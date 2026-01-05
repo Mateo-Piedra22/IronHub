@@ -254,17 +254,60 @@ async def get_attendance(
 ):
     """Get user's attendance history"""
     try:
-        # TODO: Query attendance records from tenant DB
-        # For now return placeholder
-        return {
-            "attendance": [],
-            "stats": {
-                "thisMonth": 0,
-                "lastMonth": 0,
-                "avgDuration": 0,
-                "streak": 0
+        from src.models import Asistencia
+        from sqlalchemy import func, extract
+        from datetime import datetime, timedelta
+        
+        SessionFactory = get_tenant_session_factory(tenant)
+        if not SessionFactory:
+            return {"attendance": [], "stats": {"thisMonth": 0, "lastMonth": 0, "avgDuration": 0}}
+        
+        session = SessionFactory()
+        try:
+            # Get attendance records
+            records = session.query(Asistencia).filter(
+                Asistencia.usuario_id == user["id"]
+            ).order_by(Asistencia.fecha.desc()).limit(50).all()
+            
+            # Calculate stats
+            now = datetime.now()
+            this_month = now.month
+            this_year = now.year
+            last_month = now.month - 1 if now.month > 1 else 12
+            last_year = now.year if now.month > 1 else now.year - 1
+            
+            this_month_count = session.query(func.count(Asistencia.id)).filter(
+                Asistencia.usuario_id == user["id"],
+                extract('month', Asistencia.fecha) == this_month,
+                extract('year', Asistencia.fecha) == this_year
+            ).scalar() or 0
+            
+            last_month_count = session.query(func.count(Asistencia.id)).filter(
+                Asistencia.usuario_id == user["id"],
+                extract('month', Asistencia.fecha) == last_month,
+                extract('year', Asistencia.fecha) == last_year
+            ).scalar() or 0
+            
+            return {
+                "attendance": [
+                    {
+                        "id": a.id,
+                        "date": str(a.fecha),
+                        "checkIn": str(getattr(a, 'hora_entrada', '') or ''),
+                        "checkOut": str(getattr(a, 'hora_salida', '') or ''),
+                        "duration": getattr(a, 'duracion_minutos', 60) or 60
+                    }
+                    for a in records
+                ],
+                "stats": {
+                    "thisMonth": this_month_count,
+                    "lastMonth": last_month_count,
+                    "avgDuration": 60,
+                    "streak": 0
+                }
             }
-        }
+        finally:
+            session.close()
     except Exception as e:
         logger.error(f"Error fetching attendance: {e}")
         raise HTTPException(status_code=500, detail="Error fetching attendance")
@@ -278,7 +321,13 @@ async def get_routines(
 ):
     """Get user's assigned routines"""
     try:
+        from src.models import RutinaEjercicio, Ejercicio
+        from sqlalchemy.orm import joinedload
+        
         SessionFactory = get_tenant_session_factory(tenant)
+        if not SessionFactory:
+            return {"routine": None}
+        
         session = SessionFactory()
         try:
             # Get user's assigned routine
@@ -292,12 +341,52 @@ async def get_routines(
             if not rutina:
                 return {"routine": None}
             
-            # TODO: Build full routine structure with exercises
+            # Get exercises grouped by day
+            ejercicios_raw = session.query(RutinaEjercicio).filter(
+                RutinaEjercicio.rutina_id == rutina_id
+            ).order_by(RutinaEjercicio.dia, RutinaEjercicio.orden).all()
+            
+            # Group exercises by day
+            days_map = {}
+            for ej in ejercicios_raw:
+                dia = getattr(ej, 'dia', 1) or 1
+                if dia not in days_map:
+                    days_map[dia] = []
+                
+                # Get exercise details
+                ejercicio_id = getattr(ej, 'ejercicio_id', None)
+                ejercicio_nombre = None
+                if ejercicio_id:
+                    ejercicio = session.query(Ejercicio).filter(Ejercicio.id == ejercicio_id).first()
+                    if ejercicio:
+                        ejercicio_nombre = ejercicio.nombre
+                
+                days_map[dia].append({
+                    "id": ej.id,
+                    "ejercicio_id": ejercicio_id,
+                    "ejercicio_nombre": ejercicio_nombre or getattr(ej, 'nombre', 'Ejercicio'),
+                    "series": getattr(ej, 'series', 3),
+                    "repeticiones": str(getattr(ej, 'repeticiones', '10')),
+                    "descanso": getattr(ej, 'descanso', 60),
+                    "notas": getattr(ej, 'notas', None),
+                    "orden": getattr(ej, 'orden', 0)
+                })
+            
+            # Build days array
+            days = []
+            for dia_num in sorted(days_map.keys()):
+                days.append({
+                    "numero": dia_num,
+                    "nombre": f"Día {dia_num}",
+                    "ejercicios": days_map[dia_num]
+                })
+            
             return {
                 "routine": {
                     "id": rutina.id,
                     "name": getattr(rutina, 'nombre', 'Rutina'),
-                    "days": []  # TODO: Populate from RutinaEjercicio
+                    "description": getattr(rutina, 'descripcion', None),
+                    "days": days
                 }
             }
         finally:
