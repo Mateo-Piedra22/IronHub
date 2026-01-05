@@ -111,7 +111,7 @@ class AdminService:
         except Exception:
             connect_timeout = 4
         application_name = os.getenv("ADMIN_DB_APPLICATION_NAME", "gym_management_admin").strip()
-        database = os.getenv("ADMIN_DB_NAME", "gymms_admin").strip()
+        database = os.getenv("ADMIN_DB_NAME", "ironhub_admin").strip()
 
         try:
             h = host.lower()
@@ -123,7 +123,7 @@ class AdminService:
         return {
             "host": host or "localhost",
             "port": port,
-            "database": database or "gymms_admin",
+            "database": database or "ironhub_admin",
             "user": user or "postgres",
             "password": password,
             "sslmode": sslmode or "require",

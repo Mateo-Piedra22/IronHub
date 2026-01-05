@@ -150,7 +150,7 @@ def _get_tenant_info_from_admin(tenant: str) -> Optional[Dict[str, Any]]:
         admin_params = {
             "host": os.getenv("ADMIN_DB_HOST", os.getenv("DB_HOST", "localhost")),
             "port": int(os.getenv("ADMIN_DB_PORT", os.getenv("DB_PORT", 5432))),
-            "database": os.getenv("ADMIN_DB_NAME", os.getenv("DB_NAME", "gymms_admin")),
+            "database": os.getenv("ADMIN_DB_NAME", os.getenv("DB_NAME", "ironhub_admin")),
             "user": os.getenv("ADMIN_DB_USER", os.getenv("DB_USER", "postgres")),
             "password": os.getenv("ADMIN_DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
             "sslmode": os.getenv("ADMIN_DB_SSLMODE", os.getenv("DB_SSLMODE", "require")),
