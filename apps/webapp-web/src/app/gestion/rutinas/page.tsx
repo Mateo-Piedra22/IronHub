@@ -411,10 +411,20 @@ export default function RutinasPage() {
         {
             key: 'actions',
             header: '',
-            width: '120px',
+            width: '150px',
             align: 'right' as const,
             render: (row) => (
                 <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                    <button
+                        onClick={() => {
+                            setRutinaForExercises(row);
+                            setExerciseEditorOpen(true);
+                        }}
+                        className="p-2 rounded-lg text-neutral-400 hover:text-iron-400 hover:bg-iron-500/10 transition-colors"
+                        title="Configurar Ejercicios"
+                    >
+                        <Settings2 className="w-4 h-4" />
+                    </button>
                     <button
                         onClick={() => {
                             setRutinaToPreview(row);
@@ -567,6 +577,60 @@ export default function RutinasPage() {
                 confirmText="Eliminar"
                 variant="danger"
             />
+
+            {/* Exercise Editor Modal */}
+            {exerciseEditorOpen && rutinaForExercises && (
+                <Modal
+                    isOpen={exerciseEditorOpen}
+                    onClose={() => {
+                        setExerciseEditorOpen(false);
+                        setRutinaForExercises(null);
+                    }}
+                    title={`Ejercicios: ${rutinaForExercises.nombre}`}
+                    size="full"
+                >
+                    <RoutineExerciseEditor
+                        rutinaId={rutinaForExercises.id}
+                        initialDays={
+                            rutinaForExercises.dias.length > 0
+                                ? rutinaForExercises.dias.map((d) => ({
+                                    dayNumber: d.numero,
+                                    dayName: d.nombre || '',
+                                    exercises: d.ejercicios,
+                                }))
+                                : [1, 2, 3, 4, 5].map((n) => ({
+                                    dayNumber: n,
+                                    dayName: `Día ${n}`,
+                                    exercises: [],
+                                }))
+                        }
+                        availableExercises={ejercicios}
+                        onSave={async (days) => {
+                            // Convert back to API format and save
+                            const diasPayload = days.map((d) => ({
+                                numero: d.dayNumber,
+                                nombre: d.dayName,
+                                ejercicios: d.exercises.map((e, idx) => ({
+                                    ejercicio_id: e.ejercicio_id,
+                                    series: e.series,
+                                    repeticiones: e.repeticiones,
+                                    descanso: e.descanso,
+                                    notas: e.notas,
+                                    orden: idx,
+                                })),
+                            }));
+                            await api.updateRutina(rutinaForExercises.id, { dias: diasPayload });
+                            loadRutinas();
+                            setExerciseEditorOpen(false);
+                            setRutinaForExercises(null);
+                        }}
+                        onClose={() => {
+                            setExerciseEditorOpen(false);
+                            setRutinaForExercises(null);
+                        }}
+                    />
+                </Modal>
+            )}
         </div>
     );
 }
