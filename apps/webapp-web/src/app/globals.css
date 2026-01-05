@@ -1,0 +1,127 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    html {
+        scroll-behavior: smooth;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+        @apply bg-neutral-950 text-neutral-50 font-sans;
+    }
+
+    ::selection {
+        @apply bg-iron-600 text-white;
+    }
+
+    ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+        @apply bg-neutral-900;
+    }
+
+    ::-webkit-scrollbar-thumb {
+        @apply bg-neutral-700 rounded-full;
+    }
+}
+
+@layer components {
+
+    /* Glass surfaces */
+    .glass {
+        @apply bg-neutral-900/60 backdrop-blur-xl border border-neutral-800/50;
+    }
+
+    .glass-card {
+        @apply glass rounded-2xl;
+    }
+
+    /* Navigation */
+    .nav-item {
+        @apply flex items-center gap-3 px-4 py-3 rounded-xl text-neutral-400;
+        @apply transition-all duration-200;
+        @apply hover:bg-neutral-800/50 hover:text-white;
+    }
+
+    .nav-item.active {
+        @apply bg-iron-500/20 text-iron-300;
+    }
+
+    /* Cards */
+    .stat-card {
+        @apply glass-card p-6;
+    }
+
+    .stat-value {
+        @apply text-3xl font-display font-bold text-white;
+    }
+
+    .stat-label {
+        @apply text-sm text-neutral-400 mt-1;
+    }
+
+    /* Forms */
+    .input {
+        @apply w-full px-4 py-3 rounded-xl;
+        @apply bg-neutral-900 border border-neutral-800;
+        @apply text-white placeholder-neutral-500;
+        @apply focus:outline-none focus:ring-2 focus:ring-iron-500/50 focus:border-iron-500;
+        @apply transition-all duration-200;
+    }
+
+    .label {
+        @apply block text-sm font-medium text-neutral-300 mb-2;
+    }
+
+    /* Buttons */
+    .btn-primary {
+        @apply px-6 py-3 rounded-xl font-semibold text-white;
+        @apply bg-gradient-to-r from-iron-600 to-iron-500;
+        @apply hover:shadow-glow-md transition-all duration-300;
+        @apply active:scale-[0.98];
+    }
+
+    .btn-secondary {
+        @apply px-6 py-3 rounded-xl font-medium;
+        @apply bg-neutral-800 border border-neutral-700 text-neutral-200;
+        @apply hover:bg-neutral-700 transition-all duration-200;
+    }
+
+    /* Badges */
+    .badge {
+        @apply inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium;
+    }
+
+    .badge-success {
+        @apply bg-success-500/20 text-success-400;
+    }
+
+    .badge-warning {
+        @apply bg-warning-500/20 text-warning-400;
+    }
+
+    .badge-danger {
+        @apply bg-danger-500/20 text-danger-400;
+    }
+
+    /* Member status colors */
+    .status-active {
+        @apply text-success-400;
+    }
+
+    .status-expired {
+        @apply text-danger-400;
+    }
+
+    .status-pending {
+        @apply text-warning-400;
+    }
+}

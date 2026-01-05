@@ -3,6 +3,11 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Node.js dependencies - NEVER commit these
+node_modules/
+.next/
+.turbo/
+
 # Entornos virtuales
 venv/
 ENV/
@@ -31,7 +36,7 @@ Thumbs.db
 *.ini
 *.cfg
 *.toml
-!config.toml  # descomenta si hay algún archivo de config que SÍ quieras trackear
+!config.toml  # descomentar si hay algún archivo de config que SÍ quieras trackear
 *.db
 
 # Archivos temporales
@@ -95,3 +100,6 @@ exports/
 venv312/
 venv312/
 venv/
+
+# Deprecated code (legacy)
+deprecated/

@@ -1,0 +1,26 @@
+{
+    "name": "ironhub",
+    "version": "2.0.0",
+    "private": true,
+    "description": "IronHub - Premium Gym Management Platform by MotionA",
+    "scripts": {
+        "dev": "turbo run dev",
+        "build": "turbo run build",
+        "lint": "turbo run lint",
+        "type-check": "turbo run type-check",
+        "dev:landing": "turbo run dev --filter=@ironhub/landing",
+        "dev:admin": "turbo run dev --filter=@ironhub/admin-web",
+        "dev:webapp": "turbo run dev --filter=@ironhub/webapp-web",
+        "build:landing": "turbo run build --filter=@ironhub/landing",
+        "build:admin": "turbo run build --filter=@ironhub/admin-web",
+        "build:webapp": "turbo run build --filter=@ironhub/webapp-web"
+    },
+    "devDependencies": {
+        "turbo": "^2.0.0"
+    },
+    "packageManager": "pnpm@9.0.0",
+    "engines": {
+        "node": ">=18.0.0",
+        "pnpm": ">=9.0.0"
+    }
+}

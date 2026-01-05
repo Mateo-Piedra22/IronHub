@@ -1,0 +1,559 @@
+'use client';
+
+import { useEffect, useState, useCallback } from 'react';
+import { motion } from 'framer-motion';
+import {
+    Settings,
+    DollarSign,
+    CreditCard,
+    FileText,
+    Plus,
+    Edit,
+    Trash2,
+    Check,
+    X,
+} from 'lucide-react';
+import {
+    Button,
+    Modal,
+    ConfirmModal,
+    useToast,
+    Input,
+} from '@/components/ui';
+import { api, type TipoCuota, type MetodoPago, type ConceptoPago } from '@/lib/api';
+import { formatCurrency, cn } from '@/lib/utils';
+
+// Config section tabs
+const tabs = [
+    { id: 'cuotas', label: 'Tipos de Cuota', icon: DollarSign },
+    { id: 'metodos', label: 'Métodos de Pago', icon: CreditCard },
+    { id: 'conceptos', label: 'Conceptos', icon: FileText },
+];
+
+// === TipoCuota Form Modal ===
+interface CuotaFormModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    item?: TipoCuota | null;
+    onSuccess: () => void;
+}
+
+function CuotaFormModal({ isOpen, onClose, item, onSuccess }: CuotaFormModalProps) {
+    const [loading, setLoading] = useState(false);
+    const [formData, setFormData] = useState({
+        nombre: '',
+        precio: '',
+        duracion_dias: '',
+    });
+    const { success, error } = useToast();
+
+    useEffect(() => {
+        if (isOpen) {
+            if (item) {
+                setFormData({
+                    nombre: item.nombre || '',
+                    precio: item.precio?.toString() || '',
+                    duracion_dias: item.duracion_dias?.toString() || '',
+                });
+            } else {
+                setFormData({ nombre: '', precio: '', duracion_dias: '' });
+            }
+        }
+    }, [isOpen, item]);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!formData.nombre.trim()) {
+            error('El nombre es requerido');
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const data = {
+                nombre: formData.nombre,
+                precio: formData.precio ? parseFloat(formData.precio) : undefined,
+                duracion_dias: formData.duracion_dias ? parseInt(formData.duracion_dias) : undefined,
+            };
+
+            if (item) {
+                const res = await api.updateTipoCuota(item.id, data);
+                if (res.ok) {
+                    success('Tipo de cuota actualizado');
+                    onSuccess();
+                    onClose();
+                } else {
+                    error(res.error || 'Error al actualizar');
+                }
+            } else {
+                const res = await api.createTipoCuota(data);
+                if (res.ok) {
+                    success('Tipo de cuota creado');
+                    onSuccess();
+                    onClose();
+                } else {
+                    error(res.error || 'Error al crear');
+                }
+            }
+        } catch {
+            error('Error de conexión');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <Modal
+            isOpen={isOpen}
+            onClose={onClose}
+            title={item ? 'Editar Tipo de Cuota' : 'Nuevo Tipo de Cuota'}
+            size="sm"
+            footer={
+                <>
+                    <Button variant="secondary" onClick={onClose} disabled={loading}>
+                        Cancelar
+                    </Button>
+                    <Button onClick={handleSubmit} isLoading={loading}>
+                        {item ? 'Guardar' : 'Crear'}
+                    </Button>
+                </>
+            }
+        >
+            <form onSubmit={handleSubmit} className="space-y-4">
+                <Input
+                    label="Nombre"
+                    value={formData.nombre}
+                    onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
+                    placeholder="Ej: Mensual"
+                    required
+                />
+                <Input
+                    label="Precio"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={formData.precio}
+                    onChange={(e) => setFormData({ ...formData, precio: e.target.value })}
+                    placeholder="0"
+                    leftIcon={<span className="text-neutral-400">$</span>}
+                />
+                <Input
+                    label="Duración (días)"
+                    type="number"
+                    min={1}
+                    value={formData.duracion_dias}
+                    onChange={(e) => setFormData({ ...formData, duracion_dias: e.target.value })}
+                    placeholder="30"
+                />
+            </form>
+        </Modal>
+    );
+}
+
+// === MetodoPago / Concepto Form Modal ===
+interface SimpleFormModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    item?: { id: number; nombre: string } | null;
+    type: 'metodo' | 'concepto';
+    onSuccess: () => void;
+}
+
+function SimpleFormModal({ isOpen, onClose, item, type, onSuccess }: SimpleFormModalProps) {
+    const [loading, setLoading] = useState(false);
+    const [nombre, setNombre] = useState('');
+    const { success, error } = useToast();
+
+    useEffect(() => {
+        if (isOpen) {
+            setNombre(item?.nombre || '');
+        }
+    }, [isOpen, item]);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!nombre.trim()) {
+            error('El nombre es requerido');
+            return;
+        }
+
+        setLoading(true);
+        try {
+            if (type === 'metodo') {
+                if (item) {
+                    const res = await api.updateMetodoPago(item.id, { nombre });
+                    if (res.ok) {
+                        success('Método de pago actualizado');
+                        onSuccess();
+                        onClose();
+                    } else {
+                        error(res.error || 'Error al actualizar');
+                    }
+                } else {
+                    const res = await api.createMetodoPago({ nombre });
+                    if (res.ok) {
+                        success('Método de pago creado');
+                        onSuccess();
+                        onClose();
+                    } else {
+                        error(res.error || 'Error al crear');
+                    }
+                }
+            } else {
+                if (item) {
+                    const res = await api.updateConcepto(item.id, { nombre });
+                    if (res.ok) {
+                        success('Concepto actualizado');
+                        onSuccess();
+                        onClose();
+                    } else {
+                        error(res.error || 'Error al actualizar');
+                    }
+                } else {
+                    const res = await api.createConcepto({ nombre });
+                    if (res.ok) {
+                        success('Concepto creado');
+                        onSuccess();
+                        onClose();
+                    } else {
+                        error(res.error || 'Error al crear');
+                    }
+                }
+            }
+        } catch {
+            error('Error de conexión');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const title = type === 'metodo'
+        ? (item ? 'Editar Método de Pago' : 'Nuevo Método de Pago')
+        : (item ? 'Editar Concepto' : 'Nuevo Concepto');
+
+    return (
+        <Modal
+            isOpen={isOpen}
+            onClose={onClose}
+            title={title}
+            size="sm"
+            footer={
+                <>
+                    <Button variant="secondary" onClick={onClose} disabled={loading}>
+                        Cancelar
+                    </Button>
+                    <Button onClick={handleSubmit} isLoading={loading}>
+                        {item ? 'Guardar' : 'Crear'}
+                    </Button>
+                </>
+            }
+        >
+            <form onSubmit={handleSubmit} className="space-y-4">
+                <Input
+                    label="Nombre"
+                    value={nombre}
+                    onChange={(e) => setNombre(e.target.value)}
+                    placeholder={type === 'metodo' ? 'Ej: Efectivo' : 'Ej: Cuota'}
+                    required
+                />
+            </form>
+        </Modal>
+    );
+}
+
+export default function ConfiguracionPage() {
+    const { success, error } = useToast();
+
+    // State
+    const [activeTab, setActiveTab] = useState<'cuotas' | 'metodos' | 'conceptos'>('cuotas');
+    const [loading, setLoading] = useState(true);
+
+    // Data
+    const [tiposCuota, setTiposCuota] = useState<TipoCuota[]>([]);
+    const [metodosPago, setMetodosPago] = useState<MetodoPago[]>([]);
+    const [conceptos, setConceptos] = useState<ConceptoPago[]>([]);
+
+    // Modal state
+    const [cuotaFormOpen, setCuotaFormOpen] = useState(false);
+    const [cuotaToEdit, setCuotaToEdit] = useState<TipoCuota | null>(null);
+    const [simpleFormOpen, setSimpleFormOpen] = useState(false);
+    const [simpleItemToEdit, setSimpleItemToEdit] = useState<MetodoPago | ConceptoPago | null>(null);
+    const [deleteOpen, setDeleteOpen] = useState(false);
+    const [itemToDelete, setItemToDelete] = useState<{ type: 'cuota' | 'metodo' | 'concepto'; item: TipoCuota | MetodoPago | ConceptoPago } | null>(null);
+    const [deleteLoading, setDeleteLoading] = useState(false);
+
+    // Load
+    const loadData = useCallback(async () => {
+        setLoading(true);
+        try {
+            const [cuotasRes, metodosRes, conceptosRes] = await Promise.all([
+                api.getTiposCuota(),
+                api.getMetodosPago(),
+                api.getConceptosPago(),
+            ]);
+            if (cuotasRes.ok && cuotasRes.data) setTiposCuota(cuotasRes.data.tipos);
+            if (metodosRes.ok && metodosRes.data) setMetodosPago(metodosRes.data.metodos);
+            if (conceptosRes.ok && conceptosRes.data) setConceptos(conceptosRes.data.conceptos);
+        } catch {
+            error('Error al cargar configuración');
+        } finally {
+            setLoading(false);
+        }
+    }, [error]);
+
+    useEffect(() => {
+        loadData();
+    }, [loadData]);
+
+    // Toggle active
+    const handleToggle = async (type: 'cuota' | 'metodo' | 'concepto', item: TipoCuota | MetodoPago | ConceptoPago) => {
+        try {
+            let res;
+            if (type === 'cuota') {
+                res = await api.toggleTipoCuota(item.id);
+            } else if (type === 'metodo') {
+                res = await api.toggleMetodoPago(item.id);
+            } else {
+                res = await api.toggleConcepto(item.id);
+            }
+
+            if (res.ok) {
+                success(item.activo ? 'Desactivado' : 'Activado');
+                loadData();
+            } else {
+                error(res.error || 'Error al cambiar estado');
+            }
+        } catch {
+            error('Error de conexión');
+        }
+    };
+
+    // Delete handler
+    const handleDelete = async () => {
+        if (!itemToDelete) return;
+        setDeleteLoading(true);
+        try {
+            let res;
+            if (itemToDelete.type === 'cuota') {
+                res = await api.deleteTipoCuota(itemToDelete.item.id);
+            } else if (itemToDelete.type === 'metodo') {
+                res = await api.deleteMetodoPago(itemToDelete.item.id);
+            } else {
+                res = await api.deleteConcepto(itemToDelete.item.id);
+            }
+
+            if (res.ok) {
+                success('Eliminado correctamente');
+                loadData();
+            } else {
+                error(res.error || 'Error al eliminar');
+            }
+        } catch {
+            error('Error de conexión');
+        } finally {
+            setDeleteLoading(false);
+            setDeleteOpen(false);
+            setItemToDelete(null);
+        }
+    };
+
+    // Render item list
+    const renderItemList = () => {
+        if (loading) {
+            return (
+                <div className="space-y-2">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                        <div key={i} className="glass-card p-4 animate-pulse">
+                            <div className="h-5 bg-neutral-800 rounded w-1/3" />
+                        </div>
+                    ))}
+                </div>
+            );
+        }
+
+        const items = activeTab === 'cuotas' ? tiposCuota : activeTab === 'metodos' ? metodosPago : conceptos;
+
+        if (items.length === 0) {
+            return (
+                <div className="glass-card p-8 text-center text-neutral-500">
+                    No hay elementos configurados
+                </div>
+            );
+        }
+
+        return (
+            <div className="space-y-2">
+                {items.map((item) => (
+                    <div
+                        key={item.id}
+                        className={cn(
+                            'glass-card p-4 flex items-center justify-between gap-4',
+                            !item.activo && 'opacity-50'
+                        )}
+                    >
+                        <div className="flex items-center gap-4">
+                            <button
+                                onClick={() => handleToggle(activeTab === 'cuotas' ? 'cuota' : activeTab === 'metodos' ? 'metodo' : 'concepto', item)}
+                                className={cn(
+                                    'w-8 h-8 rounded-lg flex items-center justify-center transition-colors',
+                                    item.activo
+                                        ? 'bg-success-500/20 text-success-400 hover:bg-success-500/30'
+                                        : 'bg-neutral-800 text-neutral-500 hover:bg-neutral-700'
+                                )}
+                            >
+                                {item.activo ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
+                            </button>
+                            <div>
+                                <div className="font-medium text-white">{item.nombre}</div>
+                                {activeTab === 'cuotas' && (item as TipoCuota).precio !== undefined && (
+                                    <div className="text-sm text-neutral-400">
+                                        {formatCurrency((item as TipoCuota).precio || 0)}
+                                        {(item as TipoCuota).duracion_dias && ` • ${(item as TipoCuota).duracion_dias} días`}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <button
+                                onClick={() => {
+                                    if (activeTab === 'cuotas') {
+                                        setCuotaToEdit(item as TipoCuota);
+                                        setCuotaFormOpen(true);
+                                    } else {
+                                        setSimpleItemToEdit(item as MetodoPago | ConceptoPago);
+                                        setSimpleFormOpen(true);
+                                    }
+                                }}
+                                className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+                            >
+                                <Edit className="w-4 h-4" />
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setItemToDelete({
+                                        type: activeTab === 'cuotas' ? 'cuota' : activeTab === 'metodos' ? 'metodo' : 'concepto',
+                                        item,
+                                    });
+                                    setDeleteOpen(true);
+                                }}
+                                className="p-2 rounded-lg text-neutral-400 hover:text-danger-400 hover:bg-danger-500/10 transition-colors"
+                            >
+                                <Trash2 className="w-4 h-4" />
+                            </button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        );
+    };
+
+    return (
+        <div className="space-y-6">
+            {/* Header */}
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+            >
+                <h1 className="text-2xl font-display font-bold text-white flex items-center gap-3">
+                    <Settings className="w-6 h-6 text-iron-400" />
+                    Configuración
+                </h1>
+                <p className="text-neutral-400 mt-1">
+                    Configura tipos de cuota, métodos de pago y conceptos
+                </p>
+            </motion.div>
+
+            {/* Tabs */}
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+                className="flex items-center gap-2"
+            >
+                {tabs.map((tab) => (
+                    <button
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id as 'cuotas' | 'metodos' | 'conceptos')}
+                        className={cn(
+                            'flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium transition-all duration-200',
+                            activeTab === tab.id
+                                ? 'bg-iron-500/20 text-iron-300 shadow-glow-sm'
+                                : 'text-neutral-400 hover:bg-neutral-800/50 hover:text-white'
+                        )}
+                    >
+                        <tab.icon className="w-4 h-4" />
+                        {tab.label}
+                    </button>
+                ))}
+            </motion.div>
+
+            {/* Content */}
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.15 }}
+                className="space-y-4"
+            >
+                <div className="flex items-center justify-between">
+                    <h2 className="text-lg font-semibold text-white">
+                        {tabs.find((t) => t.id === activeTab)?.label}
+                    </h2>
+                    <Button
+                        size="sm"
+                        leftIcon={<Plus className="w-4 h-4" />}
+                        onClick={() => {
+                            if (activeTab === 'cuotas') {
+                                setCuotaToEdit(null);
+                                setCuotaFormOpen(true);
+                            } else {
+                                setSimpleItemToEdit(null);
+                                setSimpleFormOpen(true);
+                            }
+                        }}
+                    >
+                        Agregar
+                    </Button>
+                </div>
+
+                {renderItemList()}
+            </motion.div>
+
+            {/* Cuota Form Modal */}
+            <CuotaFormModal
+                isOpen={cuotaFormOpen}
+                onClose={() => {
+                    setCuotaFormOpen(false);
+                    setCuotaToEdit(null);
+                }}
+                item={cuotaToEdit}
+                onSuccess={loadData}
+            />
+
+            {/* Simple Form Modal (Metodo/Concepto) */}
+            <SimpleFormModal
+                isOpen={simpleFormOpen}
+                onClose={() => {
+                    setSimpleFormOpen(false);
+                    setSimpleItemToEdit(null);
+                }}
+                item={simpleItemToEdit}
+                type={activeTab === 'metodos' ? 'metodo' : 'concepto'}
+                onSuccess={loadData}
+            />
+
+            {/* Delete Confirm */}
+            <ConfirmModal
+                isOpen={deleteOpen}
+                onClose={() => {
+                    setDeleteOpen(false);
+                    setItemToDelete(null);
+                }}
+                onConfirm={handleDelete}
+                title="Eliminar"
+                message={`¿Estás seguro de eliminar "${itemToDelete?.item.nombre}"?`}
+                confirmText="Eliminar"
+                variant="danger"
+            />
+        </div>
+    );
+}
