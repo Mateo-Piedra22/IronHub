@@ -15,6 +15,7 @@ import {
     ChevronRight,
     GripVertical,
     QrCode,
+    Settings2,
 } from 'lucide-react';
 import {
     Button,
@@ -29,6 +30,7 @@ import {
 } from '@/components/ui';
 import { api, type Rutina, type Ejercicio } from '@/lib/api';
 import { formatDate, cn } from '@/lib/utils';
+import { RoutineExerciseEditor } from '@/components/RoutineExerciseEditor';
 
 // Sidebar navigation
 const subtabs = [
@@ -290,6 +292,8 @@ export default function RutinasPage() {
     const [rutinaToPreview, setRutinaToPreview] = useState<Rutina | null>(null);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [rutinaToDelete, setRutinaToDelete] = useState<Rutina | null>(null);
+    const [exerciseEditorOpen, setExerciseEditorOpen] = useState(false);
+    const [rutinaForExercises, setRutinaForExercises] = useState<Rutina | null>(null);
 
     // Load rutinas
     const loadRutinas = useCallback(async () => {

@@ -39,7 +39,7 @@ export interface DataTableProps<T> {
 // Sort state
 type SortDirection = 'asc' | 'desc' | null;
 
-export function DataTable<T extends Record<string, unknown>>({
+export function DataTable<T extends object>({
     data,
     columns,
     keyField = 'id',
@@ -78,8 +78,8 @@ export function DataTable<T extends Record<string, unknown>>({
         if (!sortKey || !sortDirection) return data;
 
         return [...data].sort((a, b) => {
-            const aVal = a[sortKey];
-            const bVal = b[sortKey];
+            const aVal = (a as Record<string, unknown>)[sortKey];
+            const bVal = (b as Record<string, unknown>)[sortKey];
 
             if (aVal === null || aVal === undefined) return 1;
             if (bVal === null || bVal === undefined) return -1;
@@ -99,7 +99,7 @@ export function DataTable<T extends Record<string, unknown>>({
 
     // Selection handling
     const isSelected = useCallback(
-        (row: T) => selectedRows.some((r) => r[keyField] === row[keyField]),
+        (row: T) => selectedRows.some((r) => (r as Record<string, unknown>)[keyField] === (row as Record<string, unknown>)[keyField]),
         [selectedRows, keyField]
     );
 
@@ -107,7 +107,7 @@ export function DataTable<T extends Record<string, unknown>>({
         (row: T) => {
             if (!onSelectionChange) return;
             if (isSelected(row)) {
-                onSelectionChange(selectedRows.filter((r) => r[keyField] !== row[keyField]));
+                onSelectionChange(selectedRows.filter((r) => (r as Record<string, unknown>)[keyField] !== (row as Record<string, unknown>)[keyField]));
             } else {
                 onSelectionChange([...selectedRows, row]);
             }
@@ -213,7 +213,7 @@ export function DataTable<T extends Record<string, unknown>>({
                         ) : (
                             sortedData.map((row, rowIndex) => (
                                 <tr
-                                    key={String(row[keyField]) || rowIndex}
+                                    key={String((row as Record<string, unknown>)[keyField]) || rowIndex}
                                     className={cn(
                                         'transition-colors',
                                         onRowClick && 'cursor-pointer hover:bg-neutral-800/50',
@@ -243,7 +243,7 @@ export function DataTable<T extends Record<string, unknown>>({
                                         >
                                             {col.render
                                                 ? col.render(row, rowIndex)
-                                                : String(row[col.key] ?? '-')}
+                                                : String((row as Record<string, unknown>)[col.key] ?? '-')}
                                         </td>
                                     ))}
                                 </tr>

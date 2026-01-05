@@ -117,6 +117,7 @@ export interface Pago {
     tipo_cuota_nombre?: string;
     notas?: string;
     recibo_numero?: number;
+    estado?: string;
 }
 
 export interface PagoCreateInput {
@@ -223,6 +224,9 @@ export interface Asistencia {
     usuario_nombre?: string;
     fecha: string;
     hora?: string;
+    hora_entrada?: string;
+    hora_salida?: string;
+    duracion_minutos?: number;
 }
 
 // === Config Types ===
