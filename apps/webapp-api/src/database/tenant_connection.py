@@ -64,6 +64,19 @@ except ImportError:
     CURRENT_TENANT = contextvars.ContextVar('current_tenant', default=None)
 
 
+def set_current_tenant(tenant: str):
+    """Set the current tenant subdomain in context."""
+    CURRENT_TENANT.set(tenant.strip().lower() if tenant else None)
+
+
+def get_current_tenant() -> Optional[str]:
+    """Get the current tenant subdomain from context."""
+    try:
+        return CURRENT_TENANT.get()
+    except LookupError:
+        return None
+
+
 # ============================================================================
 # VALIDATION FUNCTIONS
 # ============================================================================
