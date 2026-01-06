@@ -532,7 +532,7 @@ class ApiClient {
             dias_restantes?: number;
             fecha_proximo_vencimiento?: string;
             exento?: boolean;
-        }>('/usuario/login', {
+        }>('/api/usuario/login', {
             method: 'POST',
             body: JSON.stringify(credentials),
         });
@@ -569,7 +569,7 @@ class ApiClient {
             fecha_proximo_vencimiento?: string;
             exento?: boolean;
             activo?: boolean;
-        }>('/checkin/auth', {
+        }>('/api/checkin/auth', {
             method: 'POST',
             body: JSON.stringify(credentials),
         });

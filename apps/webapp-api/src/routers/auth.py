@@ -269,15 +269,21 @@ async def checkin_auth(request: Request):
 
 @router.post("/api/usuario/change_pin")
 async def api_usuario_change_pin(request: Request):
-    user_id = request.session.get("user_id")
-    if not user_id:
-        return JSONResponse({"ok": False, "error": "No autenticado"}, status_code=401)
-        
+    """
+    PIN change endpoint supporting unauthenticated flow.
+    Accepts {dni, old_pin, new_pin} and verifies old_pin before updating.
+    This allows users to change their PIN from the login page.
+    """
     try:
         data = await request.json()
-        new_pin = str(data.get("pin") or "").strip()
+        dni = str(data.get("dni") or "").strip()
+        old_pin = str(data.get("old_pin") or "").strip()
+        new_pin = str(data.get("new_pin") or "").strip()
     except Exception:
         return JSONResponse({"ok": False, "error": "Datos inválidos"}, status_code=400)
+    
+    if not dni or not old_pin:
+        return JSONResponse({"ok": False, "error": "DNI y PIN actual requeridos"}, status_code=400)
         
     if not new_pin or len(new_pin) < 4:
         return JSONResponse({"ok": False, "error": "PIN inválido (mínimo 4 dígitos)"}, status_code=400)
@@ -287,10 +293,179 @@ async def api_usuario_change_pin(request: Request):
         return JSONResponse({"ok": False, "error": "DB error"}, status_code=500)
         
     try:
-        with db.get_connection_context() as conn: # type: ignore
-             cur = conn.cursor()
-             cur.execute("UPDATE usuarios SET pin = %s WHERE id = %s", (new_pin, int(user_id)))
-             conn.commit()
+        with db.get_connection_context() as conn:  # type: ignore
+            cur = conn.cursor()
+            # Verify old PIN first
+            cur.execute("SELECT id, pin FROM usuarios WHERE dni = %s", (dni,))
+            row = cur.fetchone()
+            if not row:
+                return JSONResponse({"ok": False, "error": "Usuario no encontrado"}, status_code=404)
+            user_id, stored_pin = row
+            if str(stored_pin or "").strip() != old_pin:
+                return JSONResponse({"ok": False, "error": "PIN actual incorrecto"}, status_code=401)
+            # Update to new PIN
+            cur.execute("UPDATE usuarios SET pin = %s WHERE id = %s", (new_pin, int(user_id)))
+            conn.commit()
         return JSONResponse({"ok": True})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# ============================================
+# JSON API Endpoints for Next.js SPA
+# These endpoints return JSON instead of HTML redirects
+# ============================================
+
+@router.post("/api/usuario/login")
+async def api_usuario_login(request: Request):
+    """
+    JSON API endpoint for usuario login (DNI + PIN).
+    Returns user info and payment status for the SPA.
+    """
+    try:
+        data = await request.json()
+        dni = str(data.get("dni") or "").strip()
+        pin = str(data.get("pin") or "").strip()
+    except Exception:
+        return JSONResponse({"success": False, "message": "Datos inválidos"}, status_code=400)
+    
+    if not dni or not pin:
+        return JSONResponse({"success": False, "message": "DNI y PIN requeridos"})
+    
+    db = get_db()
+    if db is None:
+        return JSONResponse({"success": False, "message": "Error del sistema"}, status_code=500)
+    
+    try:
+        with db.get_connection_context() as conn:  # type: ignore
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT id, pin, activo, exento, tipo_cuota_id,
+                       fecha_proximo_vencimiento, cuotas_vencidas
+                FROM usuarios WHERE dni = %s
+            """, (dni,))
+            row = cur.fetchone()
+            
+            if not row:
+                return JSONResponse({"success": False, "message": "Credenciales inválidas"})
+            
+            if str(row.get('pin') or "").strip() != pin:
+                return JSONResponse({"success": False, "message": "Credenciales inválidas"})
+            
+            user_id = row['id']
+            activo = bool(row.get('activo'))
+            
+            if not activo:
+                return JSONResponse({
+                    "success": False, 
+                    "message": "Usuario inactivo",
+                    "activo": False
+                })
+            
+            # Set session
+            request.session.clear()
+            request.session["user_id"] = int(user_id)
+            request.session["role"] = "user"
+            
+            # Calculate days remaining if applicable
+            dias_restantes = None
+            if row.get('fecha_proximo_vencimiento'):
+                from datetime import datetime, date
+                try:
+                    venc = row['fecha_proximo_vencimiento']
+                    if isinstance(venc, str):
+                        venc = datetime.fromisoformat(venc).date()
+                    elif isinstance(venc, datetime):
+                        venc = venc.date()
+                    dias_restantes = (venc - date.today()).days
+                except Exception:
+                    pass
+            
+            return JSONResponse({
+                "success": True,
+                "user_id": user_id,
+                "activo": True,
+                "exento": bool(row.get('exento')),
+                "cuotas_vencidas": row.get('cuotas_vencidas') or 0,
+                "dias_restantes": dias_restantes,
+                "fecha_proximo_vencimiento": str(row.get('fecha_proximo_vencimiento') or "")
+            })
+    except Exception as e:
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
+
+@router.post("/api/checkin/auth")
+async def api_checkin_auth(request: Request):
+    """
+    JSON API endpoint for check-in authentication (DNI + phone).
+    Used for kiosk/self-service check-in flows.
+    """
+    try:
+        data = await request.json()
+        dni = str(data.get("dni") or "").strip()
+        telefono = str(data.get("telefono") or "").strip()
+    except Exception:
+        return JSONResponse({"success": False, "message": "Datos inválidos"}, status_code=400)
+    
+    if not dni or not telefono:
+        return JSONResponse({"success": False, "message": "DNI y teléfono requeridos"})
+    
+    db = get_db()
+    if db is None:
+        return JSONResponse({"success": False, "message": "Error del sistema"}, status_code=500)
+    
+    try:
+        with db.get_connection_context() as conn:  # type: ignore
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT id, activo, exento, telefono,
+                       fecha_proximo_vencimiento, cuotas_vencidas
+                FROM usuarios WHERE dni = %s
+            """, (dni,))
+            row = cur.fetchone()
+            
+            if not row:
+                return JSONResponse({"success": False, "message": "Usuario no encontrado"})
+            
+            # Verify phone number matches (normalize by removing spaces/dashes)
+            stored_phone = str(row.get('telefono') or "").strip().replace(" ", "").replace("-", "")
+            input_phone = telefono.replace(" ", "").replace("-", "")
+            if stored_phone != input_phone:
+                return JSONResponse({"success": False, "message": "Teléfono no coincide"})
+            
+            user_id = row['id']
+            activo = bool(row.get('activo'))
+            
+            if not activo:
+                return JSONResponse({
+                    "success": False,
+                    "message": "Usuario inactivo",
+                    "activo": False
+                })
+            
+            # Calculate days remaining
+            dias_restantes = None
+            if row.get('fecha_proximo_vencimiento'):
+                from datetime import datetime, date
+                try:
+                    venc = row['fecha_proximo_vencimiento']
+                    if isinstance(venc, str):
+                        venc = datetime.fromisoformat(venc).date()
+                    elif isinstance(venc, datetime):
+                        venc = venc.date()
+                    dias_restantes = (venc - date.today()).days
+                except Exception:
+                    pass
+            
+            return JSONResponse({
+                "success": True,
+                "usuario_id": user_id,
+                "activo": True,
+                "exento": bool(row.get('exento')),
+                "cuotas_vencidas": row.get('cuotas_vencidas') or 0,
+                "dias_restantes": dias_restantes,
+                "fecha_proximo_vencimiento": str(row.get('fecha_proximo_vencimiento') or "")
+            })
+    except Exception as e:
+        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+
