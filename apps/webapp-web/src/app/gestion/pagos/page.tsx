@@ -13,6 +13,8 @@ import {
     FileText,
     RefreshCw,
     Settings,
+    X,
+    Copy,
 } from 'lucide-react';
 import {
     Button,
@@ -27,8 +29,28 @@ import {
     type Column,
 } from '@/components/ui';
 import ReciboPreviewModal, { ReciboConfigModal } from '@/components/ReciboPreviewModal';
-import { api, type Pago, type PagoCreateInput, type Usuario, type TipoCuota, type MetodoPago, type ConceptoPago } from '@/lib/api';
+import {
+    api,
+    type Pago,
+    type PagoCreateInput,
+    type PagoConceptoItem,
+    type Usuario,
+    type TipoCuota,
+    type MetodoPago,
+    type ConceptoPago,
+    PAGO_PRESET_TEMPLATES
+} from '@/lib/api';
 import { formatDate, formatCurrency, cn, getMonthName } from '@/lib/utils';
+
+// Line item state for multi-concept form
+interface ConceptoLineItem {
+    id: string; // Unique key for React
+    mode: 'registered' | 'custom';
+    concepto_id?: number;
+    descripcion: string;
+    cantidad: number;
+    precio_unitario: number;
+}
 
 // Pago form modal
 interface PagoFormModalProps {
@@ -43,6 +65,17 @@ interface PagoFormModalProps {
     onSuccess: () => void;
 }
 
+function createEmptyLineItem(): ConceptoLineItem {
+    return {
+        id: crypto.randomUUID(),
+        mode: 'custom',
+        concepto_id: undefined,
+        descripcion: '',
+        cantidad: 1,
+        precio_unitario: 0,
+    };
+}
+
 function PagoFormModal({
     isOpen,
     onClose,
@@ -55,74 +88,149 @@ function PagoFormModal({
     onSuccess,
 }: PagoFormModalProps) {
     const [loading, setLoading] = useState(false);
-    const [formData, setFormData] = useState<PagoCreateInput>({
-        usuario_id: 0,
-        monto: 0,
-        fecha: new Date().toISOString().split('T')[0],
-        mes: new Date().getMonth() + 1,
-        anio: new Date().getFullYear(),
-        metodo_pago_id: undefined,
-        concepto_id: undefined,
-        tipo_cuota_id: undefined,
-        notas: '',
-    });
+    const [usuarioId, setUsuarioId] = useState<number>(0);
+    const [fechaPago, setFechaPago] = useState<string>(new Date().toISOString().split('T')[0]);
+    const [mes, setMes] = useState<number>(new Date().getMonth() + 1);
+    const [anio, setAnio] = useState<number>(new Date().getFullYear());
+    const [metodoPagoId, setMetodoPagoId] = useState<number | undefined>();
+    const [notas, setNotas] = useState<string>('');
+    const [lineItems, setLineItems] = useState<ConceptoLineItem[]>([createEmptyLineItem()]);
     const { success, error } = useToast();
 
+    // Reset form when modal opens
     useEffect(() => {
         if (isOpen) {
-            if (pago) {
-                setFormData({
-                    usuario_id: pago.usuario_id,
-                    monto: pago.monto,
-                    fecha: pago.fecha,
-                    mes: pago.mes || new Date().getMonth() + 1,
-                    anio: pago.anio || new Date().getFullYear(),
-                    metodo_pago_id: pago.metodo_pago_id,
-                    concepto_id: pago.concepto_id,
-                    tipo_cuota_id: pago.tipo_cuota_id,
-                    notas: pago.notas || '',
-                });
-            } else {
-                const now = new Date();
-                setFormData({
-                    usuario_id: preselectedUsuarioId || 0,
-                    monto: 0,
-                    fecha: now.toISOString().split('T')[0],
-                    mes: now.getMonth() + 1,
-                    anio: now.getFullYear(),
-                    metodo_pago_id: metodosPago[0]?.id,
-                    concepto_id: conceptos[0]?.id,
-                    tipo_cuota_id: tiposCuota[0]?.id,
-                    notas: '',
-                });
-            }
+            const now = new Date();
+            setUsuarioId(preselectedUsuarioId || 0);
+            setFechaPago(now.toISOString().split('T')[0]);
+            setMes(now.getMonth() + 1);
+            setAnio(now.getFullYear());
+            setMetodoPagoId(metodosPago[0]?.id);
+            setNotas('');
+            setLineItems([createEmptyLineItem()]);
         }
-    }, [isOpen, pago, preselectedUsuarioId, metodosPago, conceptos, tiposCuota]);
+    }, [isOpen, preselectedUsuarioId, metodosPago]);
 
-    // Auto-fill monto when tipo_cuota changes
+    // Auto-fill first line item from tipo_cuota when user is selected
     useEffect(() => {
-        if (formData.tipo_cuota_id && !pago) {
-            const tipo = tiposCuota.find((t) => t.id === formData.tipo_cuota_id);
-            if (tipo?.precio) {
-                setFormData((prev) => ({ ...prev, monto: tipo.precio! }));
+        if (usuarioId && lineItems.length === 1 && !lineItems[0].descripcion && lineItems[0].precio_unitario === 0) {
+            const user = usuarios.find(u => u.id === usuarioId);
+            if (user?.tipo_cuota_id) {
+                const tipo = tiposCuota.find(t => t.id === user.tipo_cuota_id);
+                if (tipo) {
+                    setLineItems([{
+                        ...lineItems[0],
+                        descripcion: tipo.nombre,
+                        precio_unitario: tipo.precio || 0,
+                    }]);
+                }
             }
         }
-    }, [formData.tipo_cuota_id, tiposCuota, pago]);
+    }, [usuarioId, usuarios, tiposCuota, lineItems]);
+
+    // Calculate total
+    const total = lineItems.reduce((sum, item) => sum + (item.cantidad * item.precio_unitario), 0);
+
+    // Add new line item
+    const addLineItem = () => {
+        setLineItems([...lineItems, createEmptyLineItem()]);
+    };
+
+    // Remove line item
+    const removeLineItem = (id: string) => {
+        if (lineItems.length > 1) {
+            setLineItems(lineItems.filter(item => item.id !== id));
+        }
+    };
+
+    // Update line item
+    const updateLineItem = (id: string, updates: Partial<ConceptoLineItem>) => {
+        setLineItems(lineItems.map(item =>
+            item.id === id ? { ...item, ...updates } : item
+        ));
+    };
+
+    // Handle registered concept selection
+    const handleConceptoSelect = (id: string, conceptoId: number | undefined) => {
+        if (conceptoId) {
+            const concepto = conceptos.find(c => c.id === conceptoId);
+            updateLineItem(id, {
+                concepto_id: conceptoId,
+                descripcion: concepto?.nombre || '',
+                mode: 'registered',
+            });
+        }
+    };
+
+    // Apply preset template
+    const applyPreset = (presetId: string) => {
+        const preset = PAGO_PRESET_TEMPLATES.find(p => p.id === presetId);
+        if (preset) {
+            const newItems: ConceptoLineItem[] = preset.conceptos.map(c => ({
+                id: crypto.randomUUID(),
+                mode: 'custom' as const,
+                concepto_id: undefined,
+                descripcion: c.descripcion || '',
+                cantidad: c.cantidad,
+                precio_unitario: c.precio_unitario,
+            }));
+            setLineItems(newItems);
+        }
+    };
+
+    // Validation
+    const validateForm = (): boolean => {
+        if (!usuarioId) {
+            error('Selecciona un usuario');
+            return false;
+        }
+        if (lineItems.length === 0) {
+            error('Agrega al menos un concepto');
+            return false;
+        }
+        for (const item of lineItems) {
+            if (!item.concepto_id && !item.descripcion.trim()) {
+                error('Cada concepto debe tener una descripción o estar seleccionado');
+                return false;
+            }
+            if (item.cantidad <= 0) {
+                error('La cantidad debe ser mayor a 0');
+                return false;
+            }
+            if (item.precio_unitario < 0) {
+                error('El precio no puede ser negativo');
+                return false;
+            }
+        }
+        if (total <= 0) {
+            error('El total debe ser mayor a 0');
+            return false;
+        }
+        return true;
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!formData.usuario_id) {
-            error('Selecciona un usuario');
-            return;
-        }
-        if (!formData.monto || formData.monto <= 0) {
-            error('El monto debe ser mayor a 0');
-            return;
-        }
+        if (!validateForm()) return;
 
         setLoading(true);
         try {
-            const res = await api.createPago(formData);
+            const payload: PagoCreateInput = {
+                usuario_id: usuarioId,
+                fecha_pago: fechaPago,
+                mes,
+                anio,
+                metodo_pago_id: metodoPagoId,
+                notas: notas || undefined,
+                conceptos: lineItems.map(item => ({
+                    concepto_id: item.concepto_id,
+                    descripcion: item.descripcion || undefined,
+                    cantidad: item.cantidad,
+                    precio_unitario: item.precio_unitario,
+                })),
+            };
+
+            const res = await api.createPago(payload);
             if (res.ok) {
                 success('Pago registrado');
                 onSuccess();
@@ -142,7 +250,7 @@ function PagoFormModal({
             isOpen={isOpen}
             onClose={onClose}
             title="Registrar Pago"
-            size="lg"
+            size="xl"
             footer={
                 <>
                     <Button variant="secondary" onClick={onClose} disabled={loading}>
@@ -154,11 +262,12 @@ function PagoFormModal({
                 </>
             }
         >
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-5">
+                {/* User Selection */}
                 <Select
                     label="Usuario"
-                    value={formData.usuario_id?.toString() || ''}
-                    onChange={(e) => setFormData({ ...formData, usuario_id: Number(e.target.value) })}
+                    value={usuarioId?.toString() || ''}
+                    onChange={(e) => setUsuarioId(Number(e.target.value))}
                     placeholder="Seleccionar usuario"
                     options={usuarios.map((u) => ({
                         value: u.id.toString(),
@@ -166,39 +275,159 @@ function PagoFormModal({
                     }))}
                 />
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Select
-                        label="Tipo de Cuota"
-                        value={formData.tipo_cuota_id?.toString() || ''}
-                        onChange={(e) => setFormData({ ...formData, tipo_cuota_id: e.target.value ? Number(e.target.value) : undefined })}
-                        placeholder="Seleccionar"
-                        options={tiposCuota.map((tc) => ({
-                            value: tc.id.toString(),
-                            label: `${tc.nombre}${tc.precio ? ` - ${formatCurrency(tc.precio)}` : ''}`,
-                        }))}
-                    />
-                    <Input
-                        label="Monto"
-                        type="number"
-                        min={0}
-                        step={0.01}
-                        value={formData.monto || ''}
-                        onChange={(e) => setFormData({ ...formData, monto: Number(e.target.value) })}
-                        leftIcon={<span className="text-neutral-400">$</span>}
-                    />
+                {/* Preset Templates */}
+                <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm text-neutral-400">Plantillas:</span>
+                    {PAGO_PRESET_TEMPLATES.map((preset) => (
+                        <button
+                            key={preset.id}
+                            type="button"
+                            onClick={() => applyPreset(preset.id)}
+                            className="px-3 py-1.5 text-xs rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white transition-colors border border-neutral-700"
+                        >
+                            <Copy className="w-3 h-3 inline mr-1.5" />
+                            {preset.nombre}
+                        </button>
+                    ))}
                 </div>
 
+                {/* Line Items */}
+                <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                        <label className="text-sm font-medium text-neutral-300">Conceptos</label>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={addLineItem}
+                            leftIcon={<Plus className="w-4 h-4" />}
+                        >
+                            Agregar
+                        </Button>
+                    </div>
+
+                    <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                        {lineItems.map((item, index) => (
+                            <div
+                                key={item.id}
+                                className="p-3 rounded-lg bg-neutral-800/50 border border-neutral-700/50 space-y-3"
+                            >
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs text-neutral-500 font-medium">#{index + 1}</span>
+                                    <div className="flex gap-1 text-xs">
+                                        <button
+                                            type="button"
+                                            onClick={() => updateLineItem(item.id, { mode: 'registered', descripcion: '' })}
+                                            className={cn(
+                                                'px-2 py-1 rounded transition-colors',
+                                                item.mode === 'registered'
+                                                    ? 'bg-iron-500/20 text-iron-400'
+                                                    : 'text-neutral-500 hover:text-neutral-300'
+                                            )}
+                                        >
+                                            Concepto
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => updateLineItem(item.id, { mode: 'custom', concepto_id: undefined })}
+                                            className={cn(
+                                                'px-2 py-1 rounded transition-colors',
+                                                item.mode === 'custom'
+                                                    ? 'bg-iron-500/20 text-iron-400'
+                                                    : 'text-neutral-500 hover:text-neutral-300'
+                                            )}
+                                        >
+                                            Personalizado
+                                        </button>
+                                    </div>
+                                    <div className="flex-1" />
+                                    {lineItems.length > 1 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => removeLineItem(item.id)}
+                                            className="p-1 text-neutral-500 hover:text-danger-400 transition-colors"
+                                        >
+                                            <X className="w-4 h-4" />
+                                        </button>
+                                    )}
+                                </div>
+
+                                <div className="grid grid-cols-12 gap-3">
+                                    {/* Description/Concept (6 cols) */}
+                                    <div className="col-span-6">
+                                        {item.mode === 'registered' ? (
+                                            <Select
+                                                value={item.concepto_id?.toString() || ''}
+                                                onChange={(e) => handleConceptoSelect(item.id, e.target.value ? Number(e.target.value) : undefined)}
+                                                placeholder="Seleccionar concepto"
+                                                options={conceptos.map((c) => ({
+                                                    value: c.id.toString(),
+                                                    label: c.nombre,
+                                                }))}
+                                            />
+                                        ) : (
+                                            <Input
+                                                value={item.descripcion}
+                                                onChange={(e) => updateLineItem(item.id, { descripcion: e.target.value })}
+                                                placeholder="Descripción..."
+                                            />
+                                        )}
+                                    </div>
+
+                                    {/* Quantity (2 cols) */}
+                                    <div className="col-span-2">
+                                        <Input
+                                            type="number"
+                                            min={1}
+                                            value={item.cantidad}
+                                            onChange={(e) => updateLineItem(item.id, { cantidad: Math.max(1, Number(e.target.value)) })}
+                                            placeholder="Cant."
+                                        />
+                                    </div>
+
+                                    {/* Unit Price (4 cols) */}
+                                    <div className="col-span-4">
+                                        <Input
+                                            type="number"
+                                            min={0}
+                                            step={0.01}
+                                            value={item.precio_unitario || ''}
+                                            onChange={(e) => updateLineItem(item.id, { precio_unitario: Number(e.target.value) })}
+                                            leftIcon={<span className="text-neutral-400">$</span>}
+                                            placeholder="Precio"
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Line subtotal */}
+                                <div className="text-right text-sm text-neutral-400">
+                                    Subtotal: <span className="text-white font-medium">{formatCurrency(item.cantidad * item.precio_unitario)}</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Total */}
+                    <div className="flex justify-end p-3 rounded-lg bg-success-500/10 border border-success-500/20">
+                        <div className="text-right">
+                            <span className="text-sm text-neutral-400">Total:</span>
+                            <span className="ml-3 text-xl font-bold text-success-400">{formatCurrency(total)}</span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Date, Month, Year */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <Input
                         label="Fecha"
                         type="date"
-                        value={formData.fecha || ''}
-                        onChange={(e) => setFormData({ ...formData, fecha: e.target.value })}
+                        value={fechaPago}
+                        onChange={(e) => setFechaPago(e.target.value)}
                     />
                     <Select
                         label="Mes"
-                        value={formData.mes?.toString() || ''}
-                        onChange={(e) => setFormData({ ...formData, mes: Number(e.target.value) })}
+                        value={mes?.toString() || ''}
+                        onChange={(e) => setMes(Number(e.target.value))}
                         options={Array.from({ length: 12 }, (_, i) => ({
                             value: (i + 1).toString(),
                             label: getMonthName(i + 1),
@@ -209,44 +438,35 @@ function PagoFormModal({
                         type="number"
                         min={2020}
                         max={2100}
-                        value={formData.anio || ''}
-                        onChange={(e) => setFormData({ ...formData, anio: Number(e.target.value) })}
+                        value={anio || ''}
+                        onChange={(e) => setAnio(Number(e.target.value))}
                     />
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Select
-                        label="Método de Pago"
-                        value={formData.metodo_pago_id?.toString() || ''}
-                        onChange={(e) => setFormData({ ...formData, metodo_pago_id: e.target.value ? Number(e.target.value) : undefined })}
-                        placeholder="Seleccionar"
-                        options={metodosPago.map((m) => ({
-                            value: m.id.toString(),
-                            label: m.nombre,
-                        }))}
-                    />
-                    <Select
-                        label="Concepto"
-                        value={formData.concepto_id?.toString() || ''}
-                        onChange={(e) => setFormData({ ...formData, concepto_id: e.target.value ? Number(e.target.value) : undefined })}
-                        placeholder="Seleccionar"
-                        options={conceptos.map((c) => ({
-                            value: c.id.toString(),
-                            label: c.nombre,
-                        }))}
-                    />
-                </div>
+                {/* Payment Method */}
+                <Select
+                    label="Método de Pago"
+                    value={metodoPagoId?.toString() || ''}
+                    onChange={(e) => setMetodoPagoId(e.target.value ? Number(e.target.value) : undefined)}
+                    placeholder="Seleccionar"
+                    options={metodosPago.map((m) => ({
+                        value: m.id.toString(),
+                        label: m.nombre,
+                    }))}
+                />
 
+                {/* Notes */}
                 <Textarea
                     label="Notas"
-                    value={formData.notas || ''}
-                    onChange={(e) => setFormData({ ...formData, notas: e.target.value })}
+                    value={notas}
+                    onChange={(e) => setNotas(e.target.value)}
                     placeholder="Notas adicionales..."
                 />
             </form>
         </Modal>
     );
 }
+
 
 export default function PagosPage() {
     const { success, error } = useToast();

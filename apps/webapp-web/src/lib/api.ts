@@ -120,16 +120,55 @@ export interface Pago {
     estado?: string;
 }
 
+// Multi-concept payment line item
+export interface PagoConceptoItem {
+    concepto_id?: number;      // Optional - use registered concept
+    descripcion?: string;      // Required when no concepto_id
+    cantidad: number;          // Quantity (default: 1)
+    precio_unitario: number;   // Unit price
+}
+
+// Preset templates for common payment combinations
+export interface PagoPresetTemplate {
+    id: string;
+    nombre: string;
+    conceptos: Omit<PagoConceptoItem, 'concepto_id'>[];
+}
+
+export const PAGO_PRESET_TEMPLATES: PagoPresetTemplate[] = [
+    {
+        id: 'cuota_mensual',
+        nombre: 'Cuota Mensual',
+        conceptos: [{ descripcion: 'Cuota Mensual', cantidad: 1, precio_unitario: 0 }]
+    },
+    {
+        id: 'cuota_personal',
+        nombre: 'Cuota + Personal Training',
+        conceptos: [
+            { descripcion: 'Cuota Mensual', cantidad: 1, precio_unitario: 0 },
+            { descripcion: 'Personal Training', cantidad: 1, precio_unitario: 0 }
+        ]
+    },
+    {
+        id: 'inscripcion',
+        nombre: 'Inscripción + Cuota',
+        conceptos: [
+            { descripcion: 'Inscripción', cantidad: 1, precio_unitario: 0 },
+            { descripcion: 'Cuota Mensual', cantidad: 1, precio_unitario: 0 }
+        ]
+    }
+];
+
 export interface PagoCreateInput {
     usuario_id: number;
-    monto: number;
-    fecha?: string;
+    monto?: number;            // Calculated from conceptos
+    fecha_pago?: string;       // ISO date string for payment date
     mes?: number;
     anio?: number;
     metodo_pago_id?: number;
-    concepto_id?: number;
-    tipo_cuota_id?: number;
     notas?: string;
+    // Multi-concept support (required)
+    conceptos: PagoConceptoItem[];
 }
 
 // === Profesor Types ===
