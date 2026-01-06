@@ -266,6 +266,172 @@ export interface SessionUser {
     dni?: string;
 }
 
+// === User Tags & States ===
+export interface Etiqueta {
+    id: number;
+    usuario_id: number;
+    nombre: string;
+    created_at?: string;
+}
+
+export interface Estado {
+    id: number;
+    usuario_id: number;
+    nombre: string;
+    descripcion?: string;
+    fecha_vencimiento?: string;
+    activo: boolean;
+    created_at?: string;
+}
+
+export interface EstadoTemplate {
+    id: number;
+    nombre: string;
+    color?: string;
+}
+
+// === Clase Types Extended ===
+export interface ClaseTipo {
+    id: number;
+    nombre: string;
+    color?: string;
+    activo: boolean;
+}
+
+export interface ClaseHorario {
+    id: number;
+    clase_id: number;
+    dia: string;
+    hora_inicio: string;
+    hora_fin: string;
+    profesor_id?: number;
+    profesor_nombre?: string;
+    cupo?: number;
+    inscriptos_count?: number;
+}
+
+export interface Inscripcion {
+    id: number;
+    horario_id: number;
+    usuario_id: number;
+    usuario_nombre?: string;
+    usuario_telefono?: string;
+    fecha_inscripcion?: string;
+}
+
+export interface ListaEspera {
+    id: number;
+    horario_id: number;
+    usuario_id: number;
+    usuario_nombre?: string;
+    posicion: number;
+    fecha_registro?: string;
+}
+
+export interface ClaseEjercicio {
+    id: number;
+    clase_id: number;
+    ejercicio_id: number;
+    ejercicio_nombre?: string;
+    orden: number;
+}
+
+// === Profesor Types Extended ===
+export interface ProfesorHorario {
+    id: number;
+    profesor_id: number;
+    dia: string;
+    hora_inicio: string;
+    hora_fin: string;
+    disponible: boolean;
+}
+
+export interface ProfesorConfig {
+    id: number;
+    profesor_id: number;
+    usuario_vinculado_id?: number;
+    usuario_vinculado_nombre?: string;
+    monto?: number;
+    monto_tipo: 'mensual' | 'hora';
+    especialidad?: string;
+    experiencia_anios?: number;
+    certificaciones?: string;
+    notas?: string;
+}
+
+export interface ProfesorResumen {
+    horas_trabajadas: number;
+    horas_proyectadas: number;
+    horas_extra: number;
+    horas_totales: number;
+}
+
+// === WhatsApp Types ===
+export interface WhatsAppConfig {
+    id?: number;
+    phone_number_id?: string;
+    access_token?: string;
+    webhook_verify_token?: string;
+    enabled: boolean;
+    webhook_enabled: boolean;
+}
+
+export interface WhatsAppMensaje {
+    id: number;
+    usuario_id: number;
+    usuario_nombre?: string;
+    telefono?: string;
+    tipo: 'welcome' | 'payment' | 'deactivation' | 'overdue' | 'class_reminder';
+    estado: 'pending' | 'sent' | 'failed';
+    contenido?: string;
+    error_detail?: string;
+    fecha_envio?: string;
+    created_at?: string;
+}
+
+export interface WhatsAppStatus {
+    available: boolean;
+    enabled: boolean;
+    server_ok: boolean;
+    config_valid: boolean;
+}
+
+// === Recibo Types ===
+export interface ReciboConfig {
+    prefijo: string;
+    separador: string;
+    numero_inicial: number;
+    longitud_numero: number;
+    reiniciar_anual: boolean;
+    incluir_anio: boolean;
+    incluir_mes: boolean;
+}
+
+export interface ReciboItem {
+    descripcion: string;
+    cantidad: number;
+    precio: number;
+}
+
+export interface ReciboPreview {
+    numero?: string;
+    titulo: string;
+    fecha: string;
+    gym_nombre: string;
+    gym_direccion?: string;
+    usuario_nombre: string;
+    usuario_dni?: string;
+    metodo_pago?: string;
+    items: ReciboItem[];
+    subtotal: number;
+    total: number;
+    observaciones?: string;
+    emitido_por?: string;
+    mostrar_logo: boolean;
+    mostrar_metodo: boolean;
+    mostrar_dni: boolean;
+}
+
 // === API Client Class ===
 class ApiClient {
     private baseUrl: string;
@@ -704,6 +870,294 @@ class ApiClient {
             method: 'POST',
             body: JSON.stringify({ usuario_id: usuarioId }),
         });
+    }
+
+    // === User Tags (Etiquetas) ===
+    async getEtiquetas(usuarioId: number) {
+        return this.request<{ etiquetas: Etiqueta[] }>(`/api/usuarios/${usuarioId}/etiquetas`);
+    }
+
+    async addEtiqueta(usuarioId: number, nombre: string) {
+        return this.request<Etiqueta>(`/api/usuarios/${usuarioId}/etiquetas`, {
+            method: 'POST',
+            body: JSON.stringify({ nombre }),
+        });
+    }
+
+    async deleteEtiqueta(usuarioId: number, etiquetaId: number) {
+        return this.request<{ ok: boolean }>(`/api/usuarios/${usuarioId}/etiquetas/${etiquetaId}`, {
+            method: 'DELETE',
+        });
+    }
+
+    async getEtiquetasSuggestions() {
+        return this.request<{ etiquetas: string[] }>('/api/etiquetas/suggestions');
+    }
+
+    // === User States (Estados) ===
+    async getEstados(usuarioId: number) {
+        return this.request<{ estados: Estado[] }>(`/api/usuarios/${usuarioId}/estados`);
+    }
+
+    async addEstado(usuarioId: number, data: { nombre: string; descripcion?: string; fecha_vencimiento?: string }) {
+        return this.request<Estado>(`/api/usuarios/${usuarioId}/estados`, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    }
+
+    async deleteEstado(usuarioId: number, estadoId: number) {
+        return this.request<{ ok: boolean }>(`/api/usuarios/${usuarioId}/estados/${estadoId}`, {
+            method: 'DELETE',
+        });
+    }
+
+    async getEstadoTemplates() {
+        return this.request<{ templates: EstadoTemplate[] }>('/api/estados/templates');
+    }
+
+    // === User Notes ===
+    async updateUsuarioNotas(usuarioId: number, notas: string) {
+        return this.request<{ ok: boolean }>(`/api/usuarios/${usuarioId}/notas`, {
+            method: 'PUT',
+            body: JSON.stringify({ notas }),
+        });
+    }
+
+    // === User QR ===
+    async generateUserQR(usuarioId: number) {
+        return this.request<{ qr_url: string; token: string }>(`/api/usuarios/${usuarioId}/qr`);
+    }
+
+    // === Clase Types ===
+    async getClaseTipos() {
+        return this.request<{ tipos: ClaseTipo[] }>('/api/clases/tipos');
+    }
+
+    async createClaseTipo(data: { nombre: string; color?: string }) {
+        return this.request<ClaseTipo>('/api/clases/tipos', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    }
+
+    async deleteClaseTipo(id: number) {
+        return this.request<{ ok: boolean }>(`/api/clases/tipos/${id}`, {
+            method: 'DELETE',
+        });
+    }
+
+    // === Clase Horarios ===
+    async getClaseHorarios(claseId: number) {
+        return this.request<{ horarios: ClaseHorario[] }>(`/api/clases/${claseId}/horarios`);
+    }
+
+    async createClaseHorario(claseId: number, data: { dia: string; hora_inicio: string; hora_fin: string; profesor_id?: number; cupo?: number }) {
+        return this.request<ClaseHorario>(`/api/clases/${claseId}/horarios`, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    }
+
+    async updateClaseHorario(claseId: number, horarioId: number, data: Partial<ClaseHorario>) {
+        return this.request<ClaseHorario>(`/api/clases/${claseId}/horarios/${horarioId}`, {
+            method: 'PUT',
+            body: JSON.stringify(data),
+        });
+    }
+
+    async deleteClaseHorario(claseId: number, horarioId: number) {
+        return this.request<{ ok: boolean }>(`/api/clases/${claseId}/horarios/${horarioId}`, {
+            method: 'DELETE',
+        });
+    }
+
+    // === Inscripciones ===
+    async getInscripciones(horarioId: number) {
+        return this.request<{ inscripciones: Inscripcion[] }>(`/api/horarios/${horarioId}/inscripciones`);
+    }
+
+    async inscribirUsuario(horarioId: number, usuarioId: number) {
+        return this.request<Inscripcion>(`/api/horarios/${horarioId}/inscripciones`, {
+            method: 'POST',
+            body: JSON.stringify({ usuario_id: usuarioId }),
+        });
+    }
+
+    async desinscribirUsuario(horarioId: number, usuarioId: number) {
+        return this.request<{ ok: boolean }>(`/api/horarios/${horarioId}/inscripciones/${usuarioId}`, {
+            method: 'DELETE',
+        });
+    }
+
+    // === Lista de Espera ===
+    async getListaEspera(horarioId: number) {
+        return this.request<{ lista: ListaEspera[] }>(`/api/horarios/${horarioId}/lista-espera`);
+    }
+
+    async addToListaEspera(horarioId: number, usuarioId: number) {
+        return this.request<ListaEspera>(`/api/horarios/${horarioId}/lista-espera`, {
+            method: 'POST',
+            body: JSON.stringify({ usuario_id: usuarioId }),
+        });
+    }
+
+    async removeFromListaEspera(horarioId: number, usuarioId: number) {
+        return this.request<{ ok: boolean }>(`/api/horarios/${horarioId}/lista-espera/${usuarioId}`, {
+            method: 'DELETE',
+        });
+    }
+
+    async notifyListaEspera(horarioId: number) {
+        return this.request<{ ok: boolean; notified_user?: string }>(`/api/horarios/${horarioId}/lista-espera/notify`, {
+            method: 'POST',
+        });
+    }
+
+    // === Clase Ejercicios ===
+    async getClaseEjercicios(claseId: number) {
+        return this.request<{ ejercicios: ClaseEjercicio[] }>(`/api/clases/${claseId}/ejercicios`);
+    }
+
+    async updateClaseEjercicios(claseId: number, ejercicioIds: number[]) {
+        return this.request<{ ok: boolean }>(`/api/clases/${claseId}/ejercicios`, {
+            method: 'PUT',
+            body: JSON.stringify({ ejercicio_ids: ejercicioIds }),
+        });
+    }
+
+    // === Profesor Horarios ===
+    async getProfesorHorarios(profesorId: number) {
+        return this.request<{ horarios: ProfesorHorario[] }>(`/api/profesores/${profesorId}/horarios`);
+    }
+
+    async createProfesorHorario(profesorId: number, data: { dia: string; hora_inicio: string; hora_fin: string; disponible?: boolean }) {
+        return this.request<ProfesorHorario>(`/api/profesores/${profesorId}/horarios`, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    }
+
+    async updateProfesorHorario(profesorId: number, horarioId: number, data: Partial<ProfesorHorario>) {
+        return this.request<ProfesorHorario>(`/api/profesores/${profesorId}/horarios/${horarioId}`, {
+            method: 'PUT',
+            body: JSON.stringify(data),
+        });
+    }
+
+    async deleteProfesorHorario(profesorId: number, horarioId: number) {
+        return this.request<{ ok: boolean }>(`/api/profesores/${profesorId}/horarios/${horarioId}`, {
+            method: 'DELETE',
+        });
+    }
+
+    // === Profesor Config ===
+    async getProfesorConfig(profesorId: number) {
+        return this.request<ProfesorConfig>(`/api/profesores/${profesorId}/config`);
+    }
+
+    async updateProfesorConfig(profesorId: number, data: Partial<ProfesorConfig>) {
+        return this.request<ProfesorConfig>(`/api/profesores/${profesorId}/config`, {
+            method: 'PUT',
+            body: JSON.stringify(data),
+        });
+    }
+
+    // === Profesor Resumen ===
+    async getProfesorResumenMensual(profesorId: number, mes?: number, anio?: number) {
+        const params = new URLSearchParams();
+        if (mes) params.set('mes', String(mes));
+        if (anio) params.set('anio', String(anio));
+        const query = params.toString();
+        return this.request<ProfesorResumen>(`/api/profesores/${profesorId}/resumen/mensual${query ? `?${query}` : ''}`);
+    }
+
+    async getProfesorResumenSemanal(profesorId: number, fecha?: string) {
+        const params = new URLSearchParams();
+        if (fecha) params.set('fecha', fecha);
+        const query = params.toString();
+        return this.request<ProfesorResumen>(`/api/profesores/${profesorId}/resumen/semanal${query ? `?${query}` : ''}`);
+    }
+
+    // === Sesiones ===
+    async deleteSesion(sesionId: number) {
+        return this.request<{ ok: boolean }>(`/api/sesiones/${sesionId}`, {
+            method: 'DELETE',
+        });
+    }
+
+    // === WhatsApp ===
+    async getWhatsAppConfig() {
+        return this.request<WhatsAppConfig>('/api/whatsapp/config');
+    }
+
+    async updateWhatsAppConfig(data: Partial<WhatsAppConfig>) {
+        return this.request<WhatsAppConfig>('/api/whatsapp/config', {
+            method: 'PUT',
+            body: JSON.stringify(data),
+        });
+    }
+
+    async getWhatsAppStatus() {
+        return this.request<WhatsAppStatus>('/api/whatsapp/status');
+    }
+
+    async getWhatsAppMensajesPendientes() {
+        return this.request<{ mensajes: WhatsAppMensaje[] }>('/api/whatsapp/pendientes');
+    }
+
+    async getWhatsAppHistorial(usuarioId: number) {
+        return this.request<{ mensajes: WhatsAppMensaje[] }>(`/api/usuarios/${usuarioId}/whatsapp/historial`);
+    }
+
+    async retryWhatsAppMessage(mensajeId: number) {
+        return this.request<{ ok: boolean }>(`/api/whatsapp/mensajes/${mensajeId}/retry`, {
+            method: 'POST',
+        });
+    }
+
+    async retryAllWhatsAppFailed() {
+        return this.request<{ ok: boolean; retried: number }>('/api/whatsapp/retry-all', {
+            method: 'POST',
+        });
+    }
+
+    async clearWhatsAppFailed() {
+        return this.request<{ ok: boolean; cleared: number }>('/api/whatsapp/clear-failed', {
+            method: 'POST',
+        });
+    }
+
+    async forceWhatsAppSend(usuarioId: number, tipo: string) {
+        return this.request<{ ok: boolean }>(`/api/usuarios/${usuarioId}/whatsapp/force`, {
+            method: 'POST',
+            body: JSON.stringify({ tipo }),
+        });
+    }
+
+    // === Recibos ===
+    async getReciboConfig() {
+        return this.request<ReciboConfig>('/api/config/recibos');
+    }
+
+    async updateReciboConfig(data: Partial<ReciboConfig>) {
+        return this.request<ReciboConfig>('/api/config/recibos', {
+            method: 'PUT',
+            body: JSON.stringify(data),
+        });
+    }
+
+    async getReciboPreview(pagoId: number) {
+        return this.request<ReciboPreview>(`/api/pagos/${pagoId}/recibo/preview`);
+    }
+
+    async downloadReciboPDF(pagoId: number) {
+        // Returns URL to PDF
+        return this.request<{ pdf_url: string }>(`/api/pagos/${pagoId}/recibo/pdf`);
+    }
+
+    async getNextReciboNumber() {
+        return this.request<{ numero: string }>('/api/config/recibos/next-number');
     }
 }
 

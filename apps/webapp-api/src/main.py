@@ -413,3 +413,28 @@ async def get_gym_info(
     except Exception as e:
         logger.error(f"Error fetching gym info: {e}")
         raise HTTPException(status_code=500, detail="Error fetching gym info")
+
+
+# =====================================================
+# Include Routers
+# =====================================================
+
+# Import all routers
+from src.routers import users, gym, payments, whatsapp, attendance, exercises, auth
+from src.routers import profesores, inscripciones
+from src.routers import reports, admin
+
+# Include routers
+app.include_router(auth.router, tags=["Auth"])
+app.include_router(users.router, tags=["Users"])
+app.include_router(gym.router, tags=["Gym"])
+app.include_router(payments.router, tags=["Payments"])
+app.include_router(whatsapp.router, tags=["WhatsApp"])
+app.include_router(attendance.router, tags=["Attendance"])
+app.include_router(exercises.router, tags=["Exercises"])
+app.include_router(profesores.router, tags=["Profesores"])
+app.include_router(inscripciones.router, tags=["Inscripciones"])
+app.include_router(reports.router, tags=["Reports"])
+app.include_router(admin.router, tags=["Admin"])
+
+

@@ -17,6 +17,8 @@ import {
     X,
     ChevronRight,
     Home,
+    MessageSquare,
+    LayoutDashboard,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ToastContainer } from '@/components/ui';
@@ -25,6 +27,7 @@ import { api } from '@/lib/api';
 
 // Navigation items matching legacy gestion.html tabs
 const navigation = [
+    { name: 'Dashboard', href: '/gestion/dashboard', icon: LayoutDashboard, description: 'Estadísticas y KPIs' },
     { name: 'Usuarios', href: '/gestion/usuarios', icon: Users, description: 'Gestionar socios' },
     { name: 'Pagos', href: '/gestion/pagos', icon: CreditCard, description: 'Registro de pagos' },
     { name: 'Profesores', href: '/gestion/profesores', icon: GraduationCap, description: 'Staff y sesiones' },
@@ -32,6 +35,7 @@ const navigation = [
     { name: 'Ejercicios', href: '/gestion/ejercicios', icon: Dumbbell, description: 'Biblioteca de ejercicios' },
     { name: 'Clases', href: '/gestion/clases', icon: CalendarDays, description: 'Horarios grupales' },
     { name: 'Asistencias', href: '/gestion/asistencias', icon: ScanLine, description: 'Check-in y registro' },
+    { name: 'WhatsApp', href: '/gestion/whatsapp', icon: MessageSquare, description: 'Mensajes y API' },
     { name: 'Configuración', href: '/gestion/configuracion', icon: Settings, description: 'Cuotas, métodos, tema' },
 ];
 

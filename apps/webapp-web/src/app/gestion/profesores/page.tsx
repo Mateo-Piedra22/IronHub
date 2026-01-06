@@ -12,6 +12,7 @@ import {
     Trash2,
     Calendar,
     User,
+    Settings,
 } from 'lucide-react';
 import {
     Button,
@@ -22,6 +23,7 @@ import {
     Input,
     type Column,
 } from '@/components/ui';
+import ProfesorDetailModal from '@/components/ProfesorDetailModal';
 import { api, type Profesor, type Sesion } from '@/lib/api';
 import { formatDate, formatTime, cn } from '@/lib/utils';
 
@@ -257,6 +259,9 @@ export default function ProfesoresPage() {
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
     const [profesorToDelete, setProfesorToDelete] = useState<Profesor | null>(null);
 
+    // Detail modal
+    const [detailOpen, setDetailOpen] = useState(false);
+
     // Load profesores
     const loadProfesores = useCallback(async () => {
         setLoading(true);
@@ -486,10 +491,20 @@ export default function ProfesoresPage() {
                                             {selectedProfesor.email || selectedProfesor.telefono || 'Sin contacto'}
                                         </div>
                                     </div>
-                                    <SessionTimer
-                                        profesor={selectedProfesor}
-                                        onSessionUpdate={loadSesiones}
-                                    />
+                                    <div className="flex items-center gap-3">
+                                        <Button
+                                            variant="secondary"
+                                            size="sm"
+                                            leftIcon={<Settings className="w-4 h-4" />}
+                                            onClick={() => setDetailOpen(true)}
+                                        >
+                                            Configurar
+                                        </Button>
+                                        <SessionTimer
+                                            profesor={selectedProfesor}
+                                            onSessionUpdate={loadSesiones}
+                                        />
+                                    </div>
                                 </div>
                             </div>
 
@@ -572,6 +587,15 @@ export default function ProfesoresPage() {
                 confirmText="Eliminar"
                 variant="danger"
             />
+
+            {/* Detail Modal */}
+            <ProfesorDetailModal
+                isOpen={detailOpen}
+                onClose={() => setDetailOpen(false)}
+                profesor={selectedProfesor}
+                onRefresh={loadProfesores}
+            />
         </div>
     );
 }
+

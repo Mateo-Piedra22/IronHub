@@ -85,7 +85,7 @@ class SecurityUtils:
         return ''.join(secrets.choice(alphabet) for _ in range(length))
     
     @staticmethod
-    def generate_api_key(prefix: str = "gymms") -> str:
+    def generate_api_key(prefix: str = "motiona") -> str:
         """
         Genera una clave API segura con prefijo.
         

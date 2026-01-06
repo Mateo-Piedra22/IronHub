@@ -1,74 +1,89 @@
-# IronHub Admin API
+# admin-api
 
-FastAPI backend for the IronHub admin panel.
+Super-admin FastAPI backend for platform management.
 
-## Tech Stack
+## Overview
 
-- **Framework**: FastAPI
-- **Database**: PostgreSQL + SQLAlchemy
-- **Cache**: Redis (optional)
-- **Auth**: Session-based
+Centralized administration API for managing:
+- Gym (tenant) registration and lifecycle
+- Subscription and payment tracking
+- System-wide maintenance
+- Audit logging
 
-## Features
+## Project Structure
 
-- 🔐 Admin authentication
-- 🏢 Gym CRUD operations
-- 💾 Database provisioning (Neon)
-- 📊 Analytics endpoints
-- 📱 WhatsApp configuration
-
-## Getting Started
-
-```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run development server
-uvicorn src.main:app --reload --port 8000
 ```
+src/
+├── main.py              # FastAPI application
+├── services/
+│   └── admin_service.py # Core admin logic (1800+ lines)
+├── database/
+│   └── raw_manager.py   # PostgreSQL operations
+├── models/
+│   └── orm_models.py    # SQLAlchemy models
+├── security_utils.py    # Password hashing, API keys
+└── secure_config.py     # Environment configuration
+```
+
+## Key Features
+
+### Gym Management
+- Create, update, delete gyms
+- Subdomain validation and suggestions
+- Database provisioning per tenant
+
+### Subscription Management
+- Payment tracking
+- Plan upgrades/downgrades
+- Expiration alerts
+
+### Status Control
+- Active / Suspended / Maintenance states
+- Scheduled maintenance windows
+- Hard suspend for non-payment
+
+### Security
+- Password hashing (bcrypt)
+- API key generation
+- Audit trail logging
+
+## AdminService Functions (64 total)
+
+| Category | Functions |
+|----------|-----------|
+| Gym CRUD | 8 |
+| Payments | 4 |
+| Suspensions | 5 |
+| Maintenance | 4 |
+| Audit | 3 |
+| Security | 6 |
 
 ## Environment Variables
 
-Copy `.env.example` to `.env` and configure:
+```env
+# Admin Database
+ADMIN_DB_HOST=
+ADMIN_DB_NAME=ironhub_admin
+ADMIN_DB_USER=
+ADMIN_DB_PASSWORD=
+ADMIN_DB_SSLMODE=require
 
-| Variable | Description |
-|----------|-------------|
-| `ADMIN_DB_HOST` | Admin database host |
-| `ADMIN_DB_PORT` | Admin database port |
-| `ADMIN_DB_NAME` | Admin database name |
-| `ADMIN_DB_USER` | Admin database user |
-| `ADMIN_DB_PASSWORD` | Admin database password |
-| `ADMIN_SECRET` | Admin panel secret key |
-| `NEON_API_TOKEN` | Neon API token for DB provisioning |
+# Security
+ADMIN_PASSWORD=
+SESSION_SECRET=
+```
 
-## API Endpoints
+## Running Locally
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/login` | Admin login |
-| POST | `/logout` | Admin logout |
-| GET | `/gyms` | List all gyms |
-| POST | `/gyms` | Create new gym |
-| GET | `/gyms/{id}` | Get gym details |
-| PUT | `/gyms/{id}` | Update gym |
-| DELETE | `/gyms/{id}` | Delete gym |
-| GET | `/metrics` | Dashboard metrics |
+```bash
+pip install -r requirements.txt
+uvicorn src.main:app --reload --port 8001
+```
 
-## Deployment
+## Database Schema
 
-Deploy to Vercel as a Python serverless function:
-
-1. Create new Vercel project
-2. Set root directory to `apps/admin-api`
-3. Add environment variables
-4. Deploy
-
-**Domain**: `api-admin.ironhub.motiona.xyz`
-
----
-
-Developed by **MotionA** © 2026
+The admin database contains:
+- `gyms`: Tenant registry
+- `gym_payments`: Payment history
+- `admin_audit_log`: Action history
+- `admin_users`: Platform admins

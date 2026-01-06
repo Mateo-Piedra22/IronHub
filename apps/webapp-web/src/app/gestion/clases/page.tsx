@@ -7,6 +7,7 @@ import {
     Clock,
     Edit,
     Trash2,
+    Settings,
 } from 'lucide-react';
 import {
     Button,
@@ -17,6 +18,7 @@ import {
     Textarea,
     Select,
 } from '@/components/ui';
+import ClaseDetailModal from '@/components/ClaseDetailModal';
 import { api, type Clase, type Profesor } from '@/lib/api';
 import { formatTime, cn } from '@/lib/utils';
 
@@ -32,10 +34,11 @@ const diasSemana = [
 ];
 
 // Schedule grid view
-function ScheduleGrid({ clases, onEdit, onDelete }: {
+function ScheduleGrid({ clases, onEdit, onDelete, onManage }: {
     clases: Clase[];
     onEdit: (c: Clase) => void;
     onDelete: (c: Clase) => void;
+    onManage: (c: Clase) => void;
 }) {
     // Group by day
     const byDay: Record<number, Clase[]> = {};
@@ -70,7 +73,7 @@ function ScheduleGrid({ clases, onEdit, onDelete }: {
                                         'hover:border-iron-500/50 transition-colors group cursor-pointer'
                                     )}
                                     style={clase.color ? { borderLeftColor: clase.color, borderLeftWidth: 3 } : {}}
-                                    onClick={() => onEdit(clase)}
+                                    onClick={() => onManage(clase)}
                                 >
                                     <div className="font-medium text-white text-sm">{clase.nombre}</div>
                                     <div className="text-xs text-neutral-400 mt-1 flex items-center gap-1">
@@ -83,6 +86,13 @@ function ScheduleGrid({ clases, onEdit, onDelete }: {
                                         </div>
                                     )}
                                     <div className="hidden group-hover:flex items-center gap-1 mt-2">
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); onManage(clase); }}
+                                            className="p-1 rounded text-iron-400 hover:text-iron-300"
+                                            title="Gestionar horarios e inscripciones"
+                                        >
+                                            <Settings className="w-3 h-3" />
+                                        </button>
                                         <button
                                             onClick={(e) => { e.stopPropagation(); onEdit(clase); }}
                                             className="p-1 rounded text-neutral-400 hover:text-white"
@@ -105,6 +115,7 @@ function ScheduleGrid({ clases, onEdit, onDelete }: {
         </div>
     );
 }
+
 
 // Clase form modal
 interface ClaseFormModalProps {
@@ -289,6 +300,10 @@ export default function ClasesPage() {
     const [claseToDelete, setClaseToDelete] = useState<Clase | null>(null);
     const [deleteLoading, setDeleteLoading] = useState(false);
 
+    // Detail modal
+    const [detailOpen, setDetailOpen] = useState(false);
+    const [detailClase, setDetailClase] = useState<Clase | null>(null);
+
     // Load
     const loadClases = useCallback(async () => {
         setLoading(true);
@@ -379,6 +394,10 @@ export default function ClasesPage() {
                             setClaseToDelete(c);
                             setDeleteOpen(true);
                         }}
+                        onManage={(c) => {
+                            setDetailClase(c);
+                            setDetailOpen(true);
+                        }}
                     />
                 )}
             </motion.div>
@@ -408,6 +427,19 @@ export default function ClasesPage() {
                 confirmText="Eliminar"
                 variant="danger"
             />
+
+            {/* Detail Modal */}
+            <ClaseDetailModal
+                isOpen={detailOpen}
+                onClose={() => {
+                    setDetailOpen(false);
+                    setDetailClase(null);
+                }}
+                clase={detailClase}
+                profesores={profesores}
+                onRefresh={loadClases}
+            />
         </div>
     );
 }
+

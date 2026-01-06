@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
     UserPlus,
     Filter,
@@ -29,6 +29,7 @@ import {
     Textarea,
     type Column,
 } from '@/components/ui';
+import UserSidebar from '@/components/UserSidebar';
 import { api, type Usuario, type UsuarioCreateInput, type TipoCuota } from '@/lib/api';
 import { formatDate, formatDateRelative, getInitials, getWhatsAppLink, cn } from '@/lib/utils';
 
@@ -213,6 +214,10 @@ export default function UsuariosPage() {
 
     // Config data
     const [tiposCuota, setTiposCuota] = useState<TipoCuota[]>([]);
+
+    // Sidebar
+    const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [sidebarUsuario, setSidebarUsuario] = useState<Usuario | null>(null);
 
     // Load usuarios
     const loadUsuarios = useCallback(async () => {
@@ -514,7 +519,10 @@ export default function UsuariosPage() {
                     columns={columns}
                     loading={loading}
                     emptyMessage="No se encontraron usuarios"
-                    onRowClick={(row) => router.push(`/gestion/usuarios/${row.id}`)}
+                    onRowClick={(row) => {
+                        setSidebarUsuario(row);
+                        setSidebarOpen(true);
+                    }}
                     pagination={{
                         page,
                         pageSize,
@@ -549,6 +557,35 @@ export default function UsuariosPage() {
                 confirmText="Eliminar"
                 variant="danger"
             />
+
+            {/* User Sidebar */}
+            <AnimatePresence>
+                {sidebarOpen && (
+                    <UserSidebar
+                        usuario={sidebarUsuario}
+                        isOpen={sidebarOpen}
+                        onClose={() => {
+                            setSidebarOpen(false);
+                            setSidebarUsuario(null);
+                        }}
+                        onEdit={(u) => {
+                            setSelectedUsuario(u);
+                            setFormModalOpen(true);
+                            setSidebarOpen(false);
+                        }}
+                        onDelete={(u) => {
+                            setUsuarioToDelete(u);
+                            setDeleteModalOpen(true);
+                            setSidebarOpen(false);
+                        }}
+                        onToggleActivo={(u) => {
+                            handleToggleActivo(u);
+                        }}
+                        onRefresh={loadUsuarios}
+                    />
+                )}
+            </AnimatePresence>
         </div>
     );
 }
+

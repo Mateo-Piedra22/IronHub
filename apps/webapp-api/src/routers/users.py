@@ -207,6 +207,141 @@ async def api_usuario_delete(
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+
+@router.post("/api/usuarios/{usuario_id}/toggle-activo")
+async def api_usuario_toggle_activo(
+    usuario_id: int,
+    user_service: UserService = Depends(get_user_service),
+    _=Depends(require_gestion_access)
+):
+    """Toggle user active status"""
+    try:
+        from src.dependencies import get_db
+        db = get_db()
+        if db is None:
+            raise HTTPException(status_code=503, detail="DB not available")
+        
+        with db.get_connection_context() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT activo FROM usuarios WHERE id = %s", (usuario_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Usuario no encontrado")
+            
+            new_status = not row["activo"]
+            cur.execute(
+                "UPDATE usuarios SET activo = %s WHERE id = %s RETURNING *",
+                (new_status, usuario_id)
+            )
+            updated = cur.fetchone()
+            conn.commit()
+            return dict(updated) if updated else {"ok": True, "activo": new_status}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.put("/api/usuarios/{usuario_id}/notas")
+async def api_usuario_notas_update(
+    usuario_id: int,
+    request: Request,
+    user_service: UserService = Depends(get_user_service),
+    _=Depends(require_gestion_access)
+):
+    """Update user notes"""
+    try:
+        payload = await request.json()
+        notas = payload.get("notas") or ""
+        
+        from src.dependencies import get_db
+        db = get_db()
+        if db is None:
+            raise HTTPException(status_code=503, detail="DB not available")
+        
+        with db.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE usuarios SET notas = %s WHERE id = %s",
+                (notas, usuario_id)
+            )
+            conn.commit()
+            return {"ok": True}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/api/usuarios/{usuario_id}/qr")
+async def api_usuario_qr(
+    usuario_id: int,
+    user_service: UserService = Depends(get_user_service),
+    _=Depends(require_gestion_access)
+):
+    """Generate QR code URL and token for user check-in"""
+    import secrets
+    import time
+    try:
+        from src.dependencies import get_db
+        db = get_db()
+        if db is None:
+            raise HTTPException(status_code=503, detail="DB not available")
+        
+        # Generate unique token
+        token = f"checkin_{usuario_id}_{int(time.time())}_{secrets.token_hex(8)}"
+        
+        # Store token in database or memory (simplified version)
+        with db.get_connection_context() as conn:
+            cur = conn.cursor()
+            # Check if checkin_tokens table exists, create if not
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS checkin_tokens (
+                    id SERIAL PRIMARY KEY,
+                    usuario_id INTEGER NOT NULL,
+                    token TEXT NOT NULL UNIQUE,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    expires_at TIMESTAMP DEFAULT NOW() + INTERVAL '24 hours'
+                )
+            """)
+            cur.execute(
+                "INSERT INTO checkin_tokens (usuario_id, token) VALUES (%s, %s)",
+                (usuario_id, token)
+            )
+            conn.commit()
+        
+        # Return QR URL (frontend will generate actual QR image)
+        qr_url = f"/api/checkin?token={token}"
+        return {"qr_url": qr_url, "token": token}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/api/etiquetas/suggestions")
+async def api_etiquetas_suggestions(
+    user_service: UserService = Depends(get_user_service),
+    _=Depends(require_gestion_access)
+):
+    """Get common tag suggestions based on existing tags"""
+    try:
+        from src.dependencies import get_db
+        db = get_db()
+        if db is None:
+            return {"etiquetas": []}
+        
+        with db.get_connection_context() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT DISTINCT nombre, COUNT(*) as count
+                FROM usuario_etiquetas
+                GROUP BY nombre
+                ORDER BY count DESC, nombre ASC
+                LIMIT 20
+            """)
+            rows = cur.fetchall() or []
+            return {"etiquetas": [r["nombre"] for r in rows]}
+    except Exception as e:
+        return {"etiquetas": []}
+
+
 # --- API Etiquetas de usuario ---
 
 @router.get("/api/usuarios/{usuario_id}/etiquetas")

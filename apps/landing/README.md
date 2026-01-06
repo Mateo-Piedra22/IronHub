@@ -1,90 +1,61 @@
-# IronHub Landing Page
+# landing
 
-Premium landing page for the IronHub gym management platform.
+Public landing page for IronHub platform.
 
-## Tech Stack
+## Overview
 
-- **Framework**: Next.js 15 with App Router
-- **Styling**: Tailwind CSS with custom design system
-- **Animations**: Framer Motion
-- **Icons**: Lucide React
-- **Language**: TypeScript
+Marketing landing page showcasing platform features:
+- Hero section with CTAs
+- Feature highlights
+- Gym directory
+- Contact information
 
-## Design System
+## Project Structure
 
-The landing page uses a premium, disruptive color palette:
-
-- **Primary**: Deep Electric Violet (`#8b5cf6` - `#4c1d95`)
-- **Accent**: Warm Gold (`#f59e0b` - `#78350f`)
-- **Neutral**: Sophisticated slate-zinc blend
-
-Features include:
-- Glassmorphism effects
-- Gradient backgrounds and orbs
-- Micro-animations and hover effects
-- Dark mode only
-
-## Getting Started
-
-```bash
-# Install dependencies
-pnpm install
-
-# Run development server
-pnpm dev
-
-# Build for production
-pnpm build
-
-# Start production server
-pnpm start
 ```
+src/
+├── app/
+│   ├── layout.tsx       # Root layout with fonts
+│   ├── page.tsx         # Landing page (523 lines)
+│   └── globals.css      # Tailwind + custom styles
+└── lib/
+    └── utils.ts         # Utilities
+```
+
+## Page Sections
+
+| Section | Description |
+|---------|-------------|
+| Header | Sticky navbar with navigation |
+| Hero | Main headline with CTAs |
+| Features | 6 feature cards with icons |
+| Gyms | Directory of active gyms |
+| About | Platform information |
+| Contact | Contact details and form |
+| Footer | Links and copyright |
+
+## Design Features
+
+- Framer Motion animations
+- Gradient text effects
+- Glass morphism cards
+- Responsive design (mobile-first)
+- Dark theme
 
 ## Environment Variables
 
-Copy `.env.example` to `.env.local` and configure:
+```env
+# No environment variables required for static site
+```
 
-| Variable | Description |
-|----------|-------------|
-| `NEXT_PUBLIC_API_URL` | Backend API URL |
-| `NEXT_PUBLIC_ADMIN_URL` | Admin panel URL |
-| `NEXT_PUBLIC_SITE_URL` | This site's URL |
+## Development
+
+```bash
+pnpm install
+pnpm dev
+```
 
 ## Deployment
 
-Deploy to Vercel:
-
-1. Create new Vercel project
-2. Set root directory to `apps/landing`
-3. Add environment variables
-4. Deploy
-
-**Domain**: `ironhub.motiona.xyz`
-
-## Structure
-
-```
-apps/landing/
-├── src/
-│   └── app/
-│       ├── globals.css      # Global styles & design tokens
-│       ├── layout.tsx       # Root layout with metadata
-│       └── page.tsx         # Landing page sections
-├── tailwind.config.js       # Tailwind configuration
-├── next.config.js           # Next.js configuration
-└── package.json
-```
-
-## Sections
-
-1. **Header**: Fixed navigation with scroll effects
-2. **Hero**: Main headline with animated stats
-3. **Features**: 6 feature cards with icons
-4. **Gyms**: Showcase of connected gyms (fetched from API)
-5. **About**: MotionA company information
-6. **Contact**: Contact details and CTA
-7. **Footer**: Copyright and links
-
----
-
-Developed by **MotionA** © 2026
+Deploys to Vercel at `ironhub.motiona.xyz`.
+See root [DEPLOYMENT.md](../../DEPLOYMENT.md) for instructions.

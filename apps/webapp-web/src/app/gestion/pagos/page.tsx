@@ -12,6 +12,7 @@ import {
     Trash2,
     FileText,
     RefreshCw,
+    Settings,
 } from 'lucide-react';
 import {
     Button,
@@ -25,6 +26,7 @@ import {
     Textarea,
     type Column,
 } from '@/components/ui';
+import ReciboPreviewModal, { ReciboConfigModal } from '@/components/ReciboPreviewModal';
 import { api, type Pago, type PagoCreateInput, type Usuario, type TipoCuota, type MetodoPago, type ConceptoPago } from '@/lib/api';
 import { formatDate, formatCurrency, cn, getMonthName } from '@/lib/utils';
 
@@ -271,6 +273,11 @@ export default function PagosPage() {
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
     const [pagoToDelete, setPagoToDelete] = useState<Pago | null>(null);
 
+    // Recibo modals
+    const [reciboPreviewOpen, setReciboPreviewOpen] = useState(false);
+    const [reciboConfigOpen, setReciboConfigOpen] = useState(false);
+    const [selectedPago, setSelectedPago] = useState<Pago | null>(null);
+
     // Load data
     const loadPagos = useCallback(async () => {
         setLoading(true);
@@ -394,11 +401,15 @@ export default function PagosPage() {
         {
             key: 'actions',
             header: '',
-            width: '80px',
+            width: '100px',
             align: 'right',
             render: (row) => (
                 <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
                     <button
+                        onClick={() => {
+                            setSelectedPago(row);
+                            setReciboPreviewOpen(true);
+                        }}
                         className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
                         title="Ver recibo"
                     >
@@ -436,12 +447,21 @@ export default function PagosPage() {
                         Registro y gestión de pagos de cuotas
                     </p>
                 </div>
-                <Button
-                    leftIcon={<Plus className="w-4 h-4" />}
-                    onClick={() => setFormModalOpen(true)}
-                >
-                    Nuevo Pago
-                </Button>
+                <div className="flex items-center gap-2">
+                    <Button
+                        variant="secondary"
+                        leftIcon={<Settings className="w-4 h-4" />}
+                        onClick={() => setReciboConfigOpen(true)}
+                    >
+                        Config Recibos
+                    </Button>
+                    <Button
+                        leftIcon={<Plus className="w-4 h-4" />}
+                        onClick={() => setFormModalOpen(true)}
+                    >
+                        Nuevo Pago
+                    </Button>
+                </div>
             </motion.div>
 
             {/* Stats */}
@@ -566,6 +586,23 @@ export default function PagosPage() {
                 confirmText="Eliminar"
                 variant="danger"
             />
+
+            {/* Recibo Preview Modal */}
+            <ReciboPreviewModal
+                isOpen={reciboPreviewOpen}
+                onClose={() => {
+                    setReciboPreviewOpen(false);
+                    setSelectedPago(null);
+                }}
+                pago={selectedPago}
+            />
+
+            {/* Recibo Config Modal */}
+            <ReciboConfigModal
+                isOpen={reciboConfigOpen}
+                onClose={() => setReciboConfigOpen(false)}
+            />
         </div>
     );
 }
+

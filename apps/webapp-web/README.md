@@ -1,90 +1,117 @@
-# IronHub Webapp Frontend
+# webapp-web
 
-Next.js frontend for gym tenant applications (`{tenant}.ironhub.motiona.xyz`).
+Next.js 14 frontend for gym management dashboard.
 
-## Tech Stack
+## Overview
 
-- **Framework**: Next.js 15 with App Router
-- **State**: TanStack Query + Zustand
-- **Styling**: Tailwind CSS (IronHub design system)
-- **Animations**: Framer Motion
-- **Icons**: Lucide React
+Management dashboard for gym owners and professors to:
+- Manage users (socios)
+- Process payments and generate receipts
+- Track attendance
+- Create and assign routines
+- Send WhatsApp notifications
+- View analytics and KPIs
 
-## Features
+## Project Structure
 
-- 🔐 **Login**: DNI + PIN authentication
-- 📊 **Dashboard**: Membership status, quick stats
-- 💳 **Payments**: Payment history with receipts
-- 🏃 **Attendance**: Check-in/out history with stats
-- 🏋️ **Routines**: View assigned workout plans
-- 👤 **Profile**: Personal information
+```
+src/
+├── app/
+│   ├── gestion/
+│   │   ├── layout.tsx       # Sidebar layout
+│   │   ├── asistencias/     # Attendance tracking
+│   │   ├── clases/          # Class management
+│   │   ├── configuracion/   # Settings
+│   │   ├── dashboard/       # KPIs and charts
+│   │   ├── ejercicios/      # Exercise catalog
+│   │   ├── pagos/           # Payment management
+│   │   ├── profesores/      # Professor management
+│   │   ├── rutinas/         # Routine builder
+│   │   ├── usuarios/        # User management
+│   │   └── whatsapp/        # Messaging center
+│   ├── usuario/             # User self-service panel
+│   └── checkin/             # QR check-in interface
+├── components/
+│   ├── ui/                  # Base UI components
+│   │   ├── Button.tsx
+│   │   ├── Modal.tsx
+│   │   ├── Input.tsx
+│   │   ├── Select.tsx
+│   │   ├── DataTable.tsx
+│   │   └── ...
+│   ├── ReciboPreviewModal.tsx
+│   ├── RutinaExportModal.tsx
+│   ├── QRCheckInModal.tsx
+│   ├── WhatsAppUserHistory.tsx
+│   ├── SesionEditModal.tsx
+│   └── ...
+└── lib/
+    ├── api.ts               # API client
+    └── utils.ts             # Utility functions
+```
 
-## Pages
+## Key Pages
 
 | Route | Description |
 |-------|-------------|
-| `/` | Login page |
-| `/dashboard` | Member dashboard home |
-| `/dashboard/payments` | Payment history |
-| `/dashboard/attendance` | Attendance history |
-| `/dashboard/routines` | Assigned workout routine |
-| `/dashboard/profile` | Member profile |
+| /gestion/dashboard | KPIs, charts, alerts |
+| /gestion/usuarios | User CRUD with filters |
+| /gestion/pagos | Payment processing |
+| /gestion/asistencias | Daily attendance |
+| /gestion/rutinas | Routine builder |
+| /gestion/profesores | Professor sessions |
+| /gestion/configuracion | Gym settings |
+| /gestion/whatsapp | Message center |
 
-## Getting Started
+## Key Components
+
+| Component | Purpose |
+|-----------|---------|
+| DataTable | Sortable, filterable data tables |
+| Modal | Overlay dialogs |
+| ReciboPreviewModal | Receipt preview and print |
+| RutinaExportModal | Excel export options |
+| QRCheckInModal | QR code with countdown |
+| SesionEditModal | Professor session editor |
+
+## Environment Variables
+
+```env
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
+## Development
 
 ```bash
 # Install dependencies
 pnpm install
 
 # Run development server
-pnpm dev   # Runs on port 3002
+pnpm dev
+
+# Build for production
+pnpm build
+
+# Type check
+pnpm tsc --noEmit
+
+# Lint
+pnpm lint
 ```
 
-## Environment Variables
+## Styling
 
-| Variable | Description |
-|----------|-------------|
-| `NEXT_PUBLIC_API_URL` | Webapp API URL (api.ironhub.motiona.xyz) |
-| `NEXT_PUBLIC_TENANT_DOMAIN` | Base domain for tenants |
+Uses Tailwind CSS with custom design tokens:
+- Primary colors: iron-* (blue/steel)
+- Neutral scale: neutral-*
+- Semantic: success-*, warning-*, danger-*
 
-## Structure
-
-```
-apps/webapp-web/
-├── src/
-│   └── app/
-│       ├── globals.css
-│       ├── layout.tsx
-│       ├── providers.tsx
-│       ├── page.tsx                    # Login
-│       └── dashboard/
-│           ├── layout.tsx              # Navigation layout
-│           ├── page.tsx                # Dashboard home
-│           ├── payments/page.tsx       # Payment history
-│           ├── attendance/page.tsx     # Attendance history
-│           ├── routines/page.tsx       # Workout routines
-│           └── profile/page.tsx        # Member profile
-├── tailwind.config.js
-└── package.json
-```
-
-## Multi-Tenancy
-
-The app supports multi-tenancy via subdomain routing:
-- `ironfitness.ironhub.motiona.xyz` → Iron Fitness gym
-- `powergym.ironhub.motiona.xyz` → PowerGym
-
-Tenant is extracted from hostname and sent to API.
+Custom utilities:
+- `glass-card`: Frosted glass effect
+- `gradient-text`: Gradient text
+- `btn-glow`: Glowing button
 
 ## Deployment
 
-Deploy to Vercel with wildcard domain:
-
-1. Create Vercel project
-2. Set root directory: `apps/webapp-web`
-3. Configure domain: `*.ironhub.motiona.xyz`
-4. Add environment variables
-
----
-
-Developed by **MotionA** © 2026
+Deploys to Vercel as Next.js application.
+See root [DEPLOYMENT.md](../../DEPLOYMENT.md) for instructions.
