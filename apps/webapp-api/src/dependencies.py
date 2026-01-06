@@ -76,6 +76,15 @@ def get_teacher_service(session: Session = Depends(get_db_session)) -> TeacherSe
     return TeacherService(session)
 
 
+# Aliases for backwards compatibility with routers
+get_db = get_db_session
+
+
+def get_rm(session: Session = Depends(get_db_session)):
+    """Get raw manager (database session) - alias for dependency injection."""
+    return session
+
+
 # --- Security Dependencies ---
 
 async def require_gestion_access(request: Request):
