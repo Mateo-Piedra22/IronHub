@@ -1,48 +1,86 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { Dumbbell, LogIn, Eye, EyeOff, Shield } from 'lucide-react';
+import { Dumbbell, LogIn, Eye, EyeOff, Shield, Users, KeyRound, Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
+
+interface ProfesorBasico {
+    usuario_id: number;
+    nombre: string;
+    profesor_id: number;
+}
 
 export default function GestionLoginPage() {
     const router = useRouter();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [showPassword, setShowPassword] = useState(false);
-    const [formData, setFormData] = useState({
-        dni: '',
-        password: '',
-    });
+
+    // Professors list
+    const [profesores, setProfesores] = useState<ProfesorBasico[]>([]);
+    const [loadingProfesores, setLoadingProfesores] = useState(true);
+
+    // Form data
+    const [selectedProfile, setSelectedProfile] = useState('__OWNER__');
+    const [pin, setPin] = useState('');
+    const [ownerPassword, setOwnerPassword] = useState('');
+
+    // Load professors on mount
+    useEffect(() => {
+        const loadProfesores = async () => {
+            try {
+                const res = await api.getProfesoresBasico();
+                if (res.ok && Array.isArray(res.data)) {
+                    setProfesores(res.data);
+                }
+            } catch (err) {
+                console.error('Error loading professors:', err);
+            } finally {
+                setLoadingProfesores(false);
+            }
+        };
+        loadProfesores();
+    }, []);
+
+    const isOwnerSelected = selectedProfile === '__OWNER__';
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
 
-        if (!formData.dni.trim() || !formData.password) {
-            setError('Completa todos los campos');
+        // Validation
+        if (!selectedProfile) {
+            setError('Seleccioná un perfil');
             return;
+        }
+
+        if (isOwnerSelected) {
+            if (!ownerPassword.trim()) {
+                setError('Ingresá la contraseña del dueño');
+                return;
+            }
+        } else {
+            if (!pin.trim()) {
+                setError('Ingresá tu PIN');
+                return;
+            }
         }
 
         setLoading(true);
         try {
-            const res = await api.login({
-                dni: formData.dni,
-                password: formData.password,
-            });
+            const credentials = isOwnerSelected
+                ? { usuario_id: '__OWNER__', owner_password: ownerPassword }
+                : { usuario_id: selectedProfile, pin };
 
-            if (res.ok && res.data?.ok) {
-                const user = res.data.user;
-                // Only allow admin roles
-                if (!['owner', 'admin', 'profesor'].includes(user.rol)) {
-                    setError('No tienes permisos para acceder');
-                    return;
-                }
+            const res = await api.gestionLogin(credentials);
+
+            if (res.ok && res.data?.ok !== false) {
                 router.push('/gestion/usuarios');
             } else {
-                setError(res.error || 'Credenciales incorrectas');
+                setError(res.error || res.data?.message || 'Credenciales incorrectas');
             }
         } catch {
             setError('Error de conexión');
@@ -75,7 +113,7 @@ export default function GestionLoginPage() {
                         <Dumbbell className="w-8 h-8 text-white" />
                     </motion.div>
                     <h1 className="text-2xl font-display font-bold text-white">Panel de Gestión</h1>
-                    <p className="text-neutral-400 mt-1">Ingresa tus credenciales para continuar</p>
+                    <p className="text-neutral-400 mt-1">Acceso para profesores o dueño</p>
                 </div>
 
                 {/* Form Card */}
@@ -86,48 +124,105 @@ export default function GestionLoginPage() {
                     className="glass-card p-8"
                 >
                     <form onSubmit={handleSubmit} className="space-y-6">
-                        {/* DNI */}
+                        {/* Profile Selector */}
                         <div className="space-y-2">
-                            <label htmlFor="dni" className="block text-sm font-medium text-neutral-300">
-                                DNI
-                            </label>
-                            <input
-                                id="dni"
-                                type="text"
-                                inputMode="numeric"
-                                value={formData.dni}
-                                onChange={(e) => setFormData({ ...formData, dni: e.target.value })}
-                                placeholder="12345678"
-                                className="w-full px-4 py-3 rounded-xl bg-neutral-900 border border-neutral-800 text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-iron-500/50 focus:border-iron-500 transition-all"
-                                autoComplete="username"
-                            />
-                        </div>
-
-                        {/* Password */}
-                        <div className="space-y-2">
-                            <label htmlFor="password" className="block text-sm font-medium text-neutral-300">
-                                Contraseña
+                            <label htmlFor="profile" className="block text-sm font-medium text-neutral-300">
+                                Seleccionar perfil
                             </label>
                             <div className="relative">
-                                <input
-                                    id="password"
-                                    type={showPassword ? 'text' : 'password'}
-                                    value={formData.password}
-                                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                                    placeholder="••••••••"
-                                    className="w-full px-4 py-3 pr-12 rounded-xl bg-neutral-900 border border-neutral-800 text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-iron-500/50 focus:border-iron-500 transition-all"
-                                    autoComplete="current-password"
-                                />
-                                <button
-                                    type="button"
-                                    onClick={() => setShowPassword(!showPassword)}
-                                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-neutral-500 hover:text-white transition-colors"
-                                    tabIndex={-1}
+                                <select
+                                    id="profile"
+                                    value={selectedProfile}
+                                    onChange={(e) => {
+                                        setSelectedProfile(e.target.value);
+                                        setError('');
+                                        setPin('');
+                                        setOwnerPassword('');
+                                    }}
+                                    disabled={loadingProfesores}
+                                    className="w-full px-4 py-3 pl-11 rounded-xl bg-neutral-900 border border-neutral-800 text-white appearance-none focus:outline-none focus:ring-2 focus:ring-iron-500/50 focus:border-iron-500 transition-all disabled:opacity-50"
                                 >
-                                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                                </button>
+                                    <option value="__OWNER__">👑 Dueño</option>
+                                    {profesores.map((p) => (
+                                        <option key={p.usuario_id} value={String(p.usuario_id)}>
+                                            {p.nombre || `Profesor ${p.profesor_id}`}
+                                        </option>
+                                    ))}
+                                </select>
+                                <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
+                                {loadingProfesores && (
+                                    <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500 animate-spin" />
+                                )}
                             </div>
                         </div>
+
+                        {/* Conditional: PIN for professors */}
+                        {!isOwnerSelected && (
+                            <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="space-y-2"
+                            >
+                                <label htmlFor="pin" className="block text-sm font-medium text-neutral-300">
+                                    PIN
+                                </label>
+                                <div className="relative">
+                                    <input
+                                        id="pin"
+                                        type={showPassword ? 'text' : 'password'}
+                                        value={pin}
+                                        onChange={(e) => setPin(e.target.value)}
+                                        placeholder="Ingresá tu PIN"
+                                        maxLength={6}
+                                        className="w-full px-4 py-3 pl-11 pr-12 rounded-xl bg-neutral-900 border border-neutral-800 text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-iron-500/50 focus:border-iron-500 transition-all"
+                                        autoComplete="current-password"
+                                    />
+                                    <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPassword(!showPassword)}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-neutral-500 hover:text-white transition-colors"
+                                        tabIndex={-1}
+                                    >
+                                        {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                                    </button>
+                                </div>
+                            </motion.div>
+                        )}
+
+                        {/* Conditional: Password for owner */}
+                        {isOwnerSelected && (
+                            <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="space-y-2"
+                            >
+                                <label htmlFor="owner_password" className="block text-sm font-medium text-neutral-300">
+                                    Contraseña del dueño
+                                </label>
+                                <div className="relative">
+                                    <input
+                                        id="owner_password"
+                                        type={showPassword ? 'text' : 'password'}
+                                        value={ownerPassword}
+                                        onChange={(e) => setOwnerPassword(e.target.value)}
+                                        placeholder="Ingresá la contraseña"
+                                        className="w-full px-4 py-3 pr-12 rounded-xl bg-neutral-900 border border-neutral-800 text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-iron-500/50 focus:border-iron-500 transition-all"
+                                        autoComplete="current-password"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPassword(!showPassword)}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-neutral-500 hover:text-white transition-colors"
+                                        tabIndex={-1}
+                                    >
+                                        {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                                    </button>
+                                </div>
+                            </motion.div>
+                        )}
 
                         {/* Error */}
                         {error && (
@@ -143,7 +238,7 @@ export default function GestionLoginPage() {
                         {/* Submit */}
                         <button
                             type="submit"
-                            disabled={loading}
+                            disabled={loading || loadingProfesores}
                             className={cn(
                                 'w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold text-white',
                                 'bg-gradient-to-r from-iron-600 to-iron-500',

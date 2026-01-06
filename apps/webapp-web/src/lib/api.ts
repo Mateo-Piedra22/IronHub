@@ -521,6 +521,77 @@ class ApiClient {
         });
     }
 
+    // Usuario login with DNI + PIN (for /usuario-login)
+    async usuarioLogin(credentials: { dni: string; pin: string }) {
+        return this.request<{
+            success: boolean;
+            user_id?: number;
+            activo?: boolean;
+            message?: string;
+            cuotas_vencidas?: number;
+            dias_restantes?: number;
+            fecha_proximo_vencimiento?: string;
+            exento?: boolean;
+        }>('/usuario/login', {
+            method: 'POST',
+            body: JSON.stringify(credentials),
+        });
+    }
+
+    // Gestion login with professor selector or owner (for /gestion-login)
+    async gestionLogin(credentials: {
+        usuario_id: string; // '__OWNER__' for owner or numeric user ID
+        pin?: string;
+        owner_password?: string;
+    }) {
+        return this.request<{ ok: boolean; message?: string }>('/gestion/auth', {
+            method: 'POST',
+            body: JSON.stringify(credentials),
+        });
+    }
+
+    // Owner-only login (for /login - dashboard)
+    async ownerLogin(password: string) {
+        return this.request<{ ok: boolean; message?: string }>('/login', {
+            method: 'POST',
+            body: JSON.stringify({ password }),
+        });
+    }
+
+    // Check-in auth with DNI + phone (for /checkin)
+    async checkinAuth(credentials: { dni: string; telefono: string }) {
+        return this.request<{
+            success: boolean;
+            message?: string;
+            usuario_id?: number;
+            cuotas_vencidas?: number;
+            dias_restantes?: number;
+            fecha_proximo_vencimiento?: string;
+            exento?: boolean;
+            activo?: boolean;
+        }>('/checkin/auth', {
+            method: 'POST',
+            body: JSON.stringify(credentials),
+        });
+    }
+
+    // Get basic professor list for gestion login dropdown
+    async getProfesoresBasico() {
+        return this.request<Array<{
+            usuario_id: number;
+            nombre: string;
+            profesor_id: number;
+        }>>('/api/profesores_basico');
+    }
+
+    // Change user PIN (for usuario-login)
+    async changePin(credentials: { dni: string; old_pin: string; new_pin: string }) {
+        return this.request<{ ok: boolean; error?: string }>('/api/usuario/change_pin', {
+            method: 'POST',
+            body: JSON.stringify(credentials),
+        });
+    }
+
     async logout() {
         return this.request<{ ok: boolean }>('/api/auth/logout', {
             method: 'POST',

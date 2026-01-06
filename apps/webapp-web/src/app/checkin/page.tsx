@@ -11,6 +11,8 @@ import {
     User,
     Clock,
     LogOut,
+    Phone,
+    ChevronDown,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -24,13 +26,36 @@ interface CheckinResult {
     timestamp?: string;
 }
 
+const COUNTRY_PREFIXES = [
+    { code: '+54', country: 'Argentina' },
+    { code: '+598', country: 'Uruguay' },
+    { code: '+56', country: 'Chile' },
+    { code: '+595', country: 'Paraguay' },
+    { code: '+55', country: 'Brasil' },
+    { code: '+1', country: 'Estados Unidos' },
+    { code: '+34', country: 'España' },
+];
+
 export default function CheckinPage() {
+    // Auth state
     const [authenticated, setAuthenticated] = useState(false);
-    const [staffDni, setStaffDni] = useState('');
-    const [staffPassword, setStaffPassword] = useState('');
+    const [authDni, setAuthDni] = useState('');
+    const [authPhone, setAuthPhone] = useState('');
+    const [countryPrefix, setCountryPrefix] = useState('+54');
+    const [showPrefixSelector, setShowPrefixSelector] = useState(false);
     const [authLoading, setAuthLoading] = useState(false);
     const [authError, setAuthError] = useState('');
 
+    // User quota info
+    const [userInfo, setUserInfo] = useState<{
+        cuotasVencidas?: number;
+        diasRestantes?: number;
+        fechaVencimiento?: string;
+        exento?: boolean;
+        activo?: boolean;
+    } | null>(null);
+
+    // Scanner state
     const [mode, setMode] = useState<'camera' | 'manual'>('manual');
     const [scanStatus, setScanStatus] = useState<ScanStatus>('idle');
     const [lastResult, setLastResult] = useState<CheckinResult | null>(null);
@@ -41,23 +66,58 @@ export default function CheckinPage() {
     const streamRef = useRef<MediaStream | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
-    // Auth submit
+    // Restore saved credentials
+    useEffect(() => {
+        try {
+            const saved = localStorage.getItem('checkin_saved_user');
+            if (saved) {
+                const data = JSON.parse(saved);
+                if (data.dni) setAuthDni(data.dni);
+                if (data.telefono) setAuthPhone(data.telefono);
+            }
+        } catch { }
+    }, []);
+
+    // Auth submit with DNI + phone
     const handleAuth = async (e: React.FormEvent) => {
         e.preventDefault();
         setAuthError('');
+
+        const dni = authDni.replace(/\D/g, '');
+        const telefono = authPhone.replace(/\D/g, '');
+
+        if (!dni || !telefono) {
+            setAuthError('Ingresá DNI y teléfono válidos');
+            return;
+        }
+
         setAuthLoading(true);
 
         try {
-            const res = await api.login({ dni: staffDni, password: staffPassword });
-            if (res.ok && res.data?.ok) {
-                const user = res.data.user;
-                if (['owner', 'admin', 'profesor'].includes(user.rol)) {
-                    setAuthenticated(true);
-                } else {
-                    setAuthError('No tienes permisos para usar el check-in');
-                }
+            const res = await api.checkinAuth({ dni, telefono });
+
+            if (res.ok && res.data?.success) {
+                // Save for future use
+                try {
+                    localStorage.setItem('checkin_saved_user', JSON.stringify({
+                        dni,
+                        telefono,
+                        usuario_id: res.data.usuario_id || null,
+                    }));
+                } catch { }
+
+                // Store user info for quota warnings
+                setUserInfo({
+                    cuotasVencidas: res.data.cuotas_vencidas,
+                    diasRestantes: res.data.dias_restantes,
+                    fechaVencimiento: res.data.fecha_proximo_vencimiento,
+                    exento: res.data.exento,
+                    activo: res.data.activo,
+                });
+
+                setAuthenticated(true);
             } else {
-                setAuthError(res.error || 'Credenciales incorrectas');
+                setAuthError(res.error || res.data?.message || 'Credenciales inválidas');
             }
         } catch {
             setAuthError('Error de conexión');
@@ -112,6 +172,20 @@ export default function CheckinPage() {
     const processToken = useCallback(async (token: string) => {
         if (!token.trim()) return;
 
+        // Check if user is inactive
+        if (userInfo && !userInfo.exento && userInfo.activo === false) {
+            setLastResult({
+                success: false,
+                message: 'Cuenta desactivada. No podés registrar asistencia.',
+            });
+            setScanStatus('error');
+            setTimeout(() => {
+                setScanStatus('idle');
+                setLastResult(null);
+            }, 3000);
+            return;
+        }
+
         setScanStatus('processing');
         try {
             const res = await api.checkInByDni(token);
@@ -154,7 +228,7 @@ export default function CheckinPage() {
                 inputRef.current.focus();
             }
         }, 2500);
-    }, []);
+    }, [userInfo]);
 
     // Manual submit
     const handleManualSubmit = (e: React.FormEvent) => {
@@ -167,9 +241,33 @@ export default function CheckinPage() {
         stopCamera();
         await api.logout();
         setAuthenticated(false);
-        setStaffDni('');
-        setStaffPassword('');
+        setUserInfo(null);
     };
+
+    // Get quota warning message
+    const getQuotaWarning = () => {
+        if (!userInfo || userInfo.exento) return null;
+
+        const { cuotasVencidas, diasRestantes, fechaVencimiento } = userInfo;
+
+        if (cuotasVencidas && cuotasVencidas > 0) {
+            return { type: 'error', message: 'Tu cuota está vencida. Regularizá el pago para entrenar.' };
+        }
+
+        if (diasRestantes !== undefined && diasRestantes <= 3) {
+            const dMsg = diasRestantes < 0
+                ? 'vencida'
+                : (diasRestantes === 0 ? 'vence hoy' : `vence en ${diasRestantes} día${diasRestantes === 1 ? '' : 's'}`);
+            return {
+                type: 'warning',
+                message: `Atención: tu cuota ${dMsg}${fechaVencimiento ? ` (${fechaVencimiento})` : ''}.`
+            };
+        }
+
+        return null;
+    };
+
+    const quotaWarning = getQuotaWarning();
 
     // Auth screen
     if (!authenticated) {
@@ -185,42 +283,101 @@ export default function CheckinPage() {
                             <ScanLine className="w-8 h-8 text-white" />
                         </div>
                         <h1 className="text-2xl font-display font-bold text-white">Check-in</h1>
-                        <p className="text-neutral-400 mt-1">Autentícate para iniciar</p>
+                        <p className="text-neutral-400 mt-1">Ingresá tus datos para habilitar el lector</p>
                     </div>
 
                     <div className="glass-card p-8">
                         <form onSubmit={handleAuth} className="space-y-4">
+                            {/* DNI */}
                             <div>
-                                <label className="block text-sm font-medium text-neutral-300 mb-2">DNI del Staff</label>
-                                <input
-                                    type="text"
-                                    value={staffDni}
-                                    onChange={(e) => setStaffDni(e.target.value)}
-                                    className="w-full px-4 py-3 rounded-xl bg-neutral-900 border border-neutral-800 text-white focus:ring-2 focus:ring-success-500/50 focus:border-success-500 transition-all"
-                                    placeholder="12345678"
-                                />
+                                <label className="block text-sm font-medium text-neutral-300 mb-2">DNI</label>
+                                <div className="relative">
+                                    <input
+                                        type="text"
+                                        inputMode="numeric"
+                                        value={authDni}
+                                        onChange={(e) => setAuthDni(e.target.value)}
+                                        className="w-full px-4 py-3 pl-11 rounded-xl bg-neutral-900 border border-neutral-800 text-white focus:ring-2 focus:ring-success-500/50 focus:border-success-500 transition-all"
+                                        placeholder="Solo números"
+                                        autoComplete="off"
+                                    />
+                                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
+                                </div>
                             </div>
+
+                            {/* Phone with country prefix */}
                             <div>
-                                <label className="block text-sm font-medium text-neutral-300 mb-2">Contraseña</label>
-                                <input
-                                    type="password"
-                                    value={staffPassword}
-                                    onChange={(e) => setStaffPassword(e.target.value)}
-                                    className="w-full px-4 py-3 rounded-xl bg-neutral-900 border border-neutral-800 text-white focus:ring-2 focus:ring-success-500/50 focus:border-success-500 transition-all"
-                                    placeholder="••••••••"
-                                />
+                                <label className="block text-sm font-medium text-neutral-300 mb-2">Teléfono</label>
+                                <div className="flex gap-2">
+                                    {/* Prefix selector */}
+                                    <div className="relative">
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowPrefixSelector(!showPrefixSelector)}
+                                            className="flex items-center gap-1 px-3 py-3 rounded-xl bg-neutral-900 border border-neutral-800 text-white hover:bg-neutral-800 transition-all"
+                                        >
+                                            {countryPrefix}
+                                            <ChevronDown className="w-4 h-4 text-neutral-500" />
+                                        </button>
+
+                                        <AnimatePresence>
+                                            {showPrefixSelector && (
+                                                <motion.div
+                                                    initial={{ opacity: 0, y: -10 }}
+                                                    animate={{ opacity: 1, y: 0 }}
+                                                    exit={{ opacity: 0, y: -10 }}
+                                                    className="absolute top-full left-0 mt-2 w-48 bg-neutral-900 border border-neutral-800 rounded-xl shadow-lg z-10 overflow-hidden"
+                                                >
+                                                    {COUNTRY_PREFIXES.map((p) => (
+                                                        <button
+                                                            key={p.code}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                setCountryPrefix(p.code);
+                                                                setShowPrefixSelector(false);
+                                                            }}
+                                                            className={cn(
+                                                                'w-full px-4 py-2 text-left text-sm hover:bg-neutral-800 transition-colors',
+                                                                countryPrefix === p.code ? 'text-success-400' : 'text-white'
+                                                            )}
+                                                        >
+                                                            {p.country} ({p.code})
+                                                        </button>
+                                                    ))}
+                                                </motion.div>
+                                            )}
+                                        </AnimatePresence>
+                                    </div>
+
+                                    {/* Phone input */}
+                                    <div className="relative flex-1">
+                                        <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            value={authPhone}
+                                            onChange={(e) => setAuthPhone(e.target.value)}
+                                            className="w-full px-4 py-3 pl-11 rounded-xl bg-neutral-900 border border-neutral-800 text-white focus:ring-2 focus:ring-success-500/50 focus:border-success-500 transition-all"
+                                            placeholder="Ej: 3434473599"
+                                            autoComplete="off"
+                                        />
+                                        <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
+                                    </div>
+                                </div>
+                                <p className="text-xs text-neutral-500 mt-1">Elegí el prefijo. Ingresá solo dígitos.</p>
                             </div>
+
                             {authError && (
                                 <div className="p-3 rounded-xl bg-danger-500/10 border border-danger-500/30 text-danger-400 text-sm">
                                     {authError}
                                 </div>
                             )}
+
                             <button
                                 type="submit"
                                 disabled={authLoading}
                                 className="w-full py-3 rounded-xl font-semibold text-white bg-gradient-to-r from-success-500 to-success-600 hover:shadow-glow-md transition-all disabled:opacity-50"
                             >
-                                {authLoading ? 'Verificando...' : 'Iniciar Sesión'}
+                                {authLoading ? 'Verificando...' : 'Continuar'}
                             </button>
                         </form>
                     </div>
@@ -250,6 +407,22 @@ export default function CheckinPage() {
                     <LogOut className="w-5 h-5" />
                 </button>
             </div>
+
+            {/* Quota warning toast */}
+            {quotaWarning && (
+                <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className={cn(
+                        'mb-4 p-3 rounded-xl text-sm',
+                        quotaWarning.type === 'error'
+                            ? 'bg-danger-500/10 border border-danger-500/30 text-danger-400'
+                            : 'bg-warning-500/10 border border-warning-500/30 text-warning-400'
+                    )}
+                >
+                    {quotaWarning.message}
+                </motion.div>
+            )}
 
             {/* Mode toggle */}
             <div className="flex items-center gap-2 mb-6">

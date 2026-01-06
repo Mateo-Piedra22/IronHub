@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
-import { Dumbbell, LogIn, Eye, EyeOff, User } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Dumbbell, LogIn, Eye, EyeOff, User, KeyRound, ChevronDown, ChevronUp, AlertCircle, CheckCircle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -11,10 +11,21 @@ export default function UsuarioLoginPage() {
     const router = useRouter();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
-    const [showPassword, setShowPassword] = useState(false);
+    const [showPin, setShowPin] = useState(false);
     const [formData, setFormData] = useState({
         dni: '',
-        password: '',
+        pin: '',
+    });
+
+    // PIN Change state
+    const [showPinChange, setShowPinChange] = useState(false);
+    const [pinChangeLoading, setPinChangeLoading] = useState(false);
+    const [pinChangeError, setPinChangeError] = useState('');
+    const [pinChangeSuccess, setPinChangeSuccess] = useState('');
+    const [pinChangeData, setPinChangeData] = useState({
+        dni: '',
+        oldPin: '',
+        newPin: '',
     });
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -22,27 +33,92 @@ export default function UsuarioLoginPage() {
         setError('');
 
         if (!formData.dni.trim()) {
-            setError('Ingresa tu DNI');
+            setError('Ingresá tu DNI');
+            return;
+        }
+        if (!formData.pin.trim()) {
+            setError('Ingresá tu PIN');
             return;
         }
 
         setLoading(true);
         try {
-            const res = await api.login({
-                dni: formData.dni,
-                password: formData.password || formData.dni, // Default password = DNI
+            const res = await api.usuarioLogin({
+                dni: formData.dni.trim(),
+                pin: formData.pin.trim(),
             });
 
-            if (res.ok && res.data?.ok) {
+            if (res.ok && res.data?.success) {
+                // Check if user is active
+                if (res.data.activo === false) {
+                    setError('Tu cuenta está inactiva. Consultá en recepción.');
+                    return;
+                }
                 router.push('/dashboard');
             } else {
-                setError(res.error || 'DNI no encontrado o datos incorrectos');
+                setError(res.error || res.data?.message || 'Credenciales incorrectas');
             }
         } catch {
             setError('Error de conexión');
         } finally {
             setLoading(false);
         }
+    };
+
+    const handlePinChange = async () => {
+        setPinChangeError('');
+        setPinChangeSuccess('');
+
+        if (!pinChangeData.dni.trim()) {
+            setPinChangeError('Ingresá tu DNI');
+            return;
+        }
+        if (!pinChangeData.oldPin.trim()) {
+            setPinChangeError('Ingresá tu PIN actual');
+            return;
+        }
+        if (!pinChangeData.newPin.trim() || pinChangeData.newPin.length < 4) {
+            setPinChangeError('El nuevo PIN debe tener al menos 4 caracteres');
+            return;
+        }
+
+        setPinChangeLoading(true);
+        try {
+            const res = await api.changePin({
+                dni: pinChangeData.dni.trim(),
+                old_pin: pinChangeData.oldPin.trim(),
+                new_pin: pinChangeData.newPin.trim(),
+            });
+
+            if (res.ok && res.data?.ok) {
+                setPinChangeSuccess('PIN actualizado correctamente');
+                // Sync the new PIN to the login form
+                setFormData(prev => ({ ...prev, pin: pinChangeData.newPin }));
+                // Reset change form
+                setPinChangeData({ dni: '', oldPin: '', newPin: '' });
+                // Hide after success
+                setTimeout(() => {
+                    setShowPinChange(false);
+                    setPinChangeSuccess('');
+                }, 2000);
+            } else {
+                setPinChangeError(res.error || res.data?.error || 'No se pudo actualizar el PIN');
+            }
+        } catch {
+            setPinChangeError('Error de conexión');
+        } finally {
+            setPinChangeLoading(false);
+        }
+    };
+
+    // Pre-fill PIN change DNI when expanding
+    const togglePinChange = () => {
+        if (!showPinChange && formData.dni) {
+            setPinChangeData(prev => ({ ...prev, dni: formData.dni }));
+        }
+        setShowPinChange(!showPinChange);
+        setPinChangeError('');
+        setPinChangeSuccess('');
     };
 
     return (
@@ -68,8 +144,8 @@ export default function UsuarioLoginPage() {
                     >
                         <Dumbbell className="w-8 h-8 text-white" />
                     </motion.div>
-                    <h1 className="text-2xl font-display font-bold text-white">Mi Gimnasio</h1>
-                    <p className="text-neutral-400 mt-1">Accede a tu panel de socio</p>
+                    <h1 className="text-2xl font-display font-bold text-white">Acceso Usuario</h1>
+                    <p className="text-neutral-400 mt-1">Ingresá con tu DNI y PIN</p>
                 </div>
 
                 {/* Form Card */}
@@ -92,38 +168,42 @@ export default function UsuarioLoginPage() {
                                     inputMode="numeric"
                                     value={formData.dni}
                                     onChange={(e) => setFormData({ ...formData, dni: e.target.value })}
-                                    placeholder="Ingresa tu DNI"
+                                    placeholder="Ingresá tu DNI"
                                     className="w-full px-4 py-3 pl-11 rounded-xl bg-neutral-900 border border-neutral-800 text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-iron-500/50 focus:border-iron-500 transition-all"
                                     autoComplete="username"
+                                    autoFocus
                                 />
                                 <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
                             </div>
                         </div>
 
-                        {/* Password (optional for users) */}
+                        {/* PIN */}
                         <div className="space-y-2">
-                            <label htmlFor="password" className="block text-sm font-medium text-neutral-300">
-                                Contraseña <span className="text-neutral-500">(opcional)</span>
+                            <label htmlFor="pin" className="block text-sm font-medium text-neutral-300">
+                                PIN
                             </label>
                             <div className="relative">
                                 <input
-                                    id="password"
-                                    type={showPassword ? 'text' : 'password'}
-                                    value={formData.password}
-                                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                                    placeholder="Deja vacío si usas tu DNI"
-                                    className="w-full px-4 py-3 pr-12 rounded-xl bg-neutral-900 border border-neutral-800 text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-iron-500/50 focus:border-iron-500 transition-all"
+                                    id="pin"
+                                    type={showPin ? 'text' : 'password'}
+                                    value={formData.pin}
+                                    onChange={(e) => setFormData({ ...formData, pin: e.target.value })}
+                                    placeholder="Ingresá tu PIN"
+                                    maxLength={6}
+                                    className="w-full px-4 py-3 pl-11 pr-12 rounded-xl bg-neutral-900 border border-neutral-800 text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-iron-500/50 focus:border-iron-500 transition-all"
                                     autoComplete="current-password"
                                 />
+                                <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
                                 <button
                                     type="button"
-                                    onClick={() => setShowPassword(!showPassword)}
+                                    onClick={() => setShowPin(!showPin)}
                                     className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-neutral-500 hover:text-white transition-colors"
                                     tabIndex={-1}
                                 >
-                                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                                    {showPin ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                                 </button>
                             </div>
+                            <p className="text-xs text-neutral-500">Usá tu DNI y PIN configurados en recepción.</p>
                         </div>
 
                         {/* Error */}
@@ -131,33 +211,114 @@ export default function UsuarioLoginPage() {
                             <motion.div
                                 initial={{ opacity: 0, y: -10 }}
                                 animate={{ opacity: 1, y: 0 }}
-                                className="p-3 rounded-xl bg-danger-500/10 border border-danger-500/30 text-danger-400 text-sm"
+                                className="flex items-center gap-2 p-3 rounded-xl bg-danger-500/10 border border-danger-500/30 text-danger-400 text-sm"
                             >
+                                <AlertCircle className="w-4 h-4 flex-shrink-0" />
                                 {error}
                             </motion.div>
                         )}
 
-                        {/* Submit */}
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className={cn(
-                                'w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold text-white',
-                                'bg-gradient-to-r from-iron-600 to-iron-500',
-                                'hover:shadow-glow-md transition-all duration-300',
-                                'disabled:opacity-50 disabled:cursor-not-allowed'
-                            )}
-                        >
-                            {loading ? (
-                                <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                            ) : (
-                                <>
-                                    <LogIn className="w-5 h-5" />
-                                    Ingresar
-                                </>
-                            )}
-                        </button>
+                        {/* Actions */}
+                        <div className="flex gap-3">
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className={cn(
+                                    'flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold text-white',
+                                    'bg-gradient-to-r from-iron-600 to-iron-500',
+                                    'hover:shadow-glow-md transition-all duration-300',
+                                    'disabled:opacity-50 disabled:cursor-not-allowed'
+                                )}
+                            >
+                                {loading ? (
+                                    <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                ) : (
+                                    <>
+                                        <LogIn className="w-5 h-5" />
+                                        Entrar
+                                    </>
+                                )}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={togglePinChange}
+                                className={cn(
+                                    'px-4 py-3 rounded-xl font-medium transition-all',
+                                    'bg-neutral-800 border border-neutral-700 text-neutral-300',
+                                    'hover:bg-neutral-700 hover:text-white',
+                                    showPinChange && 'bg-neutral-700 text-white'
+                                )}
+                            >
+                                {showPinChange ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                            </button>
+                        </div>
                     </form>
+
+                    {/* PIN Change Section */}
+                    <AnimatePresence>
+                        {showPinChange && (
+                            <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="overflow-hidden"
+                            >
+                                <div className="mt-6 pt-6 border-t border-neutral-800 space-y-4">
+                                    <h3 className="text-sm font-medium text-neutral-300">Cambiar PIN</h3>
+
+                                    <div className="space-y-3">
+                                        <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            value={pinChangeData.dni}
+                                            onChange={(e) => setPinChangeData({ ...pinChangeData, dni: e.target.value })}
+                                            placeholder="DNI"
+                                            className="w-full px-4 py-2.5 rounded-xl bg-neutral-900 border border-neutral-800 text-white placeholder-neutral-500 text-sm focus:outline-none focus:ring-2 focus:ring-iron-500/50"
+                                        />
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <input
+                                                type="password"
+                                                value={pinChangeData.oldPin}
+                                                onChange={(e) => setPinChangeData({ ...pinChangeData, oldPin: e.target.value })}
+                                                placeholder="PIN actual"
+                                                className="w-full px-4 py-2.5 rounded-xl bg-neutral-900 border border-neutral-800 text-white placeholder-neutral-500 text-sm focus:outline-none focus:ring-2 focus:ring-iron-500/50"
+                                            />
+                                            <input
+                                                type="password"
+                                                value={pinChangeData.newPin}
+                                                onChange={(e) => setPinChangeData({ ...pinChangeData, newPin: e.target.value })}
+                                                placeholder="PIN nuevo"
+                                                className="w-full px-4 py-2.5 rounded-xl bg-neutral-900 border border-neutral-800 text-white placeholder-neutral-500 text-sm focus:outline-none focus:ring-2 focus:ring-iron-500/50"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* PIN Change Feedback */}
+                                    {pinChangeError && (
+                                        <div className="flex items-center gap-2 p-2.5 rounded-lg bg-danger-500/10 border border-danger-500/30 text-danger-400 text-xs">
+                                            <AlertCircle className="w-3.5 h-3.5" />
+                                            {pinChangeError}
+                                        </div>
+                                    )}
+                                    {pinChangeSuccess && (
+                                        <div className="flex items-center gap-2 p-2.5 rounded-lg bg-success-500/10 border border-success-500/30 text-success-400 text-xs">
+                                            <CheckCircle className="w-3.5 h-3.5" />
+                                            {pinChangeSuccess}
+                                        </div>
+                                    )}
+
+                                    <button
+                                        type="button"
+                                        onClick={handlePinChange}
+                                        disabled={pinChangeLoading}
+                                        className="w-full py-2.5 rounded-xl font-medium text-sm bg-neutral-800 border border-neutral-700 text-neutral-300 hover:bg-neutral-700 hover:text-white transition-all disabled:opacity-50"
+                                    >
+                                        {pinChangeLoading ? 'Actualizando...' : 'Actualizar PIN'}
+                                    </button>
+                                </div>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
 
                     {/* Help text */}
                     <div className="mt-6 pt-6 border-t border-neutral-800 text-center">
