@@ -107,14 +107,14 @@ export const api = {
         request<Gym>('/gyms', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams(data as Record<string, string>),
+            body: new URLSearchParams(data as unknown as Record<string, string>),
         }),
 
     updateGym: (id: number, data: Partial<GymCreateInput>) =>
         request<Gym>(`/gyms/${id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams(data as Record<string, string>),
+            body: new URLSearchParams(data as unknown as Record<string, string>),
         }),
 
     deleteGym: (id: number) =>
@@ -143,7 +143,7 @@ export const api = {
         request<Payment>(`/gyms/${gymId}/payments`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams(data as Record<string, string>),
+            body: new URLSearchParams(data as unknown as Record<string, string>),
         }),
 
     getRecentPayments: (limit = 10) =>

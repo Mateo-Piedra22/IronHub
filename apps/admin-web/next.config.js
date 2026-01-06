@@ -1,9 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
     reactStrictMode: true,
-    swcMinify: true,
     images: {
-        domains: ['ironhub.motiona.xyz', 'api-admin.ironhub.motiona.xyz'],
+        remotePatterns: [
+            { protocol: 'https', hostname: '*.ironhub.motiona.xyz' },
+            { protocol: 'https', hostname: 'cdn.ironhub.motiona.xyz' },
+        ],
     },
     async headers() {
         return [
