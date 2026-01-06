@@ -85,6 +85,23 @@ def get_rm(session: Session = Depends(get_db_session)):
     return session
 
 
+def get_pm(session: Session = Depends(get_db_session)):
+    """Get payment manager (database session) - alias for payments router."""
+    return session
+
+
+def get_admin_db() -> Generator[Session, None, None]:
+    """
+    Get admin database session (always uses global/admin database).
+    Used by public router for tenant-independent operations.
+    """
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
 # --- Security Dependencies ---
 
 async def require_gestion_access(request: Request):
