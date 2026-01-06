@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 # Local imports (self-contained)
 from src.database.raw_manager import RawPostgresManager
 from src.services.admin_service import AdminService
+from src.routers.payments import router as payments_router
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -29,6 +30,9 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+# Include routers
+app.include_router(payments_router)
 
 # CORS
 origins = os.getenv("ALLOWED_ORIGINS", "").split(",")

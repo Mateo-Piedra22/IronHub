@@ -43,6 +43,82 @@ export interface Payment {
     notes?: string;
 }
 
+// Payment Management Types (Restored from deprecated)
+export interface MetodoPago {
+    id: number;
+    nombre: string;
+    icono?: string;
+    color?: string;
+    comision?: number;
+    activo: boolean;
+    descripcion?: string;
+    fecha_creacion?: string;
+}
+
+export interface TipoCuota {
+    id: number;
+    nombre: string;
+    precio: number;
+    duracion_dias: number;
+    activo: boolean;
+    descripcion?: string;
+    icono_path?: string;
+}
+
+export interface ConceptoPago {
+    id: number;
+    nombre: string;
+    descripcion?: string;
+    precio_base: number;
+    tipo?: string;
+    activo: boolean;
+}
+
+export interface PagoConceptoItem {
+    concepto_id?: number;
+    descripcion?: string;
+    cantidad: number;
+    precio_unitario: number;
+}
+
+export interface PagoDetalle {
+    id: number;
+    concepto_id?: number;
+    descripcion?: string;
+    cantidad: number;
+    precio_unitario: number;
+    subtotal: number;
+    concepto_nombre?: string;
+}
+
+export interface PagoCompleto {
+    pago: {
+        id: number;
+        usuario_id: number;
+        monto: number;
+        mes: number;
+        año: number;
+        fecha_pago: string;
+        metodo_pago_id?: number;
+        usuario_nombre?: string;
+        dni?: string;
+        metodo_nombre?: string;
+    };
+    detalles: PagoDetalle[];
+    total_detalles: number;
+}
+
+export interface EstadisticasPagos {
+    año: number;
+    total_pagos: number;
+    total_recaudado: number;
+    promedio_pago: number;
+    pago_minimo: number;
+    pago_maximo: number;
+    por_mes: Record<number, { cantidad: number; total: number }>;
+    por_metodo: { metodo: string; cantidad: number; total: number }[];
+}
+
 export interface ApiResponse<T> {
     ok: boolean;
     data?: T;
@@ -232,6 +308,115 @@ export const api = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config),
         }),
+
+    // ========== PAYMENT MANAGEMENT (Restored from deprecated) ==========
+
+    // Métodos de Pago
+    getMetodosPago: (activos = true) =>
+        request<MetodoPago[]>(`/api/metodos_pago?activos=${activos}`),
+
+    createMetodoPago: (data: Partial<MetodoPago>) =>
+        request<{ ok: boolean; id: number }>('/api/metodos_pago', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        }),
+
+    updateMetodoPago: (id: number, data: Partial<MetodoPago>) =>
+        request<{ ok: boolean; id: number }>(`/api/metodos_pago/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        }),
+
+    deleteMetodoPago: (id: number) =>
+        request<{ ok: boolean }>(`/api/metodos_pago/${id}`, { method: 'DELETE' }),
+
+    // Tipos de Cuota (Planes)
+    getTiposCuota: (activos = false) =>
+        request<TipoCuota[]>(`/api/tipos_cuota?activos=${activos}`),
+
+    getTiposCuotaActivos: () =>
+        request<TipoCuota[]>('/api/tipos_cuota/activos'),
+
+    createTipoCuota: (data: Partial<TipoCuota>) =>
+        request<{ ok: boolean; id: number }>('/api/tipos_cuota', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        }),
+
+    updateTipoCuota: (id: number, data: Partial<TipoCuota>) =>
+        request<{ ok: boolean; id: number }>(`/api/tipos_cuota/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        }),
+
+    deleteTipoCuota: (id: number) =>
+        request<{ ok: boolean }>(`/api/tipos_cuota/${id}`, { method: 'DELETE' }),
+
+    // Conceptos de Pago
+    getConceptosPago: (activos = true) =>
+        request<ConceptoPago[]>(`/api/conceptos_pago?activos=${activos}`),
+
+    createConceptoPago: (data: Partial<ConceptoPago>) =>
+        request<{ ok: boolean; id: number }>('/api/conceptos_pago', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        }),
+
+    updateConceptoPago: (id: number, data: Partial<ConceptoPago>) =>
+        request<{ ok: boolean; id: number }>(`/api/conceptos_pago/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        }),
+
+    deleteConceptoPago: (id: number) =>
+        request<{ ok: boolean }>(`/api/conceptos_pago/${id}`, { method: 'DELETE' }),
+
+    // Pagos Avanzados
+    getPagoDetalle: (pagoId: number) =>
+        request<PagoCompleto>(`/api/pagos/${pagoId}`),
+
+    createPago: (data: {
+        usuario_id: number;
+        monto?: number;
+        mes?: number;
+        año?: number;
+        metodo_pago_id?: number;
+        fecha_pago?: string;
+        conceptos?: PagoConceptoItem[];
+    }) =>
+        request<{ ok: boolean; id: number }>('/api/pagos', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        }),
+
+    updatePago: (pagoId: number, data: {
+        usuario_id?: number;
+        monto?: number;
+        mes?: number;
+        año?: number;
+        metodo_pago_id?: number;
+        fecha_pago?: string;
+        conceptos?: PagoConceptoItem[];
+    }) =>
+        request<{ ok: boolean; id: number }>(`/api/pagos/${pagoId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        }),
+
+    deletePago: (pagoId: number) =>
+        request<{ ok: boolean }>(`/api/pagos/${pagoId}`, { method: 'DELETE' }),
+
+    // Estadísticas
+    getEstadisticasPagos: (año?: number) =>
+        request<EstadisticasPagos>(`/api/pagos/estadisticas${año ? `?año=${año}` : ''}`),
 };
 
 export default api;
