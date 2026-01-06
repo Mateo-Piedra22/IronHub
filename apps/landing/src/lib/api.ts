@@ -49,12 +49,3 @@ export async function fetchPublicGyms(): Promise<Gym[]> {
         return [];
     }
 }
-
-/**
- * Fallback gym data when API is unavailable
- */
-export const fallbackGyms: Gym[] = [
-    { id: 1, nombre: 'Iron Fitness', subdominio: 'ironfitness', status: 'active' },
-    { id: 2, nombre: 'PowerGym', subdominio: 'powergym', status: 'active' },
-    { id: 3, nombre: 'CrossFit Arena', subdominio: 'crossfitarena', status: 'active' },
-];

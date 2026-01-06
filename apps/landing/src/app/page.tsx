@@ -123,20 +123,19 @@ function HeroSection() {
                         </Link>
                     </motion.div>
 
-                    {/* Stats */}
+                    {/* Platform Features */}
                     <motion.div
                         variants={fadeInUp}
-                        className="grid grid-cols-3 gap-8 max-w-lg mx-auto pt-12"
+                        className="flex items-center justify-center gap-6 pt-12 flex-wrap"
                     >
                         {[
-                            { value: '99.9%', label: 'Uptime' },
-                            { value: '24/7', label: 'Soporte' },
-                            { value: '∞', label: 'Escalabilidad' }
-                        ].map((stat) => (
-                            <div key={stat.label} className="text-center">
-                                <div className="text-2xl md:text-3xl font-display font-bold text-white">{stat.value}</div>
-                                <div className="text-sm text-neutral-500">{stat.label}</div>
-                            </div>
+                            'Multi-Tenant',
+                            'API WhatsApp',
+                            'Check-in QR',
+                        ].map((feature) => (
+                            <span key={feature} className="px-4 py-2 rounded-full bg-neutral-800/50 border border-neutral-700/50 text-sm text-neutral-400">
+                                {feature}
+                            </span>
                         ))}
                     </motion.div>
                 </motion.div>
@@ -236,16 +235,12 @@ function GymsSection() {
     useEffect(() => {
         async function loadGyms() {
             try {
-                const { fetchPublicGyms, fallbackGyms } = await import('@/lib/api');
+                const { fetchPublicGyms } = await import('@/lib/api');
                 const data = await fetchPublicGyms();
-                setGyms(data.length > 0 ? data : fallbackGyms);
+                setGyms(data);
             } catch {
-                // Use fallback data on error
-                setGyms([
-                    { id: 1, nombre: 'Iron Fitness', subdominio: 'ironfitness', status: 'active' },
-                    { id: 2, nombre: 'PowerGym', subdominio: 'powergym', status: 'active' },
-                    { id: 3, nombre: 'CrossFit Arena', subdominio: 'crossfitarena', status: 'active' },
-                ]);
+                // Show empty state on error
+                setGyms([]);
             } finally {
                 setLoading(false);
             }

@@ -173,7 +173,10 @@ export default function GestionLayout({
                                 {/* Nav */}
                                 <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
                                     {navigation.map((item) => {
-                                        const isActive = pathname === item.href || pathname?.startsWith(item.href + '/');
+                                        // For dashboard parent, only exact match to prevent multi-selection
+                                        const isActive = item.href === '/gestion/dashboard'
+                                            ? pathname === item.href
+                                            : pathname === item.href || pathname?.startsWith(item.href + '/');
                                         return (
                                             <Link
                                                 key={item.name}
@@ -205,7 +208,10 @@ export default function GestionLayout({
             <aside className="hidden lg:block fixed top-16 left-0 bottom-0 w-64 border-r border-neutral-800/50 bg-neutral-900/50 backdrop-blur-lg">
                 <nav className="p-4 space-y-1 overflow-y-auto h-full">
                     {navigation.map((item) => {
-                        const isActive = pathname === item.href || pathname?.startsWith(item.href + '/');
+                        // For dashboard parent, only exact match to prevent multi-selection
+                        const isActive = item.href === '/gestion/dashboard'
+                            ? pathname === item.href
+                            : pathname === item.href || pathname?.startsWith(item.href + '/');
                         return (
                             <Link
                                 key={item.name}

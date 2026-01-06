@@ -1,147 +1,131 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
-import { Dumbbell, Eye, EyeOff, Loader2, AlertCircle, User } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import HomeSelector from '@/components/HomeSelector';
+import { Loader2 } from 'lucide-react';
 
-export default function LoginPage() {
-    const router = useRouter();
-    const [dni, setDni] = useState('');
-    const [pin, setPin] = useState('');
-    const [showPin, setShowPin] = useState(false);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
+interface GymData {
+    gym_name?: string;
+    logo_url?: string;
+    suspended?: boolean;
+    reason?: string;
+    until?: string;
+    maintenance?: boolean;
+    maintenance_message?: string;
+}
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setError('');
-        setLoading(true);
+export default function HomePage() {
+    const [gymData, setGymData] = useState<GymData | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [showMaintenance, setShowMaintenance] = useState(false);
+    const [maintenanceMsg, setMaintenanceMsg] = useState('');
+    const [showSuspension, setShowSuspension] = useState(false);
+    const [suspensionData, setSuspensionData] = useState<{ reason: string; until: string } | null>(null);
 
-        try {
-            const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ dni, pin }),
-                credentials: 'include',
-            });
-
-            const data = await res.json();
-
-            if (res.ok && data.ok) {
-                router.push('/dashboard');
-            } else {
-                setError(data.error || 'Credenciales incorrectas');
+    useEffect(() => {
+        async function loadData() {
+            try {
+                // Fetch gym branding data
+                const gymRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/gym/data`, {
+                    headers: { Accept: 'application/json' },
+                    credentials: 'include',
+                });
+                if (gymRes.ok) {
+                    const data = await gymRes.json();
+                    setGymData(data);
+                }
+            } catch {
+                // Fallback to defaults
             }
-        } catch (err) {
-            setError('Error de conexión');
-        } finally {
+
+            try {
+                // Check maintenance status
+                const maintRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/maintenance_status`, {
+                    credentials: 'include',
+                });
+                if (maintRes.ok) {
+                    const data = await maintRes.json();
+                    if (data.active) {
+                        setMaintenanceMsg(data.message || 'Mantenimiento en curso');
+                        setShowMaintenance(true);
+                    }
+                }
+            } catch {
+                // Ignore
+            }
+
+            try {
+                // Check suspension status
+                const suspRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/suspension_status`, {
+                    credentials: 'include',
+                });
+                if (suspRes.ok) {
+                    const data = await suspRes.json();
+                    if (data.suspended) {
+                        setSuspensionData({
+                            reason: data.reason || 'Servicio suspendido',
+                            until: data.until || '',
+                        });
+                        setShowSuspension(true);
+                    }
+                }
+            } catch {
+                // Ignore
+            }
+
             setLoading(false);
         }
-    };
+
+        loadData();
+    }, []);
+
+    if (loading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center">
+                <Loader2 className="w-8 h-8 animate-spin text-iron-400" />
+            </div>
+        );
+    }
 
     return (
-        <div className="min-h-screen flex items-center justify-center p-4">
-            {/* Background effects */}
-            <div className="fixed inset-0 pointer-events-none">
-                <div className="absolute -top-40 -right-40 h-[500px] w-[500px] rounded-full bg-iron-600/20 blur-[100px]" />
-                <div className="absolute bottom-0 -left-40 h-[400px] w-[400px] rounded-full bg-gold-600/10 blur-[100px]" />
-            </div>
+        <>
+            <HomeSelector
+                gymName={gymData?.gym_name || 'IronHub'}
+                logoUrl={gymData?.logo_url || ''}
+            />
 
-            <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="w-full max-w-md relative z-10"
-            >
-                <div className="glass-card p-8">
-                    {/* Logo */}
-                    <div className="flex flex-col items-center mb-8">
-                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-iron-500 to-iron-700 flex items-center justify-center mb-4 shadow-glow-md">
-                            <Dumbbell className="w-8 h-8 text-white" />
-                        </div>
-                        <h1 className="text-2xl font-display font-bold text-white">
-                            Bienvenido
-                        </h1>
-                        <p className="text-neutral-400 mt-1">Ingresa a tu cuenta de socio</p>
-                    </div>
-
-                    {/* Form */}
-                    <form onSubmit={handleSubmit} className="space-y-5">
-                        <div>
-                            <label htmlFor="dni" className="label">
-                                DNI / Documento
-                            </label>
-                            <div className="relative">
-                                <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
-                                <input
-                                    id="dni"
-                                    type="text"
-                                    value={dni}
-                                    onChange={(e) => setDni(e.target.value)}
-                                    className="input pl-12"
-                                    placeholder="Ingresa tu DNI"
-                                    autoFocus
-                                />
-                            </div>
-                        </div>
-
-                        <div>
-                            <label htmlFor="pin" className="label">
-                                PIN
-                            </label>
-                            <div className="relative">
-                                <input
-                                    id="pin"
-                                    type={showPin ? 'text' : 'password'}
-                                    value={pin}
-                                    onChange={(e) => setPin(e.target.value)}
-                                    className="input pr-12"
-                                    placeholder="Ingresa tu PIN"
-                                    maxLength={6}
-                                />
-                                <button
-                                    type="button"
-                                    onClick={() => setShowPin(!showPin)}
-                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300 transition-colors"
-                                >
-                                    {showPin ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                                </button>
-                            </div>
-                        </div>
-
-                        {error && (
-                            <motion.div
-                                initial={{ opacity: 0, y: -10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                className="flex items-center gap-2 text-danger-400 text-sm bg-danger-500/10 border border-danger-500/20 rounded-lg px-4 py-3"
-                            >
-                                <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                                {error}
-                            </motion.div>
-                        )}
-
+            {/* Maintenance Modal */}
+            {showMaintenance && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+                    <div className="glass-card p-6 max-w-md w-full">
+                        <h3 className="text-lg font-bold text-white mb-2">Mantenimiento</h3>
+                        <p className="text-neutral-400 mb-4">{maintenanceMsg}</p>
                         <button
-                            type="submit"
-                            disabled={loading || !dni || !pin}
-                            className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            onClick={() => setShowMaintenance(false)}
+                            className="btn-secondary w-full"
                         >
-                            {loading ? (
-                                <>
-                                    <Loader2 className="w-5 h-5 animate-spin" />
-                                    Verificando...
-                                </>
-                            ) : (
-                                'Ingresar'
-                            )}
+                            Cerrar
                         </button>
-                    </form>
-
-                    {/* Help text */}
-                    <p className="text-center text-neutral-500 text-xs mt-6">
-                        ¿No tenés cuenta? Consultá en recepción.
-                    </p>
+                    </div>
                 </div>
-            </motion.div>
-        </div>
+            )}
+
+            {/* Suspension Modal (non-dismissible) */}
+            {showSuspension && suspensionData && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+                    <div className="glass-card p-6 max-w-md w-full border border-danger-500/30">
+                        <h3 className="text-lg font-bold text-danger-400 mb-2">Servicio suspendido</h3>
+                        <p className="text-neutral-400">
+                            {suspensionData.reason}
+                            {suspensionData.until && (
+                                <span className="block mt-2 text-sm">
+                                    Hasta: {suspensionData.until}
+                                </span>
+                            )}
+                        </p>
+                    </div>
+                </div>
+            )}
+        </>
     );
 }

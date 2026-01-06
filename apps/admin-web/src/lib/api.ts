@@ -49,6 +49,29 @@ export interface ApiResponse<T> {
     error?: string;
 }
 
+export interface WhatsAppConfig {
+    phone_id?: string;
+    access_token?: string;
+    business_account_id?: string;
+    verify_token?: string;
+    app_secret?: string;
+    nonblocking?: boolean;
+    send_timeout_seconds?: number;
+}
+
+export interface GymDetails extends Gym {
+    whatsapp_phone_id?: string;
+    whatsapp_access_token?: string;
+    whatsapp_business_account_id?: string;
+    whatsapp_verify_token?: string;
+    whatsapp_app_secret?: string;
+    whatsapp_nonblocking?: boolean;
+    whatsapp_send_timeout_seconds?: number;
+    reminder_message?: string;
+    suspension_reason?: string;
+    suspension_until?: string;
+}
+
 // Helper for API requests
 async function request<T>(
     endpoint: string,
@@ -162,6 +185,53 @@ export const api = {
 
     getGymAudit: (gymId: number, limit = 50) =>
         request<{ logs: any[] }>(`/gyms/${gymId}/audit?limit=${limit}`),
+
+    // Batch Operations
+    batchProvision: (ids: number[]) =>
+        request<{ ok: boolean }>('/gyms/batch/provision', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids }),
+        }),
+
+    batchSuspend: (ids: number[], reason?: string, until?: string, hard?: boolean) =>
+        request<{ ok: boolean }>('/gyms/batch/suspend', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids, reason, until, hard }),
+        }),
+
+    batchReactivate: (ids: number[]) =>
+        request<{ ok: boolean }>('/gyms/batch/reactivate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids }),
+        }),
+
+    sendReminder: (ids: number[], message: string) =>
+        request<{ ok: boolean }>('/gyms/batch/remind', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids, message }),
+        }),
+
+    sendMaintenanceNotice: (ids: number[], message: string) =>
+        request<{ ok: boolean }>('/gyms/batch/maintenance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids, message }),
+        }),
+
+    // Gym Details
+    getGymDetails: (id: number) =>
+        request<GymDetails>(`/gyms/${id}/details`),
+
+    updateGymWhatsApp: (id: number, config: WhatsAppConfig) =>
+        request<{ ok: boolean }>(`/gyms/${id}/whatsapp`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config),
+        }),
 };
 
 export default api;
