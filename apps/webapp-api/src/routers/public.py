@@ -12,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 from datetime import datetime, timezone
 import os
 
-from src.dependencies import get_db, get_admin_db, CURRENT_TENANT
+from src.dependencies import get_admin_db, CURRENT_TENANT
 from src.utils import (
     _is_tenant_suspended, _get_tenant_suspension_info,
     _resolve_theme_vars, _resolve_logo_url, get_gym_name,
@@ -78,9 +78,13 @@ async def healthz():
             "time": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }
         try:
-            db = get_db()
-            if db is not None:
+            from src.database.connection import SessionLocal
+            session = SessionLocal()
+            try:
+                session.execute("SELECT 1")  # Simple connectivity check
                 details["db"] = "ok"
+            finally:
+                session.close()
         except Exception:
             details["db"] = "error"
         return JSONResponse(details)
@@ -157,28 +161,31 @@ async def api_maintenance_status(request: Request):
             until = row.get("suspended_until")
             msg = row.get("suspended_reason")
             try:
-                db = get_db()
-            except Exception:
-                db = None
-            if db is not None:
+                from src.database.connection import SessionLocal
+                from src.services.gym_service import GymService
+                tenant_session = SessionLocal()
                 try:
-                    act = db.obtener_configuracion("maintenance_modal_active")  # type: ignore
+                    svc = GymService(tenant_session)
+                    config = svc.obtener_configuracion_gimnasio()
+                    act = config.get("maintenance_modal_active")
                     if str(act or "").strip().lower() in ("1", "true", "yes", "on") and not active:
                         active = True
                         try:
-                            m2 = db.obtener_configuracion("maintenance_modal_message")  # type: ignore
+                            m2 = config.get("maintenance_modal_message")
                             if m2:
                                 msg = m2
                         except Exception:
                             pass
                         try:
-                            u2 = db.obtener_configuracion("maintenance_modal_until")  # type: ignore
+                            u2 = config.get("maintenance_modal_until")
                             if u2:
                                 until = u2
                         except Exception:
                             pass
-                except Exception:
-                    pass
+                finally:
+                    tenant_session.close()
+            except Exception:
+                pass
             active_now = False
             if active:
                 try:
@@ -221,13 +228,34 @@ async def api_rutina_qr_scan(uuid_rutina: str, request: Request):
         return JSONResponse({"ok": False, "error": "UUID inválido"}, status_code=400)
 
     # Intentar obtener desde DB; si no está disponible, caer a preview efímero
-    db = get_db()
     rutina = None
-    if db is not None:
+    try:
+        from src.database.connection import SessionLocal
+        from src.services.gym_service import GymService
+        session = SessionLocal()
         try:
-            rutina = db.obtener_rutina_completa_por_uuid_dict(uid)  # type: ignore
-        except Exception:
-            rutina = None
+            # Use GymService to get routine by UUID (if method exists)
+            # Fallback: query rutinas table directly
+            from sqlalchemy import text
+            result = session.execute(
+                text("SELECT id, nombre_rutina, descripcion, dias_semana, categoria, activa, usuario_id FROM rutinas WHERE uuid_rutina = :uuid"),
+                {"uuid": uid}
+            )
+            row = result.fetchone()
+            if row:
+                rutina = {
+                    "id": row[0],
+                    "nombre_rutina": row[1],
+                    "descripcion": row[2],
+                    "dias_semana": row[3],
+                    "categoria": row[4],
+                    "activa": row[5],
+                    "usuario_id": row[6],
+                }
+        finally:
+            session.close()
+    except Exception:
+        rutina = None
     if rutina is None:
         # Fallback defensivo: si existe una rutina efímera guardada para este UUID, utilizarla
         try:

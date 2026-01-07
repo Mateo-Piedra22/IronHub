@@ -216,26 +216,10 @@ async def api_usuario_toggle_activo(
 ):
     """Toggle user active status"""
     try:
-        from src.dependencies import get_db
-        db = get_db()
-        if db is None:
-            raise HTTPException(status_code=503, detail="DB not available")
-        
-        with db.get_connection_context() as conn:
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT activo FROM usuarios WHERE id = %s", (usuario_id,))
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="Usuario no encontrado")
-            
-            new_status = not row["activo"]
-            cur.execute(
-                "UPDATE usuarios SET activo = %s WHERE id = %s RETURNING *",
-                (new_status, usuario_id)
-            )
-            updated = cur.fetchone()
-            conn.commit()
-            return dict(updated) if updated else {"ok": True, "activo": new_status}
+        result = user_service.toggle_activo(usuario_id)
+        if result.get('error') == 'not_found':
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        return result
     except HTTPException:
         raise
     except Exception as e:
@@ -253,20 +237,8 @@ async def api_usuario_notas_update(
     try:
         payload = await request.json()
         notas = payload.get("notas") or ""
-        
-        from src.dependencies import get_db
-        db = get_db()
-        if db is None:
-            raise HTTPException(status_code=503, detail="DB not available")
-        
-        with db.get_connection_context() as conn:
-            cur = conn.cursor()
-            cur.execute(
-                "UPDATE usuarios SET notas = %s WHERE id = %s",
-                (notas, usuario_id)
-            )
-            conn.commit()
-            return {"ok": True}
+        user_service.update_notas(usuario_id, notas)
+        return {"ok": True}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -278,39 +250,8 @@ async def api_usuario_qr(
     _=Depends(require_gestion_access)
 ):
     """Generate QR code URL and token for user check-in"""
-    import secrets
-    import time
     try:
-        from src.dependencies import get_db
-        db = get_db()
-        if db is None:
-            raise HTTPException(status_code=503, detail="DB not available")
-        
-        # Generate unique token
-        token = f"checkin_{usuario_id}_{int(time.time())}_{secrets.token_hex(8)}"
-        
-        # Store token in database or memory (simplified version)
-        with db.get_connection_context() as conn:
-            cur = conn.cursor()
-            # Check if checkin_tokens table exists, create if not
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS checkin_tokens (
-                    id SERIAL PRIMARY KEY,
-                    usuario_id INTEGER NOT NULL,
-                    token TEXT NOT NULL UNIQUE,
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    expires_at TIMESTAMP DEFAULT NOW() + INTERVAL '24 hours'
-                )
-            """)
-            cur.execute(
-                "INSERT INTO checkin_tokens (usuario_id, token) VALUES (%s, %s)",
-                (usuario_id, token)
-            )
-            conn.commit()
-        
-        # Return QR URL (frontend will generate actual QR image)
-        qr_url = f"/api/checkin?token={token}"
-        return {"qr_url": qr_url, "token": token}
+        return user_service.generate_qr_token(usuario_id)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -322,22 +263,7 @@ async def api_etiquetas_suggestions(
 ):
     """Get common tag suggestions based on existing tags"""
     try:
-        from src.dependencies import get_db
-        db = get_db()
-        if db is None:
-            return {"etiquetas": []}
-        
-        with db.get_connection_context() as conn:
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("""
-                SELECT DISTINCT nombre, COUNT(*) as count
-                FROM usuario_etiquetas
-                GROUP BY nombre
-                ORDER BY count DESC, nombre ASC
-                LIMIT 20
-            """)
-            rows = cur.fetchall() or []
-            return {"etiquetas": [r["nombre"] for r in rows]}
+        return {"etiquetas": user_service.get_tag_suggestions()}
     except Exception as e:
         return {"etiquetas": []}
 
@@ -387,8 +313,6 @@ async def api_usuario_etiquetas_remove(
         return JSONResponse({"error": str(e)}, status_code=500)
 
 # --- API Estados de usuario ---
-# (Keeping some direct DB usage via service accessor if service doesn't have specific methods for states yet, 
-# or implementing them in Service. For now, assuming Service has user_repo access if needed or we add methods)
 
 @router.get("/api/usuarios/{usuario_id}/estados")
 async def api_usuario_estados_get(
@@ -396,27 +320,11 @@ async def api_usuario_estados_get(
     user_service: UserService = Depends(get_user_service),
     _=Depends(require_gestion_access)
 ):
-    # Accessing repo directly via service for now as we didn't add specific state methods to service
-    # Ideally we add get_user_states to UserService
+    """Get user states (lesionado, vacaciones, etc.)"""
     try:
         if not user_service.get_user(usuario_id):
              raise HTTPException(status_code=404, detail="Usuario no encontrado")
-        estados = user_service.user_repo.obtener_estados_usuario(usuario_id, solo_activos=True)
-        items = []
-        for est in estados:
-            try:
-                items.append({
-                    "id": getattr(est, "id", None),
-                    "usuario_id": getattr(est, "usuario_id", None),
-                    "estado": getattr(est, "estado", None),
-                    "descripcion": getattr(est, "descripcion", None),
-                    "fecha_inicio": getattr(est, "fecha_inicio", None),
-                    "fecha_vencimiento": getattr(est, "fecha_vencimiento", None),
-                    "activo": getattr(est, "activo", True),
-                    "creado_por": getattr(est, "creado_por", None),
-                })
-            except Exception:
-                items.append(est)
+        items = user_service.get_user_states(usuario_id, solo_activos=True)
         return {"items": items}
     except HTTPException:
         raise
@@ -428,15 +336,11 @@ async def api_usuarios_morosidad_ids(
     user_service: UserService = Depends(get_user_service),
     _=Depends(require_gestion_access)
 ):
-    # This requires a specific query. Let's use a custom query in service or repo.
-    # For now, using repo session to execute raw sql is still better than doing it here? 
-    # No, we should not do SQL here.
-    # We need a method in repo.
-    # user_service.user_repo doesn't have it.
-    # For expedience, I will skip this one or mock it empty, or implement proper method.
-    # Let's implement it properly in repo later. For now, I'll skip the implementation details or use a placeholder if not critical.
-    # Actually, I can add it to UserService as `get_morose_user_ids`
-    return [] # Placeholder for now as I didn't implement it in Service yet.
+    """Get IDs of users with overdue payments"""
+    try:
+        return user_service.get_morose_user_ids()
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.post("/api/usuarios/{usuario_id}/estados")
 async def api_usuario_estados_add(
@@ -445,21 +349,65 @@ async def api_usuario_estados_add(
     user_service: UserService = Depends(get_user_service),
     _=Depends(require_gestion_access)
 ):
-    # ... (Similar migration for states)
-    return {"ok": True} # simplified
+    """Add a new state to user"""
+    try:
+        if not user_service.get_user(usuario_id):
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        payload = await request.json()
+        creado_por = request.session.get("user_id")
+        estado_id = user_service.add_user_state(usuario_id, payload, creado_por)
+        return {"ok": True, "id": estado_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.put("/api/usuarios/{usuario_id}/estados/{estado_id}")
-async def api_usuario_estados_update(usuario_id: int, estado_id: int, request: Request, user_service: UserService = Depends(get_user_service), _=Depends(require_gestion_access)):
-    return {"ok": True}
+async def api_usuario_estados_update(
+    usuario_id: int, 
+    estado_id: int, 
+    request: Request, 
+    user_service: UserService = Depends(get_user_service), 
+    _=Depends(require_gestion_access)
+):
+    """Update a user state"""
+    try:
+        payload = await request.json()
+        ok = user_service.update_user_state(estado_id, payload)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Estado no encontrado")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.delete("/api/usuarios/{usuario_id}/estados/{estado_id}")
-async def api_usuario_estados_delete(usuario_id: int, estado_id: int, user_service: UserService = Depends(get_user_service), _=Depends(require_gestion_access)):
-    return {"ok": True}
+async def api_usuario_estados_delete(
+    usuario_id: int, 
+    estado_id: int, 
+    user_service: UserService = Depends(get_user_service), 
+    _=Depends(require_gestion_access)
+):
+    """Delete (soft) a user state"""
+    try:
+        ok = user_service.delete_user_state(estado_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Estado no encontrado")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.get("/api/estados/plantillas")
-async def api_estados_plantillas(user_service: UserService = Depends(get_user_service), _=Depends(require_gestion_access)):
+async def api_estados_plantillas(
+    user_service: UserService = Depends(get_user_service), 
+    _=Depends(require_gestion_access)
+):
+    """Get predefined state templates"""
     try:
-        items = user_service.user_repo.obtener_plantillas_estados()
+        items = user_service.get_state_templates()
         return {"items": items}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

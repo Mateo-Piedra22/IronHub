@@ -651,3 +651,86 @@ def _get_session_secret() -> str:
     # 4) Absolute last resort: ephemeral secret
     import secrets as _secrets
     return _secrets.token_urlsafe(32)
+
+
+# --- JWT and Usuario Helpers (ported from legacy server.py lines 5613-5656) ---
+
+def _get_usuario_id_by_dni(dni: str) -> Optional[int]:
+    """
+    Get usuario ID by DNI from the database.
+    Returns None if not found or on error.
+    """
+    try:
+        d = str(dni or "").strip()
+    except Exception:
+        d = str(dni)
+    if not d:
+        return None
+    db = get_db()
+    if db is None:
+        return None
+    try:
+        with db.get_connection_context() as conn:  # type: ignore
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)  # type: ignore
+            cur.execute("SELECT id FROM usuarios WHERE dni = %s LIMIT 1", (d,))
+            row = cur.fetchone()
+            if row and ("id" in row):
+                try:
+                    val = int(row["id"] or 0)
+                    return val if val > 0 else None
+                except Exception:
+                    pass
+    except Exception:
+        try:
+            logger.exception("Error buscando usuario por DNI")
+        except Exception:
+            pass
+    return None
+
+
+def _issue_usuario_jwt(usuario_id: int) -> Optional[str]:
+    """
+    Issue a JWT token for a usuario session.
+    Token is valid for 24 hours (86400 seconds).
+    Uses HMAC-SHA256 with the session secret.
+    """
+    try:
+        import json
+        import base64
+        import time
+        import hmac
+        import hashlib
+        
+        hdr = {"alg": "HS256", "typ": "JWT"}
+        now = int(time.time())
+        pl = {"sub": int(usuario_id), "role": "user", "iat": now, "exp": now + 86400}
+        hdr_b = json.dumps(hdr, separators=(",", ":")).encode("utf-8")
+        pl_b = json.dumps(pl, separators=(",", ":")).encode("utf-8")
+        h_b64 = base64.urlsafe_b64encode(hdr_b).rstrip(b"=").decode("utf-8")
+        p_b64 = base64.urlsafe_b64encode(pl_b).rstrip(b"=").decode("utf-8")
+        signing_input = f"{h_b64}.{p_b64}".encode("utf-8")
+        secret = _get_session_secret().encode("utf-8")
+        sig = hmac.new(secret, signing_input, hashlib.sha256).digest()
+        s_b64 = base64.urlsafe_b64encode(sig).rstrip(b"=").decode("utf-8")
+        return f"{h_b64}.{p_b64}.{s_b64}"
+    except Exception:
+        return None
+
+
+def _get_usuario_nombre(usuario_id: int) -> Optional[str]:
+    """
+    Get the nombre (name) for a usuario by ID.
+    Returns None if not found or on error.
+    """
+    db = get_db()
+    if db is None:
+        return None
+    try:
+        u = db.obtener_usuario_por_id(int(usuario_id))  # type: ignore
+        if u is not None:
+            nombre = getattr(u, 'nombre', None) or (u.get('nombre') if isinstance(u, dict) else None) or ""
+            return nombre if nombre else None
+    except Exception:
+        pass
+    return None
+

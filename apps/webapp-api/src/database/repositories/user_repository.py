@@ -276,6 +276,67 @@ class UserRepository(BaseRepository):
         self.db.refresh(etiqueta)
         return etiqueta.id
 
+    def obtener_sugerencias_etiquetas(self, limit: int = 20) -> List[str]:
+        """Get tag suggestions ordered by usage frequency."""
+        stmt = select(Etiqueta.nombre, func.count(UsuarioEtiqueta.id).label('count')).\
+            outerjoin(UsuarioEtiqueta, Etiqueta.id == UsuarioEtiqueta.etiqueta_id).\
+            group_by(Etiqueta.nombre).\
+            order_by(func.count(UsuarioEtiqueta.id).desc(), Etiqueta.nombre.asc()).\
+            limit(limit)
+        results = self.db.execute(stmt).all()
+        return [r[0] for r in results]
+
+    # --- User States (Estados) Management ---
+    def obtener_estados_usuario(self, usuario_id: int, solo_activos: bool = True) -> List[UsuarioEstado]:
+        """Get user states (lesionado, vacaciones, etc.)."""
+        stmt = select(UsuarioEstado).where(UsuarioEstado.usuario_id == usuario_id)
+        if solo_activos:
+            stmt = stmt.where(UsuarioEstado.activo == True)
+        stmt = stmt.order_by(UsuarioEstado.fecha_inicio.desc())
+        return list(self.db.scalars(stmt).all())
+
+    def crear_estado_usuario(self, usuario_id: int, estado: str, descripcion: str = None,
+                             fecha_inicio: date = None, fecha_vencimiento: date = None, 
+                             creado_por: int = None) -> int:
+        """Create a new user state."""
+        new_state = UsuarioEstado(
+            usuario_id=usuario_id,
+            estado=estado,
+            descripcion=descripcion,
+            fecha_inicio=fecha_inicio or date.today(),
+            fecha_vencimiento=fecha_vencimiento,
+            activo=True,
+            creado_por=creado_por
+        )
+        self.db.add(new_state)
+        self.db.commit()
+        self.db.refresh(new_state)
+        return new_state.id
+
+    def actualizar_estado_usuario(self, estado_id: int, data: Dict[str, Any]) -> bool:
+        """Update an existing user state."""
+        estado = self.db.get(UsuarioEstado, estado_id)
+        if not estado:
+            return False
+        for key, value in data.items():
+            if hasattr(estado, key) and key not in ('id', 'usuario_id'):
+                setattr(estado, key, value)
+        self.db.commit()
+        return True
+
+    def eliminar_estado_usuario(self, estado_id: int) -> bool:
+        """Soft-delete a user state."""
+        estado = self.db.get(UsuarioEstado, estado_id)
+        if estado:
+            estado.activo = False
+            self.db.commit()
+            return True
+        return False
+
+    def obtener_plantillas_estados(self) -> List[str]:
+        """Get common state templates."""
+        return ['lesionado', 'vacaciones', 'suspendido', 'baja_temporal', 'prueba_gratis']
+
     # --- States History ---
     def registrar_cambio_estado(self, usuario_id: int, nuevo_estado: str, accion: str, 
                                detalles: str = None, creado_por: int = None):

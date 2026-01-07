@@ -14,13 +14,12 @@ from datetime import datetime, timezone, date
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 
-import psycopg2
-import psycopg2.extras
 from fastapi import APIRouter, Request, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.responses import JSONResponse, FileResponse
 
-from src.dependencies import get_db, get_rm, require_gestion_access, require_owner
-from src.utils import _circuit_guard_json, _resolve_existing_dir, _apply_change_idempotent, _filter_existing_columns
+from src.dependencies import get_gym_service, require_gestion_access, require_owner
+from src.services.gym_service import GymService
+from src.utils import _resolve_existing_dir, _apply_change_idempotent, _filter_existing_columns
 from src.models import Rutina, RutinaEjercicio, Ejercicio, Clase, ClaseHorario, Usuario
 from src.utils import _resolve_logo_url, get_gym_name
 from src.services.storage_service import StorageService
@@ -31,27 +30,31 @@ logger = logging.getLogger(__name__)
 # --- API Configuración ---
 
 @router.get("/api/gym/data")
-async def api_gym_data(_=Depends(require_gestion_access)):
-    db = get_db()
-    if db is None:
-        return {}
-    guard = _circuit_guard_json(db, "/api/gym/data")
-    if guard:
-        return guard
+async def api_gym_data(
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Get gym configuration using SQLAlchemy."""
     try:
-        # We can use db.obtener_configuracion_gimnasio() if available
-        if hasattr(db, 'obtener_configuracion_gimnasio'):
-            return db.obtener_configuracion_gimnasio()
+        config = svc.obtener_configuracion_gimnasio()
+        if config:
+            return config
         # Fallback to simple dict using utils
         return {
             "gym_name": get_gym_name(),
             "logo_url": _resolve_logo_url()
         }
     except Exception as e:
+        logger.error(f"Error getting gym data: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.post("/api/gym/update")
-async def api_gym_update(request: Request, _=Depends(require_owner)):
+async def api_gym_update(
+    request: Request, 
+    _=Depends(require_owner),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Update gym configuration using SQLAlchemy."""
     try:
         data = await request.json()
         name = str(data.get("gym_name", "")).strip()
@@ -59,30 +62,26 @@ async def api_gym_update(request: Request, _=Depends(require_owner)):
         
         if not name:
             return JSONResponse({"ok": False, "error": "Nombre inválido"}, status_code=400)
-            
-        db = get_db()
-        if db is None:
-             return JSONResponse({"ok": False, "error": "DB no disponible"}, status_code=500)
-             
+        
         updates = {"gym_name": name}
         if address:
             updates["gym_address"] = address
-            
-        if hasattr(db, 'actualizar_configuracion_gimnasio'):
-            db.actualizar_configuracion_gimnasio(updates) # type: ignore
-        else:
-            # Fallback
-            if hasattr(db, 'actualizar_configuracion'):
-                db.actualizar_configuracion('gym_name', name) # type: ignore
-                if address:
-                    db.actualizar_configuracion('gym_address', address) # type: ignore
         
-        return JSONResponse({"ok": True})
+        if svc.actualizar_configuracion_gimnasio(updates):
+            return JSONResponse({"ok": True})
+        return JSONResponse({"ok": False, "error": "Error guardando"}, status_code=500)
     except Exception as e:
+        logger.error(f"Error updating gym: {e}")
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 @router.post("/api/gym/logo")
-async def api_gym_logo(request: Request, file: UploadFile = File(...), _=Depends(require_owner)):
+async def api_gym_logo(
+    request: Request, 
+    file: UploadFile = File(...), 
+    _=Depends(require_owner),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Upload gym logo using SQLAlchemy for storage."""
     try:
         ctype = str(getattr(file, 'content_type', '') or '').lower()
         if ctype not in ("image/png", "image/svg+xml", "image/jpeg", "image/jpg"):
@@ -97,8 +96,6 @@ async def api_gym_logo(request: Request, file: UploadFile = File(...), _=Depends
         # 1. Try Cloud Storage (B2 + Cloudflare)
         try:
             storage = StorageService()
-            # Use gym subdomain/id for folder structure if possible, but for now 'assets' is fine or 'logos'
-            # We can try to get tenant info
             from src.utils import _get_tenant_from_request
             tenant = _get_tenant_from_request(request) or "common"
             
@@ -107,8 +104,6 @@ async def api_gym_logo(request: Request, file: UploadFile = File(...), _=Depends
             elif "jpeg" in ctype or "jpg" in ctype: ext = ".jpg"
             
             filename = f"gym_logo_{int(time.time())}{ext}"
-            
-            # Upload to 'logos/<tenant>/...'
             uploaded_url = storage.upload_file(data, filename, ctype, subfolder=f"logos/{tenant}")
             if uploaded_url:
                 public_url = uploaded_url
@@ -132,16 +127,13 @@ async def api_gym_logo(request: Request, file: UploadFile = File(...), _=Depends
             except Exception as e:
                 return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
         
-        # Save to DB
-        db = get_db()
-        if db:
-             if hasattr(db, 'actualizar_logo_url'):
-                 db.actualizar_logo_url(public_url) # type: ignore
-             elif hasattr(db, 'actualizar_configuracion'):
-                 db.actualizar_configuracion('gym_logo_url', public_url) # type: ignore
+        # Save to DB using GymService
+        if public_url:
+            svc.actualizar_logo_url(public_url)
                  
         return JSONResponse({"ok": True, "logo_url": public_url})
     except Exception as e:
+        logger.error(f"Error uploading gym logo: {e}")
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 @router.get("/api/gym/subscription")
@@ -509,21 +501,17 @@ def _load_ejercicios_catalog(force: bool = False) -> Dict[str, Any]:
             by_id: Dict[int, Dict[str, Any]] = {}
             by_name: Dict[str, Dict[str, Any]] = {}
             rows = None
-            db = get_db()
-            if db is not None:
+            try:
+                from src.database.connection import SessionLocal
+                from src.services.gym_service import GymService
+                session = SessionLocal()
                 try:
-                    with db.get_connection_context() as conn:  # type: ignore
-                        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                        cols = db.get_table_columns('ejercicios') or []  # type: ignore
-                        select_cols = ['id', 'nombre']
-                        if 'video_url' in cols:
-                            select_cols.append('video_url')
-                        if 'video_mime' in cols:
-                            select_cols.append('video_mime')
-                        cur.execute(f"SELECT {', '.join(select_cols)} FROM ejercicios")
-                        rows = cur.fetchall()
-                except Exception:
-                    rows = None
+                    svc = GymService(session)
+                    rows = svc.obtener_ejercicios_catalog()
+                finally:
+                    session.close()
+            except Exception:
+                rows = None
             if rows:
                 for r in rows:
                     try:
@@ -684,12 +672,17 @@ def _build_rutina_from_draft(payload: Dict[str, Any]) -> tuple:
         u_id = None
 
     if (not u_nombre) and (u_id is not None):
-        db = get_db()
         try:
-            if db is not None:
-                u_obj = db.obtener_usuario(int(u_id))  # type: ignore
+            from src.dependencies import get_user_service
+            from src.database.connection import SessionLocal
+            session = SessionLocal()
+            try:
+                svc = get_user_service(session)
+                u_obj = svc.get_user(int(u_id))
                 if u_obj:
                     u_nombre = (getattr(u_obj, "nombre", "") or "").strip() or u_nombre
+            finally:
+                session.close()
         except Exception:
             pass
     
@@ -758,51 +751,46 @@ def _build_rutina_from_draft(payload: Dict[str, Any]) -> tuple:
 # --- API Configuración ---
 
 @router.get("/api/gym_data")
-async def api_gym_data(_=Depends(require_gestion_access)):
-    db = get_db()
-    if db is None:
-        return {}
-    guard = _circuit_guard_json(db, "/api/gym_data")
-    if guard:
-        return guard
+async def api_gym_data_legacy(
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Legacy gym data endpoint using SQLAlchemy."""
     try:
-        # Assuming read_gym_data is available via DB or similar
-        # Original code used core.utils.read_gym_data(db)
-        # We can use db.obtener_configuracion_gimnasio() if available
-        if hasattr(db, 'obtener_configuracion_gimnasio'):
-            return db.obtener_configuracion_gimnasio()
-        return {}
+        config = svc.obtener_configuracion_gimnasio()
+        return config if config else {}
     except Exception as e:
+        logger.error(f"Error getting gym data: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.put("/api/gym_update")
-async def api_gym_update(request: Request, _=Depends(require_gestion_access)):
-    db = get_db()
-    if db is None:
-        raise HTTPException(status_code=503, detail="DB no disponible")
-    guard = _circuit_guard_json(db, "/api/gym_update")
-    if guard:
-        return guard
+async def api_gym_update_legacy(
+    request: Request, 
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Legacy gym update endpoint using SQLAlchemy."""
     try:
         payload = await request.json()
-        # Assuming save_gym_data or similar
-        if hasattr(db, 'guardar_configuracion_gimnasio'):
-            ok = db.guardar_configuracion_gimnasio(payload)
-            if ok:
-                return {"ok": True}
+        if svc.actualizar_configuracion_gimnasio(payload):
+            return {"ok": True}
         return JSONResponse({"error": "No se pudo guardar"}, status_code=400)
     except Exception as e:
+        logger.error(f"Error updating gym: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.post("/api/gym_logo")
-async def api_gym_logo(file: UploadFile = File(...), _=Depends(require_gestion_access)):
-    # Implementation simplified - upload to assets
+async def api_gym_logo_legacy(
+    file: UploadFile = File(...), 
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Legacy gym logo upload endpoint using SQLAlchemy."""
     try:
         assets_dir = _resolve_existing_dir("assets")
         if not assets_dir.exists():
             os.makedirs(assets_dir, exist_ok=True)
         
-        # Safe filename
         ext = os.path.splitext(file.filename)[1] if file.filename else ".png"
         filename = f"gym_logo_{int(time.time())}{ext}"
         filepath = assets_dir / filename
@@ -811,58 +799,55 @@ async def api_gym_logo(file: UploadFile = File(...), _=Depends(require_gestion_a
         with open(filepath, "wb") as f:
             f.write(content)
             
-        # Update DB config
-        db = get_db()
-        if db:
-            if hasattr(db, 'actualizar_configuracion'):
-                db.actualizar_configuracion('gym_logo_url', f"/assets/{filename}")
+        # Update DB config using GymService
+        svc.actualizar_configuracion('gym_logo_url', f"/assets/{filename}")
         
         return {"ok": True, "url": f"/assets/{filename}"}
     except Exception as e:
+        logger.error(f"Error uploading gym logo: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 # --- API Clases ---
 
 @router.get("/api/clases")
-async def api_clases(_=Depends(require_gestion_access)):
-    db = get_db()
-    if db is None:
-        return []
-    guard = _circuit_guard_json(db, "/api/clases")
-    if guard:
-        return guard
+async def api_clases(
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Get all classes using SQLAlchemy."""
     try:
-        return db.obtener_clases_con_detalle()  # type: ignore
+        return svc.obtener_clases()
     except Exception as e:
+        logger.error(f"Error getting clases: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.post("/api/clases")
-async def api_clases_create(request: Request, _=Depends(require_gestion_access)):
-    db = get_db()
-    if db is None:
-        raise HTTPException(status_code=503, detail="DB no disponible")
-    guard = _circuit_guard_json(db, "/api/clases[POST]")
-    if guard:
-        return guard
+async def api_clases_create(
+    request: Request, 
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Create a class using SQLAlchemy."""
     try:
         payload = await request.json()
         nombre = (payload.get("nombre") or "").strip()
         descripcion = (payload.get("descripcion") or "").strip()
         if not nombre:
             raise HTTPException(status_code=400, detail="Nombre requerido")
-        if Clase is not None:
-            obj = Clase(id=None, nombre=nombre, descripcion=descripcion, activa=True)  # type: ignore
-            new_id = db.crear_clase(obj)  # type: ignore
-        else:
-            with db.get_connection_context() as conn:  # type: ignore
-                cur = conn.cursor()
-                cur.execute("INSERT INTO clases (nombre, descripcion) VALUES (%s, %s) RETURNING id", (nombre, descripcion))
-                new_id = int(cur.fetchone()[0] or 0)
-                conn.commit()
-        return {"ok": True, "id": int(new_id)}
+        
+        new_id = svc.crear_clase({
+            'nombre': nombre,
+            'descripcion': descripcion,
+            'activo': True
+        })
+        
+        if new_id:
+            return {"ok": True, "id": int(new_id)}
+        return JSONResponse({"error": "No se pudo crear"}, status_code=400)
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Error creating clase: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 # --- API Bloques ---
@@ -898,72 +883,45 @@ def _ensure_bloques_schema(conn) -> None:
         logger.error(f"Error asegurando esquema de bloques: {e}")
 
 @router.get("/api/clases/{clase_id}/bloques")
-async def api_clase_bloques_list(clase_id: int, _=Depends(require_gestion_access)):
-    db = get_db()
-    if db is None:
-        raise HTTPException(status_code=503, detail="DB no disponible")
+async def api_clase_bloques_list(
+    clase_id: int, 
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Get workout blocks for a class using SQLAlchemy."""
     try:
-        with db.get_connection_context() as conn:  # type: ignore
-            _ensure_bloques_schema(conn)
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("""
-                SELECT id, nombre
-                FROM clase_bloques
-                WHERE clase_id = %s
-                ORDER BY nombre ASC, id DESC
-            """, (clase_id,))
-            rows = cur.fetchall() or []
-            return [{"id": int(r["id"]), "nombre": (r.get("nombre") or "Bloque").strip()} for r in rows]
-    except HTTPException:
-        raise
+        return svc.obtener_clase_bloques(clase_id)
     except Exception as e:
-        logging.exception("Error listando bloques")
+        logger.error(f"Error listing bloques: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.get("/api/clases/{clase_id}/bloques/{bloque_id}")
-async def api_clase_bloque_items(clase_id: int, bloque_id: int, _=Depends(require_gestion_access)):
-    db = get_db()
-    if db is None:
-        raise HTTPException(status_code=503, detail="DB no disponible")
+async def api_clase_bloque_items(
+    clase_id: int, 
+    bloque_id: int, 
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Get items in a workout block using SQLAlchemy."""
     try:
-        with db.get_connection_context() as conn:  # type: ignore
-            _ensure_bloques_schema(conn)
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT id FROM clase_bloques WHERE id = %s AND clase_id = %s", (bloque_id, clase_id))
-            if not cur.fetchone():
-                raise HTTPException(status_code=404, detail="Bloque no encontrado")
-            cur.execute(
-                """
-                SELECT ejercicio_id, orden, series, repeticiones, descanso_segundos, notas
-                FROM clase_bloque_items
-                WHERE bloque_id = %s
-                ORDER BY orden ASC, id ASC
-                """,
-                (bloque_id,)
-            )
-            rows = cur.fetchall() or []
-            return [
-                {
-                    "ejercicio_id": int(r.get("ejercicio_id") or 0),
-                    "orden": int(r.get("orden") or 0),
-                    "series": int(r.get("series") or 0),
-                    "repeticiones": str(r.get("repeticiones") or ""),
-                    "descanso_segundos": int(r.get("descanso_segundos") or 0),
-                    "notas": str(r.get("notas") or ""),
-                }
-                for r in rows
-            ]
+        items = svc.obtener_bloque_items(clase_id, bloque_id)
+        if items is None:
+            raise HTTPException(status_code=404, detail="Bloque no encontrado")
+        return items
     except HTTPException:
         raise
     except Exception as e:
-        logging.exception("Error obteniendo items del bloque")
+        logger.error(f"Error getting bloque items: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.post("/api/clases/{clase_id}/bloques")
-async def api_clase_bloque_create(clase_id: int, request: Request, _=Depends(require_gestion_access)):
-    db = get_db()
-    if db is None:
-        raise HTTPException(status_code=503, detail="DB no disponible")
+async def api_clase_bloque_create(
+    clase_id: int, 
+    request: Request, 
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Create a workout block with items using SQLAlchemy."""
     payload = await request.json()
     try:
         nombre = (payload.get("nombre") or "").strip()
@@ -972,255 +930,222 @@ async def api_clase_bloque_create(clase_id: int, request: Request, _=Depends(req
             raise HTTPException(status_code=400, detail="'nombre' es obligatorio")
         if not isinstance(items, list):
             items = []
-        with db.atomic_transaction() as conn:  # type: ignore
-            _ensure_bloques_schema(conn)
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute(
-                "INSERT INTO clase_bloques (clase_id, nombre) VALUES (%s, %s) RETURNING id",
-                (clase_id, nombre)
-            )
-            row = cur.fetchone()
-            bloque_id = int(row["id"]) if row else None
-            if not bloque_id:
-                raise HTTPException(status_code=500, detail="No se pudo crear bloque")
-            for idx, it in enumerate(items):
-                try:
-                    cur.execute(
-                        """
-                        INSERT INTO clase_bloque_items (bloque_id, ejercicio_id, orden, series, repeticiones, descanso_segundos, notas)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        """,
-                        (
-                            bloque_id,
-                            int(it.get("ejercicio_id") or it.get("id") or 0),
-                            int(it.get("orden") or idx),
-                            int(it.get("series") or 0),
-                            str(it.get("repeticiones") or ""),
-                            int(it.get("descanso_segundos") or 0),
-                            str(it.get("notas") or ""),
-                        )
-                    )
-                except Exception:
-                    pass
+        
+        # Convert items format
+        formatted_items = [
+            {
+                'ejercicio_id': int(it.get("ejercicio_id") or it.get("id") or 0),
+                'orden': int(it.get("orden") or idx),
+                'series': int(it.get("series") or 0),
+                'repeticiones': str(it.get("repeticiones") or ""),
+                'descanso_segundos': int(it.get("descanso_segundos") or 0),
+                'notas': str(it.get("notas") or "")
+            }
+            for idx, it in enumerate(items)
+        ]
+        
+        bloque_id = svc.crear_clase_bloque(clase_id, nombre, formatted_items)
+        if bloque_id:
             return {"ok": True, "id": bloque_id}
+        raise HTTPException(status_code=500, detail="No se pudo crear bloque")
     except HTTPException:
         raise
     except Exception as e:
-        logging.exception("Error creando bloque")
+        logger.error(f"Error creating bloque: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.put("/api/clases/{clase_id}/bloques/{bloque_id}")
-async def api_clase_bloque_update(clase_id: int, bloque_id: int, request: Request, _=Depends(require_gestion_access)):
-    db = get_db()
-    if db is None:
-        raise HTTPException(status_code=503, detail="DB no disponible")
+async def api_clase_bloque_update(
+    clase_id: int, 
+    bloque_id: int, 
+    request: Request, 
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Update a workout block using SQLAlchemy."""
     payload = await request.json()
     try:
         items = payload.get("items") or []
         nombre_raw = payload.get("nombre")
-        nombre = (nombre_raw or "").strip() if isinstance(nombre_raw, str) else None
+        nombre = (nombre_raw or "").strip() if isinstance(nombre_raw, str) else "Bloque"
         if not isinstance(items, list):
             items = []
-        with db.atomic_transaction() as conn:  # type: ignore
-            _ensure_bloques_schema(conn)
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT id FROM clase_bloques WHERE id = %s AND clase_id = %s", (bloque_id, clase_id))
-            if not cur.fetchone():
-                raise HTTPException(status_code=404, detail="Bloque no encontrado")
-            cur.execute("DELETE FROM clase_bloque_items WHERE bloque_id = %s", (bloque_id,))
-            for idx, it in enumerate(items):
-                try:
-                    cur.execute(
-                        """
-                        INSERT INTO clase_bloque_items (bloque_id, ejercicio_id, orden, series, repeticiones, descanso_segundos, notas)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        """,
-                        (
-                            bloque_id,
-                            int(it.get("ejercicio_id") or it.get("id") or 0),
-                            int(it.get("orden") or idx),
-                            int(it.get("series") or 0),
-                            str(it.get("repeticiones") or ""),
-                            int(it.get("descanso_segundos") or 0),
-                            str(it.get("notas") or ""),
-                        )
-                    )
-                except Exception:
-                    pass
-            try:
-                if nombre is not None and nombre != "":
-                    cur.execute("UPDATE clase_bloques SET nombre = %s, updated_at = NOW() WHERE id = %s", (nombre, bloque_id))
-                else:
-                    cur.execute("UPDATE clase_bloques SET updated_at = NOW() WHERE id = %s", (bloque_id,))
-            except Exception:
-                pass
+        
+        # Check if bloque exists
+        existing = svc.obtener_bloque_items(clase_id, bloque_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Bloque no encontrado")
+        
+        # Convert items format
+        formatted_items = [
+            {
+                'ejercicio_id': int(it.get("ejercicio_id") or it.get("id") or 0),
+                'orden': int(it.get("orden") or idx),
+                'series': int(it.get("series") or 0),
+                'repeticiones': str(it.get("repeticiones") or ""),
+                'descanso_segundos': int(it.get("descanso_segundos") or 0),
+                'notas': str(it.get("notas") or "")
+            }
+            for idx, it in enumerate(items)
+        ]
+        
+        if svc.actualizar_clase_bloque(bloque_id, nombre, formatted_items):
             return {"ok": True}
+        return JSONResponse({"error": "No se pudo actualizar"}, status_code=500)
     except HTTPException:
         raise
     except Exception as e:
-        logging.exception("Error actualizando bloque")
+        logger.error(f"Error updating bloque: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.delete("/api/clases/{clase_id}/bloques/{bloque_id}")
-async def api_clase_bloque_delete(clase_id: int, bloque_id: int, _=Depends(require_gestion_access)):
-    db = get_db()
-    if db is None:
-        raise HTTPException(status_code=503, detail="DB no disponible")
+async def api_clase_bloque_delete(
+    clase_id: int, 
+    bloque_id: int, 
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Delete a workout block using SQLAlchemy."""
     try:
-        with db.atomic_transaction() as conn:  # type: ignore
-            _ensure_bloques_schema(conn)
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT id FROM clase_bloques WHERE id = %s AND clase_id = %s", (bloque_id, clase_id))
-            if not cur.fetchone():
-                raise HTTPException(status_code=404, detail="Bloque no encontrado")
-            cur.execute("DELETE FROM clase_bloque_items WHERE bloque_id = %s", (bloque_id,))
-            cur.execute("DELETE FROM clase_bloques WHERE id = %s", (bloque_id,))
+        # Check if bloque exists
+        existing = svc.obtener_bloque_items(clase_id, bloque_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Bloque no encontrado")
+        
+        if svc.eliminar_clase_bloque(bloque_id):
             return {"ok": True}
+        return JSONResponse({"error": "No se pudo eliminar"}, status_code=500)
     except HTTPException:
         raise
     except Exception as e:
-        logging.exception("Error eliminando bloque")
+        logger.error(f"Error deleting bloque: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 # --- API Ejercicios ---
 
 @router.get("/api/ejercicios")
-async def api_ejercicios_list(_=Depends(require_gestion_access)):
-    db = get_db()
-    if db is None:
-        return []
-    guard = _circuit_guard_json(db, "/api/ejercicios")
-    if guard:
-        return guard
+async def api_ejercicios_list(
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Get all exercises using SQLAlchemy."""
     try:
-        return db.obtener_ejercicios()  # type: ignore
+        return svc.obtener_ejercicios()
     except Exception as e:
+        logger.error(f"Error listing ejercicios: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.post("/api/ejercicios")
-async def api_ejercicios_create(request: Request, _=Depends(require_gestion_access)):
-    db = get_db()
-    if db is None:
-        raise HTTPException(status_code=503, detail="DB no disponible")
-    guard = _circuit_guard_json(db, "/api/ejercicios[POST]")
-    if guard:
-        return guard
+async def api_ejercicios_create(
+    request: Request, 
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Create an exercise using SQLAlchemy."""
     try:
         payload = await request.json()
         nombre = (payload.get("nombre") or "").strip()
-        grupo = (payload.get("grupo_muscular") or "").strip()
         if not nombre:
             raise HTTPException(status_code=400, detail="Nombre requerido")
-        video_url = payload.get("video_url")
-        video_mime = payload.get("video_mime")
-        if Ejercicio is not None:
-            obj = Ejercicio(id=None, nombre=nombre, grupo_muscular=grupo, video_url=video_url, video_mime=video_mime)  # type: ignore
-            new_id = db.crear_ejercicio(obj)  # type: ignore
-        else:
-            raise HTTPException(status_code=500, detail="Modelo Ejercicio no disponible")
-        return {"ok": True, "id": int(new_id)}
+        
+        new_id = svc.crear_ejercicio({
+            'nombre': nombre,
+            'grupo_muscular': (payload.get("grupo_muscular") or "").strip(),
+            'video_url': payload.get("video_url"),
+            'video_mime': payload.get("video_mime")
+        })
+        
+        if new_id:
+            return {"ok": True, "id": int(new_id)}
+        return JSONResponse({"error": "No se pudo crear"}, status_code=500)
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Error creating ejercicio: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.put("/api/ejercicios/{ejercicio_id}")
-async def api_ejercicios_update(ejercicio_id: int, request: Request, _=Depends(require_gestion_access)):
-    db = get_db()
-    if db is None:
-        raise HTTPException(status_code=503, detail="DB no disponible")
+async def api_ejercicios_update(
+    ejercicio_id: int, 
+    request: Request, 
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Update an exercise using SQLAlchemy."""
     try:
         payload = await request.json()
-        # Simplificado: asumiendo método en DB o SQL directo
-        with db.get_connection_context() as conn:  # type: ignore
-            cur = conn.cursor()
-            nombre = payload.get("nombre")
-            grupo = payload.get("grupo_muscular")
-            video_url = payload.get("video_url")
-            video_mime = payload.get("video_mime")
-            sets = []
-            vals = []
-            if nombre:
-                sets.append("nombre = %s")
-                vals.append(nombre)
-            if grupo is not None:
-                sets.append("grupo_muscular = %s")
-                vals.append(grupo)
-            if video_url is not None:
-                sets.append("video_url = %s")
-                vals.append(video_url)
-            if video_mime is not None:
-                sets.append("video_mime = %s")
-                vals.append(video_mime)
-            if sets:
-                vals.append(ejercicio_id)
-                cur.execute(f"UPDATE ejercicios SET {', '.join(sets)} WHERE id = %s", vals)
-                conn.commit()
-        return {"ok": True}
+        if svc.actualizar_ejercicio(ejercicio_id, payload):
+            return {"ok": True}
+        return JSONResponse({"error": "No se pudo actualizar"}, status_code=500)
     except Exception as e:
+        logger.error(f"Error updating ejercicio: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.delete("/api/ejercicios/{ejercicio_id}")
-async def api_ejercicios_delete(ejercicio_id: int, _=Depends(require_gestion_access)):
-    db = get_db()
-    if db is None:
-        raise HTTPException(status_code=503, detail="DB no disponible")
+async def api_ejercicios_delete(
+    ejercicio_id: int, 
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Delete an exercise using SQLAlchemy."""
     try:
-        db.eliminar_ejercicio(ejercicio_id)  # type: ignore
-        return {"ok": True}
+        if svc.eliminar_ejercicio(ejercicio_id):
+            return {"ok": True}
+        return JSONResponse({"error": "No se pudo eliminar"}, status_code=500)
     except Exception as e:
+        logger.error(f"Error deleting ejercicio: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 # --- API Rutinas ---
 
 @router.get("/api/rutinas")
-async def api_rutinas_list(usuario_id: Optional[int] = None, _=Depends(require_gestion_access)):
-    db = get_db()
-    if db is None:
-        return []
-    guard = _circuit_guard_json(db, "/api/rutinas")
-    if guard:
-        return guard
+async def api_rutinas_list(
+    usuario_id: Optional[int] = None, 
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Get routines using SQLAlchemy."""
     try:
-        if usuario_id is not None:
-            return db.obtener_rutinas_por_usuario(int(usuario_id))  # type: ignore
-        return db.obtener_todas_rutinas()  # type: ignore
+        return svc.obtener_rutinas(usuario_id)
     except Exception as e:
+        logger.error(f"Error listing rutinas: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.post("/api/rutinas")
-async def api_rutinas_create(request: Request, _=Depends(require_gestion_access)):
-    db = get_db()
-    if db is None:
-        raise HTTPException(status_code=503, detail="DB no disponible")
-    guard = _circuit_guard_json(db, "/api/rutinas[POST]")
-    if guard:
-        return guard
+async def api_rutinas_create(
+    request: Request, 
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Create a routine using SQLAlchemy."""
     try:
         payload = await request.json()
         nombre = (payload.get("nombre") or "").strip()
         if not nombre:
             raise HTTPException(status_code=400, detail="Nombre requerido")
-        rutina = Rutina(
-            id=None,
-            nombre_rutina=nombre,
-            descripcion=payload.get("descripcion"),
-            usuario_id=payload.get("usuario_id"),
-            dias_semana=payload.get("dias_semana") or 1,
-            categoria=payload.get("categoria") or "general",
-            activa=True
-        )
-        # Asumiendo método en DB
-        new_id = db.crear_rutina(rutina)  # type: ignore
-        return {"ok": True, "id": int(new_id)}
+        
+        new_id = svc.crear_rutina({
+            'nombre_rutina': nombre,
+            'descripcion': payload.get("descripcion"),
+            'usuario_id': payload.get("usuario_id"),
+            'dias_semana': payload.get("dias_semana") or 1,
+            'categoria': payload.get("categoria") or "general",
+            'activa': True
+        })
+        
+        if new_id:
+            return {"ok": True, "id": int(new_id)}
+        return JSONResponse({"error": "No se pudo crear"}, status_code=500)
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.error(f"Error creating rutina: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.get("/api/rutinas/{rutina_id}/export/pdf")
-async def api_rutina_export_pdf(rutina_id: int, weeks: int = 1, filename: Optional[str] = None, qr_mode: str = "auto", sheet: Optional[str] = None, _=Depends(require_gestion_access)):
-    db = get_db()
+async def api_rutina_export_pdf(rutina_id: int, weeks: int = 1, filename: Optional[str] = None, qr_mode: str = "auto", sheet: Optional[str] = None, _=Depends(require_gestion_access), gym_svc: GymService = Depends(get_gym_service)):
     rm = get_rm()
-    if db is None or rm is None:
+    if rm is None:
         raise HTTPException(status_code=503, detail="Servicio no disponible")
     try:
         rutina = db.obtener_rutina_completa(rutina_id)  # type: ignore

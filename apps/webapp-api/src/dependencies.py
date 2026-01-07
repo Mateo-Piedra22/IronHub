@@ -21,6 +21,15 @@ from src.database.connection import SessionLocal
 from src.database.tenant_connection import get_tenant_session_factory
 from src.services.user_service import UserService
 from src.services.teacher_service import TeacherService
+from src.services.payment_service import PaymentService
+from src.services.auth_service import AuthService
+from src.services.gym_service import GymService
+from src.services.attendance_service import AttendanceService
+from src.services.inscripciones_service import InscripcionesService
+from src.services.profesor_service import ProfesorService
+from src.services.whatsapp_service import WhatsAppService
+from src.services.reports_service import ReportsService
+from src.services.admin_service import AdminService
 
 
 def set_current_tenant(tenant: str):
@@ -85,9 +94,55 @@ def get_rm(session: Session = Depends(get_db_session)):
     return session
 
 
-def get_pm(session: Session = Depends(get_db_session)):
-    """Get payment manager (database session) - alias for payments router."""
-    return session
+def get_payment_service(session: Session = Depends(get_db_session)) -> PaymentService:
+    """Get PaymentService instance with current session."""
+    return PaymentService(session)
+
+
+def get_auth_service(session: Session = Depends(get_db_session)) -> AuthService:
+    """Get AuthService instance with current session."""
+    return AuthService(session)
+
+
+def get_gym_service(session: Session = Depends(get_db_session)) -> GymService:
+    """Get GymService instance with current session."""
+    return GymService(session)
+
+
+def get_attendance_service(session: Session = Depends(get_db_session)) -> AttendanceService:
+    """Get AttendanceService instance with current session."""
+    return AttendanceService(session)
+
+
+def get_inscripciones_service(session: Session = Depends(get_db_session)) -> InscripcionesService:
+    """Get InscripcionesService instance with current session."""
+    return InscripcionesService(session)
+
+
+def get_profesor_service(session: Session = Depends(get_db_session)) -> ProfesorService:
+    """Get ProfesorService instance with current session."""
+    return ProfesorService(session)
+
+
+def get_whatsapp_service(session: Session = Depends(get_db_session)) -> WhatsAppService:
+    """Get WhatsAppService instance with current session."""
+    return WhatsAppService(session)
+
+
+def get_reports_service(session: Session = Depends(get_db_session)) -> ReportsService:
+    """Get ReportsService instance with current session."""
+    return ReportsService(session)
+
+
+def get_admin_service(session: Session = Depends(get_db_session)) -> AdminService:
+    """Get AdminService instance with current session."""
+    return AdminService(session)
+
+
+# Alias for backwards compatibility with routers
+def get_pm(session: Session = Depends(get_db_session)) -> PaymentService:
+    """Get PaymentService - alias for payments router backward compatibility."""
+    return PaymentService(session)
 
 
 def get_admin_db() -> Generator[Session, None, None]:

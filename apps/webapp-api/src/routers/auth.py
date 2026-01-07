@@ -1,15 +1,20 @@
 from pathlib import Path
-import psycopg2
-import psycopg2.extras
+import logging
 from fastapi import APIRouter, Request, Depends, status, Form
 from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
-from src.dependencies import get_db
+from src.dependencies import get_auth_service
+from src.services.auth_service import AuthService
 from src.utils import (
     _verify_owner_password, _resolve_theme_vars, _resolve_logo_url, 
-    get_gym_name
+    get_gym_name, _issue_usuario_jwt, _get_usuario_nombre
 )
+from src.rate_limit import (
+    is_rate_limited_login, register_login_attempt, clear_login_attempts
+)
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -61,7 +66,14 @@ async def usuario_login_page(request: Request, error: str = ""):
     return templates.TemplateResponse("usuario_login.html", ctx)
 
 @router.post("/usuario/login")
-async def usuario_login_post(request: Request):
+async def usuario_login_post(
+    request: Request,
+    svc: AuthService = Depends(get_auth_service)
+):
+    """
+    Usuario login endpoint with rate limiting using SQLAlchemy.
+    Ported from legacy server.py lines 5673-5740.
+    """
     try:
         form = await request.form()
         dni = str(form.get("dni") or "").strip()
@@ -71,38 +83,57 @@ async def usuario_login_post(request: Request):
         pin = ""
         
     if not dni or not pin:
-        return RedirectResponse(url="/usuario/login?error=Datos%20incompletos", status_code=303)
+        return RedirectResponse(url="/usuario/login?error=Ingrese%20DNI%20y%20PIN", status_code=303)
 
-    db = get_db()
-    if db is None:
-         return RedirectResponse(url="/usuario/login?error=Error%20del%20sistema", status_code=303)
+    # Rate limiting check (10 IP / 5 DNI per 5 minutes)
+    if is_rate_limited_login(request, dni):
+        return RedirectResponse(url="/usuario/login?error=Demasiados%20intentos.%20Intente%20m%C3%A1s%20tarde", status_code=303)
 
-    user_id = None
-    active = False
+    # Register attempt before verification
+    register_login_attempt(request, dni)
+
+    # Get user by DNI using SQLAlchemy
+    user = svc.obtener_usuario_por_dni(dni)
+    if not user:
+        return RedirectResponse(url="/usuario/login?error=DNI%20no%20encontrado", status_code=303)
+
+    # Verify PIN using AuthService
+    pin_result = svc.verificar_pin(user.id, pin)
     
-    # Verify user via DB
+    if not pin_result['valid']:
+        return RedirectResponse(url="/usuario/login?error=PIN%20inv%C3%A1lido", status_code=303)
+    
+    if not pin_result['activo']:
+        return RedirectResponse(url="/usuario/login?error=Usuario%20inactivo", status_code=303)
+
+    # Success: clear rate limits
+    clear_login_attempts(request, dni)
+
+    # Setup session with all required variables
     try:
-        with db.get_connection_context() as conn:  # type: ignore
-            cur = conn.cursor()
-            cur.execute("SELECT id, pin, activo FROM usuarios WHERE dni = %s", (dni,))
-            row = cur.fetchone()
-            if row:
-                 uid, stored_pin, is_active = row
-                 if str(stored_pin or "").strip() == pin:
-                      user_id = uid
-                      active = bool(is_active)
+        request.session.clear()
     except Exception:
         pass
-        
-    if user_id:
-        if not active:
-             return RedirectResponse(url="/usuario/login?error=Usuario%20inactivo", status_code=303)
-             
-        request.session.clear()
-        request.session["user_id"] = int(user_id)
-        return RedirectResponse(url="/usuario/panel", status_code=303)
-        
-    return RedirectResponse(url="/usuario/login?error=Credenciales%20inv%C3%A1lidas", status_code=303)
+    
+    request.session["user_id"] = int(user.id)
+    request.session["role"] = "user"
+
+    # Set usuario_nombre
+    try:
+        if user.nombre:
+            request.session["usuario_nombre"] = user.nombre
+    except Exception:
+        pass
+
+    # Issue JWT token
+    try:
+        tok = _issue_usuario_jwt(int(user.id))
+        if tok:
+            request.session["usuario_jwt"] = tok
+    except Exception:
+        pass
+
+    return RedirectResponse(url="/usuario/panel", status_code=303)
 
 @router.get("/logout")
 @router.post("/logout")
@@ -142,12 +173,34 @@ async def login_page(request: Request, error: str = ""):
 
 @router.get("/gestion/logout")
 @router.post("/gestion/logout")
-async def gestion_logout(request: Request):
+async def gestion_logout(
+    request: Request,
+    svc: AuthService = Depends(get_auth_service)
+):
+    """
+    Logout for gestion (professor/owner) panel using SQLAlchemy.
+    Finalizes professor work session before clearing session.
+    """
+    # Finalize professor work session if exists
+    try:
+        sesion_id = request.session.get("gestion_sesion_trabajo_id")
+        if sesion_id is not None:
+            try:
+                svc.finalizar_sesion_profesor(int(sesion_id))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    
     request.session.clear()
     return RedirectResponse(url="/gestion/login", status_code=303)
 
 @router.post("/gestion/auth")
-async def gestion_auth(request: Request):
+async def gestion_auth(
+    request: Request,
+    svc: AuthService = Depends(get_auth_service)
+):
+    """Gestion (professor/owner) authentication using SQLAlchemy."""
     try:
         content_type = request.headers.get("content-type", "")
         if content_type.startswith("application/json"):
@@ -160,10 +213,6 @@ async def gestion_auth(request: Request):
     usuario_id_raw = data.get("usuario_id")
     owner_password = str(data.get("owner_password", "")).strip()
     pin_raw = data.get("pin")
-    
-    db = get_db()
-    if db is None:
-        return RedirectResponse(url="/gestion/login?error=Base%20de%20datos%20no%20disponible", status_code=303)
 
     # Owner login logic
     if isinstance(usuario_id_raw, str) and usuario_id_raw == "__OWNER__":
@@ -186,51 +235,29 @@ async def gestion_auth(request: Request):
     
     if not usuario_id or not pin:
         return RedirectResponse(url="/gestion/login?error=Par%C3%A1metros%20inv%C3%A1lidos", status_code=303)
-        
-    ok = False
-    try:
-        # Assuming verificar_pin_usuario returns truthy if valid
-        ok = bool(db.verificar_pin_usuario(usuario_id, pin))  # type: ignore
-    except Exception:
-        ok = False
-        
-    if not ok:
+    
+    # Verify PIN using AuthService
+    pin_result = svc.verificar_pin(usuario_id, pin)
+    if not pin_result['valid']:
         return RedirectResponse(url="/gestion/login?error=PIN%20inv%C3%A1lido", status_code=303)
-        
-    # Clear session but keep specific flags if needed? original server.py cleared it.
+    
+    # Clear session
     try:
         request.session.clear()
     except Exception:
         pass
         
-    # Setup session for user/professor
+    # Get user info
+    user = svc.obtener_usuario_por_id(usuario_id)
+    user_role = getattr(user, 'rol', None) if user else None
+    
+    # Check for professor privileges
+    profesores = svc.obtener_profesores_activos()
     profesor_id = None
-    prof = None
-    try:
-        prof = db.obtener_profesor_por_usuario_id(usuario_id)  # type: ignore
-    except Exception:
-        prof = None
-        
-    user_role = None
-    try:
-        u = db.obtener_usuario_por_id(usuario_id)  # type: ignore
-        if u is not None:
-            # Handle both object and dict
-            user_role = getattr(u, 'rol', None) or (u.get('rol') if isinstance(u, dict) else None)
-    except Exception:
-        user_role = None
-        
-    try:
-        if prof:
-            profesor_id = getattr(prof, 'profesor_id', None)
-            if profesor_id is None and isinstance(prof, dict):
-                profesor_id = prof.get('profesor_id')
-        
-        # Auto-create professor if role matches but no professor record exists
-        if (profesor_id is None) and (user_role == 'profesor'):
-            profesor_id = db.crear_profesor(usuario_id)  # type: ignore
-    except Exception:
-        profesor_id = None
+    for p in profesores:
+        if p.get('usuario_id') == usuario_id:
+            profesor_id = p.get('id')
+            break
         
     request.session["gestion_profesor_user_id"] = usuario_id
     try:
@@ -240,8 +267,11 @@ async def gestion_auth(request: Request):
         
     if profesor_id:
         request.session["gestion_profesor_id"] = int(profesor_id)
+        # Start work session
         try:
-            db.iniciar_sesion_trabajo_profesor(int(profesor_id), 'Trabajo')  # type: ignore
+            sesion_id = svc.registrar_inicio_sesion_profesor(int(profesor_id), usuario_id)
+            if sesion_id:
+                request.session["gestion_sesion_trabajo_id"] = sesion_id
         except Exception:
             pass
             
@@ -268,11 +298,13 @@ async def checkin_auth(request: Request):
     return RedirectResponse(url="/login?error=Credenciales%20inv%C3%A1lidas", status_code=303)
 
 @router.post("/api/usuario/change_pin")
-async def api_usuario_change_pin(request: Request):
+async def api_usuario_change_pin(
+    request: Request,
+    svc: AuthService = Depends(get_auth_service)
+):
     """
-    PIN change endpoint supporting unauthenticated flow.
+    PIN change endpoint supporting unauthenticated flow using SQLAlchemy.
     Accepts {dni, old_pin, new_pin} and verifies old_pin before updating.
-    This allows users to change their PIN from the login page.
     """
     try:
         data = await request.json()
@@ -282,33 +314,40 @@ async def api_usuario_change_pin(request: Request):
     except Exception:
         return JSONResponse({"ok": False, "error": "Datos inválidos"}, status_code=400)
     
-    if not dni or not old_pin:
-        return JSONResponse({"ok": False, "error": "DNI y PIN actual requeridos"}, status_code=400)
+    if not dni or not old_pin or not new_pin:
+        return JSONResponse({"ok": False, "error": "Parámetros inválidos"}, status_code=400)
         
-    if not new_pin or len(new_pin) < 4:
-        return JSONResponse({"ok": False, "error": "PIN inválido (mínimo 4 dígitos)"}, status_code=400)
-        
-    db = get_db()
-    if db is None:
-        return JSONResponse({"ok": False, "error": "DB error"}, status_code=500)
-        
-    try:
-        with db.get_connection_context() as conn:  # type: ignore
-            cur = conn.cursor()
-            # Verify old PIN first
-            cur.execute("SELECT id, pin FROM usuarios WHERE dni = %s", (dni,))
-            row = cur.fetchone()
-            if not row:
-                return JSONResponse({"ok": False, "error": "Usuario no encontrado"}, status_code=404)
-            user_id, stored_pin = row
-            if str(stored_pin or "").strip() != old_pin:
-                return JSONResponse({"ok": False, "error": "PIN actual incorrecto"}, status_code=401)
-            # Update to new PIN
-            cur.execute("UPDATE usuarios SET pin = %s WHERE id = %s", (new_pin, int(user_id)))
-            conn.commit()
-        return JSONResponse({"ok": True})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    if len(new_pin) < 4:
+        return JSONResponse({"ok": False, "error": "El PIN nuevo debe tener al menos 4 caracteres"}, status_code=400)
+    
+    # Rate limiting check (uses same limits as login)
+    if is_rate_limited_login(request, dni):
+        return JSONResponse({"ok": False, "error": "Demasiados intentos. Intente más tarde"}, status_code=429)
+    
+    # Register attempt
+    register_login_attempt(request, dni)
+    
+    # Get user by DNI using SQLAlchemy
+    user = svc.obtener_usuario_por_dni(dni)
+    if not user:
+        return JSONResponse({"ok": False, "error": "DNI no encontrado"}, status_code=400)
+    
+    # Verify old PIN using AuthService
+    pin_result = svc.verificar_pin(user.id, old_pin)
+    if not pin_result['valid']:
+        return JSONResponse({"ok": False, "error": "PIN antiguo inválido"}, status_code=400)
+    
+    # Validation: new PIN must differ from old PIN
+    if new_pin == old_pin:
+        return JSONResponse({"ok": False, "error": "El PIN nuevo debe ser distinto al actual"}, status_code=400)
+    
+    # Update PIN using AuthService
+    if svc.actualizar_pin(user.id, new_pin):
+        # Clear rate limits on success
+        clear_login_attempts(request, dni)
+        return JSONResponse({"ok": True}, status_code=200)
+    else:
+        return JSONResponse({"ok": False, "error": "Error al actualizar PIN"}, status_code=500)
 
 
 # ============================================
@@ -317,10 +356,13 @@ async def api_usuario_change_pin(request: Request):
 # ============================================
 
 @router.post("/api/usuario/login")
-async def api_usuario_login(request: Request):
+async def api_usuario_login(
+    request: Request,
+    svc: AuthService = Depends(get_auth_service)
+):
     """
-    JSON API endpoint for usuario login (DNI + PIN).
-    Returns user info and payment status for the SPA.
+    JSON API endpoint for usuario login (DNI + PIN) using SQLAlchemy.
+    Returns user info, payment status, and JWT token for the SPA.
     """
     try:
         data = await request.json()
@@ -332,72 +374,84 @@ async def api_usuario_login(request: Request):
     if not dni or not pin:
         return JSONResponse({"success": False, "message": "DNI y PIN requeridos"})
     
-    db = get_db()
-    if db is None:
-        return JSONResponse({"success": False, "message": "Error del sistema"}, status_code=500)
+    # Rate limiting check
+    if is_rate_limited_login(request, dni):
+        return JSONResponse({"success": False, "message": "Demasiados intentos. Intente más tarde"}, status_code=429)
     
+    # Register attempt before verification
+    register_login_attempt(request, dni)
+    
+    # Get user by DNI using SQLAlchemy
+    user = svc.obtener_usuario_por_dni(dni)
+    if not user:
+        return JSONResponse({"success": False, "message": "Credenciales inválidas"})
+    
+    # Verify PIN using AuthService
+    pin_result = svc.verificar_pin(user.id, pin)
+    if not pin_result['valid']:
+        return JSONResponse({"success": False, "message": "Credenciales inválidas"})
+    
+    if not user.activo:
+        return JSONResponse({
+            "success": False, 
+            "message": "Usuario inactivo",
+            "activo": False
+        })
+    
+    # Success: clear rate limits
+    clear_login_attempts(request, dni)
+    
+    # Set session with all required variables
+    request.session.clear()
+    request.session["user_id"] = int(user.id)
+    request.session["role"] = "user"
+    
+    # Set usuario_nombre
+    nombre = user.nombre or ""
+    if nombre:
+        request.session["usuario_nombre"] = nombre
+    
+    # Issue JWT token
+    jwt_token = None
     try:
-        with db.get_connection_context() as conn:  # type: ignore
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("""
-                SELECT id, pin, activo, exento, tipo_cuota_id,
-                       fecha_proximo_vencimiento, cuotas_vencidas
-                FROM usuarios WHERE dni = %s
-            """, (dni,))
-            row = cur.fetchone()
-            
-            if not row:
-                return JSONResponse({"success": False, "message": "Credenciales inválidas"})
-            
-            if str(row.get('pin') or "").strip() != pin:
-                return JSONResponse({"success": False, "message": "Credenciales inválidas"})
-            
-            user_id = row['id']
-            activo = bool(row.get('activo'))
-            
-            if not activo:
-                return JSONResponse({
-                    "success": False, 
-                    "message": "Usuario inactivo",
-                    "activo": False
-                })
-            
-            # Set session
-            request.session.clear()
-            request.session["user_id"] = int(user_id)
-            request.session["role"] = "user"
-            
-            # Calculate days remaining if applicable
-            dias_restantes = None
-            if row.get('fecha_proximo_vencimiento'):
-                from datetime import datetime, date
-                try:
-                    venc = row['fecha_proximo_vencimiento']
-                    if isinstance(venc, str):
-                        venc = datetime.fromisoformat(venc).date()
-                    elif isinstance(venc, datetime):
-                        venc = venc.date()
-                    dias_restantes = (venc - date.today()).days
-                except Exception:
-                    pass
-            
-            return JSONResponse({
-                "success": True,
-                "user_id": user_id,
-                "activo": True,
-                "exento": bool(row.get('exento')),
-                "cuotas_vencidas": row.get('cuotas_vencidas') or 0,
-                "dias_restantes": dias_restantes,
-                "fecha_proximo_vencimiento": str(row.get('fecha_proximo_vencimiento') or "")
-            })
-    except Exception as e:
-        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+        jwt_token = _issue_usuario_jwt(int(user.id))
+        if jwt_token:
+            request.session["usuario_jwt"] = jwt_token
+    except Exception:
+        pass
+    
+    # Calculate days remaining if applicable
+    dias_restantes = None
+    if user.fecha_proximo_vencimiento:
+        from datetime import datetime, date
+        try:
+            venc = user.fecha_proximo_vencimiento
+            if isinstance(venc, datetime):
+                venc = venc.date()
+            dias_restantes = (venc - date.today()).days
+        except Exception:
+            pass
+    
+    return JSONResponse({
+        "success": True,
+        "user_id": user.id,
+        "nombre": nombre,
+        "activo": True,
+        "exento": bool(getattr(user, 'exento', False)),
+        "cuotas_vencidas": getattr(user, 'cuotas_vencidas', 0) or 0,
+        "dias_restantes": dias_restantes,
+        "fecha_proximo_vencimiento": str(user.fecha_proximo_vencimiento or ""),
+        "token": jwt_token  # JWT for client-side use
+    })
 
 
 @router.post("/api/checkin/auth")
-async def api_checkin_auth(request: Request):
+async def api_checkin_auth(
+    request: Request,
+    svc: AuthService = Depends(get_auth_service)
+):
     """
-    JSON API endpoint for check-in authentication (DNI + phone).
+    JSON API endpoint for check-in authentication (DNI + phone) using SQLAlchemy.
     Used for kiosk/self-service check-in flows.
     """
     try:
@@ -410,62 +464,42 @@ async def api_checkin_auth(request: Request):
     if not dni or not telefono:
         return JSONResponse({"success": False, "message": "DNI y teléfono requeridos"})
     
-    db = get_db()
-    if db is None:
-        return JSONResponse({"success": False, "message": "Error del sistema"}, status_code=500)
+    # Verify checkin using AuthService
+    result = svc.verificar_checkin(dni, telefono)
     
-    try:
-        with db.get_connection_context() as conn:  # type: ignore
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("""
-                SELECT id, activo, exento, telefono,
-                       fecha_proximo_vencimiento, cuotas_vencidas
-                FROM usuarios WHERE dni = %s
-            """, (dni,))
-            row = cur.fetchone()
-            
-            if not row:
-                return JSONResponse({"success": False, "message": "Usuario no encontrado"})
-            
-            # Verify phone number matches (normalize by removing spaces/dashes)
-            stored_phone = str(row.get('telefono') or "").strip().replace(" ", "").replace("-", "")
-            input_phone = telefono.replace(" ", "").replace("-", "")
-            if stored_phone != input_phone:
-                return JSONResponse({"success": False, "message": "Teléfono no coincide"})
-            
-            user_id = row['id']
-            activo = bool(row.get('activo'))
-            
-            if not activo:
-                return JSONResponse({
-                    "success": False,
-                    "message": "Usuario inactivo",
-                    "activo": False
-                })
-            
-            # Calculate days remaining
-            dias_restantes = None
-            if row.get('fecha_proximo_vencimiento'):
-                from datetime import datetime, date
-                try:
-                    venc = row['fecha_proximo_vencimiento']
-                    if isinstance(venc, str):
-                        venc = datetime.fromisoformat(venc).date()
-                    elif isinstance(venc, datetime):
-                        venc = venc.date()
-                    dias_restantes = (venc - date.today()).days
-                except Exception:
-                    pass
-            
-            return JSONResponse({
-                "success": True,
-                "usuario_id": user_id,
-                "activo": True,
-                "exento": bool(row.get('exento')),
-                "cuotas_vencidas": row.get('cuotas_vencidas') or 0,
-                "dias_restantes": dias_restantes,
-                "fecha_proximo_vencimiento": str(row.get('fecha_proximo_vencimiento') or "")
-            })
-    except Exception as e:
-        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+    if not result['valid']:
+        error_msg = result.get('error', 'Verificación fallida')
+        return JSONResponse({
+            "success": False, 
+            "message": error_msg,
+            "activo": result.get('activo', False)
+        })
+    
+    user = result.get('usuario', {})
+    
+    # Calculate days remaining
+    dias_restantes = None
+    fecha_vencimiento = user.get('fecha_vencimiento')
+    if fecha_vencimiento:
+        from datetime import datetime, date
+        try:
+            if isinstance(fecha_vencimiento, str):
+                venc = datetime.fromisoformat(fecha_vencimiento).date()
+            elif isinstance(fecha_vencimiento, datetime):
+                venc = fecha_vencimiento.date()
+            else:
+                venc = fecha_vencimiento
+            dias_restantes = (venc - date.today()).days
+        except Exception:
+            pass
+    
+    return JSONResponse({
+        "success": True,
+        "usuario_id": user.get('id'),
+        "activo": True,
+        "exento": bool(user.get('exento', False)),
+        "cuotas_vencidas": user.get('cuotas_vencidas', 0) or 0,
+        "dias_restantes": dias_restantes,
+        "fecha_proximo_vencimiento": str(fecha_vencimiento or "")
+    })
 

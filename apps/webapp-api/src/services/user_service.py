@@ -22,15 +22,6 @@ class UserService(BaseService):
         return self.user_repo.obtener_usuario_por_dni(dni)
 
     def list_users(self, q: Optional[str] = None, limit: int = 50, offset: int = 0) -> List[Dict]:
-        # Moving logic from router's api_usuarios_list
-        # The repository has buscar_usuarios but it returns a specific dict format and doesn't support offset/limit fully in the same way.
-        # We should probably enhance the repository or just implement the specific query here if it's complex filtering.
-        # Ideally, we ask the repository to do it.
-        
-        # Let's use the repository's finding capabilities.
-        # If the repo method isn't enough, we should add a method to the repo, not write SQL here.
-        # But for now, to strictly follow the plan of moving logic out of Routers:
-        
         return self.user_repo.listar_usuarios_paginados(q, limit, offset)
 
     def create_user(self, data: Dict[str, Any]) -> int:
@@ -87,10 +78,8 @@ class UserService(BaseService):
         # Get last payments
         pagos = self.payment_repo.obtener_ultimos_pagos(user_id, limit=10)
         
-        # Get routines (GymRepo might handle this or we need a RoutineRepository)
-        # Assuming we can access routines via relationship or simple query
-        # For now, let's assume GymRepository has something or we add it.
-        rutinas = [r for r in u.rutinas if r.activa] # SQLAlchemy relationship if available
+        # Get routines via relationship
+        rutinas = [r for r in u.rutinas if r.activa] if hasattr(u, 'rutinas') and u.rutinas else []
         
         return {
             "usuario": u,
@@ -107,10 +96,7 @@ class UserService(BaseService):
         nombre = tag_data.get("nombre")
         
         if not etiqueta_id and nombre:
-            # Create tag if not exists
-            # This logic was in the router
-            # We need a method in repo to get_or_create tag
-            et = self.user_repo.obtener_o_crear_etiqueta(nombre) # We need to ensure this exists
+            et = self.user_repo.obtener_o_crear_etiqueta(nombre)
             etiqueta_id = et.id
             
         if etiqueta_id:
@@ -121,3 +107,94 @@ class UserService(BaseService):
     def remove_user_tag(self, user_id: int, tag_id: int):
         self.user_repo.remover_etiqueta(user_id, tag_id)
         return True
+
+    # --- Fixed: Using ORM instead of raw SQL ---
+    
+    def toggle_activo(self, user_id: int) -> Dict[str, Any]:
+        """Toggle user active status using ORM."""
+        user = self.user_repo.obtener_usuario(user_id)
+        if not user:
+            return {'error': 'not_found'}
+        new_status = self.user_repo.alternar_estado_activo(user_id)
+        return {'id': user_id, 'activo': new_status, 'nombre': user.nombre}
+
+    def update_notas(self, user_id: int, notas: str) -> bool:
+        """Update user notes using ORM."""
+        user = self.user_repo.obtener_usuario(user_id)
+        if not user:
+            return False
+        user.notas = notas
+        self.db.commit()
+        return True
+
+    def generate_qr_token(self, user_id: int) -> Dict[str, str]:
+        """Generate QR check-in token for user."""
+        import secrets
+        import time
+        from src.database.orm_models import CheckinPending
+        
+        token = f"checkin_{user_id}_{int(time.time())}_{secrets.token_hex(8)}"
+        
+        # Use ORM model instead of raw CREATE TABLE
+        expires_at = datetime.now() + timedelta(hours=24)
+        checkin_pending = CheckinPending(
+            usuario_id=user_id,
+            token=token,
+            expires_at=expires_at
+        )
+        self.db.add(checkin_pending)
+        self.db.commit()
+        
+        return {'qr_url': f"/api/checkin?token={token}", 'token': token}
+
+    def get_tag_suggestions(self) -> List[str]:
+        """Get common tag suggestions using ORM."""
+        return self.user_repo.obtener_sugerencias_etiquetas(limit=20)
+
+    # --- User States (Estados) Management ---
+    
+    def get_user_states(self, user_id: int, solo_activos: bool = True) -> List[Dict]:
+        """Get user states."""
+        estados = self.user_repo.obtener_estados_usuario(user_id, solo_activos)
+        return [
+            {
+                'id': e.id,
+                'usuario_id': e.usuario_id,
+                'estado': e.estado,
+                'descripcion': e.descripcion,
+                'fecha_inicio': e.fecha_inicio,
+                'fecha_vencimiento': e.fecha_vencimiento,
+                'activo': e.activo,
+                'creado_por': e.creado_por
+            }
+            for e in estados
+        ]
+
+    def add_user_state(self, user_id: int, data: Dict[str, Any], creado_por: int = None) -> int:
+        """Add a new state to user."""
+        return self.user_repo.crear_estado_usuario(
+            usuario_id=user_id,
+            estado=data.get('estado'),
+            descripcion=data.get('descripcion'),
+            fecha_inicio=data.get('fecha_inicio'),
+            fecha_vencimiento=data.get('fecha_vencimiento'),
+            creado_por=creado_por
+        )
+
+    def update_user_state(self, estado_id: int, data: Dict[str, Any]) -> bool:
+        """Update an existing user state."""
+        return self.user_repo.actualizar_estado_usuario(estado_id, data)
+
+    def delete_user_state(self, estado_id: int) -> bool:
+        """Delete (soft) a user state."""
+        return self.user_repo.eliminar_estado_usuario(estado_id)
+
+    def get_state_templates(self) -> List[str]:
+        """Get predefined state templates."""
+        return self.user_repo.obtener_plantillas_estados()
+
+    def get_morose_user_ids(self) -> List[int]:
+        """Get IDs of users with overdue payments."""
+        morosos = self.user_repo.obtener_usuarios_morosos()
+        return [m['id'] for m in morosos]
+
