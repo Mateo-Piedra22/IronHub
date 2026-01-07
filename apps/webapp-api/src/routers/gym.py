@@ -1025,12 +1025,16 @@ async def api_clase_bloque_delete(
 
 @router.get("/api/ejercicios")
 async def api_ejercicios_list(
+    request: Request,
     _=Depends(require_gestion_access),
     svc: GymService = Depends(get_gym_service)
 ):
-    """Get all exercises using SQLAlchemy."""
+    """Get all exercises using SQLAlchemy with optional filters."""
     try:
-        return svc.obtener_ejercicios()
+        search = request.query_params.get("search")
+        grupo = request.query_params.get("grupo")
+        objetivo = request.query_params.get("objetivo")
+        return {"ejercicios": svc.obtener_ejercicios(search=search, grupo=grupo, objetivo=objetivo)}
     except Exception as e:
         logger.error(f"Error listing ejercicios: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)

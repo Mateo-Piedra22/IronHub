@@ -284,23 +284,46 @@ class GymService(BaseService):
             logger.error(f"Error getting ejercicios catalog: {e}")
             return []
 
-    def obtener_ejercicios(self) -> List[Dict[str, Any]]:
-        """Get all exercises for listing."""
+    def obtener_ejercicios(self, search: str = None, grupo: str = None, objetivo: str = None) -> List[Dict[str, Any]]:
+        """Get all exercises for listing with optional filters."""
         try:
             cols = self.get_table_columns('ejercicios')
             select_cols = ['id', 'nombre']
             if 'grupo_muscular' in cols:
                 select_cols.append('grupo_muscular')
+            if 'objetivo' in cols:
+                select_cols.append('objetivo')
             if 'video_url' in cols:
                 select_cols.append('video_url')
             if 'video_mime' in cols:
                 select_cols.append('video_mime')
             if 'descripcion' in cols:
                 select_cols.append('descripcion')
+            if 'equipamiento' in cols:
+                select_cols.append('equipamiento')
             
-            result = self.db.execute(
-                text(f"SELECT {', '.join(select_cols)} FROM ejercicios ORDER BY nombre")
-            )
+            # Build WHERE clause
+            conditions = []
+            params = {}
+            
+            if search and search.strip():
+                conditions.append("(LOWER(nombre) LIKE :search OR LOWER(descripcion) LIKE :search)")
+                params['search'] = f"%{search.strip().lower()}%"
+            
+            if grupo and grupo.strip():
+                conditions.append("LOWER(grupo_muscular) = :grupo")
+                params['grupo'] = grupo.strip().lower()
+            
+            if objetivo and objetivo.strip():
+                conditions.append("LOWER(objetivo) = :objetivo")
+                params['objetivo'] = objetivo.strip().lower()
+            
+            where_clause = ""
+            if conditions:
+                where_clause = " WHERE " + " AND ".join(conditions)
+            
+            query = f"SELECT {', '.join(select_cols)} FROM ejercicios{where_clause} ORDER BY nombre"
+            result = self.db.execute(text(query), params)
             
             exercises = []
             for row in result.fetchall():
@@ -308,6 +331,9 @@ class GymService(BaseService):
                 idx = 2
                 if 'grupo_muscular' in select_cols:
                     exercise['grupo_muscular'] = row[idx]
+                    idx += 1
+                if 'objetivo' in select_cols:
+                    exercise['objetivo'] = row[idx]
                     idx += 1
                 if 'video_url' in select_cols:
                     exercise['video_url'] = row[idx]
@@ -317,6 +343,9 @@ class GymService(BaseService):
                     idx += 1
                 if 'descripcion' in select_cols:
                     exercise['descripcion'] = row[idx]
+                    idx += 1
+                if 'equipamiento' in select_cols:
+                    exercise['equipamiento'] = row[idx]
                 exercises.append(exercise)
             return exercises
         except Exception as e:

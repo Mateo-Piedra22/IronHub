@@ -753,10 +753,11 @@ class ApiClient {
     }
 
     // === Ejercicios ===
-    async getEjercicios(params?: { search?: string; grupo?: string }) {
+    async getEjercicios(params?: { search?: string; grupo?: string; objetivo?: string }) {
         const searchParams = new URLSearchParams();
         if (params?.search) searchParams.set('search', params.search);
         if (params?.grupo) searchParams.set('grupo', params.grupo);
+        if (params?.objetivo) searchParams.set('objetivo', params.objetivo);
 
         const query = searchParams.toString();
         return this.request<{ ejercicios: Ejercicio[] }>(
@@ -975,11 +976,43 @@ class ApiClient {
         });
     }
 
-    async createAsistencia(usuarioId: number) {
-        return this.request<Asistencia>('/api/asistencias', {
+    async createAsistencia(usuarioId: number, fecha?: string) {
+        return this.request<{ success: boolean; asistencia_id?: number; message?: string }>('/api/asistencias/registrar', {
             method: 'POST',
-            body: JSON.stringify({ usuario_id: usuarioId }),
+            body: JSON.stringify({ usuario_id: usuarioId, fecha }),
         });
+    }
+
+    async deleteAsistencia(usuarioId: number, fecha?: string) {
+        return this.request<{ success: boolean }>('/api/asistencias/eliminar', {
+            method: 'DELETE',
+            body: JSON.stringify({
+                usuario_id: usuarioId,
+                fecha: fecha || new Date().toISOString().split('T')[0]
+            }),
+        });
+    }
+
+    async getAsistenciasHoyIds() {
+        return this.request<number[]>('/api/asistencias_hoy_ids');
+    }
+
+    async getUserAsistencias(usuarioId: number, limit?: number) {
+        const params = new URLSearchParams();
+        params.set('usuario_id', String(usuarioId));
+        if (limit) params.set('limit', String(limit));
+        return this.request<{ asistencias: Asistencia[] }>(`/api/usuario_asistencias?${params.toString()}`);
+    }
+
+    async createCheckinToken(usuarioId: number, expiresMinutes?: number) {
+        return this.request<{ success: boolean; token: string; expires_minutes: number }>('/api/checkin/create_token', {
+            method: 'POST',
+            body: JSON.stringify({ usuario_id: usuarioId, expires_minutes: expiresMinutes || 5 }),
+        });
+    }
+
+    async getCheckinTokenStatus(token: string) {
+        return this.request<{ exists: boolean; used: boolean; expired: boolean }>(`/api/checkin/token_status?token=${encodeURIComponent(token)}`);
     }
 
     // === User Tags (Etiquetas) ===

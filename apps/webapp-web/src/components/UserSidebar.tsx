@@ -22,9 +22,13 @@ import {
     Plus,
     Save,
     MessageSquare,
+    DollarSign,
+    UserCheck,
+    UserMinus,
+    Loader2,
 } from 'lucide-react';
 import { Button, Modal, ConfirmModal, Input, useToast } from '@/components/ui';
-import { api, type Usuario, type Etiqueta, type Estado, type Pago, type EstadoTemplate } from '@/lib/api';
+import { api, type Usuario, type Etiqueta, type Estado, type Pago, type EstadoTemplate, type Asistencia } from '@/lib/api';
 import { formatDate, formatCurrency, getWhatsAppLink, cn } from '@/lib/utils';
 
 interface UserSidebarProps {
@@ -35,6 +39,8 @@ interface UserSidebarProps {
     onDelete: (usuario: Usuario) => void;
     onToggleActivo: (usuario: Usuario) => void;
     onRefresh: () => void;
+    onOpenPagoModal?: (usuario: Usuario) => void;
+    onCreateRutina?: (usuario: Usuario) => void;
 }
 
 type TabType = 'notas' | 'etiquetas' | 'estados';
@@ -47,6 +53,8 @@ export default function UserSidebar({
     onDelete,
     onToggleActivo,
     onRefresh,
+    onOpenPagoModal,
+    onCreateRutina,
 }: UserSidebarProps) {
     const { success, error } = useToast();
     const [activeTab, setActiveTab] = useState<TabType>('notas');
@@ -72,10 +80,17 @@ export default function UserSidebar({
     // Historial pagos
     const [pagos, setPagos] = useState<Pago[]>([]);
 
+    // Asistencia state
+    const [asistencias30d, setAsistencias30d] = useState<number>(0);
+    const [hasAsistenciaHoy, setHasAsistenciaHoy] = useState(false);
+    const [asistenciaLoading, setAsistenciaLoading] = useState(false);
+
     // QR Modal
     const [qrModalOpen, setQrModalOpen] = useState(false);
-    const [qrData, setQrData] = useState<{ qr_url: string; token: string } | null>(null);
+    const [qrToken, setQrToken] = useState<string | null>(null);
     const [qrLoading, setQrLoading] = useState(false);
+    const [qrStatus, setQrStatus] = useState<'waiting' | 'used' | 'expired'>('waiting');
+    const qrPollRef = useRef<NodeJS.Timeout | null>(null);
 
     // Load data when usuario changes
     useEffect(() => {
@@ -86,7 +101,12 @@ export default function UserSidebar({
             loadPagos();
             loadSuggestions();
             loadEstadoTemplates();
+            loadAsistenciaStatus();
         }
+        // Cleanup QR polling on unmount
+        return () => {
+            if (qrPollRef.current) clearInterval(qrPollRef.current);
+        };
     }, [usuario?.id, isOpen]);
 
     const loadEtiquetas = async () => {
@@ -110,6 +130,30 @@ export default function UserSidebar({
         const res = await api.getPagos({ usuario_id: usuario.id, limit: 10 });
         if (res.ok && res.data) {
             setPagos(res.data.pagos);
+        }
+    };
+
+    const loadAsistenciaStatus = async () => {
+        if (!usuario) return;
+        try {
+            // Check if user has attendance today
+            const hoyRes = await api.getAsistenciasHoyIds();
+            if (hoyRes.ok && hoyRes.data) {
+                setHasAsistenciaHoy(hoyRes.data.includes(usuario.id));
+            }
+            // Load recent 30d attendance count
+            const recentRes = await api.getUserAsistencias(usuario.id, 200);
+            if (recentRes.ok && recentRes.data) {
+                const thirtyDaysAgo = new Date();
+                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                const recent = recentRes.data.asistencias.filter((a: Asistencia) => {
+                    const fecha = new Date(a.fecha);
+                    return fecha >= thirtyDaysAgo;
+                });
+                setAsistencias30d(recent.length);
+            }
+        } catch (e) {
+            // Silently fail
         }
     };
 
@@ -207,30 +251,81 @@ export default function UserSidebar({
         }
     };
 
-    // QR
+    // QR - Generate token and start polling
     const handleGenerateQR = async () => {
         if (!usuario) return;
         setQrLoading(true);
-        const res = await api.generateUserQR(usuario.id);
+        setQrStatus('waiting');
+
+        // Clear any existing poll
+        if (qrPollRef.current) clearInterval(qrPollRef.current);
+
+        const res = await api.createCheckinToken(usuario.id, 5);
         setQrLoading(false);
+
         if (res.ok && res.data) {
-            setQrData(res.data);
+            setQrToken(res.data.token);
             setQrModalOpen(true);
+
+            // Start polling for token status
+            qrPollRef.current = setInterval(async () => {
+                if (!res.data?.token) return;
+                const statusRes = await api.getCheckinTokenStatus(res.data.token);
+                if (statusRes.ok && statusRes.data) {
+                    if (statusRes.data.used) {
+                        setQrStatus('used');
+                        setHasAsistenciaHoy(true);
+                        if (qrPollRef.current) clearInterval(qrPollRef.current);
+                        success('¡Asistencia registrada!');
+                        onRefresh();
+                        loadAsistenciaStatus();
+                    } else if (statusRes.data.expired) {
+                        setQrStatus('expired');
+                        if (qrPollRef.current) clearInterval(qrPollRef.current);
+                    }
+                }
+            }, 2000);
         } else {
             error(res.error || 'Error al generar QR');
         }
     };
 
-    // Asistencia manual
-    const handleRegistrarAsistencia = async () => {
+    const handleCloseQRModal = () => {
+        setQrModalOpen(false);
+        if (qrPollRef.current) clearInterval(qrPollRef.current);
+        setQrToken(null);
+    };
+
+    // Asistencia manual - toggle based on current state
+    const handleToggleAsistencia = async () => {
         if (!usuario) return;
-        const res = await api.createAsistencia(usuario.id);
-        if (res.ok) {
-            success('Asistencia registrada');
-            onRefresh();
+        setAsistenciaLoading(true);
+
+        if (hasAsistenciaHoy) {
+            // Remove attendance
+            const res = await api.deleteAsistencia(usuario.id);
+            if (res.ok) {
+                success('Asistencia de hoy eliminada');
+                setHasAsistenciaHoy(false);
+                onRefresh();
+                loadAsistenciaStatus();
+            } else {
+                error(res.error || 'Error al eliminar asistencia');
+            }
         } else {
-            error(res.error || 'Error al registrar asistencia');
+            // Register attendance
+            const res = await api.createAsistencia(usuario.id);
+            if (res.ok) {
+                success('Asistencia registrada');
+                setHasAsistenciaHoy(true);
+                onRefresh();
+                loadAsistenciaStatus();
+            } else {
+                error(res.error || 'Error al registrar asistencia');
+            }
         }
+
+        setAsistenciaLoading(false);
     };
 
     // Filter etiquetas
@@ -359,16 +454,37 @@ export default function UserSidebar({
                         </Button>
                         <Button size="sm" variant="secondary" onClick={handleGenerateQR} isLoading={qrLoading}>
                             <QrCode className="w-3 h-3 mr-1" />
-                            QR
+                            Emitir QR
                         </Button>
-                        <Button size="sm" variant="secondary" onClick={handleRegistrarAsistencia}>
-                            <Clock className="w-3 h-3 mr-1" />
-                            Asistencia
+                        <Button
+                            size="sm"
+                            variant={hasAsistenciaHoy ? 'danger' : 'primary'}
+                            onClick={handleToggleAsistencia}
+                            isLoading={asistenciaLoading}
+                        >
+                            {hasAsistenciaHoy ? <UserMinus className="w-3 h-3 mr-1" /> : <UserCheck className="w-3 h-3 mr-1" />}
+                            {hasAsistenciaHoy ? 'Quitar asistencia' : 'Registrar asistencia'}
                         </Button>
+                        {onOpenPagoModal && (
+                            <Button size="sm" variant="secondary" onClick={() => onOpenPagoModal(usuario)}>
+                                <DollarSign className="w-3 h-3 mr-1" />
+                                Registrar pago
+                            </Button>
+                        )}
+                        {onCreateRutina && (
+                            <Button size="sm" variant="secondary" onClick={() => onCreateRutina(usuario)}>
+                                <Dumbbell className="w-3 h-3 mr-1" />
+                                Crear rutina
+                            </Button>
+                        )}
                         <Button size="sm" variant="danger" onClick={() => onDelete(usuario)}>
                             <Trash2 className="w-3 h-3 mr-1" />
                             Eliminar
                         </Button>
+                    </div>
+                    {/* Attendance stat */}
+                    <div className="mt-2 text-xs text-neutral-500">
+                        Asistencias (30 días): <span className="font-medium text-white">{asistencias30d}</span>
                     </div>
                 </div>
 
@@ -596,25 +712,59 @@ export default function UserSidebar({
             {/* QR Modal */}
             <Modal
                 isOpen={qrModalOpen}
-                onClose={() => setQrModalOpen(false)}
+                onClose={handleCloseQRModal}
                 title="QR de Check-in"
                 size="sm"
             >
-                {qrData && (
-                    <div className="text-center space-y-4">
-                        <img
-                            src={qrData.qr_url}
-                            alt="QR Code"
-                            className="w-48 h-48 mx-auto rounded-lg"
-                        />
-                        <p className="text-sm text-neutral-400">
-                            El usuario puede escanear este código para registrar su asistencia.
-                        </p>
-                        <p className="text-xs text-neutral-500 font-mono">
-                            Token: {qrData.token}
-                        </p>
-                    </div>
-                )}
+                <div className="text-center space-y-4">
+                    {qrToken && qrStatus === 'waiting' && (
+                        <>
+                            <div className="bg-white p-4 rounded-lg inline-block">
+                                <img
+                                    src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrToken)}`}
+                                    alt="QR Code"
+                                    className="w-48 h-48"
+                                />
+                            </div>
+                            <div className="flex items-center justify-center gap-2 text-sm text-neutral-400">
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                Esperando que el usuario escanee...
+                            </div>
+                            <p className="text-xs text-neutral-500">
+                                El código expira en 5 minutos.
+                            </p>
+                        </>
+                    )}
+                    {qrStatus === 'used' && (
+                        <>
+                            <div className="w-16 h-16 mx-auto bg-success-500/20 rounded-full flex items-center justify-center">
+                                <CheckCircle2 className="w-8 h-8 text-success-400" />
+                            </div>
+                            <p className="text-lg font-semibold text-success-400">
+                                ¡Asistencia registrada!
+                            </p>
+                            <p className="text-sm text-neutral-400">
+                                El usuario escaneó el código correctamente.
+                            </p>
+                        </>
+                    )}
+                    {qrStatus === 'expired' && (
+                        <>
+                            <div className="w-16 h-16 mx-auto bg-danger-500/20 rounded-full flex items-center justify-center">
+                                <XCircle className="w-8 h-8 text-danger-400" />
+                            </div>
+                            <p className="text-lg font-semibold text-danger-400">
+                                Código expirado
+                            </p>
+                            <p className="text-sm text-neutral-400">
+                                Genera un nuevo código para intentar de nuevo.
+                            </p>
+                            <Button onClick={handleGenerateQR} isLoading={qrLoading}>
+                                Generar nuevo QR
+                            </Button>
+                        </>
+                    )}
+                </div>
             </Modal>
 
             {/* Click outside to close */}

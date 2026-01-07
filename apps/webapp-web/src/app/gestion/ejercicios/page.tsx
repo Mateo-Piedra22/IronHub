@@ -32,6 +32,16 @@ const gruposMusculares = [
     'Abdominales', 'Core', 'Antebrazos', 'Full Body', 'Cardio',
 ];
 
+// Objetivos for filtering
+const objetivos = [
+    { value: 'general', label: 'General' },
+    { value: 'fuerza', label: 'Fuerza' },
+    { value: 'hipertrofia', label: 'Hipertrofia' },
+    { value: 'resistencia', label: 'Resistencia' },
+    { value: 'cardio', label: 'Cardio' },
+    { value: 'flexibilidad', label: 'Flexibilidad' },
+];
+
 // Ejercicio form modal
 interface EjercicioFormModalProps {
     isOpen: boolean;
@@ -174,6 +184,7 @@ export default function EjerciciosPage() {
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [filterGrupo, setFilterGrupo] = useState('');
+    const [filterObjetivo, setFilterObjetivo] = useState('');
 
     // Modals
     const [formOpen, setFormOpen] = useState(false);
@@ -188,6 +199,7 @@ export default function EjerciciosPage() {
             const res = await api.getEjercicios({
                 search: search || undefined,
                 grupo: filterGrupo || undefined,
+                objetivo: filterObjetivo || undefined,
             });
             if (res.ok && res.data) {
                 setEjercicios(res.data.ejercicios);
@@ -197,7 +209,7 @@ export default function EjerciciosPage() {
         } finally {
             setLoading(false);
         }
-    }, [search, filterGrupo, error]);
+    }, [search, filterGrupo, filterObjetivo, error]);
 
     useEffect(() => {
         loadEjercicios();
@@ -367,6 +379,14 @@ export default function EjerciciosPage() {
                         options={[
                             { value: '', label: 'Todos los grupos' },
                             ...gruposMusculares.map((g) => ({ value: g, label: g })),
+                        ]}
+                    />
+                    <Select
+                        value={filterObjetivo}
+                        onChange={(e) => setFilterObjetivo(e.target.value)}
+                        options={[
+                            { value: '', label: 'Todos los objetivos' },
+                            ...objetivos,
                         ]}
                     />
                 </div>
