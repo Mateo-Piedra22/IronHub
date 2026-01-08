@@ -15,10 +15,12 @@
         "@tanstack/react-query": "^5.0.0",
         "clsx": "^2.1.0",
         "framer-motion": "^11.0.0",
+        "html5-qrcode": "^2.3.8",
         "lucide-react": "^0.400.0",
         "next": "^15.0.0",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
+        "react-dropzone": "^14.3.8",
         "tailwind-merge": "^2.2.0",
         "zustand": "^4.5.0"
     },

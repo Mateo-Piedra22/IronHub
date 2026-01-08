@@ -21,13 +21,13 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         return (
             <div className="space-y-1.5">
                 {label && (
-                    <label htmlFor={inputId} className="block text-sm font-medium text-neutral-300">
+                    <label htmlFor={inputId} className="block text-sm font-medium text-slate-300">
                         {label}
                     </label>
                 )}
                 <div className="relative">
                     {leftIcon && (
-                        <div className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500">
+                        <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
                             {leftIcon}
                         </div>
                     )}
@@ -36,9 +36,9 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
                         id={inputId}
                         className={cn(
                             'w-full px-4 py-3 rounded-xl',
-                            'bg-neutral-900 border border-neutral-800',
+                            'bg-slate-900 border border-slate-800',
                             'text-white placeholder-neutral-500',
-                            'focus:outline-none focus:ring-2 focus:ring-iron-500/50 focus:border-iron-500',
+                            'focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500',
                             'transition-all duration-200',
                             'disabled:opacity-50 disabled:cursor-not-allowed',
                             leftIcon && 'pl-10',
@@ -49,7 +49,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
                         {...props}
                     />
                     {rightIcon && (
-                        <div className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500">
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500">
                             {rightIcon}
                         </div>
                     )}
@@ -58,7 +58,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
                     <p className="text-sm text-danger-400">{error}</p>
                 )}
                 {hint && !error && (
-                    <p className="text-sm text-neutral-500">{hint}</p>
+                    <p className="text-sm text-slate-500">{hint}</p>
                 )}
             </div>
         );
@@ -133,7 +133,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         return (
             <div className="space-y-1.5">
                 {label && (
-                    <label htmlFor={inputId} className="block text-sm font-medium text-neutral-300">
+                    <label htmlFor={inputId} className="block text-sm font-medium text-slate-300">
                         {label}
                     </label>
                 )}
@@ -142,9 +142,9 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
                     id={inputId}
                     className={cn(
                         'w-full px-4 py-3 rounded-xl resize-y min-h-[100px]',
-                        'bg-neutral-900 border border-neutral-800',
+                        'bg-slate-900 border border-slate-800',
                         'text-white placeholder-neutral-500',
-                        'focus:outline-none focus:ring-2 focus:ring-iron-500/50 focus:border-iron-500',
+                        'focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500',
                         'transition-all duration-200',
                         'disabled:opacity-50 disabled:cursor-not-allowed',
                         error && 'border-danger-500 focus:ring-danger-500/50 focus:border-danger-500',
@@ -156,7 +156,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
                     <p className="text-sm text-danger-400">{error}</p>
                 )}
                 {hint && !error && (
-                    <p className="text-sm text-neutral-500">{hint}</p>
+                    <p className="text-sm text-slate-500">{hint}</p>
                 )}
             </div>
         );
@@ -180,7 +180,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
         return (
             <div className="space-y-1.5">
                 {label && (
-                    <label htmlFor={inputId} className="block text-sm font-medium text-neutral-300">
+                    <label htmlFor={inputId} className="block text-sm font-medium text-slate-300">
                         {label}
                     </label>
                 )}
@@ -189,9 +189,9 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
                     id={inputId}
                     className={cn(
                         'w-full px-4 py-3 rounded-xl appearance-none',
-                        'bg-neutral-900 border border-neutral-800',
+                        'bg-slate-900 border border-slate-800',
                         'text-white',
-                        'focus:outline-none focus:ring-2 focus:ring-iron-500/50 focus:border-iron-500',
+                        'focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500',
                         'transition-all duration-200',
                         'disabled:opacity-50 disabled:cursor-not-allowed',
                         'cursor-pointer',
@@ -242,17 +242,17 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
                     id={inputId}
                     className={cn(
                         'w-5 h-5 rounded-md',
-                        'bg-neutral-900 border border-neutral-700',
-                        'text-iron-500',
-                        'focus:outline-none focus:ring-2 focus:ring-iron-500/50',
+                        'bg-slate-900 border border-slate-700',
+                        'text-primary-500',
+                        'focus:outline-none focus:ring-2 focus:ring-primary-500/50',
                         'transition-all duration-200',
                         'cursor-pointer',
-                        'checked:bg-iron-500 checked:border-iron-500',
+                        'checked:bg-primary-500 checked:border-primary-500',
                         className
                     )}
                     {...props}
                 />
-                <span className="text-sm text-neutral-300 group-hover:text-white transition-colors">
+                <span className="text-sm text-slate-300 group-hover:text-white transition-colors">
                     {label}
                 </span>
             </label>
@@ -263,3 +263,4 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
 Checkbox.displayName = 'Checkbox';
 
 export default Input;
+

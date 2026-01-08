@@ -116,3 +116,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 }
 
 export default AuthProvider;
+

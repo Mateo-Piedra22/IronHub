@@ -50,10 +50,14 @@ app = FastAPI(
 )
 
 # CORS for wildcard subdomains
+# CORS for wildcard subdomains
 base_domain = os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz")
+# Escape dots for regex
+escaped_domain = base_domain.replace(".", r"\.")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[f"https://*.{base_domain}", f"https://{base_domain}"],
+    # allow_origins=[f"https://*.{base_domain}", f"https://{base_domain}"], # Invalid wildcard usage
+    allow_origin_regex=f"https://.*\.{escaped_domain}",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

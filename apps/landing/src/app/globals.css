@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,8 +6,8 @@
 
 @layer base {
   :root {
-    --background: 9 9 11;
-    --foreground: 250 250 250;
+    --background: 2 6 23;
+    --foreground: 248 250 252;
   }
 
   html {
@@ -17,15 +17,11 @@
   }
 
   body {
-    @apply bg-neutral-950 text-neutral-50 font-sans;
-    background-image: 
-      radial-gradient(ellipse 80% 80% at 50% -20%, rgba(139, 92, 246, 0.15), transparent),
-      radial-gradient(ellipse 50% 50% at 80% 20%, rgba(217, 119, 6, 0.1), transparent);
-    background-attachment: fixed;
+    @apply bg-slate-950 text-slate-50 font-sans;
   }
 
   ::selection {
-    @apply bg-iron-600 text-white;
+    @apply bg-primary-600 text-white;
   }
 
   /* Custom scrollbar */
@@ -35,65 +31,51 @@
   }
 
   ::-webkit-scrollbar-track {
-    @apply bg-neutral-900;
+    @apply bg-slate-900;
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-neutral-700 rounded-full;
+    @apply bg-slate-700 rounded-full;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-neutral-600;
+    @apply bg-slate-600;
   }
 }
 
 @layer components {
-  /* Premium Glass Card */
-  .glass-card {
-    @apply bg-neutral-900/50 backdrop-blur-xl border border-neutral-800/50 rounded-2xl;
-    box-shadow: 
-      0 0 0 1px rgba(255, 255, 255, 0.05) inset,
-      0 25px 50px -12px rgba(0, 0, 0, 0.5);
+
+  /* Card - Clean solid background */
+  .card {
+    @apply bg-slate-900 border border-slate-800 rounded-2xl;
   }
 
-  /* Gradient text */
-  .gradient-text {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-iron-400 via-iron-300 to-gold-400;
+  /* Card with subtle shadow */
+  .card-elevated {
+    @apply bg-slate-900 border border-slate-800 rounded-2xl shadow-elevated;
   }
 
-  /* Glow button */
-  .btn-glow {
-    @apply relative overflow-hidden px-8 py-4 rounded-xl font-semibold text-white;
-    @apply bg-gradient-to-r from-iron-600 to-iron-500;
-    @apply transition-all duration-300 ease-out;
-    @apply hover:shadow-glow-md hover:scale-[1.02];
+  /* Standard button */
+  .btn-primary {
+    @apply px-8 py-4 rounded-xl font-semibold text-white;
+    @apply bg-primary-600 hover:bg-primary-500;
+    @apply transition-colors duration-200;
     @apply active:scale-[0.98];
-  }
-
-  .btn-glow::before {
-    content: '';
-    @apply absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent;
-    @apply -translate-x-full;
-    transition: transform 0.6s ease;
-  }
-
-  .btn-glow:hover::before {
-    @apply translate-x-full;
   }
 
   /* Secondary button */
   .btn-secondary {
     @apply px-8 py-4 rounded-xl font-semibold;
-    @apply bg-neutral-800/50 border border-neutral-700/50 text-neutral-200;
-    @apply transition-all duration-300 ease-out;
-    @apply hover:bg-neutral-800 hover:border-neutral-600 hover:text-white;
+    @apply bg-slate-800 border border-slate-700 text-slate-200;
+    @apply transition-colors duration-200;
+    @apply hover:bg-slate-700 hover:border-slate-600 hover:text-white;
     @apply active:scale-[0.98];
   }
 
-  /* Gym card */
-  .gym-card {
-    @apply glass-card p-6 transition-all duration-500 ease-out;
-    @apply hover:border-iron-500/50 hover:shadow-glow-sm hover:-translate-y-1;
+  /* Feature card */
+  .feature-card {
+    @apply card p-6 transition-all duration-300;
+    @apply hover:border-primary-500/50 hover:-translate-y-1;
   }
 
   /* Section heading */
@@ -104,42 +86,32 @@
   /* Badge */
   .badge {
     @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-medium;
-    @apply bg-iron-500/20 text-iron-300 border border-iron-500/30;
+    @apply bg-primary-500/10 text-primary-400 border border-primary-500/20;
   }
 
-  /* Animated gradient border */
-  .gradient-border {
-    @apply relative;
-  }
-
-  .gradient-border::before {
-    content: '';
-    @apply absolute -inset-[1px] rounded-2xl;
-    background: linear-gradient(135deg, rgba(139, 92, 246, 0.5), rgba(217, 119, 6, 0.5));
-    @apply -z-10 opacity-0 transition-opacity duration-500;
-  }
-
-  .gradient-border:hover::before {
-    @apply opacity-100;
+  /* Gradient text (subtle) */
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
   }
 }
 
 @layer utilities {
-  /* Fade in up animation delays */
-  .animation-delay-150 { animation-delay: 150ms; }
-  .animation-delay-300 { animation-delay: 300ms; }
-  .animation-delay-500 { animation-delay: 500ms; }
-  .animation-delay-700 { animation-delay: 700ms; }
 
-  /* Text glow */
-  .text-glow {
-    text-shadow: 0 0 30px rgba(139, 92, 246, 0.5);
+  /* Fade in up animation delays */
+  .animation-delay-150 {
+    animation-delay: 150ms;
   }
 
-  /* Noise overlay */
-  .noise::before {
-    content: '';
-    @apply absolute inset-0 pointer-events-none opacity-[0.03];
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  .animation-delay-300 {
+    animation-delay: 300ms;
+  }
+
+  .animation-delay-500 {
+    animation-delay: 500ms;
+  }
+
+  .animation-delay-700 {
+    animation-delay: 700ms;
   }
 }

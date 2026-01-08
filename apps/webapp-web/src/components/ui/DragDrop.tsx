@@ -61,7 +61,7 @@ export function SortableItemWrapper({ item, children, disabled }: SortableItemPr
                 {...listeners}
                 className={cn(
                     'absolute left-0 top-1/2 -translate-y-1/2 -ml-2 p-1 rounded cursor-grab',
-                    'text-neutral-600 hover:text-neutral-400 transition-colors',
+                    'text-slate-600 hover:text-slate-400 transition-colors',
                     'opacity-0 group-hover:opacity-100',
                     disabled && 'hidden'
                 )}
@@ -255,8 +255,8 @@ export function KanbanBoard<T extends SortableItem>({
                                     </div>
                                 )
                             ) : (
-                                <div className="glass-card">
-                                    <div className="p-3 border-b border-neutral-800">
+                                <div className="card">
+                                    <div className="p-3 border-b border-slate-800">
                                         <h3 className="font-medium text-white">{column.title}</h3>
                                     </div>
                                     <div className="p-3 space-y-2 min-h-[100px]">
@@ -284,3 +284,4 @@ export function KanbanBoard<T extends SortableItem>({
 }
 
 export { arrayMove };
+

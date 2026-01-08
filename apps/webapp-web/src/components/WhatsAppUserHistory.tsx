@@ -195,7 +195,7 @@ export function WhatsAppUserHistory({ isOpen, onClose, userId, userName }: Whats
                 {/* History list */}
                 <div className="max-h-[400px] overflow-y-auto space-y-2">
                     {filteredMessages.length === 0 ? (
-                        <div className="py-8 text-center text-neutral-500">
+                        <div className="py-8 text-center text-slate-500">
                             <MessageSquare className="w-8 h-8 mx-auto mb-2 opacity-50" />
                             No hay mensajes
                         </div>
@@ -207,7 +207,7 @@ export function WhatsAppUserHistory({ isOpen, onClose, userId, userName }: Whats
                                     "p-3 rounded-xl border",
                                     msg.status === "failed"
                                         ? "border-danger-500/30 bg-danger-500/5"
-                                        : "border-neutral-800 bg-neutral-900/50"
+                                        : "border-slate-800 bg-slate-900/50"
                                 )}
                             >
                                 <div className="flex items-start justify-between gap-2">
@@ -219,17 +219,17 @@ export function WhatsAppUserHistory({ isOpen, onClose, userId, userName }: Whats
                                                 "text-xs px-1.5 py-0.5 rounded",
                                                 msg.status === "failed" ? "bg-danger-500/20 text-danger-400" :
                                                     msg.status === "read" ? "bg-success-500/20 text-success-400" :
-                                                        "bg-neutral-800 text-neutral-400"
+                                                        "bg-slate-800 text-slate-400"
                                             )}>
                                                 {getStatusLabel(msg.status)}
                                             </span>
                                         </div>
-                                        <div className="text-xs text-neutral-500 mt-1 flex items-center gap-1">
+                                        <div className="text-xs text-slate-500 mt-1 flex items-center gap-1">
                                             <Clock className="w-3 h-3" />
                                             {formatDate(msg.sent_at || msg.created_at)}
                                         </div>
                                         {msg.message_content && (
-                                            <div className="text-xs text-neutral-400 mt-2 line-clamp-2">
+                                            <div className="text-xs text-slate-400 mt-2 line-clamp-2">
                                                 {msg.message_content}
                                             </div>
                                         )}
@@ -259,3 +259,4 @@ export function WhatsAppUserHistory({ isOpen, onClose, userId, userName }: Whats
 }
 
 export default WhatsAppUserHistory;
+

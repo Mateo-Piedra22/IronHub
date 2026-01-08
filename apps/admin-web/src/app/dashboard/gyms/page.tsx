@@ -255,13 +255,13 @@ export default function GymsPage() {
     const tenantDomain = process.env.NEXT_PUBLIC_TENANT_DOMAIN || 'ironhub.motiona.xyz';
 
     const GymRow = ({ gym }: { gym: Gym }) => (
-        <tr className={selectedIds.has(gym.id) ? 'bg-iron-500/10' : ''}>
+        <tr className={selectedIds.has(gym.id) ? 'bg-primary-500/10' : ''}>
             <td className="w-10">
                 <button onClick={() => toggleSelect(gym.id)} className="p-1">
                     {selectedIds.has(gym.id) ? (
-                        <CheckSquare className="w-4 h-4 text-iron-400" />
+                        <CheckSquare className="w-4 h-4 text-primary-400" />
                     ) : (
-                        <Square className="w-4 h-4 text-neutral-600" />
+                        <Square className="w-4 h-4 text-slate-600" />
                     )}
                 </button>
             </td>
@@ -271,13 +271,13 @@ export default function GymsPage() {
                     href={`https://${gym.subdominio}.${tenantDomain}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-iron-400 hover:text-iron-300 flex items-center gap-1"
+                    className="text-primary-400 hover:text-primary-300 flex items-center gap-1"
                 >
                     {gym.subdominio}
                     <ExternalLink className="w-3 h-3" />
                 </a>
             </td>
-            <td className="text-neutral-400 text-sm">{gym.db_name}</td>
+            <td className="text-slate-400 text-sm">{gym.db_name}</td>
             <td>
                 <span className={`badge ${gym.status === 'active' ? 'badge-success' :
                     gym.status === 'maintenance' ? 'badge-warning' : 'badge-danger'
@@ -290,21 +290,21 @@ export default function GymsPage() {
                 {gym.wa_configured ? (
                     <Check className="w-4 h-4 text-success-400" />
                 ) : (
-                    <X className="w-4 h-4 text-neutral-600" />
+                    <X className="w-4 h-4 text-slate-600" />
                 )}
             </td>
             <td>
                 <div className="flex items-center gap-1">
                     <button
                         onClick={() => { setSelectedGym(gym); setStatusOpen(true); }}
-                        className="p-2 rounded-lg hover:bg-neutral-800 text-neutral-400 hover:text-white"
+                        className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white"
                         title="Cambiar estado"
                     >
                         <Power className="w-4 h-4" />
                     </button>
                     <button
                         onClick={() => { setSelectedGym(gym); setDeleteOpen(true); }}
-                        className="p-2 rounded-lg hover:bg-danger-500/10 text-neutral-400 hover:text-danger-400"
+                        className="p-2 rounded-lg hover:bg-danger-500/10 text-slate-400 hover:text-danger-400"
                         title="Eliminar"
                     >
                         <Trash2 className="w-4 h-4" />
@@ -315,14 +315,14 @@ export default function GymsPage() {
     );
 
     const GymCard = ({ gym }: { gym: Gym }) => (
-        <div className={`glass-card p-4 ${selectedIds.has(gym.id) ? 'ring-2 ring-iron-500' : ''}`}>
+        <div className={`card p-4 ${selectedIds.has(gym.id) ? 'ring-2 ring-primary-500' : ''}`}>
             <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center gap-2">
                     <button onClick={() => toggleSelect(gym.id)} className="p-1">
                         {selectedIds.has(gym.id) ? (
-                            <CheckSquare className="w-4 h-4 text-iron-400" />
+                            <CheckSquare className="w-4 h-4 text-primary-400" />
                         ) : (
-                            <Square className="w-4 h-4 text-neutral-600" />
+                            <Square className="w-4 h-4 text-slate-600" />
                         )}
                     </button>
                     <div>
@@ -331,7 +331,7 @@ export default function GymsPage() {
                             href={`https://${gym.subdominio}.${tenantDomain}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-sm text-iron-400 hover:text-iron-300 flex items-center gap-1"
+                            className="text-sm text-primary-400 hover:text-primary-300 flex items-center gap-1"
                         >
                             {gym.subdominio}.{tenantDomain}
                             <ExternalLink className="w-3 h-3" />
@@ -346,17 +346,17 @@ export default function GymsPage() {
                 </span>
             </div>
             <div className="flex items-center justify-between text-sm">
-                <span className="text-neutral-500">DB: {gym.db_name}</span>
+                <span className="text-slate-500">DB: {gym.db_name}</span>
                 <div className="flex items-center gap-1">
                     <button
                         onClick={() => { setSelectedGym(gym); setStatusOpen(true); }}
-                        className="p-1.5 rounded-lg hover:bg-neutral-800 text-neutral-400"
+                        className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400"
                     >
                         <Power className="w-4 h-4" />
                     </button>
                     <button
                         onClick={() => { setSelectedGym(gym); setDeleteOpen(true); }}
-                        className="p-1.5 rounded-lg hover:bg-danger-500/10 text-neutral-400 hover:text-danger-400"
+                        className="p-1.5 rounded-lg hover:bg-danger-500/10 text-slate-400 hover:text-danger-400"
                     >
                         <Trash2 className="w-4 h-4" />
                     </button>
@@ -371,7 +371,7 @@ export default function GymsPage() {
             <div className="flex items-center justify-between flex-wrap gap-4">
                 <div>
                     <h1 className="page-title">Gimnasios</h1>
-                    <p className="text-neutral-400 mt-1">Gestiona todos los gimnasios del sistema</p>
+                    <p className="text-slate-400 mt-1">Gestiona todos los gimnasios del sistema</p>
                 </div>
                 <button onClick={() => setCreateOpen(true)} className="btn-primary flex items-center gap-2">
                     <Plus className="w-4 h-4" />
@@ -382,7 +382,7 @@ export default function GymsPage() {
             {/* Filters */}
             <div className="flex items-center gap-4 flex-wrap">
                 <div className="relative flex-1 max-w-md">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-500" />
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                     <input
                         type="text"
                         placeholder="Buscar gimnasios..."
@@ -401,29 +401,29 @@ export default function GymsPage() {
                     <option value="suspended">Suspendidos</option>
                     <option value="maintenance">Mantenimiento</option>
                 </select>
-                <div className="flex items-center gap-1 border border-neutral-700 rounded-lg p-1">
+                <div className="flex items-center gap-1 border border-slate-700 rounded-lg p-1">
                     <button
                         onClick={() => setViewMode('table')}
-                        className={`p-2 rounded ${viewMode === 'table' ? 'bg-neutral-700 text-white' : 'text-neutral-400 hover:text-white'}`}
+                        className={`p-2 rounded ${viewMode === 'table' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}
                     >
                         <List className="w-4 h-4" />
                     </button>
                     <button
                         onClick={() => setViewMode('cards')}
-                        className={`p-2 rounded ${viewMode === 'cards' ? 'bg-neutral-700 text-white' : 'text-neutral-400 hover:text-white'}`}
+                        className={`p-2 rounded ${viewMode === 'cards' ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'}`}
                     >
                         <Grid3X3 className="w-4 h-4" />
                     </button>
                 </div>
-                <button onClick={loadGyms} className="p-2 rounded-lg hover:bg-neutral-800 text-neutral-400">
+                <button onClick={loadGyms} className="p-2 rounded-lg hover:bg-slate-800 text-slate-400">
                     <RefreshCw className="w-4 h-4" />
                 </button>
             </div>
 
             {/* Batch Actions Bar */}
             {selectedIds.size > 0 && (
-                <div className="glass-card p-4 flex items-center gap-4 flex-wrap">
-                    <span className="text-sm text-neutral-400">
+                <div className="card p-4 flex items-center gap-4 flex-wrap">
+                    <span className="text-sm text-slate-400">
                         {selectedIds.size} seleccionados
                     </span>
                     <button
@@ -458,7 +458,7 @@ export default function GymsPage() {
                         <button
                             onClick={handleSendReminder}
                             disabled={batchLoading || !reminderMessage.trim()}
-                            className="p-2 rounded-lg bg-neutral-800 text-neutral-400 hover:text-white disabled:opacity-50"
+                            className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white disabled:opacity-50"
                         >
                             <Send className="w-4 h-4" />
                         </button>
@@ -480,10 +480,10 @@ export default function GymsPage() {
                         </button>
                     </div>
                     <div className="ml-auto flex items-center gap-2">
-                        <button onClick={selectAll} className="text-sm text-neutral-400 hover:text-white">
+                        <button onClick={selectAll} className="text-sm text-slate-400 hover:text-white">
                             Seleccionar todo
                         </button>
-                        <button onClick={clearSelection} className="text-sm text-neutral-400 hover:text-white">
+                        <button onClick={clearSelection} className="text-sm text-slate-400 hover:text-white">
                             Limpiar
                         </button>
                     </div>
@@ -491,10 +491,10 @@ export default function GymsPage() {
             )}
 
             {/* Content */}
-            <div className="glass-card overflow-hidden">
+            <div className="card overflow-hidden">
                 {loading ? (
                     <div className="flex items-center justify-center py-16">
-                        <Loader2 className="w-8 h-8 animate-spin text-iron-400" />
+                        <Loader2 className="w-8 h-8 animate-spin text-primary-400" />
                     </div>
                 ) : viewMode === 'table' ? (
                     <table className="data-table">
@@ -503,9 +503,9 @@ export default function GymsPage() {
                                 <th className="w-10">
                                     <button onClick={selectedIds.size === gyms.length ? clearSelection : selectAll}>
                                         {selectedIds.size === gyms.length && gyms.length > 0 ? (
-                                            <CheckSquare className="w-4 h-4 text-iron-400" />
+                                            <CheckSquare className="w-4 h-4 text-primary-400" />
                                         ) : (
-                                            <Square className="w-4 h-4 text-neutral-600" />
+                                            <Square className="w-4 h-4 text-slate-600" />
                                         )}
                                     </button>
                                 </th>
@@ -520,7 +520,7 @@ export default function GymsPage() {
                         <tbody>
                             {gyms.length === 0 ? (
                                 <tr>
-                                    <td colSpan={7} className="text-center text-neutral-500 py-8">
+                                    <td colSpan={7} className="text-center text-slate-500 py-8">
                                         No hay gimnasios
                                     </td>
                                 </tr>
@@ -532,7 +532,7 @@ export default function GymsPage() {
                 ) : (
                     <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {gyms.length === 0 ? (
-                            <p className="col-span-full text-center text-neutral-500 py-8">No hay gimnasios</p>
+                            <p className="col-span-full text-center text-slate-500 py-8">No hay gimnasios</p>
                         ) : (
                             gyms.map((gym) => <GymCard key={gym.id} gym={gym} />)
                         )}
@@ -542,21 +542,21 @@ export default function GymsPage() {
 
             {/* Pagination */}
             <div className="flex items-center justify-between">
-                <div className="text-sm text-neutral-400">
+                <div className="text-sm text-slate-400">
                     Página {page} de {lastPage} · {total} resultados
                 </div>
                 <div className="flex items-center gap-2">
                     <button
                         onClick={() => setPage((p) => Math.max(1, p - 1))}
                         disabled={page <= 1}
-                        className="p-2 rounded-lg bg-neutral-800 text-neutral-400 hover:text-white disabled:opacity-50"
+                        className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white disabled:opacity-50"
                     >
                         <ChevronLeft className="w-4 h-4" />
                     </button>
                     <button
                         onClick={() => setPage((p) => Math.min(lastPage, p + 1))}
                         disabled={page >= lastPage}
-                        className="p-2 rounded-lg bg-neutral-800 text-neutral-400 hover:text-white disabled:opacity-50"
+                        className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white disabled:opacity-50"
                     >
                         <ChevronRight className="w-4 h-4" />
                     </button>
@@ -578,7 +578,7 @@ export default function GymsPage() {
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.95, opacity: 0 }}
                             onClick={(e) => e.stopPropagation()}
-                            className="glass-card w-full max-w-lg p-6 my-8"
+                            className="card w-full max-w-lg p-6 my-8"
                         >
                             <h2 className="text-xl font-bold text-white mb-4">Nuevo Gimnasio</h2>
                             <form onSubmit={handleCreate} className="space-y-4">
@@ -602,7 +602,7 @@ export default function GymsPage() {
                                             className="input"
                                             placeholder="ironfitness"
                                         />
-                                        <span className="text-neutral-500 whitespace-nowrap">.{tenantDomain}</span>
+                                        <span className="text-slate-500 whitespace-nowrap">.{tenantDomain}</span>
                                     </div>
                                 </div>
                                 <div>
@@ -616,8 +616,8 @@ export default function GymsPage() {
                                     />
                                 </div>
 
-                                <details className="border border-neutral-700 rounded-lg">
-                                    <summary className="cursor-pointer px-4 py-3 text-sm text-neutral-300 bg-neutral-800/50 rounded-lg">
+                                <details className="border border-slate-700 rounded-lg">
+                                    <summary className="cursor-pointer px-4 py-3 text-sm text-slate-300 bg-slate-800/50 rounded-lg">
                                         Configuración de WhatsApp (avanzado)
                                     </summary>
                                     <div className="p-4 space-y-3">
@@ -672,7 +672,7 @@ export default function GymsPage() {
                                                 checked={formData.whatsapp_nonblocking}
                                                 onChange={(e) => setFormData({ ...formData, whatsapp_nonblocking: e.target.checked })}
                                             />
-                                            <span className="text-sm text-neutral-300">Envío no bloqueante</span>
+                                            <span className="text-sm text-slate-300">Envío no bloqueante</span>
                                         </label>
                                         <div>
                                             <label className="label text-xs">Timeout (segundos)</label>
@@ -723,10 +723,10 @@ export default function GymsPage() {
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.95, opacity: 0 }}
                             onClick={(e) => e.stopPropagation()}
-                            className="glass-card w-full max-w-sm p-6"
+                            className="card w-full max-w-sm p-6"
                         >
                             <h2 className="text-xl font-bold text-white mb-2">Eliminar Gimnasio</h2>
-                            <p className="text-neutral-400 mb-4">
+                            <p className="text-slate-400 mb-4">
                                 ¿Eliminar <strong>{selectedGym.nombre}</strong>? Esta acción eliminará también su base de datos.
                             </p>
                             <div className="flex items-center justify-end gap-3">
@@ -757,29 +757,29 @@ export default function GymsPage() {
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.95, opacity: 0 }}
                             onClick={(e) => e.stopPropagation()}
-                            className="glass-card w-full max-w-sm p-6"
+                            className="card w-full max-w-sm p-6"
                         >
                             <h2 className="text-xl font-bold text-white mb-4">Cambiar Estado</h2>
-                            <p className="text-neutral-400 mb-4">{selectedGym.nombre}</p>
+                            <p className="text-slate-400 mb-4">{selectedGym.nombre}</p>
                             <div className="space-y-2">
                                 <button
                                     onClick={() => handleStatusChange('active')}
                                     disabled={formLoading}
-                                    className="w-full p-3 rounded-xl text-left hover:bg-success-500/10 border border-neutral-800 hover:border-success-500/30"
+                                    className="w-full p-3 rounded-xl text-left hover:bg-success-500/10 border border-slate-800 hover:border-success-500/30"
                                 >
                                     <span className="text-success-400 font-medium">Activar</span>
                                 </button>
                                 <button
                                     onClick={() => handleStatusChange('maintenance')}
                                     disabled={formLoading}
-                                    className="w-full p-3 rounded-xl text-left hover:bg-warning-500/10 border border-neutral-800 hover:border-warning-500/30"
+                                    className="w-full p-3 rounded-xl text-left hover:bg-warning-500/10 border border-slate-800 hover:border-warning-500/30"
                                 >
                                     <span className="text-warning-400 font-medium">Mantenimiento</span>
                                 </button>
                                 <button
                                     onClick={() => handleStatusChange('suspended')}
                                     disabled={formLoading}
-                                    className="w-full p-3 rounded-xl text-left hover:bg-danger-500/10 border border-neutral-800 hover:border-danger-500/30"
+                                    className="w-full p-3 rounded-xl text-left hover:bg-danger-500/10 border border-slate-800 hover:border-danger-500/30"
                                 >
                                     <span className="text-danger-400 font-medium">Suspender</span>
                                 </button>
@@ -807,10 +807,10 @@ export default function GymsPage() {
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 0.95, opacity: 0 }}
                             onClick={(e) => e.stopPropagation()}
-                            className="glass-card w-full max-w-md p-6"
+                            className="card w-full max-w-md p-6"
                         >
                             <h2 className="text-xl font-bold text-white mb-4">Suspender Gimnasios</h2>
-                            <p className="text-neutral-400 mb-4">{selectedIds.size} gimnasio(s) seleccionado(s)</p>
+                            <p className="text-slate-400 mb-4">{selectedIds.size} gimnasio(s) seleccionado(s)</p>
                             <div className="space-y-4">
                                 <div>
                                     <label className="label">Razón</label>
@@ -837,7 +837,7 @@ export default function GymsPage() {
                                         checked={suspendData.hard}
                                         onChange={(e) => setSuspendData({ ...suspendData, hard: e.target.checked })}
                                     />
-                                    <span className="text-neutral-300">Hard suspend</span>
+                                    <span className="text-slate-300">Hard suspend</span>
                                 </label>
                             </div>
                             <div className="flex items-center justify-end gap-3 mt-6">
@@ -855,3 +855,4 @@ export default function GymsPage() {
         </div>
     );
 }
+

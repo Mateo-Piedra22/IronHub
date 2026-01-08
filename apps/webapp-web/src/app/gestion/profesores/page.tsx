@@ -214,7 +214,7 @@ function SessionTimer({ profesor, onSessionUpdate }: SessionTimerProps) {
         <div className="flex items-center gap-4">
             <div className={cn(
                 'font-mono text-lg',
-                isActive ? 'text-success-400' : 'text-neutral-500'
+                isActive ? 'text-success-400' : 'text-slate-500'
             )}>
                 {formatElapsed(elapsed)}
             </div>
@@ -349,7 +349,7 @@ export default function ProfesoresPage() {
             key: 'minutos',
             header: 'Duración',
             render: (row) => (
-                <span className="text-iron-400">
+                <span className="text-primary-400">
                     {Math.floor(row.minutos / 60)}h {row.minutos % 60}m
                 </span>
             ),
@@ -360,7 +360,7 @@ export default function ProfesoresPage() {
             render: (row) => (
                 <span className={cn(
                     'inline-flex items-center px-2 py-1 rounded-md text-xs',
-                    row.tipo === 'extra' ? 'bg-warning-500/20 text-warning-400' : 'bg-neutral-800 text-neutral-300'
+                    row.tipo === 'extra' ? 'bg-warning-500/20 text-warning-400' : 'bg-slate-800 text-slate-300'
                 )}>
                     {row.tipo === 'extra' ? 'Extra' : 'Normal'}
                 </span>
@@ -383,7 +383,7 @@ export default function ProfesoresPage() {
             >
                 <div>
                     <h1 className="text-2xl font-display font-bold text-white">Profesores</h1>
-                    <p className="text-neutral-400 mt-1">
+                    <p className="text-slate-400 mt-1">
                         Gestión de staff y control de sesiones
                     </p>
                 </div>
@@ -405,11 +405,11 @@ export default function ProfesoresPage() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.1 }}
-                    className="glass-card overflow-hidden"
+                    className="card overflow-hidden"
                 >
-                    <div className="p-4 border-b border-neutral-800">
+                    <div className="p-4 border-b border-slate-800">
                         <h2 className="font-semibold text-white flex items-center gap-2">
-                            <User className="w-4 h-4 text-iron-400" />
+                            <User className="w-4 h-4 text-primary-400" />
                             Staff ({profesores.length})
                         </h2>
                     </div>
@@ -417,12 +417,12 @@ export default function ProfesoresPage() {
                         {loading ? (
                             Array.from({ length: 3 }).map((_, i) => (
                                 <div key={i} className="p-4 animate-pulse">
-                                    <div className="h-4 bg-neutral-800 rounded w-3/4 mb-2" />
-                                    <div className="h-3 bg-neutral-800 rounded w-1/2" />
+                                    <div className="h-4 bg-slate-800 rounded w-3/4 mb-2" />
+                                    <div className="h-3 bg-slate-800 rounded w-1/2" />
                                 </div>
                             ))
                         ) : profesores.length === 0 ? (
-                            <div className="p-8 text-center text-neutral-500">
+                            <div className="p-8 text-center text-slate-500">
                                 No hay profesores registrados
                             </div>
                         ) : (
@@ -432,14 +432,14 @@ export default function ProfesoresPage() {
                                     className={cn(
                                         'p-4 flex items-center justify-between transition-colors cursor-pointer',
                                         selectedProfesor?.id === prof.id
-                                            ? 'bg-iron-500/10 border-l-2 border-l-iron-500'
-                                            : 'hover:bg-neutral-800/50'
+                                            ? 'bg-primary-500/10 border-l-2 border-l-primary-500'
+                                            : 'hover:bg-slate-800/50'
                                     )}
                                     onClick={() => setSelectedProfesor(prof)}
                                 >
                                     <div>
                                         <div className="font-medium text-white">{prof.nombre}</div>
-                                        <div className="text-sm text-neutral-500 mt-0.5">
+                                        <div className="text-sm text-slate-500 mt-0.5">
                                             {prof.telefono || prof.email || 'Sin contacto'}
                                         </div>
                                     </div>
@@ -450,7 +450,7 @@ export default function ProfesoresPage() {
                                                 setProfesorToEdit(prof);
                                                 setFormModalOpen(true);
                                             }}
-                                            className="p-1.5 rounded text-neutral-400 hover:text-white hover:bg-neutral-800"
+                                            className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-800"
                                         >
                                             <Edit className="w-3.5 h-3.5" />
                                         </button>
@@ -460,7 +460,7 @@ export default function ProfesoresPage() {
                                                 setProfesorToDelete(prof);
                                                 setDeleteModalOpen(true);
                                             }}
-                                            className="p-1.5 rounded text-neutral-400 hover:text-danger-400"
+                                            className="p-1.5 rounded text-slate-400 hover:text-danger-400"
                                         >
                                             <Trash2 className="w-3.5 h-3.5" />
                                         </button>
@@ -481,13 +481,13 @@ export default function ProfesoresPage() {
                     {selectedProfesor ? (
                         <>
                             {/* Profesor header with timer */}
-                            <div className="glass-card p-6">
+                            <div className="card p-6">
                                 <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                                     <div>
                                         <h2 className="text-xl font-display font-bold text-white">
                                             {selectedProfesor.nombre}
                                         </h2>
-                                        <div className="text-sm text-neutral-400 mt-1">
+                                        <div className="text-sm text-slate-400 mt-1">
                                             {selectedProfesor.email || selectedProfesor.telefono || 'Sin contacto'}
                                         </div>
                                     </div>
@@ -510,20 +510,20 @@ export default function ProfesoresPage() {
 
                             {/* Stats */}
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                                <div className="glass-card p-4">
+                                <div className="card p-4">
                                     <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 rounded-xl bg-iron-500/20 flex items-center justify-center">
-                                            <Timer className="w-5 h-5 text-iron-400" />
+                                        <div className="w-10 h-10 rounded-xl bg-primary-500/20 flex items-center justify-center">
+                                            <Timer className="w-5 h-5 text-primary-400" />
                                         </div>
                                         <div>
                                             <div className="text-xl font-bold text-white">
                                                 {totalHoras}h {restMinutos}m
                                             </div>
-                                            <div className="text-xs text-neutral-500">Total horas</div>
+                                            <div className="text-xs text-slate-500">Total horas</div>
                                         </div>
                                     </div>
                                 </div>
-                                <div className="glass-card p-4">
+                                <div className="card p-4">
                                     <div className="flex items-center gap-3">
                                         <div className="w-10 h-10 rounded-xl bg-success-500/20 flex items-center justify-center">
                                             <Calendar className="w-5 h-5 text-success-400" />
@@ -532,17 +532,17 @@ export default function ProfesoresPage() {
                                             <div className="text-xl font-bold text-white">
                                                 {sesiones.length}
                                             </div>
-                                            <div className="text-xs text-neutral-500">Sesiones</div>
+                                            <div className="text-xs text-slate-500">Sesiones</div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
 
                             {/* Sesiones table */}
-                            <div className="glass-card overflow-hidden">
-                                <div className="p-4 border-b border-neutral-800">
+                            <div className="card overflow-hidden">
+                                <div className="p-4 border-b border-slate-800">
                                     <h3 className="font-semibold text-white flex items-center gap-2">
-                                        <Clock className="w-4 h-4 text-iron-400" />
+                                        <Clock className="w-4 h-4 text-primary-400" />
                                         Historial de Sesiones
                                     </h3>
                                 </div>
@@ -556,7 +556,7 @@ export default function ProfesoresPage() {
                             </div>
                         </>
                     ) : (
-                        <div className="glass-card p-12 text-center text-neutral-500">
+                        <div className="card p-12 text-center text-slate-500">
                             Selecciona un profesor para ver detalles
                         </div>
                     )}
@@ -598,4 +598,5 @@ export default function ProfesoresPage() {
         </div>
     );
 }
+
 

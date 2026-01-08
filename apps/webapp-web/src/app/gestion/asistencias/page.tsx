@@ -68,7 +68,7 @@ export default function AsistenciasPage() {
             sortable: true,
             render: (row) => (
                 <div className="flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-neutral-500" />
+                    <Calendar className="w-4 h-4 text-slate-500" />
                     <span className="font-medium text-white">{formatDate(row.fecha)}</span>
                 </div>
             ),
@@ -78,7 +78,7 @@ export default function AsistenciasPage() {
             header: 'Hora',
             render: (row) => (
                 <div className="flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-neutral-500" />
+                    <Clock className="w-4 h-4 text-slate-500" />
                     <span>{row.hora ? formatTime(row.hora) : '-'}</span>
                 </div>
             ),
@@ -109,7 +109,7 @@ export default function AsistenciasPage() {
             >
                 <div>
                     <h1 className="text-2xl font-display font-bold text-white">Asistencias</h1>
-                    <p className="text-neutral-400 mt-1">
+                    <p className="text-slate-400 mt-1">
                         Registro de check-ins de los socios
                     </p>
                 </div>
@@ -128,7 +128,7 @@ export default function AsistenciasPage() {
                 transition={{ delay: 0.1 }}
                 className="grid grid-cols-2 md:grid-cols-4 gap-4"
             >
-                <div className="glass-card p-4">
+                <div className="card p-4">
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-xl bg-success-500/20 flex items-center justify-center">
                             <Users className="w-5 h-5 text-success-400" />
@@ -137,20 +137,20 @@ export default function AsistenciasPage() {
                             <div className="text-2xl font-display font-bold text-white">
                                 {todayCount}
                             </div>
-                            <div className="text-xs text-neutral-500">Hoy</div>
+                            <div className="text-xs text-slate-500">Hoy</div>
                         </div>
                     </div>
                 </div>
-                <div className="glass-card p-4">
+                <div className="card p-4">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-iron-500/20 flex items-center justify-center">
-                            <Calendar className="w-5 h-5 text-iron-400" />
+                        <div className="w-10 h-10 rounded-xl bg-primary-500/20 flex items-center justify-center">
+                            <Calendar className="w-5 h-5 text-primary-400" />
                         </div>
                         <div>
                             <div className="text-2xl font-display font-bold text-white">
                                 {asistencias.length}
                             </div>
-                            <div className="text-xs text-neutral-500">Total mostrado</div>
+                            <div className="text-xs text-slate-500">Total mostrado</div>
                         </div>
                     </div>
                 </div>
@@ -161,7 +161,7 @@ export default function AsistenciasPage() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.15 }}
-                className="glass-card p-4"
+                className="card p-4"
             >
                 <div className="flex flex-col sm:flex-row gap-4">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
@@ -202,3 +202,4 @@ export default function AsistenciasPage() {
         </div>
     );
 }
+

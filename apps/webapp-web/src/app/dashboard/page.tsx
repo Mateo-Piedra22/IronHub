@@ -56,10 +56,10 @@ export default function UserDashboardPage() {
 
     if (authLoading || loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-neutral-950">
+            <div className="min-h-screen flex items-center justify-center bg-slate-950">
                 <div className="flex flex-col items-center gap-4">
-                    <div className="w-12 h-12 border-4 border-iron-500/30 border-t-iron-500 rounded-full animate-spin" />
-                    <p className="text-neutral-400">Cargando...</p>
+                    <div className="w-12 h-12 border-4 border-primary-500/30 border-t-primary-500 rounded-full animate-spin" />
+                    <p className="text-slate-400">Cargando...</p>
                 </div>
             </div>
         );
@@ -67,8 +67,8 @@ export default function UserDashboardPage() {
 
     if (!user || !userData) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-neutral-950">
-                <p className="text-neutral-400">Error al cargar datos</p>
+            <div className="min-h-screen flex items-center justify-center bg-slate-950">
+                <p className="text-slate-400">Error al cargar datos</p>
             </div>
         );
     }
@@ -79,22 +79,22 @@ export default function UserDashboardPage() {
     const isExpiringSoon = daysRemaining > 0 && daysRemaining <= 7;
 
     return (
-        <div className="min-h-screen bg-neutral-950 pb-20">
+        <div className="min-h-screen bg-slate-950 pb-20">
             {/* Header */}
-            <div className="glass border-b border-neutral-800/50 p-4">
+            <div className="bg-slate-900 border-b border-slate-800/50 p-4">
                 <div className="max-w-md mx-auto flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-iron-500 to-iron-700 flex items-center justify-center text-white font-bold text-lg">
+                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center text-white font-bold text-lg">
                             {userData.nombre.charAt(0)}
                         </div>
                         <div>
                             <h1 className="font-semibold text-white">{userData.nombre}</h1>
-                            <p className="text-xs text-neutral-500">{userData.tipo_cuota_nombre || 'Sin cuota'}</p>
+                            <p className="text-xs text-slate-500">{userData.tipo_cuota_nombre || 'Sin cuota'}</p>
                         </div>
                     </div>
                     <button
                         onClick={() => logout()}
-                        className="p-2 rounded-lg text-neutral-400 hover:text-danger-400 hover:bg-danger-500/10 transition-colors"
+                        className="p-2 rounded-lg text-slate-400 hover:text-danger-400 hover:bg-danger-500/10 transition-colors"
                     >
                         <LogOut className="w-5 h-5" />
                     </button>
@@ -107,7 +107,7 @@ export default function UserDashboardPage() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     className={cn(
-                        'glass-card p-6 border-l-4',
+                        'card p-6 border-l-4',
                         isExpired
                             ? 'border-l-danger-500 bg-danger-500/5'
                             : isExpiringSoon
@@ -127,7 +127,7 @@ export default function UserDashboardPage() {
                                     {isExpired ? 'Suscripción vencida' : 'Suscripción activa'}
                                 </span>
                             </div>
-                            <p className="text-sm text-neutral-400 mt-1">
+                            <p className="text-sm text-slate-400 mt-1">
                                 {userData.fecha_proximo_vencimiento
                                     ? `Vence: ${formatDate(userData.fecha_proximo_vencimiento)}`
                                     : 'Sin fecha de vencimiento'}
@@ -140,9 +140,32 @@ export default function UserDashboardPage() {
                             )}>
                                 {isExpired ? 'Vencida' : `${daysRemaining} días`}
                             </div>
-                            <p className="text-xs text-neutral-500">restantes</p>
+                            <p className="text-xs text-slate-500">restantes</p>
                         </div>
                     </div>
+
+                    {/* Progress bar - subscription cycle */}
+                    {!isExpired && daysRemaining > 0 && (
+                        <div className="mt-4">
+                            <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
+                                <span>Progreso del ciclo</span>
+                                <span>{Math.min(100, Math.round((daysRemaining / 30) * 100))}%</span>
+                            </div>
+                            <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
+                                <motion.div
+                                    initial={{ width: 0 }}
+                                    animate={{ width: `${Math.min(100, Math.round((daysRemaining / 30) * 100))}%` }}
+                                    transition={{ duration: 0.8, ease: 'easeOut' }}
+                                    className={cn(
+                                        'h-full rounded-full',
+                                        isExpiringSoon
+                                            ? 'bg-gradient-to-r from-warning-600 to-warning-400'
+                                            : 'bg-gradient-to-r from-success-600 to-success-400'
+                                    )}
+                                />
+                            </div>
+                        </div>
+                    )}
                 </motion.div>
 
                 {/* Quick Actions */}
@@ -152,22 +175,22 @@ export default function UserDashboardPage() {
                     transition={{ delay: 0.1 }}
                     className="grid grid-cols-2 gap-4"
                 >
-                    <button className="glass-card p-4 text-left hover:border-iron-500/50 transition-colors group">
-                        <div className="w-10 h-10 rounded-xl bg-iron-500/20 flex items-center justify-center mb-3 group-hover:bg-iron-500/30 transition-colors">
-                            <QrCode className="w-5 h-5 text-iron-400" />
+                    <button className="card p-4 text-left hover:border-primary-500/50 transition-colors group">
+                        <div className="w-10 h-10 rounded-xl bg-primary-500/20 flex items-center justify-center mb-3 group-hover:bg-primary-500/30 transition-colors">
+                            <QrCode className="w-5 h-5 text-primary-400" />
                         </div>
                         <div className="font-medium text-white">Mi QR</div>
-                        <p className="text-xs text-neutral-500">Para check-in</p>
+                        <p className="text-xs text-slate-500">Para check-in</p>
                     </button>
                     <button
-                        className="glass-card p-4 text-left hover:border-iron-500/50 transition-colors group"
+                        className="card p-4 text-left hover:border-primary-500/50 transition-colors group"
                         onClick={() => {/* Navigate to rutina */ }}
                     >
-                        <div className="w-10 h-10 rounded-xl bg-iron-500/20 flex items-center justify-center mb-3 group-hover:bg-iron-500/30 transition-colors">
-                            <Dumbbell className="w-5 h-5 text-iron-400" />
+                        <div className="w-10 h-10 rounded-xl bg-primary-500/20 flex items-center justify-center mb-3 group-hover:bg-primary-500/30 transition-colors">
+                            <Dumbbell className="w-5 h-5 text-primary-400" />
                         </div>
                         <div className="font-medium text-white">Mi Rutina</div>
-                        <p className="text-xs text-neutral-500">{rutina?.nombre || 'Sin asignar'}</p>
+                        <p className="text-xs text-slate-500">{rutina?.nombre || 'Sin asignar'}</p>
                     </button>
                 </motion.div>
 
@@ -176,17 +199,17 @@ export default function UserDashboardPage() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.2 }}
-                    className="glass-card overflow-hidden"
+                    className="card overflow-hidden"
                 >
-                    <div className="p-4 border-b border-neutral-800 flex items-center justify-between">
+                    <div className="p-4 border-b border-slate-800 flex items-center justify-between">
                         <h2 className="font-semibold text-white flex items-center gap-2">
-                            <CreditCard className="w-4 h-4 text-iron-400" />
+                            <CreditCard className="w-4 h-4 text-primary-400" />
                             Últimos pagos
                         </h2>
                     </div>
                     <div className="divide-y divide-neutral-800">
                         {pagos.length === 0 ? (
-                            <div className="p-6 text-center text-neutral-500">
+                            <div className="p-6 text-center text-slate-500">
                                 No hay pagos registrados
                             </div>
                         ) : (
@@ -194,7 +217,7 @@ export default function UserDashboardPage() {
                                 <div key={pago.id} className="p-4 flex items-center justify-between">
                                     <div>
                                         <div className="text-sm text-white">{formatDate(pago.fecha)}</div>
-                                        <div className="text-xs text-neutral-500">{pago.tipo_cuota_nombre || 'Pago'}</div>
+                                        <div className="text-xs text-slate-500">{pago.tipo_cuota_nombre || 'Pago'}</div>
                                     </div>
                                     <div className="text-success-400 font-semibold">
                                         {formatCurrency(pago.monto)}
@@ -211,15 +234,15 @@ export default function UserDashboardPage() {
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.3 }}
-                        className="glass-card overflow-hidden"
+                        className="card overflow-hidden"
                     >
-                        <div className="p-4 border-b border-neutral-800">
+                        <div className="p-4 border-b border-slate-800">
                             <h2 className="font-semibold text-white flex items-center gap-2">
-                                <Dumbbell className="w-4 h-4 text-iron-400" />
+                                <Dumbbell className="w-4 h-4 text-primary-400" />
                                 {rutina.nombre}
                             </h2>
                             {rutina.descripcion && (
-                                <p className="text-sm text-neutral-400 mt-1">{rutina.descripcion}</p>
+                                <p className="text-sm text-slate-400 mt-1">{rutina.descripcion}</p>
                             )}
                         </div>
                         <div className="p-4">
@@ -232,8 +255,8 @@ export default function UserDashboardPage() {
                                             className={cn(
                                                 'aspect-square rounded-lg flex items-center justify-center text-xs font-medium',
                                                 hasTraining
-                                                    ? 'bg-iron-500/30 text-iron-300'
-                                                    : 'bg-neutral-800/50 text-neutral-600'
+                                                    ? 'bg-primary-500/30 text-primary-300'
+                                                    : 'bg-slate-800/50 text-slate-600'
                                             )}
                                         >
                                             {day}
@@ -241,7 +264,7 @@ export default function UserDashboardPage() {
                                     );
                                 })}
                             </div>
-                            <button className="mt-4 w-full py-2.5 rounded-xl border border-neutral-800 text-sm text-neutral-400 hover:text-white hover:border-neutral-700 transition-colors flex items-center justify-center gap-2">
+                            <button className="mt-4 w-full py-2.5 rounded-xl border border-slate-800 text-sm text-slate-400 hover:text-white hover:border-slate-700 transition-colors flex items-center justify-center gap-2">
                                 Ver rutina completa
                                 <ChevronRight className="w-4 h-4" />
                             </button>
@@ -252,3 +275,4 @@ export default function UserDashboardPage() {
         </div>
     );
 }
+

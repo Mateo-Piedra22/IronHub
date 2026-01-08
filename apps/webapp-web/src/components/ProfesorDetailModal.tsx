@@ -197,7 +197,7 @@ export default function ProfesorDetailModal({
         >
             <div className="space-y-4">
                 {/* Tabs */}
-                <div className="flex border-b border-neutral-800">
+                <div className="flex border-b border-slate-800">
                     {[
                         { id: 'horarios', label: 'Horarios', icon: Clock },
                         { id: 'resumen', label: 'Resumen', icon: Calendar },
@@ -209,8 +209,8 @@ export default function ProfesorDetailModal({
                             className={cn(
                                 'flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors',
                                 activeTab === tab.id
-                                    ? 'text-iron-400 border-iron-400'
-                                    : 'text-neutral-500 border-transparent hover:text-white'
+                                    ? 'text-primary-400 border-primary-400'
+                                    : 'text-slate-500 border-transparent hover:text-white'
                             )}
                         >
                             <tab.icon className="w-4 h-4" />
@@ -224,7 +224,7 @@ export default function ProfesorDetailModal({
                     {activeTab === 'horarios' && (
                         <div className="space-y-4">
                             {/* Add horario form */}
-                            <div className="glass-card p-4 space-y-3">
+                            <div className="card p-4 space-y-3">
                                 <h4 className="text-sm font-medium text-white">Agregar Disponibilidad</h4>
                                 <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                                     <Select
@@ -242,7 +242,7 @@ export default function ProfesorDetailModal({
                                         value={horarioForm.hora_fin}
                                         onChange={(e) => setHorarioForm({ ...horarioForm, hora_fin: e.target.value })}
                                     />
-                                    <label className="flex items-center gap-2 text-sm text-neutral-400">
+                                    <label className="flex items-center gap-2 text-sm text-slate-400">
                                         <input
                                             type="checkbox"
                                             checked={horarioForm.disponible}
@@ -260,26 +260,26 @@ export default function ProfesorDetailModal({
                             {/* Horarios grid */}
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                                 {diasSemana.map((dia) => (
-                                    <div key={dia} className="glass-card p-3">
+                                    <div key={dia} className="card p-3">
                                         <div className="text-sm font-medium text-white mb-2">{dia}</div>
                                         <div className="space-y-1">
                                             {horariosByDay[dia].length === 0 ? (
-                                                <div className="text-xs text-neutral-500">Sin horarios</div>
+                                                <div className="text-xs text-slate-500">Sin horarios</div>
                                             ) : (
                                                 horariosByDay[dia].map((h) => (
                                                     <div
                                                         key={h.id}
                                                         className={cn(
                                                             'flex items-center justify-between p-2 rounded text-xs',
-                                                            h.disponible ? 'bg-success-500/10' : 'bg-neutral-800'
+                                                            h.disponible ? 'bg-success-500/10' : 'bg-slate-800'
                                                         )}
                                                     >
-                                                        <span className="text-neutral-300">
+                                                        <span className="text-slate-300">
                                                             {formatTime(h.hora_inicio)} - {formatTime(h.hora_fin)}
                                                         </span>
                                                         <button
                                                             onClick={() => handleDeleteHorario(h.id)}
-                                                            className="text-neutral-400 hover:text-danger-400"
+                                                            className="text-slate-400 hover:text-danger-400"
                                                         >
                                                             <Trash2 className="w-3 h-3" />
                                                         </button>
@@ -326,56 +326,56 @@ export default function ProfesorDetailModal({
                             </div>
 
                             {/* Monthly summary */}
-                            <div className="glass-card p-4">
+                            <div className="card p-4">
                                 <h4 className="text-sm font-medium text-white mb-4">Resumen Mensual</h4>
                                 {resumenMensual ? (
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                         <div className="text-center">
                                             <div className="text-2xl font-bold text-white">{resumenMensual.horas_trabajadas}h</div>
-                                            <div className="text-xs text-neutral-500">Trabajadas</div>
+                                            <div className="text-xs text-slate-500">Trabajadas</div>
                                         </div>
                                         <div className="text-center">
-                                            <div className="text-2xl font-bold text-neutral-400">{resumenMensual.horas_proyectadas}h</div>
-                                            <div className="text-xs text-neutral-500">Proyectadas</div>
+                                            <div className="text-2xl font-bold text-slate-400">{resumenMensual.horas_proyectadas}h</div>
+                                            <div className="text-xs text-slate-500">Proyectadas</div>
                                         </div>
                                         <div className="text-center">
                                             <div className="text-2xl font-bold text-warning-400">{resumenMensual.horas_extra}h</div>
-                                            <div className="text-xs text-neutral-500">Extra</div>
+                                            <div className="text-xs text-slate-500">Extra</div>
                                         </div>
                                         <div className="text-center">
                                             <div className="text-2xl font-bold text-success-400">{resumenMensual.horas_totales}h</div>
-                                            <div className="text-xs text-neutral-500">Total</div>
+                                            <div className="text-xs text-slate-500">Total</div>
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className="text-center text-neutral-500 py-4">Sin datos</div>
+                                    <div className="text-center text-slate-500 py-4">Sin datos</div>
                                 )}
                             </div>
 
                             {/* Weekly summary */}
-                            <div className="glass-card p-4">
+                            <div className="card p-4">
                                 <h4 className="text-sm font-medium text-white mb-4">Resumen Semanal (esta semana)</h4>
                                 {resumenSemanal ? (
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                         <div className="text-center">
                                             <div className="text-2xl font-bold text-white">{resumenSemanal.horas_trabajadas}h</div>
-                                            <div className="text-xs text-neutral-500">Trabajadas</div>
+                                            <div className="text-xs text-slate-500">Trabajadas</div>
                                         </div>
                                         <div className="text-center">
-                                            <div className="text-2xl font-bold text-neutral-400">{resumenSemanal.horas_proyectadas}h</div>
-                                            <div className="text-xs text-neutral-500">Proyectadas</div>
+                                            <div className="text-2xl font-bold text-slate-400">{resumenSemanal.horas_proyectadas}h</div>
+                                            <div className="text-xs text-slate-500">Proyectadas</div>
                                         </div>
                                         <div className="text-center">
                                             <div className="text-2xl font-bold text-warning-400">{resumenSemanal.horas_extra}h</div>
-                                            <div className="text-xs text-neutral-500">Extra</div>
+                                            <div className="text-xs text-slate-500">Extra</div>
                                         </div>
                                         <div className="text-center">
                                             <div className="text-2xl font-bold text-success-400">{resumenSemanal.horas_totales}h</div>
-                                            <div className="text-xs text-neutral-500">Total</div>
+                                            <div className="text-xs text-slate-500">Total</div>
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className="text-center text-neutral-500 py-4">Sin datos</div>
+                                    <div className="text-center text-slate-500 py-4">Sin datos</div>
                                 )}
                             </div>
                         </div>
@@ -485,3 +485,4 @@ export default function ProfesorDetailModal({
         </Modal>
     );
 }
+

@@ -103,7 +103,7 @@ export function Modal({
                         exit={{ opacity: 0, scale: 0.95, y: -10 }}
                         transition={{ duration: 0.2, ease: 'easeOut' }}
                         className={cn(
-                            'relative w-full bg-neutral-900 border border-neutral-800 rounded-2xl shadow-elevated',
+                            'relative w-full bg-slate-900 border border-slate-800 rounded-2xl shadow-elevated',
                             'flex flex-col overflow-hidden',
                             sizeClasses[size],
                             size === 'full' ? 'h-[95vh]' : 'max-h-[90vh]',
@@ -113,7 +113,7 @@ export function Modal({
                     >
                         {/* Header */}
                         {(title || showCloseButton) && (
-                            <div className="flex items-center justify-between gap-4 px-6 py-4 border-b border-neutral-800">
+                            <div className="flex items-center justify-between gap-4 px-6 py-4 border-b border-slate-800">
                                 <div>
                                     {title && (
                                         <h2
@@ -124,7 +124,7 @@ export function Modal({
                                         </h2>
                                     )}
                                     {description && (
-                                        <p className="text-sm text-neutral-400 mt-0.5">
+                                        <p className="text-sm text-slate-400 mt-0.5">
                                             {description}
                                         </p>
                                     )}
@@ -132,7 +132,7 @@ export function Modal({
                                 {showCloseButton && (
                                     <button
                                         onClick={onClose}
-                                        className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+                                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                                         aria-label="Cerrar"
                                     >
                                         <X className="w-5 h-5" />
@@ -148,7 +148,7 @@ export function Modal({
 
                         {/* Footer */}
                         {footer && (
-                            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-neutral-800 bg-neutral-900/50">
+                            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-800 bg-slate-900/50">
                                 {footer}
                             </div>
                         )}
@@ -186,7 +186,7 @@ export function ConfirmModal({
     const variantClasses = {
         danger: 'bg-danger-500 hover:bg-danger-600 text-white',
         warning: 'bg-warning-500 hover:bg-warning-600 text-black',
-        info: 'bg-iron-500 hover:bg-iron-600 text-white',
+        info: 'bg-primary-500 hover:bg-primary-600 text-white',
     };
 
     return (
@@ -225,9 +225,10 @@ export function ConfirmModal({
                 </>
             }
         >
-            <p className="text-neutral-300">{message}</p>
+            <p className="text-slate-300">{message}</p>
         </Modal>
     );
 }
 
 export default Modal;
+

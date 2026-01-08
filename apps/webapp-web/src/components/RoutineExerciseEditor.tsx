@@ -22,10 +22,11 @@ import {
     verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Plus, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
+import { GripVertical, Plus, Trash2, ChevronDown, ChevronRight, FileSpreadsheet } from 'lucide-react';
 import { Button, Modal, Select, Input, useToast } from '@/components/ui';
 import { api, type Ejercicio, type EjercicioRutina } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { ExcelPreviewViewer } from '@/components/ExcelPreviewViewer';
 
 // Types
 type DraggableExercise = EjercicioRutina & { dragId: string };
@@ -68,17 +69,17 @@ function DroppableDay({
         <div
             ref={setNodeRef}
             className={cn(
-                'glass-card overflow-hidden transition-all',
-                isOver && 'ring-2 ring-iron-500 ring-offset-2 ring-offset-neutral-950'
+                'card overflow-hidden transition-all',
+                isOver && 'ring-2 ring-primary-500 ring-offset-2 ring-offset-neutral-950'
             )}
         >
-            <div className="p-3 bg-neutral-900/80 border-b border-neutral-800 flex items-center justify-between">
+            <div className="p-3 bg-slate-900/80 border-b border-slate-800 flex items-center justify-between">
                 <h3 className="font-semibold text-white">
                     Día {day.dayNumber}: {day.dayName || 'Sin nombre'}
                 </h3>
                 <button
                     onClick={onAddExercise}
-                    className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                 >
                     <Plus className="w-4 h-4" />
                 </button>
@@ -119,8 +120,8 @@ function SortableExercise({
             ref={setNodeRef}
             style={style}
             className={cn(
-                'p-3 rounded-xl border border-neutral-800 bg-neutral-900/50 group',
-                'hover:border-neutral-700 transition-colors',
+                'p-3 rounded-xl border border-slate-800 bg-slate-900/50 group',
+                'hover:border-slate-700 transition-colors',
                 isDragging && 'opacity-50 shadow-lg'
             )}
         >
@@ -128,22 +129,22 @@ function SortableExercise({
                 <div
                     {...attributes}
                     {...listeners}
-                    className="cursor-grab text-neutral-600 hover:text-neutral-400 transition-colors"
+                    className="cursor-grab text-slate-600 hover:text-slate-400 transition-colors"
                 >
                     <GripVertical className="w-4 h-4" />
                 </div>
                 <div className="flex-1 min-w-0" onClick={onEdit}>
-                    <div className="font-medium text-white text-sm truncate cursor-pointer hover:text-iron-300">
+                    <div className="font-medium text-white text-sm truncate cursor-pointer hover:text-primary-300">
                         {exercise.ejercicio_nombre || `Ejercicio #${exercise.ejercicio_id}`}
                     </div>
-                    <div className="text-xs text-neutral-500">
+                    <div className="text-xs text-slate-500">
                         {exercise.series} series x {exercise.repeticiones} reps
                         {exercise.descanso && ` • ${exercise.descanso}s`}
                     </div>
                 </div>
                 <button
                     onClick={onDelete}
-                    className="p-1.5 rounded text-neutral-500 hover:text-danger-400 opacity-0 group-hover:opacity-100 transition-all"
+                    className="p-1.5 rounded text-slate-500 hover:text-danger-400 opacity-0 group-hover:opacity-100 transition-all"
                 >
                     <Trash2 className="w-4 h-4" />
                 </button>
@@ -181,7 +182,7 @@ function ExerciseFormModal({
             if (exercise) {
                 setFormData({
                     ejercicio_id: exercise.ejercicio_id,
-                    series: exercise.series || 3,
+                    series: typeof exercise.series === 'number' ? exercise.series : Number(exercise.series) || 3,
                     repeticiones: exercise.repeticiones || '10',
                     descanso: exercise.descanso || 60,
                     notas: exercise.notas || '',
@@ -283,6 +284,9 @@ export function RoutineExerciseEditor({
     const [exerciseModalOpen, setExerciseModalOpen] = useState(false);
     const [editingExercise, setEditingExercise] = useState<EjercicioRutina | null>(null);
     const [targetDayNumber, setTargetDayNumber] = useState<number>(1);
+
+    // Excel preview state
+    const [showPreview, setShowPreview] = useState(false);
 
     const sensors = useSensors(
         useSensor(PointerSensor, {
@@ -511,6 +515,13 @@ export function RoutineExerciseEditor({
                     Configurar Ejercicios
                 </h2>
                 <div className="flex items-center gap-2">
+                    <Button
+                        variant={showPreview ? 'primary' : 'secondary'}
+                        leftIcon={<FileSpreadsheet className="w-4 h-4" />}
+                        onClick={() => setShowPreview(!showPreview)}
+                    >
+                        {showPreview ? 'Ocultar Preview' : 'Ver Excel'}
+                    </Button>
                     <Button variant="secondary" onClick={onClose} disabled={saving}>
                         Cancelar
                     </Button>
@@ -540,7 +551,7 @@ export function RoutineExerciseEditor({
                                 strategy={verticalListSortingStrategy}
                             >
                                 {day.exercises.length === 0 ? (
-                                    <div className="text-center text-neutral-600 text-sm py-8">
+                                    <div className="text-center text-slate-600 text-sm py-8">
                                         Arrastra ejercicios aquí
                                     </div>
                                 ) : (
@@ -560,11 +571,11 @@ export function RoutineExerciseEditor({
 
                 <DragOverlay>
                     {activeExercise && (
-                        <div className="p-3 rounded-xl border border-iron-500 bg-neutral-900 shadow-lg rotate-2">
+                        <div className="p-3 rounded-xl border border-primary-500 bg-slate-900 shadow-lg rotate-2">
                             <div className="font-medium text-white text-sm">
                                 {activeExercise.ejercicio_nombre}
                             </div>
-                            <div className="text-xs text-neutral-500">
+                            <div className="text-xs text-slate-500">
                                 {activeExercise.series} x {activeExercise.repeticiones}
                             </div>
                         </div>
@@ -580,6 +591,14 @@ export function RoutineExerciseEditor({
                 availableExercises={availableExercises}
                 onSave={handleSaveExercise}
             />
+
+            {/* Excel Preview */}
+            <ExcelPreviewViewer
+                excelUrl={api.getRutinaExcelUrl(rutinaId)}
+                isOpen={showPreview}
+                onMinimize={() => setShowPreview(false)}
+            />
         </div>
     );
 }
+

@@ -9,7 +9,7 @@ export default function MaintenancePage() {
         <div className="min-h-screen bg-gradient-to-br from-neutral-950 via-neutral-900 to-neutral-950 flex items-center justify-center p-4">
             {/* Background effects */}
             <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                <div className="absolute -top-1/2 -left-1/2 w-full h-full bg-gradient-radial from-iron-500/10 to-transparent" />
+                <div className="absolute -top-1/2 -left-1/2 w-full h-full bg-gradient-radial from-primary-500/10 to-transparent" />
                 <div className="absolute -bottom-1/2 -right-1/2 w-full h-full bg-gradient-radial from-warning-500/10 to-transparent" />
             </div>
 
@@ -19,7 +19,7 @@ export default function MaintenancePage() {
                 transition={{ duration: 0.5 }}
                 className="relative z-10 max-w-md w-full"
             >
-                <div className="glass-card p-8 text-center">
+                <div className="card p-8 text-center">
                     {/* Icon */}
                     <motion.div
                         initial={{ scale: 0 }}
@@ -45,7 +45,7 @@ export default function MaintenancePage() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ delay: 0.4 }}
-                        className="text-neutral-400 mb-6"
+                        className="text-slate-400 mb-6"
                     >
                         Estamos realizando mejoras en el sistema. Por favor, vuelve a intentarlo en unos minutos.
                     </motion.p>
@@ -55,7 +55,7 @@ export default function MaintenancePage() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ delay: 0.5 }}
-                        className="flex items-center justify-center gap-2 text-sm text-neutral-500 mb-6"
+                        className="flex items-center justify-center gap-2 text-sm text-slate-500 mb-6"
                     >
                         <Clock className="w-4 h-4" />
                         <span>Tiempo estimado: 15-30 minutos</span>
@@ -66,9 +66,9 @@ export default function MaintenancePage() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ delay: 0.6 }}
-                        className="p-4 rounded-xl bg-neutral-800/50 border border-neutral-700"
+                        className="p-4 rounded-xl bg-slate-800/50 border border-slate-700"
                     >
-                        <p className="text-sm text-neutral-400">
+                        <p className="text-sm text-slate-400">
                             Si el problema persiste, contacta al administrador de tu gimnasio.
                         </p>
                     </motion.div>
@@ -82,7 +82,7 @@ export default function MaintenancePage() {
                     >
                         <Link
                             href="/"
-                            className="inline-flex items-center gap-2 text-iron-400 hover:text-iron-300 transition-colors"
+                            className="inline-flex items-center gap-2 text-primary-400 hover:text-primary-300 transition-colors"
                         >
                             <ArrowLeft className="w-4 h-4" />
                             <span>Volver al inicio</span>
@@ -112,3 +112,4 @@ export default function MaintenancePage() {
         </div>
     );
 }
+

@@ -128,19 +128,19 @@ export function DataTable<T extends object>({
     const totalPages = pagination ? Math.ceil(pagination.total / pagination.pageSize) : 1;
 
     return (
-        <div className={cn('overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900/50', className)}>
+        <div className={cn('overflow-hidden rounded-xl border border-slate-800 bg-slate-900/50', className)}>
             {/* Table wrapper */}
             <div className="overflow-x-auto">
                 <table className="w-full">
                     <thead>
-                        <tr className="border-b border-neutral-800 bg-neutral-900/80 backdrop-blur-sm">
+                        <tr className="border-b border-slate-800 bg-slate-900/80 backdrop-blur-sm">
                             {selectable && (
                                 <th className="w-12 px-4 py-3">
                                     <input
                                         type="checkbox"
                                         checked={data.length > 0 && selectedRows.length === data.length}
                                         onChange={toggleAll}
-                                        className="w-4 h-4 rounded border-neutral-700 bg-neutral-900 text-iron-500 focus:ring-iron-500/50"
+                                        className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-primary-500 focus:ring-primary-500/50"
                                     />
                                 </th>
                             )}
@@ -149,7 +149,7 @@ export function DataTable<T extends object>({
                                     key={col.key}
                                     className={cn(
                                         compact ? 'px-3 py-2' : 'px-4 py-3',
-                                        'text-left text-xs font-semibold text-neutral-400 uppercase tracking-wider',
+                                        'text-left text-xs font-semibold text-slate-400 uppercase tracking-wider',
                                         col.sortable && 'cursor-pointer select-none hover:text-white transition-colors',
                                         col.align === 'center' && 'text-center',
                                         col.align === 'right' && 'text-right'
@@ -169,16 +169,16 @@ export function DataTable<T extends object>({
                                                     className={cn(
                                                         'w-3 h-3 -mb-1',
                                                         sortKey === col.key && sortDirection === 'asc'
-                                                            ? 'text-iron-400'
-                                                            : 'text-neutral-600'
+                                                            ? 'text-primary-400'
+                                                            : 'text-slate-600'
                                                     )}
                                                 />
                                                 <ChevronDown
                                                     className={cn(
                                                         'w-3 h-3 -mt-1',
                                                         sortKey === col.key && sortDirection === 'desc'
-                                                            ? 'text-iron-400'
-                                                            : 'text-neutral-600'
+                                                            ? 'text-primary-400'
+                                                            : 'text-slate-600'
                                                     )}
                                                 />
                                             </span>
@@ -193,10 +193,10 @@ export function DataTable<T extends object>({
                             // Skeleton rows
                             Array.from({ length: 5 }).map((_, i) => (
                                 <tr key={i}>
-                                    {selectable && <td className="px-4 py-3"><div className="h-4 w-4 bg-neutral-800 rounded animate-pulse" /></td>}
+                                    {selectable && <td className="px-4 py-3"><div className="h-4 w-4 bg-slate-800 rounded animate-pulse" /></td>}
                                     {columns.map((col) => (
                                         <td key={col.key} className={compact ? 'px-3 py-2' : 'px-4 py-3'}>
-                                            <div className="h-4 bg-neutral-800 rounded animate-pulse" style={{ width: `${60 + Math.random() * 40}%` }} />
+                                            <div className="h-4 bg-slate-800 rounded animate-pulse" style={{ width: `${60 + Math.random() * 40}%` }} />
                                         </td>
                                     ))}
                                 </tr>
@@ -205,7 +205,7 @@ export function DataTable<T extends object>({
                             <tr>
                                 <td
                                     colSpan={columns.length + (selectable ? 1 : 0)}
-                                    className="px-4 py-12 text-center text-neutral-500"
+                                    className="px-4 py-12 text-center text-slate-500"
                                 >
                                     {emptyMessage}
                                 </td>
@@ -216,8 +216,8 @@ export function DataTable<T extends object>({
                                     key={String((row as Record<string, unknown>)[keyField]) || rowIndex}
                                     className={cn(
                                         'transition-colors',
-                                        onRowClick && 'cursor-pointer hover:bg-neutral-800/50',
-                                        isSelected(row) && 'bg-iron-500/10'
+                                        onRowClick && 'cursor-pointer hover:bg-slate-800/50',
+                                        isSelected(row) && 'bg-primary-500/10'
                                     )}
                                     onClick={() => onRowClick?.(row)}
                                 >
@@ -227,7 +227,7 @@ export function DataTable<T extends object>({
                                                 type="checkbox"
                                                 checked={isSelected(row)}
                                                 onChange={() => toggleRow(row)}
-                                                className="w-4 h-4 rounded border-neutral-700 bg-neutral-900 text-iron-500 focus:ring-iron-500/50"
+                                                className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-primary-500 focus:ring-primary-500/50"
                                             />
                                         </td>
                                     )}
@@ -236,7 +236,7 @@ export function DataTable<T extends object>({
                                             key={col.key}
                                             className={cn(
                                                 compact ? 'px-3 py-2 text-sm' : 'px-4 py-3',
-                                                'text-neutral-300',
+                                                'text-slate-300',
                                                 col.align === 'center' && 'text-center',
                                                 col.align === 'right' && 'text-right'
                                             )}
@@ -255,8 +255,8 @@ export function DataTable<T extends object>({
 
             {/* Pagination */}
             {pagination && (
-                <div className="flex items-center justify-between px-4 py-3 border-t border-neutral-800 bg-neutral-900/80">
-                    <div className="text-sm text-neutral-500">
+                <div className="flex items-center justify-between px-4 py-3 border-t border-slate-800 bg-slate-900/80">
+                    <div className="text-sm text-slate-500">
                         Mostrando {Math.min((pagination.page - 1) * pagination.pageSize + 1, pagination.total)} a{' '}
                         {Math.min(pagination.page * pagination.pageSize, pagination.total)} de {pagination.total}
                     </div>
@@ -264,31 +264,31 @@ export function DataTable<T extends object>({
                         <button
                             onClick={() => pagination.onPageChange(1)}
                             disabled={pagination.page <= 1}
-                            className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                         >
                             <ChevronsLeft className="w-4 h-4" />
                         </button>
                         <button
                             onClick={() => pagination.onPageChange(pagination.page - 1)}
                             disabled={pagination.page <= 1}
-                            className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                         >
                             <ChevronLeft className="w-4 h-4" />
                         </button>
-                        <span className="px-3 py-1 text-sm text-neutral-300">
+                        <span className="px-3 py-1 text-sm text-slate-300">
                             {pagination.page} / {totalPages}
                         </span>
                         <button
                             onClick={() => pagination.onPageChange(pagination.page + 1)}
                             disabled={pagination.page >= totalPages}
-                            className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                         >
                             <ChevronRight className="w-4 h-4" />
                         </button>
                         <button
                             onClick={() => pagination.onPageChange(totalPages)}
                             disabled={pagination.page >= totalPages}
-                            className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                         >
                             <ChevronsRight className="w-4 h-4" />
                         </button>
@@ -300,3 +300,4 @@ export function DataTable<T extends object>({
 }
 
 export default DataTable;
+

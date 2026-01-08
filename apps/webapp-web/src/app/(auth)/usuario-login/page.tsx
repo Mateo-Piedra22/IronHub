@@ -122,10 +122,10 @@ export default function UsuarioLoginPage() {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center p-4 bg-neutral-950">
+        <div className="min-h-screen flex items-center justify-center p-4 bg-slate-950">
             {/* Background effects */}
             <div className="fixed inset-0 overflow-hidden pointer-events-none">
-                <div className="absolute top-1/3 right-1/4 w-80 h-80 bg-iron-500/10 rounded-full blur-3xl" />
+                <div className="absolute top-1/3 right-1/4 w-80 h-80 bg-primary-500/10 rounded-full blur-3xl" />
                 <div className="absolute bottom-1/3 left-1/4 w-80 h-80 bg-success-500/5 rounded-full blur-3xl" />
             </div>
 
@@ -140,12 +140,12 @@ export default function UsuarioLoginPage() {
                         initial={{ scale: 0.8 }}
                         animate={{ scale: 1 }}
                         transition={{ delay: 0.1 }}
-                        className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-iron-500 to-iron-700 shadow-glow-md mb-4"
+                        className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 shadow-md mb-4"
                     >
                         <Dumbbell className="w-8 h-8 text-white" />
                     </motion.div>
                     <h1 className="text-2xl font-display font-bold text-white">Acceso Usuario</h1>
-                    <p className="text-neutral-400 mt-1">Ingresá con tu DNI y PIN</p>
+                    <p className="text-slate-400 mt-1">Ingresá con tu DNI y PIN</p>
                 </div>
 
                 {/* Form Card */}
@@ -153,12 +153,12 @@ export default function UsuarioLoginPage() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.2 }}
-                    className="glass-card p-8"
+                    className="card p-8"
                 >
                     <form onSubmit={handleSubmit} className="space-y-6">
                         {/* DNI */}
                         <div className="space-y-2">
-                            <label htmlFor="dni" className="block text-sm font-medium text-neutral-300">
+                            <label htmlFor="dni" className="block text-sm font-medium text-slate-300">
                                 DNI
                             </label>
                             <div className="relative">
@@ -169,17 +169,17 @@ export default function UsuarioLoginPage() {
                                     value={formData.dni}
                                     onChange={(e) => setFormData({ ...formData, dni: e.target.value })}
                                     placeholder="Ingresá tu DNI"
-                                    className="w-full px-4 py-3 pl-11 rounded-xl bg-neutral-900 border border-neutral-800 text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-iron-500/50 focus:border-iron-500 transition-all"
+                                    className="w-full px-4 py-3 pl-11 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all"
                                     autoComplete="username"
                                     autoFocus
                                 />
-                                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
+                                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
                             </div>
                         </div>
 
                         {/* PIN */}
                         <div className="space-y-2">
-                            <label htmlFor="pin" className="block text-sm font-medium text-neutral-300">
+                            <label htmlFor="pin" className="block text-sm font-medium text-slate-300">
                                 PIN
                             </label>
                             <div className="relative">
@@ -190,20 +190,20 @@ export default function UsuarioLoginPage() {
                                     onChange={(e) => setFormData({ ...formData, pin: e.target.value })}
                                     placeholder="Ingresá tu PIN"
                                     maxLength={6}
-                                    className="w-full px-4 py-3 pl-11 pr-12 rounded-xl bg-neutral-900 border border-neutral-800 text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-iron-500/50 focus:border-iron-500 transition-all"
+                                    className="w-full px-4 py-3 pl-11 pr-12 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all"
                                     autoComplete="current-password"
                                 />
-                                <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
+                                <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
                                 <button
                                     type="button"
                                     onClick={() => setShowPin(!showPin)}
-                                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-neutral-500 hover:text-white transition-colors"
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-white transition-colors"
                                     tabIndex={-1}
                                 >
                                     {showPin ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                                 </button>
                             </div>
-                            <p className="text-xs text-neutral-500">Usá tu DNI y PIN configurados en recepción.</p>
+                            <p className="text-xs text-slate-500">Usá tu DNI y PIN configurados en recepción.</p>
                         </div>
 
                         {/* Error */}
@@ -225,8 +225,8 @@ export default function UsuarioLoginPage() {
                                 disabled={loading}
                                 className={cn(
                                     'flex-1 flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold text-white',
-                                    'bg-gradient-to-r from-iron-600 to-iron-500',
-                                    'hover:shadow-glow-md transition-all duration-300',
+                                    'bg-gradient-to-r from-primary-600 to-primary-500',
+                                    'hover:shadow-md transition-all duration-300',
                                     'disabled:opacity-50 disabled:cursor-not-allowed'
                                 )}
                             >
@@ -244,9 +244,9 @@ export default function UsuarioLoginPage() {
                                 onClick={togglePinChange}
                                 className={cn(
                                     'px-4 py-3 rounded-xl font-medium transition-all',
-                                    'bg-neutral-800 border border-neutral-700 text-neutral-300',
-                                    'hover:bg-neutral-700 hover:text-white',
-                                    showPinChange && 'bg-neutral-700 text-white'
+                                    'bg-slate-800 border border-slate-700 text-slate-300',
+                                    'hover:bg-slate-700 hover:text-white',
+                                    showPinChange && 'bg-slate-700 text-white'
                                 )}
                             >
                                 {showPinChange ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
@@ -263,8 +263,8 @@ export default function UsuarioLoginPage() {
                                 exit={{ opacity: 0, height: 0 }}
                                 className="overflow-hidden"
                             >
-                                <div className="mt-6 pt-6 border-t border-neutral-800 space-y-4">
-                                    <h3 className="text-sm font-medium text-neutral-300">Cambiar PIN</h3>
+                                <div className="mt-6 pt-6 border-t border-slate-800 space-y-4">
+                                    <h3 className="text-sm font-medium text-slate-300">Cambiar PIN</h3>
 
                                     <div className="space-y-3">
                                         <input
@@ -273,7 +273,7 @@ export default function UsuarioLoginPage() {
                                             value={pinChangeData.dni}
                                             onChange={(e) => setPinChangeData({ ...pinChangeData, dni: e.target.value })}
                                             placeholder="DNI"
-                                            className="w-full px-4 py-2.5 rounded-xl bg-neutral-900 border border-neutral-800 text-white placeholder-neutral-500 text-sm focus:outline-none focus:ring-2 focus:ring-iron-500/50"
+                                            className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-neutral-500 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/50"
                                         />
                                         <div className="grid grid-cols-2 gap-3">
                                             <input
@@ -281,14 +281,14 @@ export default function UsuarioLoginPage() {
                                                 value={pinChangeData.oldPin}
                                                 onChange={(e) => setPinChangeData({ ...pinChangeData, oldPin: e.target.value })}
                                                 placeholder="PIN actual"
-                                                className="w-full px-4 py-2.5 rounded-xl bg-neutral-900 border border-neutral-800 text-white placeholder-neutral-500 text-sm focus:outline-none focus:ring-2 focus:ring-iron-500/50"
+                                                className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-neutral-500 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/50"
                                             />
                                             <input
                                                 type="password"
                                                 value={pinChangeData.newPin}
                                                 onChange={(e) => setPinChangeData({ ...pinChangeData, newPin: e.target.value })}
                                                 placeholder="PIN nuevo"
-                                                className="w-full px-4 py-2.5 rounded-xl bg-neutral-900 border border-neutral-800 text-white placeholder-neutral-500 text-sm focus:outline-none focus:ring-2 focus:ring-iron-500/50"
+                                                className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-neutral-500 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/50"
                                             />
                                         </div>
                                     </div>
@@ -311,7 +311,7 @@ export default function UsuarioLoginPage() {
                                         type="button"
                                         onClick={handlePinChange}
                                         disabled={pinChangeLoading}
-                                        className="w-full py-2.5 rounded-xl font-medium text-sm bg-neutral-800 border border-neutral-700 text-neutral-300 hover:bg-neutral-700 hover:text-white transition-all disabled:opacity-50"
+                                        className="w-full py-2.5 rounded-xl font-medium text-sm bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 hover:text-white transition-all disabled:opacity-50"
                                     >
                                         {pinChangeLoading ? 'Actualizando...' : 'Actualizar PIN'}
                                     </button>
@@ -321,8 +321,8 @@ export default function UsuarioLoginPage() {
                     </AnimatePresence>
 
                     {/* Help text */}
-                    <div className="mt-6 pt-6 border-t border-neutral-800 text-center">
-                        <p className="text-xs text-neutral-500">
+                    <div className="mt-6 pt-6 border-t border-slate-800 text-center">
+                        <p className="text-xs text-slate-500">
                             ¿Problemas para ingresar? Comunícate con tu gimnasio
                         </p>
                     </div>
@@ -331,3 +331,4 @@ export default function UsuarioLoginPage() {
         </div>
     );
 }
+

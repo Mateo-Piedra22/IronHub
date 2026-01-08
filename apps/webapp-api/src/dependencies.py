@@ -89,9 +89,13 @@ def get_teacher_service(session: Session = Depends(get_db_session)) -> TeacherSe
 get_db = get_db_session
 
 
-def get_rm(session: Session = Depends(get_db_session)):
-    """Get raw manager (database session) - alias for dependency injection."""
-    return session
+def get_rm():
+    """Get RoutineTemplateManager instance for PDF/Excel generation."""
+    try:
+        from src.routine_manager import RoutineTemplateManager
+        return RoutineTemplateManager()
+    except Exception:
+        return None
 
 
 def get_payment_service(session: Session = Depends(get_db_session)) -> PaymentService:

@@ -50,6 +50,7 @@ app.add_middleware(
     secret_key=os.getenv("ADMIN_SESSION_SECRET", "admin-session-secret-change-me"),
     https_only=os.getenv("ENV", "production") == "production",
     same_site="lax",
+    domain=f".{os.getenv('TENANT_BASE_DOMAIN', 'ironhub.motiona.xyz')}"  # Allow cookie sharing
 )
 
 # Service instance (lazy loaded)

@@ -179,7 +179,7 @@ export function getStatusColor(status: string): string {
         case 'warning':
             return 'text-warning-400';
         default:
-            return 'text-neutral-400';
+            return 'text-slate-400';
     }
 }
 
@@ -269,3 +269,4 @@ export function generateColor(seed: string): string {
     const h = hash % 360;
     return `hsl(${h}, 70%, 50%)`;
 }
+

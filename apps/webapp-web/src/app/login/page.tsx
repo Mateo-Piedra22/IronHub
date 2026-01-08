@@ -43,7 +43,7 @@ export default function OwnerLoginPage() {
         <div className="min-h-screen flex items-center justify-center p-4">
             {/* Background effects */}
             <div className="fixed inset-0 pointer-events-none">
-                <div className="absolute -top-40 -right-40 h-[500px] w-[500px] rounded-full bg-iron-600/20 blur-[100px]" />
+                <div className="absolute -top-40 -right-40 h-[500px] w-[500px] rounded-full bg-primary-600/20 blur-[100px]" />
                 <div className="absolute bottom-0 -left-40 h-[400px] w-[400px] rounded-full bg-gold-600/10 blur-[100px]" />
             </div>
 
@@ -52,16 +52,16 @@ export default function OwnerLoginPage() {
                 animate={{ opacity: 1, y: 0 }}
                 className="w-full max-w-md relative z-10"
             >
-                <div className="glass-card p-8">
+                <div className="card p-8">
                     {/* Logo */}
                     <div className="flex flex-col items-center mb-8">
-                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-iron-500 to-iron-700 flex items-center justify-center mb-4 shadow-glow-md">
+                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center mb-4 shadow-md">
                             <Dumbbell className="w-8 h-8 text-white" />
                         </div>
                         <h1 className="text-2xl font-display font-bold text-white">
                             Panel de Control
                         </h1>
-                        <p className="text-neutral-400 mt-1">Acceso exclusivo del dueño</p>
+                        <p className="text-slate-400 mt-1">Acceso exclusivo del dueño</p>
                     </div>
 
                     {/* Form */}
@@ -71,7 +71,7 @@ export default function OwnerLoginPage() {
                                 Contraseña
                             </label>
                             <div className="relative">
-                                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
+                                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
                                 <input
                                     id="password"
                                     type={showPassword ? 'text' : 'password'}
@@ -85,7 +85,7 @@ export default function OwnerLoginPage() {
                                 <button
                                     type="button"
                                     onClick={() => setShowPassword(!showPassword)}
-                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300 transition-colors"
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
                                 >
                                     {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                                 </button>
@@ -120,7 +120,7 @@ export default function OwnerLoginPage() {
                     </form>
 
                     {/* Help text */}
-                    <p className="text-center text-neutral-500 text-xs mt-6">
+                    <p className="text-center text-slate-500 text-xs mt-6">
                         Este acceso es exclusivo para el propietario del gimnasio.
                     </p>
                 </div>
@@ -128,3 +128,4 @@ export default function OwnerLoginPage() {
         </div>
     );
 }
+

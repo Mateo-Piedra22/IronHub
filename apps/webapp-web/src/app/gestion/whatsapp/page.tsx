@@ -182,10 +182,10 @@ export default function WhatsAppPage() {
             header: 'Usuario',
             render: (row) => (
                 <div className="flex items-center gap-2">
-                    <User className="w-4 h-4 text-neutral-500" />
+                    <User className="w-4 h-4 text-slate-500" />
                     <div>
                         <div className="font-medium text-white">{row.usuario_nombre}</div>
-                        {row.telefono && <div className="text-xs text-neutral-500">{row.telefono}</div>}
+                        {row.telefono && <div className="text-xs text-slate-500">{row.telefono}</div>}
                     </div>
                 </div>
             ),
@@ -215,7 +215,7 @@ export default function WhatsAppPage() {
             key: 'created_at',
             header: 'Fecha',
             render: (row) => (
-                <div className="text-sm text-neutral-400">
+                <div className="text-sm text-slate-400">
                     {row.created_at && formatDate(row.created_at)}
                 </div>
             ),
@@ -259,7 +259,7 @@ export default function WhatsAppPage() {
             >
                 <div>
                     <h1 className="text-2xl font-display font-bold text-white">WhatsApp</h1>
-                    <p className="text-neutral-400 mt-1">
+                    <p className="text-slate-400 mt-1">
                         Gestión de mensajes y configuración de la API
                     </p>
                 </div>
@@ -292,11 +292,11 @@ export default function WhatsAppPage() {
                 className="grid grid-cols-2 md:grid-cols-4 gap-4"
             >
                 {/* Connection status */}
-                <div className="glass-card p-4">
+                <div className="card p-4">
                     <div className="flex items-center justify-between">
-                        <div className="text-sm text-neutral-400">Estado</div>
+                        <div className="text-sm text-slate-400">Estado</div>
                         {statusLoading ? (
-                            <div className="w-4 h-4 rounded-full bg-neutral-700 animate-pulse" />
+                            <div className="w-4 h-4 rounded-full bg-slate-700 animate-pulse" />
                         ) : (
                             status?.available ? (
                                 <Wifi className="w-5 h-5 text-success-400" />
@@ -314,9 +314,9 @@ export default function WhatsAppPage() {
                 </div>
 
                 {/* Pending */}
-                <div className="glass-card p-4">
+                <div className="card p-4">
                     <div className="flex items-center justify-between">
-                        <div className="text-sm text-neutral-400">Pendientes</div>
+                        <div className="text-sm text-slate-400">Pendientes</div>
                         <Clock className="w-5 h-5 text-warning-400" />
                     </div>
                     <div className="text-xl font-bold text-warning-400 mt-2">
@@ -325,9 +325,9 @@ export default function WhatsAppPage() {
                 </div>
 
                 {/* Failed */}
-                <div className="glass-card p-4">
+                <div className="card p-4">
                     <div className="flex items-center justify-between">
-                        <div className="text-sm text-neutral-400">Fallidos</div>
+                        <div className="text-sm text-slate-400">Fallidos</div>
                         <XCircle className="w-5 h-5 text-danger-400" />
                     </div>
                     <div className="text-xl font-bold text-danger-400 mt-2">
@@ -336,9 +336,9 @@ export default function WhatsAppPage() {
                 </div>
 
                 {/* Sent */}
-                <div className="glass-card p-4">
+                <div className="card p-4">
                     <div className="flex items-center justify-between">
-                        <div className="text-sm text-neutral-400">Enviados</div>
+                        <div className="text-sm text-slate-400">Enviados</div>
                         <CheckCircle2 className="w-5 h-5 text-success-400" />
                     </div>
                     <div className="text-xl font-bold text-success-400 mt-2">
@@ -352,10 +352,10 @@ export default function WhatsAppPage() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2 }}
-                className="glass-card p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+                className="card p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
             >
                 <div className="flex items-center gap-2">
-                    <span className="text-sm text-neutral-400">Filtrar:</span>
+                    <span className="text-sm text-slate-400">Filtrar:</span>
                     {[
                         { value: 'all', label: 'Todos' },
                         { value: 'pending', label: 'Pendientes' },
@@ -367,8 +367,8 @@ export default function WhatsAppPage() {
                             className={cn(
                                 'px-3 py-1 rounded-full text-sm transition-colors',
                                 filter === opt.value
-                                    ? 'bg-iron-500/20 text-iron-400'
-                                    : 'text-neutral-400 hover:text-white'
+                                    ? 'bg-primary-500/20 text-primary-400'
+                                    : 'text-slate-400 hover:text-white'
                             )}
                         >
                             {opt.label}
@@ -437,7 +437,7 @@ export default function WhatsAppPage() {
                             onChange={(e) => setConfig({ ...config, phone_number_id: e.target.value })}
                             placeholder="123456789012345"
                         />
-                        <p className="text-xs text-neutral-500 mt-1">ID del número de WhatsApp Business</p>
+                        <p className="text-xs text-slate-500 mt-1">ID del número de WhatsApp Business</p>
                     </div>
                     <div>
                         <Input
@@ -447,7 +447,7 @@ export default function WhatsAppPage() {
                             type="password"
                             placeholder="EAAxxxxxx..."
                         />
-                        <p className="text-xs text-neutral-500 mt-1">Token de acceso de la API de Meta</p>
+                        <p className="text-xs text-slate-500 mt-1">Token de acceso de la API de Meta</p>
                     </div>
                     <div>
                         <Input
@@ -456,10 +456,10 @@ export default function WhatsAppPage() {
                             onChange={(e) => setConfig({ ...config, webhook_verify_token: e.target.value })}
                             placeholder="mi_token_secreto"
                         />
-                        <p className="text-xs text-neutral-500 mt-1">Token para verificar webhooks entrantes</p>
+                        <p className="text-xs text-slate-500 mt-1">Token para verificar webhooks entrantes</p>
                     </div>
                     <div className="grid grid-cols-2 gap-4 pt-4">
-                        <label className="flex items-center gap-3 p-3 rounded-lg border border-neutral-700 cursor-pointer hover:bg-neutral-800">
+                        <label className="flex items-center gap-3 p-3 rounded-lg border border-slate-700 cursor-pointer hover:bg-slate-800">
                             <input
                                 type="checkbox"
                                 checked={config.enabled}
@@ -468,10 +468,10 @@ export default function WhatsAppPage() {
                             />
                             <div>
                                 <div className="font-medium text-white">Habilitar WhatsApp</div>
-                                <div className="text-xs text-neutral-500">Enviar mensajes automáticos</div>
+                                <div className="text-xs text-slate-500">Enviar mensajes automáticos</div>
                             </div>
                         </label>
-                        <label className="flex items-center gap-3 p-3 rounded-lg border border-neutral-700 cursor-pointer hover:bg-neutral-800">
+                        <label className="flex items-center gap-3 p-3 rounded-lg border border-slate-700 cursor-pointer hover:bg-slate-800">
                             <input
                                 type="checkbox"
                                 checked={config.webhook_enabled}
@@ -480,7 +480,7 @@ export default function WhatsAppPage() {
                             />
                             <div>
                                 <div className="font-medium text-white">Webhooks</div>
-                                <div className="text-xs text-neutral-500">Recibir notificaciones</div>
+                                <div className="text-xs text-slate-500">Recibir notificaciones</div>
                             </div>
                         </label>
                     </div>
@@ -500,3 +500,4 @@ export default function WhatsAppPage() {
         </div>
     );
 }
+

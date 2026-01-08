@@ -9,7 +9,12 @@ import {
     Edit,
     Trash2,
     Filter,
+    X,
+    Play,
+    ExternalLink,
+    PlayCircle,
 } from 'lucide-react';
+import { VideoDropzone } from '@/components/VideoDropzone';
 import {
     Button,
     DataTable,
@@ -57,6 +62,8 @@ function EjercicioFormModal({ isOpen, onClose, ejercicio, onSuccess }: Ejercicio
         descripcion: '',
         grupo_muscular: '',
         equipamiento: '',
+        variantes: '',
+        objetivo: 'general',
         video_url: '',
     });
     const { success, error } = useToast();
@@ -69,6 +76,8 @@ function EjercicioFormModal({ isOpen, onClose, ejercicio, onSuccess }: Ejercicio
                     descripcion: ejercicio.descripcion || '',
                     grupo_muscular: ejercicio.grupo_muscular || '',
                     equipamiento: ejercicio.equipamiento || '',
+                    variantes: ejercicio.variantes || '',
+                    objetivo: ejercicio.objetivo || 'general',
                     video_url: ejercicio.video_url || '',
                 });
             } else {
@@ -77,6 +86,8 @@ function EjercicioFormModal({ isOpen, onClose, ejercicio, onSuccess }: Ejercicio
                     descripcion: '',
                     grupo_muscular: '',
                     equipamiento: '',
+                    variantes: '',
+                    objetivo: 'general',
                     video_url: '',
                 });
             }
@@ -158,13 +169,43 @@ function EjercicioFormModal({ isOpen, onClose, ejercicio, onSuccess }: Ejercicio
                         placeholder="Ej: Barra, Mancuernas"
                     />
                 </div>
-                <Input
-                    label="URL de Video"
-                    value={formData.video_url}
-                    onChange={(e) => setFormData({ ...formData, video_url: e.target.value })}
-                    placeholder="https://youtube.com/watch?v=..."
-                    leftIcon={<Video className="w-4 h-4" />}
+
+                <Textarea
+                    label="Variantes / Progresiones"
+                    value={formData.variantes}
+                    onChange={(e) => setFormData({ ...formData, variantes: e.target.value })}
+                    placeholder="Ej: Flexiones con rodillas, Flexiones diamante..."
                 />
+
+                <Select
+                    label="Objetivo"
+                    value={formData.objetivo}
+                    onChange={(e) => setFormData({ ...formData, objetivo: e.target.value })}
+                    options={objetivos}
+                />
+
+                <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-400">Video o GIF</label>
+                    <VideoDropzone
+                        value={formData.video_url}
+                        onUpload={async (file) => {
+                            const res = await api.uploadExerciseVideo(file);
+                            if (res.ok && res.data) {
+                                setFormData(prev => ({ ...prev, video_url: res.data!.url }));
+                                return res.data.url;
+                            }
+                            throw new Error(res.error || 'Error subiendo video');
+                        }}
+                        onClear={() => setFormData(prev => ({ ...prev, video_url: '' }))}
+                    />
+                    <Input
+                        value={formData.video_url}
+                        onChange={(e) => setFormData({ ...formData, video_url: e.target.value })}
+                        placeholder="O pega una URL de video (YouTube, MP4...)"
+                        leftIcon={<Video className="w-4 h-4" />}
+                        className="text-xs"
+                    />
+                </div>
                 <Textarea
                     label="Descripción / Instrucciones"
                     value={formData.descripcion}
@@ -172,7 +213,7 @@ function EjercicioFormModal({ isOpen, onClose, ejercicio, onSuccess }: Ejercicio
                     placeholder="Describe el ejercicio y su ejecución correcta..."
                 />
             </form>
-        </Modal>
+        </Modal >
     );
 }
 
@@ -191,6 +232,9 @@ export default function EjerciciosPage() {
     const [ejercicioToEdit, setEjercicioToEdit] = useState<Ejercicio | null>(null);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [ejercicioToDelete, setEjercicioToDelete] = useState<Ejercicio | null>(null);
+
+    // Sidebar state
+    const [selectedEjercicio, setSelectedEjercicio] = useState<Ejercicio | null>(null);
 
     // Load
     const loadEjercicios = useCallback(async () => {
@@ -242,17 +286,17 @@ export default function EjerciciosPage() {
             sortable: true,
             render: (row) => (
                 <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-iron-500/20 flex items-center justify-center">
+                    <div className="w-10 h-10 rounded-xl bg-primary-500/20 flex items-center justify-center">
                         {row.video_url ? (
-                            <Video className="w-5 h-5 text-iron-400" />
+                            <Video className="w-5 h-5 text-primary-400" />
                         ) : (
-                            <span className="text-iron-400 text-lg">💪</span>
+                            <span className="text-primary-400 text-lg">💪</span>
                         )}
                     </div>
                     <div>
                         <div className="font-medium text-white">{row.nombre}</div>
                         {row.descripcion && (
-                            <div className="text-sm text-neutral-500 line-clamp-1 max-w-[200px]">
+                            <div className="text-sm text-slate-500 line-clamp-1 max-w-[200px]">
                                 {row.descripcion}
                             </div>
                         )}
@@ -266,11 +310,11 @@ export default function EjerciciosPage() {
             sortable: true,
             render: (row) => (
                 row.grupo_muscular ? (
-                    <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-iron-500/20 text-iron-300 text-xs">
+                    <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-primary-500/20 text-primary-300 text-xs">
                         {row.grupo_muscular}
                     </span>
                 ) : (
-                    <span className="text-neutral-600">-</span>
+                    <span className="text-slate-600">-</span>
                 )
             ),
         },
@@ -291,13 +335,13 @@ export default function EjerciciosPage() {
                         href={row.video_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-iron-400 hover:text-iron-300"
+                        className="text-primary-400 hover:text-primary-300"
                         onClick={(e) => e.stopPropagation()}
                     >
                         <Video className="w-4 h-4" />
                     </a>
                 ) : (
-                    <span className="text-neutral-600">-</span>
+                    <span className="text-slate-600">-</span>
                 )
             ),
         },
@@ -313,7 +357,7 @@ export default function EjerciciosPage() {
                             setEjercicioToEdit(row);
                             setFormOpen(true);
                         }}
-                        className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                         title="Editar"
                     >
                         <Edit className="w-4 h-4" />
@@ -323,7 +367,7 @@ export default function EjerciciosPage() {
                             setEjercicioToDelete(row);
                             setDeleteOpen(true);
                         }}
-                        className="p-2 rounded-lg text-neutral-400 hover:text-danger-400 hover:bg-danger-500/10 transition-colors"
+                        className="p-2 rounded-lg text-slate-400 hover:text-danger-400 hover:bg-danger-500/10 transition-colors"
                         title="Eliminar"
                     >
                         <Trash2 className="w-4 h-4" />
@@ -343,7 +387,7 @@ export default function EjerciciosPage() {
             >
                 <div>
                     <h1 className="text-2xl font-display font-bold text-white">Ejercicios</h1>
-                    <p className="text-neutral-400 mt-1">
+                    <p className="text-slate-400 mt-1">
                         Biblioteca de ejercicios para tus rutinas
                     </p>
                 </div>
@@ -363,7 +407,7 @@ export default function EjerciciosPage() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 }}
-                className="glass-card p-4"
+                className="card p-4"
             >
                 <div className="flex flex-col sm:flex-row gap-4">
                     <div className="flex-1">
@@ -397,9 +441,9 @@ export default function EjerciciosPage() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.15 }}
-                className="glass-card p-4"
+                className="card p-4"
             >
-                <div className="text-sm text-neutral-400">
+                <div className="text-sm text-slate-400">
                     Total: <span className="text-white font-medium">{ejercicios.length} ejercicios</span>
                 </div>
             </motion.div>
@@ -415,6 +459,7 @@ export default function EjerciciosPage() {
                     columns={columns}
                     loading={loading}
                     emptyMessage="No se encontraron ejercicios"
+                    onRowClick={(row) => setSelectedEjercicio(row)}
                 />
             </motion.div>
 
@@ -442,6 +487,131 @@ export default function EjerciciosPage() {
                 confirmText="Eliminar"
                 variant="danger"
             />
+
+            {/* Ejercicio Sidebar */}
+            {selectedEjercicio && (
+                <>
+                    <div
+                        className="fixed inset-0 bg-black/50 z-40"
+                        onClick={() => setSelectedEjercicio(null)}
+                    />
+                    <motion.div
+                        initial={{ opacity: 0, x: 300 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: 300 }}
+                        className="fixed right-0 top-0 h-full w-[420px] max-w-full bg-slate-900 border-l border-slate-800 z-50 flex flex-col overflow-hidden"
+                    >
+                        {/* Header */}
+                        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+                            <h3 className="font-semibold text-white">{selectedEjercicio.nombre}</h3>
+                            <button
+                                onClick={() => setSelectedEjercicio(null)}
+                                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        {/* Video Preview */}
+                        {selectedEjercicio.video_url && (
+                            <div className="p-4 border-b border-slate-800">
+                                <div className="relative aspect-video bg-black rounded-xl overflow-hidden">
+                                    {selectedEjercicio.video_url.includes('youtube') || selectedEjercicio.video_url.includes('youtu.be') ? (
+                                        <iframe
+                                            src={getYouTubeEmbedUrl(selectedEjercicio.video_url)}
+                                            className="absolute inset-0 w-full h-full"
+                                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                                            allowFullScreen
+                                        />
+                                    ) : (
+                                        <video
+                                            src={selectedEjercicio.video_url}
+                                            controls
+                                            className="absolute inset-0 w-full h-full object-contain"
+                                        />
+                                    )}
+                                </div>
+                                <a
+                                    href={selectedEjercicio.video_url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="mt-2 inline-flex items-center gap-1 text-xs text-primary-400 hover:text-primary-300"
+                                >
+                                    <ExternalLink className="w-3 h-3" />
+                                    Abrir en nueva pestaña
+                                </a>
+                            </div>
+                        )}
+
+                        {/* Details */}
+                        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                            {/* Tags */}
+                            <div className="flex flex-wrap gap-2">
+                                {selectedEjercicio.grupo_muscular && (
+                                    <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-primary-500/20 text-primary-300 text-xs">
+                                        {selectedEjercicio.grupo_muscular}
+                                    </span>
+                                )}
+                                {(selectedEjercicio as any).objetivo && (
+                                    <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-success-500/20 text-success-300 text-xs">
+                                        {(selectedEjercicio as any).objetivo}
+                                    </span>
+                                )}
+                                {selectedEjercicio.equipamiento && (
+                                    <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 text-xs">
+                                        {selectedEjercicio.equipamiento}
+                                    </span>
+                                )}
+                            </div>
+
+                            {/* Description */}
+                            {selectedEjercicio.descripcion && (
+                                <div>
+                                    <h4 className="text-xs font-medium text-slate-500 mb-2">Descripción</h4>
+                                    <p className="text-sm text-slate-300 whitespace-pre-wrap">
+                                        {selectedEjercicio.descripcion}
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* Actions */}
+                            <div className="flex gap-2 pt-4">
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => {
+                                        setEjercicioToEdit(selectedEjercicio);
+                                        setFormOpen(true);
+                                    }}
+                                >
+                                    <Edit className="w-3 h-3 mr-1" />
+                                    Editar
+                                </Button>
+                                <Button
+                                    variant="danger"
+                                    size="sm"
+                                    onClick={() => {
+                                        setEjercicioToDelete(selectedEjercicio);
+                                        setDeleteOpen(true);
+                                    }}
+                                >
+                                    <Trash2 className="w-3 h-3 mr-1" />
+                                    Eliminar
+                                </Button>
+                            </div>
+                        </div>
+                    </motion.div>
+                </>
+            )}
         </div>
     );
 }
+
+// Helper function to convert YouTube URL to embed URL
+function getYouTubeEmbedUrl(url: string): string {
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+    const match = url.match(regExp);
+    const videoId = match && match[2].length === 11 ? match[2] : null;
+    return videoId ? `https://www.youtube.com/embed/${videoId}` : url;
+}
+

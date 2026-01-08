@@ -18,7 +18,7 @@ export default function SuspensionPage() {
                 transition={{ duration: 0.5 }}
                 className="relative z-10 max-w-md w-full"
             >
-                <div className="glass-card p-8 text-center">
+                <div className="card p-8 text-center">
                     {/* Icon */}
                     <motion.div
                         initial={{ scale: 0 }}
@@ -44,7 +44,7 @@ export default function SuspensionPage() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ delay: 0.4 }}
-                        className="text-neutral-400 mb-6"
+                        className="text-slate-400 mb-6"
                     >
                         Tu cuenta ha sido suspendida temporalmente debido a cuotas vencidas.
                     </motion.p>
@@ -66,13 +66,13 @@ export default function SuspensionPage() {
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         transition={{ delay: 0.6 }}
-                        className="p-4 rounded-xl bg-neutral-800/50 border border-neutral-700"
+                        className="p-4 rounded-xl bg-slate-800/50 border border-slate-700"
                     >
-                        <div className="flex items-center justify-center gap-2 text-neutral-400 mb-2">
+                        <div className="flex items-center justify-center gap-2 text-slate-400 mb-2">
                             <Phone className="w-4 h-4" />
                             <span className="text-sm font-medium">Contactá al gimnasio</span>
                         </div>
-                        <p className="text-sm text-neutral-500">
+                        <p className="text-sm text-slate-500">
                             Acercate a recepción o comunicate con el administrador para resolver tu situación.
                         </p>
                     </motion.div>
@@ -86,7 +86,7 @@ export default function SuspensionPage() {
                     >
                         <Link
                             href="/"
-                            className="inline-flex items-center gap-2 text-neutral-400 hover:text-neutral-300 transition-colors"
+                            className="inline-flex items-center gap-2 text-slate-400 hover:text-slate-300 transition-colors"
                         >
                             <ArrowLeft className="w-4 h-4" />
                             <span>Volver al inicio</span>
@@ -97,3 +97,4 @@ export default function SuspensionPage() {
         </div>
     );
 }
+

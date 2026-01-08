@@ -55,13 +55,13 @@ function ScheduleGrid({ clases, onEdit, onDelete, onManage }: {
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-4">
             {diasSemana.map((dia) => (
-                <div key={dia.value} className="glass-card overflow-hidden">
-                    <div className="p-3 bg-neutral-900/80 border-b border-neutral-800">
+                <div key={dia.value} className="card overflow-hidden">
+                    <div className="p-3 bg-slate-900/80 border-b border-slate-800">
                         <h3 className="font-semibold text-white text-center">{dia.label}</h3>
                     </div>
                     <div className="p-3 space-y-2 min-h-[200px]">
                         {byDay[dia.value].length === 0 ? (
-                            <div className="text-center text-neutral-600 text-sm py-4">
+                            <div className="text-center text-slate-600 text-sm py-4">
                                 Sin clases
                             </div>
                         ) : (
@@ -69,39 +69,39 @@ function ScheduleGrid({ clases, onEdit, onDelete, onManage }: {
                                 <div
                                     key={clase.id}
                                     className={cn(
-                                        'p-3 rounded-xl border border-neutral-800 bg-neutral-900/50',
-                                        'hover:border-iron-500/50 transition-colors group cursor-pointer'
+                                        'p-3 rounded-xl border border-slate-800 bg-slate-900/50',
+                                        'hover:border-primary-500/50 transition-colors group cursor-pointer'
                                     )}
                                     style={clase.color ? { borderLeftColor: clase.color, borderLeftWidth: 3 } : {}}
                                     onClick={() => onManage(clase)}
                                 >
                                     <div className="font-medium text-white text-sm">{clase.nombre}</div>
-                                    <div className="text-xs text-neutral-400 mt-1 flex items-center gap-1">
+                                    <div className="text-xs text-slate-400 mt-1 flex items-center gap-1">
                                         <Clock className="w-3 h-3" />
                                         {formatTime(clase.hora_inicio)} - {formatTime(clase.hora_fin)}
                                     </div>
                                     {clase.profesor_nombre && (
-                                        <div className="text-xs text-neutral-500 mt-1">
+                                        <div className="text-xs text-slate-500 mt-1">
                                             {clase.profesor_nombre}
                                         </div>
                                     )}
                                     <div className="hidden group-hover:flex items-center gap-1 mt-2">
                                         <button
                                             onClick={(e) => { e.stopPropagation(); onManage(clase); }}
-                                            className="p-1 rounded text-iron-400 hover:text-iron-300"
+                                            className="p-1 rounded text-primary-400 hover:text-primary-300"
                                             title="Gestionar horarios e inscripciones"
                                         >
                                             <Settings className="w-3 h-3" />
                                         </button>
                                         <button
                                             onClick={(e) => { e.stopPropagation(); onEdit(clase); }}
-                                            className="p-1 rounded text-neutral-400 hover:text-white"
+                                            className="p-1 rounded text-slate-400 hover:text-white"
                                         >
                                             <Edit className="w-3 h-3" />
                                         </button>
                                         <button
                                             onClick={(e) => { e.stopPropagation(); onDelete(clase); }}
-                                            className="p-1 rounded text-neutral-400 hover:text-danger-400"
+                                            className="p-1 rounded text-slate-400 hover:text-danger-400"
                                         >
                                             <Trash2 className="w-3 h-3" />
                                         </button>
@@ -266,7 +266,7 @@ function ClaseFormModal({ isOpen, onClose, clase, profesores, onSuccess }: Clase
                     />
                 </div>
                 <div className="flex items-center gap-4">
-                    <label className="text-sm font-medium text-neutral-300">Color</label>
+                    <label className="text-sm font-medium text-slate-300">Color</label>
                     <input
                         type="color"
                         value={formData.color}
@@ -358,7 +358,7 @@ export default function ClasesPage() {
             >
                 <div>
                     <h1 className="text-2xl font-display font-bold text-white">Clases</h1>
-                    <p className="text-neutral-400 mt-1">
+                    <p className="text-slate-400 mt-1">
                         Horarios de clases grupales
                     </p>
                 </div>
@@ -380,7 +380,7 @@ export default function ClasesPage() {
                 transition={{ delay: 0.1 }}
             >
                 {loading ? (
-                    <div className="glass-card p-12 text-center text-neutral-500">
+                    <div className="card p-12 text-center text-slate-500">
                         Cargando horarios...
                     </div>
                 ) : (
@@ -442,4 +442,5 @@ export default function ClasesPage() {
         </div>
     );
 }
+
 

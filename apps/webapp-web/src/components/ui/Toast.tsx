@@ -123,14 +123,14 @@ const iconColors = {
     success: 'text-success-400',
     error: 'text-danger-400',
     warning: 'text-warning-400',
-    info: 'text-iron-400',
+    info: 'text-primary-400',
 };
 
 const borderColors = {
     success: 'border-l-success-500',
     error: 'border-l-danger-500',
     warning: 'border-l-warning-500',
-    info: 'border-l-iron-500',
+    info: 'border-l-primary-500',
 };
 
 // Single Toast component
@@ -148,7 +148,7 @@ function ToastItem({ toast }: { toast: Toast }) {
             className={cn(
                 'pointer-events-auto',
                 'min-w-[320px] max-w-[420px]',
-                'bg-neutral-900 border border-neutral-800 border-l-4 rounded-xl',
+                'bg-slate-900 border border-slate-800 border-l-4 rounded-xl',
                 'shadow-elevated',
                 'flex items-start gap-3 p-4',
                 borderColors[toast.type]
@@ -157,14 +157,14 @@ function ToastItem({ toast }: { toast: Toast }) {
         >
             <Icon className={cn('w-5 h-5 mt-0.5 flex-shrink-0', iconColors[toast.type])} />
             <div className="flex-1 min-w-0">
-                <p className="text-sm text-neutral-100">{toast.message}</p>
+                <p className="text-sm text-slate-100">{toast.message}</p>
                 {toast.action && (
                     <button
                         onClick={() => {
                             toast.action?.onClick();
                             removeToast(toast.id);
                         }}
-                        className="mt-2 text-sm font-medium text-iron-400 hover:text-iron-300 transition-colors"
+                        className="mt-2 text-sm font-medium text-primary-400 hover:text-primary-300 transition-colors"
                     >
                         {toast.action.label}
                     </button>
@@ -172,7 +172,7 @@ function ToastItem({ toast }: { toast: Toast }) {
             </div>
             <button
                 onClick={() => removeToast(toast.id)}
-                className="p-1 rounded-lg text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors flex-shrink-0"
+                className="p-1 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition-colors flex-shrink-0"
                 aria-label="Cerrar notificación"
             >
                 <X className="w-4 h-4" />
@@ -206,3 +206,4 @@ export function showToast(message: string, type: ToastType = 'info', duration?: 
 }
 
 export default ToastContainer;
+

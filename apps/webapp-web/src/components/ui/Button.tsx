@@ -14,30 +14,30 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantClasses = {
     primary: [
-        'bg-gradient-to-r from-iron-600 to-iron-500',
+        'bg-gradient-to-r from-primary-600 to-primary-500',
         'text-white font-semibold',
-        'hover:shadow-glow-md hover:from-iron-500 hover:to-iron-400',
+        'hover:shadow-md hover:from-primary-500 hover:to-primary-400',
         'active:scale-[0.98]',
         'disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none',
     ].join(' '),
     secondary: [
-        'bg-neutral-800 border border-neutral-700',
-        'text-neutral-200',
-        'hover:bg-neutral-700 hover:border-neutral-600',
+        'bg-slate-800 border border-slate-700',
+        'text-slate-200',
+        'hover:bg-slate-700 hover:border-slate-600',
         'active:scale-[0.98]',
         'disabled:opacity-50 disabled:cursor-not-allowed',
     ].join(' '),
     ghost: [
         'bg-transparent',
-        'text-neutral-400',
-        'hover:bg-neutral-800 hover:text-white',
+        'text-slate-400',
+        'hover:bg-slate-800 hover:text-white',
         'active:scale-[0.98]',
         'disabled:opacity-50 disabled:cursor-not-allowed',
     ].join(' '),
     outline: [
-        'bg-transparent border border-neutral-700',
-        'text-neutral-300',
-        'hover:bg-neutral-800 hover:border-neutral-600 hover:text-white',
+        'bg-transparent border border-slate-700',
+        'text-slate-300',
+        'hover:bg-slate-800 hover:border-slate-600 hover:text-white',
         'active:scale-[0.98]',
         'disabled:opacity-50 disabled:cursor-not-allowed',
     ].join(' '),
@@ -93,7 +93,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
                 className={cn(
                     'inline-flex items-center justify-center',
                     'font-medium transition-all duration-200',
-                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-iron-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-900',
+                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-900',
                     variantClasses[variant],
                     sizeClasses[size],
                     className
@@ -148,7 +148,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
                 className={cn(
                     'inline-flex items-center justify-center',
                     'transition-all duration-200',
-                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-iron-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-900',
+                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/50 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-900',
                     variantClasses[variant],
                     iconSizeClasses[size],
                     className
@@ -168,3 +168,4 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
 IconButton.displayName = 'IconButton';
 
 export default Button;
+

@@ -277,13 +277,13 @@ function PagoFormModal({
 
                 {/* Preset Templates */}
                 <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm text-neutral-400">Plantillas:</span>
+                    <span className="text-sm text-slate-400">Plantillas:</span>
                     {PAGO_PRESET_TEMPLATES.map((preset) => (
                         <button
                             key={preset.id}
                             type="button"
                             onClick={() => applyPreset(preset.id)}
-                            className="px-3 py-1.5 text-xs rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white transition-colors border border-neutral-700"
+                            className="px-3 py-1.5 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors border border-slate-700"
                         >
                             <Copy className="w-3 h-3 inline mr-1.5" />
                             {preset.nombre}
@@ -294,7 +294,7 @@ function PagoFormModal({
                 {/* Line Items */}
                 <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                        <label className="text-sm font-medium text-neutral-300">Conceptos</label>
+                        <label className="text-sm font-medium text-slate-300">Conceptos</label>
                         <Button
                             type="button"
                             variant="ghost"
@@ -310,10 +310,10 @@ function PagoFormModal({
                         {lineItems.map((item, index) => (
                             <div
                                 key={item.id}
-                                className="p-3 rounded-lg bg-neutral-800/50 border border-neutral-700/50 space-y-3"
+                                className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50 space-y-3"
                             >
                                 <div className="flex items-center gap-2">
-                                    <span className="text-xs text-neutral-500 font-medium">#{index + 1}</span>
+                                    <span className="text-xs text-slate-500 font-medium">#{index + 1}</span>
                                     <div className="flex gap-1 text-xs">
                                         <button
                                             type="button"
@@ -321,8 +321,8 @@ function PagoFormModal({
                                             className={cn(
                                                 'px-2 py-1 rounded transition-colors',
                                                 item.mode === 'registered'
-                                                    ? 'bg-iron-500/20 text-iron-400'
-                                                    : 'text-neutral-500 hover:text-neutral-300'
+                                                    ? 'bg-primary-500/20 text-primary-400'
+                                                    : 'text-slate-500 hover:text-slate-300'
                                             )}
                                         >
                                             Concepto
@@ -333,8 +333,8 @@ function PagoFormModal({
                                             className={cn(
                                                 'px-2 py-1 rounded transition-colors',
                                                 item.mode === 'custom'
-                                                    ? 'bg-iron-500/20 text-iron-400'
-                                                    : 'text-neutral-500 hover:text-neutral-300'
+                                                    ? 'bg-primary-500/20 text-primary-400'
+                                                    : 'text-slate-500 hover:text-slate-300'
                                             )}
                                         >
                                             Personalizado
@@ -345,7 +345,7 @@ function PagoFormModal({
                                         <button
                                             type="button"
                                             onClick={() => removeLineItem(item.id)}
-                                            className="p-1 text-neutral-500 hover:text-danger-400 transition-colors"
+                                            className="p-1 text-slate-500 hover:text-danger-400 transition-colors"
                                         >
                                             <X className="w-4 h-4" />
                                         </button>
@@ -393,14 +393,14 @@ function PagoFormModal({
                                             step={0.01}
                                             value={item.precio_unitario || ''}
                                             onChange={(e) => updateLineItem(item.id, { precio_unitario: Number(e.target.value) })}
-                                            leftIcon={<span className="text-neutral-400">$</span>}
+                                            leftIcon={<span className="text-slate-400">$</span>}
                                             placeholder="Precio"
                                         />
                                     </div>
                                 </div>
 
                                 {/* Line subtotal */}
-                                <div className="text-right text-sm text-neutral-400">
+                                <div className="text-right text-sm text-slate-400">
                                     Subtotal: <span className="text-white font-medium">{formatCurrency(item.cantidad * item.precio_unitario)}</span>
                                 </div>
                             </div>
@@ -410,7 +410,7 @@ function PagoFormModal({
                     {/* Total */}
                     <div className="flex justify-end p-3 rounded-lg bg-success-500/10 border border-success-500/20">
                         <div className="text-right">
-                            <span className="text-sm text-neutral-400">Total:</span>
+                            <span className="text-sm text-slate-400">Total:</span>
                             <span className="ml-3 text-xl font-bold text-success-400">{formatCurrency(total)}</span>
                         </div>
                     </div>
@@ -568,7 +568,7 @@ export default function PagosPage() {
             render: (row) => (
                 <div>
                     <div className="font-medium text-white">{formatDate(row.fecha)}</div>
-                    <div className="text-xs text-neutral-500">
+                    <div className="text-xs text-slate-500">
                         {row.mes && row.anio ? `${getMonthName(row.mes)} ${row.anio}` : ''}
                     </div>
                 </div>
@@ -601,7 +601,7 @@ export default function PagosPage() {
             key: 'metodo_pago_nombre',
             header: 'Método',
             render: (row) => (
-                <span className="inline-flex items-center px-2 py-1 rounded-md bg-neutral-800 text-xs">
+                <span className="inline-flex items-center px-2 py-1 rounded-md bg-slate-800 text-xs">
                     {row.metodo_pago_nombre || '-'}
                 </span>
             ),
@@ -612,9 +612,9 @@ export default function PagosPage() {
             align: 'center',
             render: (row) => (
                 row.recibo_numero ? (
-                    <span className="text-iron-400 font-mono text-sm">#{row.recibo_numero}</span>
+                    <span className="text-primary-400 font-mono text-sm">#{row.recibo_numero}</span>
                 ) : (
-                    <span className="text-neutral-600">-</span>
+                    <span className="text-slate-600">-</span>
                 )
             ),
         },
@@ -630,7 +630,7 @@ export default function PagosPage() {
                             setSelectedPago(row);
                             setReciboPreviewOpen(true);
                         }}
-                        className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                         title="Ver recibo"
                     >
                         <FileText className="w-4 h-4" />
@@ -640,7 +640,7 @@ export default function PagosPage() {
                             setPagoToDelete(row);
                             setDeleteModalOpen(true);
                         }}
-                        className="p-2 rounded-lg text-neutral-400 hover:text-danger-400 hover:bg-danger-500/10 transition-colors"
+                        className="p-2 rounded-lg text-slate-400 hover:text-danger-400 hover:bg-danger-500/10 transition-colors"
                         title="Eliminar"
                     >
                         <Trash2 className="w-4 h-4" />
@@ -663,7 +663,7 @@ export default function PagosPage() {
             >
                 <div>
                     <h1 className="text-2xl font-display font-bold text-white">Pagos</h1>
-                    <p className="text-neutral-400 mt-1">
+                    <p className="text-slate-400 mt-1">
                         Registro y gestión de pagos de cuotas
                     </p>
                 </div>
@@ -691,14 +691,14 @@ export default function PagosPage() {
                 transition={{ delay: 0.1 }}
                 className="grid grid-cols-2 md:grid-cols-4 gap-4"
             >
-                <div className="glass-card p-4">
-                    <div className="text-sm text-neutral-400">Total mostrado</div>
+                <div className="card p-4">
+                    <div className="text-sm text-slate-400">Total mostrado</div>
                     <div className="text-2xl font-display font-bold text-success-400 mt-1">
                         {formatCurrency(totalMonto)}
                     </div>
                 </div>
-                <div className="glass-card p-4">
-                    <div className="text-sm text-neutral-400">Registros</div>
+                <div className="card p-4">
+                    <div className="text-sm text-slate-400">Registros</div>
                     <div className="text-2xl font-display font-bold text-white mt-1">
                         {total}
                     </div>
@@ -710,7 +710,7 @@ export default function PagosPage() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.15 }}
-                className="glass-card p-4"
+                className="card p-4"
             >
                 <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-4">
                     <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -825,4 +825,5 @@ export default function PagosPage() {
         </div>
     );
 }
+
 

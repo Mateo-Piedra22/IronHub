@@ -6,24 +6,51 @@ module.exports = {
     darkMode: 'class',
     theme: {
         extend: {
-            // Premium IronHub Color Palette - Disruptive & Professional
+            // Slate Professional - Clean, Modern, Sober
             colors: {
-                // Primary: Deep Electric Violet with Gold accents
-                iron: {
-                    50: '#f5f3ff',
-                    100: '#ede9fe',
-                    200: '#ddd6fe',
-                    300: '#c4b5fd',
-                    400: '#a78bfa',
-                    500: '#8b5cf6',
-                    600: '#7c3aed',
-                    700: '#6d28d9',
-                    800: '#5b21b6',
-                    900: '#4c1d95',
-                    950: '#2e1065',
+                // Primary: Professional Blue (accent for CTAs)
+                primary: {
+                    50: '#eff6ff',
+                    100: '#dbeafe',
+                    200: '#bfdbfe',
+                    300: '#93c5fd',
+                    400: '#60a5fa',
+                    500: '#3b82f6',
+                    600: '#2563eb',
+                    700: '#1d4ed8',
+                    800: '#1e40af',
+                    900: '#1e3a8a',
+                    950: '#172554',
                 },
-                // Accent: Warm Gold/Amber for premium feel
-                gold: {
+                // Neutral: Slate (main UI colors)
+                slate: {
+                    50: '#f8fafc',
+                    100: '#f1f5f9',
+                    200: '#e2e8f0',
+                    300: '#cbd5e1',
+                    400: '#94a3b8',
+                    500: '#64748b',
+                    600: '#475569',
+                    700: '#334155',
+                    800: '#1e293b',
+                    900: '#0f172a',
+                    950: '#020617',
+                },
+                // Semantic: Success (Emerald)
+                success: {
+                    50: '#ecfdf5',
+                    100: '#d1fae5',
+                    200: '#a7f3d0',
+                    300: '#6ee7b7',
+                    400: '#34d399',
+                    500: '#10b981',
+                    600: '#059669',
+                    700: '#047857',
+                    800: '#065f46',
+                    900: '#064e3b',
+                },
+                // Semantic: Warning (Amber)
+                warning: {
                     50: '#fffbeb',
                     100: '#fef3c7',
                     200: '#fde68a',
@@ -34,49 +61,34 @@ module.exports = {
                     700: '#b45309',
                     800: '#92400e',
                     900: '#78350f',
-                    950: '#451a03',
                 },
-                // Neutral: Sophisticated slate-zinc blend
-                neutral: {
-                    50: '#fafafa',
-                    100: '#f4f4f5',
-                    200: '#e4e4e7',
-                    300: '#d4d4d8',
-                    400: '#a1a1aa',
-                    500: '#71717a',
-                    600: '#52525b',
-                    700: '#3f3f46',
-                    800: '#27272a',
-                    850: '#1f1f23',
-                    900: '#18181b',
-                    950: '#09090b',
-                },
-                // Success: Emerald
-                success: {
-                    400: '#34d399',
-                    500: '#10b981',
-                    600: '#059669',
-                },
-                // Danger: Rose
+                // Semantic: Danger (Rose)
                 danger: {
+                    50: '#fff1f2',
+                    100: '#ffe4e6',
+                    200: '#fecdd3',
+                    300: '#fda4af',
                     400: '#fb7185',
                     500: '#f43f5e',
                     600: '#e11d48',
+                    700: '#be123c',
+                    800: '#9f1239',
+                    900: '#881337',
                 },
-                // Warning: Amber
-                warning: {
-                    400: '#fbbf24',
-                    500: '#f59e0b',
-                    600: '#d97706',
+                // Info (Sky)
+                info: {
+                    400: '#38bdf8',
+                    500: '#0ea5e9',
+                    600: '#0284c7',
                 },
             },
             // Typography
             fontFamily: {
                 sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
-                display: ['Outfit', 'Inter', 'system-ui', 'sans-serif'],
+                display: ['Inter', 'system-ui', 'sans-serif'],
                 mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
             },
-            // Spacing & Sizing
+            // Font sizes
             fontSize: {
                 'display-2xl': ['4.5rem', { lineHeight: '1.1', letterSpacing: '-0.02em' }],
                 'display-xl': ['3.75rem', { lineHeight: '1.1', letterSpacing: '-0.02em' }],
@@ -84,33 +96,29 @@ module.exports = {
                 'display-md': ['2.25rem', { lineHeight: '1.2', letterSpacing: '-0.01em' }],
                 'display-sm': ['1.875rem', { lineHeight: '1.3' }],
             },
-            // Shadows for depth
+            // Shadows - Clean, no glow
             boxShadow: {
-                'glow-sm': '0 0 15px -3px rgba(139, 92, 246, 0.3)',
-                'glow-md': '0 0 30px -5px rgba(139, 92, 246, 0.4)',
-                'glow-lg': '0 0 50px -10px rgba(139, 92, 246, 0.5)',
-                'glow-gold': '0 0 30px -5px rgba(245, 158, 11, 0.3)',
-                'glass': '0 8px 32px 0 rgba(0, 0, 0, 0.36)',
-                'elevated': '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
-            },
-            // Backdrop blur for glassmorphism
-            backdropBlur: {
-                xs: '2px',
+                'sm': '0 1px 2px 0 rgb(0 0 0 / 0.05)',
+                'DEFAULT': '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)',
+                'md': '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
+                'lg': '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
+                'xl': '0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)',
+                '2xl': '0 25px 50px -12px rgb(0 0 0 / 0.25)',
+                'inner': 'inset 0 2px 4px 0 rgb(0 0 0 / 0.05)',
+                'card': '0 1px 3px 0 rgb(0 0 0 / 0.3), 0 1px 2px -1px rgb(0 0 0 / 0.2)',
+                'elevated': '0 10px 40px -10px rgb(0 0 0 / 0.4)',
             },
             // Border radius
             borderRadius: {
                 '4xl': '2rem',
                 '5xl': '2.5rem',
             },
-            // Animations
+            // Animations - subtle, professional
             animation: {
-                'fade-in': 'fadeIn 0.5s ease-out',
-                'fade-up': 'fadeUp 0.6s ease-out',
-                'slide-in-left': 'slideInLeft 0.5s ease-out',
-                'slide-in-right': 'slideInRight 0.5s ease-out',
-                'glow-pulse': 'glowPulse 2s ease-in-out infinite',
-                'float': 'float 6s ease-in-out infinite',
-                'gradient': 'gradient 8s ease infinite',
+                'fade-in': 'fadeIn 0.3s ease-out',
+                'fade-up': 'fadeUp 0.4s ease-out',
+                'slide-in-left': 'slideInLeft 0.3s ease-out',
+                'slide-in-right': 'slideInRight 0.3s ease-out',
             },
             keyframes: {
                 fadeIn: {
@@ -118,37 +126,17 @@ module.exports = {
                     '100%': { opacity: '1' },
                 },
                 fadeUp: {
-                    '0%': { opacity: '0', transform: 'translateY(20px)' },
+                    '0%': { opacity: '0', transform: 'translateY(10px)' },
                     '100%': { opacity: '1', transform: 'translateY(0)' },
                 },
                 slideInLeft: {
-                    '0%': { opacity: '0', transform: 'translateX(-30px)' },
+                    '0%': { opacity: '0', transform: 'translateX(-20px)' },
                     '100%': { opacity: '1', transform: 'translateX(0)' },
                 },
                 slideInRight: {
-                    '0%': { opacity: '0', transform: 'translateX(30px)' },
+                    '0%': { opacity: '0', transform: 'translateX(20px)' },
                     '100%': { opacity: '1', transform: 'translateX(0)' },
                 },
-                glowPulse: {
-                    '0%, 100%': { boxShadow: '0 0 20px -5px rgba(139, 92, 246, 0.4)' },
-                    '50%': { boxShadow: '0 0 40px -5px rgba(139, 92, 246, 0.6)' },
-                },
-                float: {
-                    '0%, 100%': { transform: 'translateY(0)' },
-                    '50%': { transform: 'translateY(-10px)' },
-                },
-                gradient: {
-                    '0%, 100%': { backgroundPosition: '0% 50%' },
-                    '50%': { backgroundPosition: '100% 50%' },
-                },
-            },
-            // Background images
-            backgroundImage: {
-                'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
-                'gradient-conic': 'conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))',
-                'gradient-iron': 'linear-gradient(135deg, #6d28d9 0%, #8b5cf6 50%, #d97706 100%)',
-                'gradient-dark': 'linear-gradient(180deg, #09090b 0%, #18181b 100%)',
-                'mesh': 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'100\' height=\'100\' viewBox=\'0 0 100 100\'%3E%3Cg fill-rule=\'evenodd\'%3E%3Cg fill=\'%239C92AC\' fill-opacity=\'0.03\'%3E%3Cpath opacity=\'.5\' d=\'M96 95h4v1h-4v4h-1v-4h-9v4h-1v-4h-9v4h-1v-4h-9v4h-1v-4h-9v4h-1v-4h-9v4h-1v-4h-9v4h-1v-4h-9v4h-1v-4h-9v4h-1v-4H0v-1h15v-9H0v-1h15v-9H0v-1h15v-9H0v-1h15v-9H0v-1h15v-9H0v-1h15v-9H0v-1h15v-9H0v-1h15v-9H0v-1h15V0h1v15h9V0h1v15h9V0h1v15h9V0h1v15h9V0h1v15h9V0h1v15h9V0h1v15h9V0h1v15h9V0h1v15h4v1h-4v9h4v1h-4v9h4v1h-4v9h4v1h-4v9h4v1h-4v9h4v1h-4v9h4v1h-4v9h4v1h-4v9zm-1 0v-9h-9v9h9zm-10 0v-9h-9v9h9zm-10 0v-9h-9v9h9zm-10 0v-9h-9v9h9zm-10 0v-9h-9v9h9zm-10 0v-9h-9v9h9zm-10 0v-9h-9v9h9zm-10 0v-9h-9v9h9zm-9-10h9v-9h-9v9zm10 0h9v-9h-9v9zm10 0h9v-9h-9v9zm10 0h9v-9h-9v9zm10 0h9v-9h-9v9zm10 0h9v-9h-9v9zm10 0h9v-9h-9v9zm10 0h9v-9h-9v9zm9-10v-9h-9v9h9zm-10 0v-9h-9v9h9zm-10 0v-9h-9v9h9zm-10 0v-9h-9v9h9zm-10 0v-9h-9v9h9zm-10 0v-9h-9v9h9zm-10 0v-9h-9v9h9zm-10 0v-9h-9v9h9zm-9-10h9v-9h-9v9zm10 0h9v-9h-9v9zm10 0h9v-9h-9v9zm10 0h9v-9h-9v9zm10 0h9v-9h-9v9zm10 0h9v-9h-9v9zm10 0h9v-9h-9v9zm10 0h9v-9h-9v9z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")',
             },
         },
     },

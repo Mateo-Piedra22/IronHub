@@ -272,52 +272,52 @@ export default function CheckinPage() {
     // Auth screen
     if (!authenticated) {
         return (
-            <div className="min-h-screen flex items-center justify-center p-4 bg-neutral-950">
+            <div className="min-h-screen flex items-center justify-center p-4 bg-slate-950">
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     className="w-full max-w-md"
                 >
                     <div className="text-center mb-8">
-                        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-success-500 to-success-600 shadow-glow-md mb-4">
+                        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-success-500 to-success-600 shadow-md mb-4">
                             <ScanLine className="w-8 h-8 text-white" />
                         </div>
                         <h1 className="text-2xl font-display font-bold text-white">Check-in</h1>
-                        <p className="text-neutral-400 mt-1">Ingresá tus datos para habilitar el lector</p>
+                        <p className="text-slate-400 mt-1">Ingresá tus datos para habilitar el lector</p>
                     </div>
 
-                    <div className="glass-card p-8">
+                    <div className="card p-8">
                         <form onSubmit={handleAuth} className="space-y-4">
                             {/* DNI */}
                             <div>
-                                <label className="block text-sm font-medium text-neutral-300 mb-2">DNI</label>
+                                <label className="block text-sm font-medium text-slate-300 mb-2">DNI</label>
                                 <div className="relative">
                                     <input
                                         type="text"
                                         inputMode="numeric"
                                         value={authDni}
                                         onChange={(e) => setAuthDni(e.target.value)}
-                                        className="w-full px-4 py-3 pl-11 rounded-xl bg-neutral-900 border border-neutral-800 text-white focus:ring-2 focus:ring-success-500/50 focus:border-success-500 transition-all"
+                                        className="w-full px-4 py-3 pl-11 rounded-xl bg-slate-900 border border-slate-800 text-white focus:ring-2 focus:ring-success-500/50 focus:border-success-500 transition-all"
                                         placeholder="Solo números"
                                         autoComplete="off"
                                     />
-                                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
+                                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
                                 </div>
                             </div>
 
                             {/* Phone with country prefix */}
                             <div>
-                                <label className="block text-sm font-medium text-neutral-300 mb-2">Teléfono</label>
+                                <label className="block text-sm font-medium text-slate-300 mb-2">Teléfono</label>
                                 <div className="flex gap-2">
                                     {/* Prefix selector */}
                                     <div className="relative">
                                         <button
                                             type="button"
                                             onClick={() => setShowPrefixSelector(!showPrefixSelector)}
-                                            className="flex items-center gap-1 px-3 py-3 rounded-xl bg-neutral-900 border border-neutral-800 text-white hover:bg-neutral-800 transition-all"
+                                            className="flex items-center gap-1 px-3 py-3 rounded-xl bg-slate-900 border border-slate-800 text-white hover:bg-slate-800 transition-all"
                                         >
                                             {countryPrefix}
-                                            <ChevronDown className="w-4 h-4 text-neutral-500" />
+                                            <ChevronDown className="w-4 h-4 text-slate-500" />
                                         </button>
 
                                         <AnimatePresence>
@@ -326,7 +326,7 @@ export default function CheckinPage() {
                                                     initial={{ opacity: 0, y: -10 }}
                                                     animate={{ opacity: 1, y: 0 }}
                                                     exit={{ opacity: 0, y: -10 }}
-                                                    className="absolute top-full left-0 mt-2 w-48 bg-neutral-900 border border-neutral-800 rounded-xl shadow-lg z-10 overflow-hidden"
+                                                    className="absolute top-full left-0 mt-2 w-48 bg-slate-900 border border-slate-800 rounded-xl shadow-lg z-10 overflow-hidden"
                                                 >
                                                     {COUNTRY_PREFIXES.map((p) => (
                                                         <button
@@ -337,7 +337,7 @@ export default function CheckinPage() {
                                                                 setShowPrefixSelector(false);
                                                             }}
                                                             className={cn(
-                                                                'w-full px-4 py-2 text-left text-sm hover:bg-neutral-800 transition-colors',
+                                                                'w-full px-4 py-2 text-left text-sm hover:bg-slate-800 transition-colors',
                                                                 countryPrefix === p.code ? 'text-success-400' : 'text-white'
                                                             )}
                                                         >
@@ -356,14 +356,14 @@ export default function CheckinPage() {
                                             inputMode="numeric"
                                             value={authPhone}
                                             onChange={(e) => setAuthPhone(e.target.value)}
-                                            className="w-full px-4 py-3 pl-11 rounded-xl bg-neutral-900 border border-neutral-800 text-white focus:ring-2 focus:ring-success-500/50 focus:border-success-500 transition-all"
+                                            className="w-full px-4 py-3 pl-11 rounded-xl bg-slate-900 border border-slate-800 text-white focus:ring-2 focus:ring-success-500/50 focus:border-success-500 transition-all"
                                             placeholder="Ej: 3434473599"
                                             autoComplete="off"
                                         />
-                                        <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
+                                        <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
                                     </div>
                                 </div>
-                                <p className="text-xs text-neutral-500 mt-1">Elegí el prefijo. Ingresá solo dígitos.</p>
+                                <p className="text-xs text-slate-500 mt-1">Elegí el prefijo. Ingresá solo dígitos.</p>
                             </div>
 
                             {authError && (
@@ -375,7 +375,7 @@ export default function CheckinPage() {
                             <button
                                 type="submit"
                                 disabled={authLoading}
-                                className="w-full py-3 rounded-xl font-semibold text-white bg-gradient-to-r from-success-500 to-success-600 hover:shadow-glow-md transition-all disabled:opacity-50"
+                                className="w-full py-3 rounded-xl font-semibold text-white bg-gradient-to-r from-success-500 to-success-600 hover:shadow-md transition-all disabled:opacity-50"
                             >
                                 {authLoading ? 'Verificando...' : 'Continuar'}
                             </button>
@@ -388,7 +388,7 @@ export default function CheckinPage() {
 
     // Main check-in screen
     return (
-        <div className="min-h-screen bg-neutral-950 p-4">
+        <div className="min-h-screen bg-slate-950 p-4">
             {/* Header */}
             <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-3">
@@ -397,12 +397,12 @@ export default function CheckinPage() {
                     </div>
                     <div>
                         <h1 className="text-lg font-display font-bold text-white">Check-in</h1>
-                        <p className="text-xs text-neutral-500">Ingresa el DNI del socio</p>
+                        <p className="text-xs text-slate-500">Ingresa el DNI del socio</p>
                     </div>
                 </div>
                 <button
                     onClick={handleLogout}
-                    className="p-2 rounded-lg text-neutral-400 hover:text-danger-400 hover:bg-danger-500/10 transition-colors"
+                    className="p-2 rounded-lg text-slate-400 hover:text-danger-400 hover:bg-danger-500/10 transition-colors"
                 >
                     <LogOut className="w-5 h-5" />
                 </button>
@@ -432,7 +432,7 @@ export default function CheckinPage() {
                         'flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-medium transition-all',
                         mode === 'camera'
                             ? 'bg-success-500/20 text-success-400 border border-success-500/30'
-                            : 'bg-neutral-900 text-neutral-400 border border-neutral-800'
+                            : 'bg-slate-900 text-slate-400 border border-slate-800'
                     )}
                 >
                     <Camera className="w-4 h-4" />
@@ -444,7 +444,7 @@ export default function CheckinPage() {
                         'flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-medium transition-all',
                         mode === 'manual'
                             ? 'bg-success-500/20 text-success-400 border border-success-500/30'
-                            : 'bg-neutral-900 text-neutral-400 border border-neutral-800'
+                            : 'bg-slate-900 text-slate-400 border border-slate-800'
                     )}
                 >
                     <Keyboard className="w-4 h-4" />
@@ -453,7 +453,7 @@ export default function CheckinPage() {
             </div>
 
             {/* Scanner area */}
-            <div className="relative aspect-square max-w-md mx-auto mb-6 rounded-2xl overflow-hidden bg-neutral-900 border border-neutral-800">
+            <div className="relative aspect-square max-w-md mx-auto mb-6 rounded-2xl overflow-hidden bg-slate-900 border border-slate-800">
                 {mode === 'camera' ? (
                     <>
                         <video
@@ -478,13 +478,13 @@ export default function CheckinPage() {
                                 />
                             </div>
                         </div>
-                        <div className="absolute bottom-4 left-4 right-4 text-center text-sm text-neutral-400">
+                        <div className="absolute bottom-4 left-4 right-4 text-center text-sm text-slate-400">
                             Apunta la cámara al código QR del socio
                         </div>
                     </>
                 ) : (
                     <form onSubmit={handleManualSubmit} className="flex flex-col items-center justify-center h-full p-6">
-                        <Keyboard className="w-12 h-12 text-neutral-600 mb-4" />
+                        <Keyboard className="w-12 h-12 text-slate-600 mb-4" />
                         <input
                             ref={inputRef}
                             type="text"
@@ -493,7 +493,7 @@ export default function CheckinPage() {
                             onChange={(e) => setManualToken(e.target.value)}
                             placeholder="Ingresa el DNI..."
                             disabled={scanStatus === 'processing'}
-                            className="w-full px-4 py-3 rounded-xl bg-neutral-800 border border-neutral-700 text-white text-center text-lg tracking-widest focus:ring-2 focus:ring-success-500/50 focus:border-success-500 transition-all disabled:opacity-50"
+                            className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white text-center text-lg tracking-widest focus:ring-2 focus:ring-success-500/50 focus:border-success-500 transition-all disabled:opacity-50"
                             autoFocus
                         />
                         <button
@@ -541,7 +541,7 @@ export default function CheckinPage() {
             {/* Recent checkins */}
             {recentCheckins.length > 0 && (
                 <div className="max-w-md mx-auto">
-                    <h2 className="text-sm font-medium text-neutral-400 mb-3 flex items-center gap-2">
+                    <h2 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
                         <Clock className="w-4 h-4" />
                         Últimos Check-ins
                     </h2>
@@ -549,7 +549,7 @@ export default function CheckinPage() {
                         {recentCheckins.slice(0, 5).map((c, i) => (
                             <div
                                 key={i}
-                                className="flex items-center justify-between p-3 rounded-xl bg-neutral-900/50 border border-neutral-800"
+                                className="flex items-center justify-between p-3 rounded-xl bg-slate-900/50 border border-slate-800"
                             >
                                 <div className="flex items-center gap-3">
                                     <div className="w-8 h-8 rounded-full bg-success-500/20 flex items-center justify-center">
@@ -557,7 +557,7 @@ export default function CheckinPage() {
                                     </div>
                                     <span className="text-white text-sm">{c.name}</span>
                                 </div>
-                                <span className="text-xs text-neutral-500">{c.time}</span>
+                                <span className="text-xs text-slate-500">{c.time}</span>
                             </div>
                         ))}
                     </div>
@@ -566,3 +566,4 @@ export default function CheckinPage() {
         </div>
     );
 }
+

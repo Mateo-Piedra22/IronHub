@@ -90,10 +90,10 @@ export default function GestionLoginPage() {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center p-4 bg-neutral-950">
+        <div className="min-h-screen flex items-center justify-center p-4 bg-slate-950">
             {/* Background effects */}
             <div className="fixed inset-0 overflow-hidden pointer-events-none">
-                <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-iron-500/10 rounded-full blur-3xl" />
+                <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary-500/10 rounded-full blur-3xl" />
                 <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-gold-500/5 rounded-full blur-3xl" />
             </div>
 
@@ -108,12 +108,12 @@ export default function GestionLoginPage() {
                         initial={{ scale: 0.8 }}
                         animate={{ scale: 1 }}
                         transition={{ delay: 0.1 }}
-                        className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-iron-500 to-iron-700 shadow-glow-md mb-4"
+                        className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 shadow-md mb-4"
                     >
                         <Dumbbell className="w-8 h-8 text-white" />
                     </motion.div>
                     <h1 className="text-2xl font-display font-bold text-white">Panel de Gestión</h1>
-                    <p className="text-neutral-400 mt-1">Acceso para profesores o dueño</p>
+                    <p className="text-slate-400 mt-1">Acceso para profesores o dueño</p>
                 </div>
 
                 {/* Form Card */}
@@ -121,12 +121,12 @@ export default function GestionLoginPage() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.2 }}
-                    className="glass-card p-8"
+                    className="card p-8"
                 >
                     <form onSubmit={handleSubmit} className="space-y-6">
                         {/* Profile Selector */}
                         <div className="space-y-2">
-                            <label htmlFor="profile" className="block text-sm font-medium text-neutral-300">
+                            <label htmlFor="profile" className="block text-sm font-medium text-slate-300">
                                 Seleccionar perfil
                             </label>
                             <div className="relative">
@@ -140,7 +140,7 @@ export default function GestionLoginPage() {
                                         setOwnerPassword('');
                                     }}
                                     disabled={loadingProfesores}
-                                    className="w-full px-4 py-3 pl-11 rounded-xl bg-neutral-900 border border-neutral-800 text-white appearance-none focus:outline-none focus:ring-2 focus:ring-iron-500/50 focus:border-iron-500 transition-all disabled:opacity-50"
+                                    className="w-full px-4 py-3 pl-11 rounded-xl bg-slate-900 border border-slate-800 text-white appearance-none focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all disabled:opacity-50"
                                 >
                                     <option value="__OWNER__">👑 Dueño</option>
                                     {profesores.map((p) => (
@@ -149,9 +149,9 @@ export default function GestionLoginPage() {
                                         </option>
                                     ))}
                                 </select>
-                                <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
+                                <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
                                 {loadingProfesores && (
-                                    <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500 animate-spin" />
+                                    <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 animate-spin" />
                                 )}
                             </div>
                         </div>
@@ -164,7 +164,7 @@ export default function GestionLoginPage() {
                                 exit={{ opacity: 0, height: 0 }}
                                 className="space-y-2"
                             >
-                                <label htmlFor="pin" className="block text-sm font-medium text-neutral-300">
+                                <label htmlFor="pin" className="block text-sm font-medium text-slate-300">
                                     PIN
                                 </label>
                                 <div className="relative">
@@ -175,14 +175,14 @@ export default function GestionLoginPage() {
                                         onChange={(e) => setPin(e.target.value)}
                                         placeholder="Ingresá tu PIN"
                                         maxLength={6}
-                                        className="w-full px-4 py-3 pl-11 pr-12 rounded-xl bg-neutral-900 border border-neutral-800 text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-iron-500/50 focus:border-iron-500 transition-all"
+                                        className="w-full px-4 py-3 pl-11 pr-12 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all"
                                         autoComplete="current-password"
                                     />
-                                    <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
+                                    <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
                                     <button
                                         type="button"
                                         onClick={() => setShowPassword(!showPassword)}
-                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-neutral-500 hover:text-white transition-colors"
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-white transition-colors"
                                         tabIndex={-1}
                                     >
                                         {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
@@ -199,7 +199,7 @@ export default function GestionLoginPage() {
                                 exit={{ opacity: 0, height: 0 }}
                                 className="space-y-2"
                             >
-                                <label htmlFor="owner_password" className="block text-sm font-medium text-neutral-300">
+                                <label htmlFor="owner_password" className="block text-sm font-medium text-slate-300">
                                     Contraseña del dueño
                                 </label>
                                 <div className="relative">
@@ -209,13 +209,13 @@ export default function GestionLoginPage() {
                                         value={ownerPassword}
                                         onChange={(e) => setOwnerPassword(e.target.value)}
                                         placeholder="Ingresá la contraseña"
-                                        className="w-full px-4 py-3 pr-12 rounded-xl bg-neutral-900 border border-neutral-800 text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-iron-500/50 focus:border-iron-500 transition-all"
+                                        className="w-full px-4 py-3 pr-12 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all"
                                         autoComplete="current-password"
                                     />
                                     <button
                                         type="button"
                                         onClick={() => setShowPassword(!showPassword)}
-                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-neutral-500 hover:text-white transition-colors"
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-white transition-colors"
                                         tabIndex={-1}
                                     >
                                         {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
@@ -241,8 +241,8 @@ export default function GestionLoginPage() {
                             disabled={loading || loadingProfesores}
                             className={cn(
                                 'w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold text-white',
-                                'bg-gradient-to-r from-iron-600 to-iron-500',
-                                'hover:shadow-glow-md transition-all duration-300',
+                                'bg-gradient-to-r from-primary-600 to-primary-500',
+                                'hover:shadow-md transition-all duration-300',
                                 'disabled:opacity-50 disabled:cursor-not-allowed'
                             )}
                         >
@@ -258,8 +258,8 @@ export default function GestionLoginPage() {
                     </form>
 
                     {/* Admin notice */}
-                    <div className="mt-6 pt-6 border-t border-neutral-800">
-                        <div className="flex items-center gap-2 text-xs text-neutral-500">
+                    <div className="mt-6 pt-6 border-t border-slate-800">
+                        <div className="flex items-center gap-2 text-xs text-slate-500">
                             <Shield className="w-4 h-4" />
                             <span>Acceso restringido a personal autorizado</span>
                         </div>
@@ -269,3 +269,4 @@ export default function GestionLoginPage() {
         </div>
     );
 }
+

@@ -239,12 +239,12 @@ export default function ClaseDetailModal({
             <div className="space-y-4">
                 {/* Horario selector */}
                 {horarios.length > 0 && (
-                    <div className="flex items-center gap-2 pb-4 border-b border-neutral-800">
-                        <span className="text-sm text-neutral-400">Horario:</span>
+                    <div className="flex items-center gap-2 pb-4 border-b border-slate-800">
+                        <span className="text-sm text-slate-400">Horario:</span>
                         <select
                             value={selectedHorarioId || ''}
                             onChange={(e) => setSelectedHorarioId(Number(e.target.value))}
-                            className="bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white"
+                            className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"
                         >
                             {horarios.map((h) => (
                                 <option key={h.id} value={h.id}>
@@ -254,7 +254,7 @@ export default function ClaseDetailModal({
                             ))}
                         </select>
                         {selectedHorario && (
-                            <span className="text-sm text-neutral-500 ml-auto">
+                            <span className="text-sm text-slate-500 ml-auto">
                                 {selectedHorario.inscriptos_count || 0}
                                 {selectedHorario.cupo && `/${selectedHorario.cupo}`} inscriptos
                             </span>
@@ -263,7 +263,7 @@ export default function ClaseDetailModal({
                 )}
 
                 {/* Tabs */}
-                <div className="flex border-b border-neutral-800">
+                <div className="flex border-b border-slate-800">
                     {[
                         { id: 'horarios', label: 'Horarios', icon: Clock },
                         { id: 'inscripciones', label: 'Inscriptos', icon: Users },
@@ -275,8 +275,8 @@ export default function ClaseDetailModal({
                             className={cn(
                                 'flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors',
                                 activeTab === tab.id
-                                    ? 'text-iron-400 border-iron-400'
-                                    : 'text-neutral-500 border-transparent hover:text-white'
+                                    ? 'text-primary-400 border-primary-400'
+                                    : 'text-slate-500 border-transparent hover:text-white'
                             )}
                         >
                             <tab.icon className="w-4 h-4" />
@@ -290,7 +290,7 @@ export default function ClaseDetailModal({
                     {activeTab === 'horarios' && (
                         <div className="space-y-4">
                             {/* Add horario form */}
-                            <div className="glass-card p-4 space-y-3">
+                            <div className="card p-4 space-y-3">
                                 <h4 className="text-sm font-medium text-white">Agregar Horario</h4>
                                 <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                                     <Select
@@ -337,8 +337,8 @@ export default function ClaseDetailModal({
                                         className={cn(
                                             'flex items-center justify-between p-3 rounded-lg border',
                                             selectedHorarioId === h.id
-                                                ? 'bg-iron-500/10 border-iron-500/50'
-                                                : 'bg-neutral-800/50 border-neutral-700'
+                                                ? 'bg-primary-500/10 border-primary-500/50'
+                                                : 'bg-slate-800/50 border-slate-700'
                                         )}
                                     >
                                         <div className="flex items-center gap-4">
@@ -347,27 +347,27 @@ export default function ClaseDetailModal({
                                                 className="text-left"
                                             >
                                                 <div className="font-medium text-white">{h.dia}</div>
-                                                <div className="text-sm text-neutral-400">
+                                                <div className="text-sm text-slate-400">
                                                     {formatTime(h.hora_inicio)} - {formatTime(h.hora_fin)}
                                                 </div>
                                             </button>
                                             {h.profesor_nombre && (
-                                                <span className="text-sm text-neutral-500">{h.profesor_nombre}</span>
+                                                <span className="text-sm text-slate-500">{h.profesor_nombre}</span>
                                             )}
-                                            <span className="text-sm text-neutral-400">
+                                            <span className="text-sm text-slate-400">
                                                 {h.inscriptos_count || 0}{h.cupo && `/${h.cupo}`}
                                             </span>
                                         </div>
                                         <button
                                             onClick={() => handleDeleteHorario(h.id)}
-                                            className="p-2 text-neutral-400 hover:text-danger-400"
+                                            className="p-2 text-slate-400 hover:text-danger-400"
                                         >
                                             <Trash2 className="w-4 h-4" />
                                         </button>
                                     </div>
                                 ))}
                                 {horarios.length === 0 && (
-                                    <div className="text-center text-neutral-500 py-8">
+                                    <div className="text-center text-slate-500 py-8">
                                         Sin horarios configurados
                                     </div>
                                 )}
@@ -378,7 +378,7 @@ export default function ClaseDetailModal({
                     {activeTab === 'inscripciones' && (
                         <div className="space-y-4">
                             {!selectedHorarioId ? (
-                                <div className="text-center text-neutral-500 py-8">
+                                <div className="text-center text-slate-500 py-8">
                                     Selecciona un horario primero
                                 </div>
                             ) : (
@@ -405,24 +405,24 @@ export default function ClaseDetailModal({
                                         {inscripciones.map((i) => (
                                             <div
                                                 key={i.id}
-                                                className="flex items-center justify-between p-3 bg-neutral-800/50 rounded-lg border border-neutral-700"
+                                                className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg border border-slate-700"
                                             >
                                                 <div>
                                                     <div className="font-medium text-white">{i.usuario_nombre}</div>
                                                     {i.usuario_telefono && (
-                                                        <div className="text-xs text-neutral-500">{i.usuario_telefono}</div>
+                                                        <div className="text-xs text-slate-500">{i.usuario_telefono}</div>
                                                     )}
                                                 </div>
                                                 <button
                                                     onClick={() => handleDesinscribir(i.usuario_id)}
-                                                    className="p-2 text-neutral-400 hover:text-danger-400"
+                                                    className="p-2 text-slate-400 hover:text-danger-400"
                                                 >
                                                     <X className="w-4 h-4" />
                                                 </button>
                                             </div>
                                         ))}
                                         {inscripciones.length === 0 && (
-                                            <div className="text-center text-neutral-500 py-8">
+                                            <div className="text-center text-slate-500 py-8">
                                                 Sin inscriptos
                                             </div>
                                         )}
@@ -435,7 +435,7 @@ export default function ClaseDetailModal({
                     {activeTab === 'espera' && (
                         <div className="space-y-4">
                             {!selectedHorarioId ? (
-                                <div className="text-center text-neutral-500 py-8">
+                                <div className="text-center text-slate-500 py-8">
                                     Selecciona un horario primero
                                 </div>
                             ) : (
@@ -468,24 +468,24 @@ export default function ClaseDetailModal({
                                         {listaEspera.map((item, index) => (
                                             <div
                                                 key={item.id}
-                                                className="flex items-center justify-between p-3 bg-neutral-800/50 rounded-lg border border-neutral-700"
+                                                className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg border border-slate-700"
                                             >
                                                 <div className="flex items-center gap-3">
-                                                    <span className="w-6 h-6 rounded-full bg-neutral-700 flex items-center justify-center text-xs font-medium">
+                                                    <span className="w-6 h-6 rounded-full bg-slate-700 flex items-center justify-center text-xs font-medium">
                                                         {index + 1}
                                                     </span>
                                                     <div className="font-medium text-white">{item.usuario_nombre}</div>
                                                 </div>
                                                 <button
                                                     onClick={() => handleRemoveFromWaitlist(item.usuario_id)}
-                                                    className="p-2 text-neutral-400 hover:text-danger-400"
+                                                    className="p-2 text-slate-400 hover:text-danger-400"
                                                 >
                                                     <X className="w-4 h-4" />
                                                 </button>
                                             </div>
                                         ))}
                                         {listaEspera.length === 0 && (
-                                            <div className="text-center text-neutral-500 py-8">
+                                            <div className="text-center text-slate-500 py-8">
                                                 Lista de espera vacía
                                             </div>
                                         )}
@@ -499,3 +499,4 @@ export default function ClaseDetailModal({
         </Modal>
     );
 }
+

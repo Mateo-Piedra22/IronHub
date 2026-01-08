@@ -82,7 +82,7 @@ export default function HomePage() {
     if (loading) {
         return (
             <div className="min-h-screen flex items-center justify-center">
-                <Loader2 className="w-8 h-8 animate-spin text-iron-400" />
+                <Loader2 className="w-8 h-8 animate-spin text-primary-400" />
             </div>
         );
     }
@@ -97,9 +97,9 @@ export default function HomePage() {
             {/* Maintenance Modal */}
             {showMaintenance && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-                    <div className="glass-card p-6 max-w-md w-full">
+                    <div className="card p-6 max-w-md w-full">
                         <h3 className="text-lg font-bold text-white mb-2">Mantenimiento</h3>
-                        <p className="text-neutral-400 mb-4">{maintenanceMsg}</p>
+                        <p className="text-slate-400 mb-4">{maintenanceMsg}</p>
                         <button
                             onClick={() => setShowMaintenance(false)}
                             className="btn-secondary w-full"
@@ -113,9 +113,9 @@ export default function HomePage() {
             {/* Suspension Modal (non-dismissible) */}
             {showSuspension && suspensionData && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-                    <div className="glass-card p-6 max-w-md w-full border border-danger-500/30">
+                    <div className="card p-6 max-w-md w-full border border-danger-500/30">
                         <h3 className="text-lg font-bold text-danger-400 mb-2">Servicio suspendido</h3>
-                        <p className="text-neutral-400">
+                        <p className="text-slate-400">
                             {suspensionData.reason}
                             {suspensionData.until && (
                                 <span className="block mt-2 text-sm">
@@ -129,3 +129,4 @@ export default function HomePage() {
         </>
     );
 }
+

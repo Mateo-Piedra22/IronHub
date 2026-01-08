@@ -107,7 +107,7 @@ export default function DashboardPage() {
     if (loading) {
         return (
             <div className="flex items-center justify-center h-64">
-                <Loader2 className="w-8 h-8 animate-spin text-iron-400" />
+                <Loader2 className="w-8 h-8 animate-spin text-primary-400" />
             </div>
         );
     }
@@ -117,7 +117,7 @@ export default function DashboardPage() {
             {/* Header */}
             <div className="page-header">
                 <h1 className="page-title">Dashboard</h1>
-                <p className="text-neutral-400 mt-1">
+                <p className="text-slate-400 mt-1">
                     Resumen general de IronHub
                 </p>
             </div>
@@ -137,8 +137,8 @@ export default function DashboardPage() {
                                 <p className="stat-label">{stat.label}</p>
                                 <p className="stat-value mt-2">{stat.value}</p>
                             </div>
-                            <div className="w-10 h-10 rounded-xl bg-iron-500/20 flex items-center justify-center">
-                                <stat.icon className="w-5 h-5 text-iron-400" />
+                            <div className="w-10 h-10 rounded-xl bg-primary-500/20 flex items-center justify-center">
+                                <stat.icon className="w-5 h-5 text-primary-400" />
                             </div>
                         </div>
                         <div className="mt-4 flex items-center gap-1.5">
@@ -162,11 +162,11 @@ export default function DashboardPage() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.4 }}
-                    className="lg:col-span-2 glass-card"
+                    className="lg:col-span-2 card"
                 >
-                    <div className="p-6 border-b border-neutral-800/50 flex items-center justify-between">
+                    <div className="p-6 border-b border-slate-800/50 flex items-center justify-between">
                         <h2 className="text-lg font-semibold text-white">Gimnasios Recientes</h2>
-                        <Link href="/dashboard/gyms" className="text-sm text-iron-400 hover:text-iron-300">
+                        <Link href="/dashboard/gyms" className="text-sm text-primary-400 hover:text-primary-300">
                             Ver todos →
                         </Link>
                     </div>
@@ -181,7 +181,7 @@ export default function DashboardPage() {
                         <tbody>
                             {recentGyms.length === 0 ? (
                                 <tr>
-                                    <td colSpan={3} className="text-center text-neutral-500 py-8">
+                                    <td colSpan={3} className="text-center text-slate-500 py-8">
                                         No hay gimnasios registrados
                                     </td>
                                 </tr>
@@ -189,7 +189,7 @@ export default function DashboardPage() {
                                 recentGyms.map((gym) => (
                                     <tr key={gym.id} className="cursor-pointer">
                                         <td className="font-medium text-white">{gym.nombre}</td>
-                                        <td className="text-neutral-400">{gym.subdominio}.ironhub.xyz</td>
+                                        <td className="text-slate-400">{gym.subdominio}.ironhub.xyz</td>
                                         <td>
                                             <span className={`badge ${gym.status === 'active' ? 'badge-success' :
                                                     gym.status === 'maintenance' ? 'badge-warning' : 'badge-danger'
@@ -210,9 +210,9 @@ export default function DashboardPage() {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.5 }}
-                    className="glass-card"
+                    className="card"
                 >
-                    <div className="p-6 border-b border-neutral-800/50">
+                    <div className="p-6 border-b border-slate-800/50">
                         <h2 className="text-lg font-semibold text-white flex items-center gap-2">
                             <AlertCircle className="w-5 h-5 text-warning-400" />
                             Próximos Vencimientos
@@ -220,16 +220,16 @@ export default function DashboardPage() {
                     </div>
                     <div className="p-4 space-y-3">
                         {expirations.length === 0 ? (
-                            <p className="text-neutral-500 text-center py-4">Sin vencimientos próximos</p>
+                            <p className="text-slate-500 text-center py-4">Sin vencimientos próximos</p>
                         ) : (
                             expirations.map((item, index) => (
                                 <div
                                     key={index}
-                                    className="flex items-center justify-between p-3 rounded-xl bg-neutral-800/30 border border-neutral-800/50"
+                                    className="flex items-center justify-between p-3 rounded-xl bg-slate-800/30 border border-slate-800/50"
                                 >
                                     <div>
                                         <p className="font-medium text-white">{item.gym}</p>
-                                        <p className="text-xs text-neutral-500">Suscripción</p>
+                                        <p className="text-xs text-slate-500">Suscripción</p>
                                     </div>
                                     <div className="flex items-center gap-2 text-warning-400">
                                         <Clock className="w-4 h-4" />
@@ -244,3 +244,4 @@ export default function DashboardPage() {
         </div>
     );
 }
+

@@ -301,6 +301,8 @@ class GymService(BaseService):
                 select_cols.append('descripcion')
             if 'equipamiento' in cols:
                 select_cols.append('equipamiento')
+            if 'variantes' in cols:
+                select_cols.append('variantes')
             
             # Build WHERE clause
             conditions = []
@@ -346,6 +348,9 @@ class GymService(BaseService):
                     idx += 1
                 if 'equipamiento' in select_cols:
                     exercise['equipamiento'] = row[idx]
+                    idx += 1
+                if 'variantes' in select_cols:
+                    exercise['variantes'] = row[idx]
                 exercises.append(exercise)
             return exercises
         except Exception as e:
@@ -357,15 +362,17 @@ class GymService(BaseService):
         try:
             result = self.db.execute(
                 text("""
-                    INSERT INTO ejercicios (nombre, grupo_muscular, video_url, video_mime)
-                    VALUES (:nombre, :grupo, :video_url, :video_mime)
+                    INSERT INTO ejercicios (nombre, grupo_muscular, video_url, video_mime, equipamiento, variantes)
+                    VALUES (:nombre, :grupo, :video_url, :video_mime, :equipamiento, :variantes)
                     RETURNING id
                 """),
                 {
                     'nombre': data.get('nombre', ''),
                     'grupo': data.get('grupo_muscular'),
                     'video_url': data.get('video_url'),
-                    'video_mime': data.get('video_mime')
+                    'video_mime': data.get('video_mime'),
+                    'equipamiento': data.get('equipamiento'),
+                    'variantes': data.get('variantes')
                 }
             )
             row = result.fetchone()
@@ -393,6 +400,12 @@ class GymService(BaseService):
             if 'video_mime' in data:
                 sets.append("video_mime = :video_mime")
                 params['video_mime'] = data['video_mime']
+            if 'equipamiento' in data:
+                sets.append("equipamiento = :equipamiento")
+                params['equipamiento'] = data['equipamiento']
+            if 'variantes' in data:
+                sets.append("variantes = :variantes")
+                params['variantes'] = data['variantes']
             
             if sets:
                 self.db.execute(
@@ -422,13 +435,13 @@ class GymService(BaseService):
 
     # ========== Rutinas (Basic) ==========
 
-    def obtener_rutinas(self, usuario_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Get routines, optionally filtered by user."""
+    def obtener_rutinas(self, usuario_id: Optional[int] = None, include_exercises: bool = False) -> List[Dict[str, Any]]:
+        """Get routines, optionally filtered by user. If include_exercises or usuario_id, includes ejercicios."""
         try:
             if usuario_id:
                 result = self.db.execute(
                     text("""
-                        SELECT id, nombre_rutina, descripcion, usuario_id, dias_semana, categoria, activa
+                        SELECT id, nombre_rutina, descripcion, usuario_id, dias_semana, categoria, activa, uuid_rutina
                         FROM rutinas WHERE usuario_id = :usuario_id ORDER BY nombre_rutina
                     """),
                     {'usuario_id': usuario_id}
@@ -436,29 +449,68 @@ class GymService(BaseService):
             else:
                 result = self.db.execute(
                     text("""
-                        SELECT id, nombre_rutina, descripcion, usuario_id, dias_semana, categoria, activa
+                        SELECT id, nombre_rutina, descripcion, usuario_id, dias_semana, categoria, activa, uuid_rutina
                         FROM rutinas ORDER BY nombre_rutina
                     """)
                 )
-            return [
-                {
+            
+            rutinas = []
+            for row in result.fetchall():
+                rutina = {
                     'id': row[0],
                     'nombre_rutina': row[1],
+                    'nombre': row[1],  # Alias for frontend
                     'descripcion': row[2],
                     'usuario_id': row[3],
                     'dias_semana': row[4],
                     'categoria': row[5],
-                    'activa': row[6]
+                    'activa': row[6],
+                    'uuid_rutina': row[7]
                 }
-                for row in result.fetchall()
-            ]
+                
+                # Include exercises if requested or if filtering by user (for user dashboard)
+                if include_exercises or usuario_id:
+                    rutina_completa = self.obtener_rutina_completa(rutina['id'])
+                    if rutina_completa:
+                        rutina['dias'] = rutina_completa.get('dias', [])
+                        rutina['ejercicios'] = rutina_completa.get('ejercicios', [])
+                
+                rutinas.append(rutina)
+            return rutinas
         except Exception as e:
             logger.error(f"Error getting rutinas: {e}")
             return []
 
-    def crear_rutina(self, data: Dict[str, Any]) -> Optional[int]:
-        """Create a new routine."""
+    def desactivar_rutinas_usuario(self, usuario_id: int, except_rutina_id: Optional[int] = None) -> bool:
+        """Deactivate all rutinas for a user, optionally except one."""
         try:
+            if except_rutina_id:
+                self.db.execute(
+                    text("UPDATE rutinas SET activa = FALSE WHERE usuario_id = :usuario_id AND id != :except_id"),
+                    {'usuario_id': usuario_id, 'except_id': except_rutina_id}
+                )
+            else:
+                self.db.execute(
+                    text("UPDATE rutinas SET activa = FALSE WHERE usuario_id = :usuario_id"),
+                    {'usuario_id': usuario_id}
+                )
+            self.db.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error deactivating rutinas: {e}")
+            self.db.rollback()
+            return False
+
+    def crear_rutina(self, data: Dict[str, Any]) -> Optional[int]:
+        """Create a new routine. If activa=True and usuario_id is set, deactivates other rutinas for that user."""
+        try:
+            usuario_id = data.get('usuario_id')
+            activa = data.get('activa', True)
+            
+            # Auto-deactivate other rutinas if this one will be active
+            if usuario_id and activa:
+                self.desactivar_rutinas_usuario(usuario_id)
+            
             result = self.db.execute(
                 text("""
                     INSERT INTO rutinas (nombre_rutina, descripcion, usuario_id, dias_semana, categoria, activa)
@@ -468,19 +520,211 @@ class GymService(BaseService):
                 {
                     'nombre': data.get('nombre_rutina', ''),
                     'descripcion': data.get('descripcion'),
-                    'usuario_id': data.get('usuario_id'),
+                    'usuario_id': usuario_id,
                     'dias': data.get('dias_semana', 1),
                     'categoria': data.get('categoria', 'general'),
-                    'activa': data.get('activa', True)
+                    'activa': activa
                 }
             )
             row = result.fetchone()
+            rutina_id = row[0] if row else None
+            
+            # Insert exercises if present (Critical for Duplicate functionality)
+            ejercicios = data.get('ejercicios', [])
+            if rutina_id and ejercicios:
+                for ej in ejercicios:
+                    self.db.execute(
+                        text("""
+                            INSERT INTO rutinas_ejercicios (rutina_id, ejercicio_id, dia, orden, series, repeticiones, descanso, notas)
+                            VALUES (:rutina_id, :ejercicio_id, :dia, :orden, :series, :repeticiones, :descanso, :notas)
+                        """),
+                        {
+                            'rutina_id': rutina_id,
+                            'ejercicio_id': ej.get('ejercicio_id'),
+                            'dia': ej.get('dia', 1),
+                            'orden': ej.get('orden', 0),
+                            'series': ej.get('series'),
+                            'repeticiones': ej.get('repeticiones'),
+                            'descanso': ej.get('descanso'),
+                            'notas': ej.get('notas')
+                        }
+                    )
+
             self.db.commit()
-            return row[0] if row else None
+            return rutina_id
         except Exception as e:
             logger.error(f"Error creating rutina: {e}")
             self.db.rollback()
             return None
+
+    def obtener_rutina_completa(self, rutina_id: int) -> Optional[Dict[str, Any]]:
+        """Get a single routine with all its exercises."""
+        try:
+            result = self.db.execute(
+                text("""
+                    SELECT r.id, r.nombre_rutina, r.descripcion, r.usuario_id, r.dias_semana, 
+                           r.categoria, r.activa, r.uuid_rutina, r.fecha_creacion,
+                           u.nombre as usuario_nombre
+                    FROM rutinas r
+                    LEFT JOIN usuarios u ON r.usuario_id = u.id
+                    WHERE r.id = :rutina_id
+                """),
+                {'rutina_id': rutina_id}
+            )
+            row = result.fetchone()
+            if not row:
+                return None
+            
+            rutina = {
+                'id': row[0],
+                'nombre_rutina': row[1],
+                'nombre': row[1],  # Alias
+                'descripcion': row[2],
+                'usuario_id': row[3],
+                'dias_semana': row[4],
+                'categoria': row[5],
+                'activa': row[6],
+                'uuid_rutina': row[7],
+                'fecha_creacion': row[8],
+                'usuario_nombre': row[9],
+                'ejercicios': [],
+                'dias': []
+            }
+            
+            # Get exercises for this routine
+            ej_result = self.db.execute(
+                text("""
+                    SELECT re.id, re.rutina_id, re.ejercicio_id, re.dia, re.orden,
+                           re.series, re.repeticiones, re.descanso, re.notas,
+                           e.nombre as ejercicio_nombre, e.video_url, e.descripcion, e.equipamiento
+                    FROM rutinas_ejercicios re
+                    LEFT JOIN ejercicios e ON re.ejercicio_id = e.id
+                    WHERE re.rutina_id = :rutina_id
+                    ORDER BY re.dia, re.orden
+                """),
+                {'rutina_id': rutina_id}
+            )
+            
+            dias_map = {}
+            for ej_row in ej_result.fetchall():
+                ejercicio = {
+                    'id': ej_row[0],
+                    'rutina_id': ej_row[1],
+                    'ejercicio_id': ej_row[2],
+                    'dia': ej_row[3],
+                    'orden': ej_row[4],
+                    'series': ej_row[5],
+                    'repeticiones': ej_row[6],
+                    'descanso': ej_row[7],
+                    'notas': ej_row[8],
+                    'ejercicio_nombre': ej_row[9],
+                    'nombre_ejercicio': ej_row[9],  # Alias
+                    'video_url': ej_row[10],
+                    'descripcion': ej_row[11],
+                    'equipamiento': ej_row[12]
+                }
+                rutina['ejercicios'].append(ejercicio)
+                
+                # Build dias structure
+                dia_num = ej_row[3] or 1
+                if dia_num not in dias_map:
+                    dias_map[dia_num] = {'numero': dia_num, 'nombre': f'Día {dia_num}', 'ejercicios': []}
+                dias_map[dia_num]['ejercicios'].append(ejercicio)
+            
+            rutina['dias'] = [dias_map[d] for d in sorted(dias_map.keys())]
+            return rutina
+        except Exception as e:
+            logger.error(f"Error getting rutina completa: {e}")
+            return None
+
+    def actualizar_rutina(self, rutina_id: int, data: Dict[str, Any]) -> bool:
+        """Update a routine and optionally its exercises."""
+        try:
+            # Update main routine data
+            updates = []
+            params = {'rutina_id': rutina_id}
+            
+            if 'nombre_rutina' in data or 'nombre' in data:
+                updates.append("nombre_rutina = :nombre")
+                params['nombre'] = data.get('nombre_rutina') or data.get('nombre')
+            if 'descripcion' in data:
+                updates.append("descripcion = :descripcion")
+                params['descripcion'] = data.get('descripcion')
+            if 'categoria' in data:
+                updates.append("categoria = :categoria")
+                params['categoria'] = data.get('categoria')
+            if 'activa' in data:
+                updates.append("activa = :activa")
+                params['activa'] = data.get('activa')
+            if 'usuario_id' in data:
+                updates.append("usuario_id = :usuario_id")
+                params['usuario_id'] = data.get('usuario_id')
+            if 'dias_semana' in data:
+                updates.append("dias_semana = :dias_semana")
+                params['dias_semana'] = data.get('dias_semana')
+            
+            if updates:
+                self.db.execute(
+                    text(f"UPDATE rutinas SET {', '.join(updates)} WHERE id = :rutina_id"),
+                    params
+                )
+            
+            # Update exercises if provided (dias array)
+            if 'dias' in data and isinstance(data['dias'], list):
+                # Delete existing exercises
+                self.db.execute(
+                    text("DELETE FROM rutinas_ejercicios WHERE rutina_id = :rutina_id"),
+                    {'rutina_id': rutina_id}
+                )
+                
+                # Insert new exercises
+                for dia in data['dias']:
+                    dia_num = dia.get('numero', 1)
+                    for idx, ej in enumerate(dia.get('ejercicios', [])):
+                        self.db.execute(
+                            text("""
+                                INSERT INTO rutinas_ejercicios 
+                                (rutina_id, ejercicio_id, dia, orden, series, repeticiones, descanso, notas)
+                                VALUES (:rutina_id, :ejercicio_id, :dia, :orden, :series, :repeticiones, :descanso, :notas)
+                            """),
+                            {
+                                'rutina_id': rutina_id,
+                                'ejercicio_id': ej.get('ejercicio_id'),
+                                'dia': dia_num,
+                                'orden': ej.get('orden', idx),
+                                'series': ej.get('series', ''),
+                                'repeticiones': ej.get('repeticiones', ''),
+                                'descanso': ej.get('descanso', 0),
+                                'notas': ej.get('notas', '')
+                            }
+                        )
+            
+            self.db.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error updating rutina: {e}")
+            self.db.rollback()
+            return False
+
+    def eliminar_rutina(self, rutina_id: int) -> bool:
+        """Delete a routine and its exercises."""
+        try:
+            # Delete exercises first (FK constraint)
+            self.db.execute(
+                text("DELETE FROM rutinas_ejercicios WHERE rutina_id = :rutina_id"),
+                {'rutina_id': rutina_id}
+            )
+            # Delete routine
+            self.db.execute(
+                text("DELETE FROM rutinas WHERE id = :rutina_id"),
+                {'rutina_id': rutina_id}
+            )
+            self.db.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting rutina: {e}")
+            self.db.rollback()
+            return False
 
     # ========== Clase Bloques (Class Workout Blocks) ==========
 

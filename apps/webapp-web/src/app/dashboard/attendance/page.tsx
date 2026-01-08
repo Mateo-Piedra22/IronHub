@@ -57,7 +57,7 @@ export default function AttendancePage() {
     if (loading) {
         return (
             <div className="flex items-center justify-center h-64">
-                <Loader2 className="w-8 h-8 animate-spin text-iron-400" />
+                <Loader2 className="w-8 h-8 animate-spin text-primary-400" />
             </div>
         );
     }
@@ -66,7 +66,7 @@ export default function AttendancePage() {
         <div className="space-y-6 py-6">
             <div>
                 <h1 className="text-2xl font-display font-bold text-white">Mis Asistencias</h1>
-                <p className="text-neutral-400 mt-1">Registro de asistencias al gimnasio</p>
+                <p className="text-slate-400 mt-1">Registro de asistencias al gimnasio</p>
             </div>
 
             {/* Stats Grid */}
@@ -77,8 +77,8 @@ export default function AttendancePage() {
                     className="stat-card"
                 >
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-iron-500/20 flex items-center justify-center">
-                            <Calendar className="w-5 h-5 text-iron-400" />
+                        <div className="w-10 h-10 rounded-xl bg-primary-500/20 flex items-center justify-center">
+                            <Calendar className="w-5 h-5 text-primary-400" />
                         </div>
                         <div>
                             <div className="stat-value text-xl">{stats.thisMonth}</div>
@@ -132,14 +132,14 @@ export default function AttendancePage() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.3 }}
-                className="glass-card overflow-hidden"
+                className="card overflow-hidden"
             >
-                <div className="p-4 border-b border-neutral-800/50">
+                <div className="p-4 border-b border-slate-800/50">
                     <h2 className="font-semibold text-white">Historial de Asistencias</h2>
                 </div>
                 <div className="divide-y divide-neutral-800/50">
                     {attendance.length === 0 ? (
-                        <div className="p-8 text-center text-neutral-500">
+                        <div className="p-8 text-center text-slate-500">
                             No hay asistencias registradas
                         </div>
                     ) : (
@@ -149,11 +149,11 @@ export default function AttendancePage() {
                                 initial={{ opacity: 0, x: -20 }}
                                 animate={{ opacity: 1, x: 0 }}
                                 transition={{ delay: 0.4 + index * 0.03 }}
-                                className="p-4 flex items-center justify-between hover:bg-neutral-800/30 transition-colors"
+                                className="p-4 flex items-center justify-between hover:bg-slate-800/30 transition-colors"
                             >
                                 <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 rounded-xl bg-neutral-800 flex flex-col items-center justify-center">
-                                        <span className="text-xs text-neutral-500">
+                                    <div className="w-12 h-12 rounded-xl bg-slate-800 flex flex-col items-center justify-center">
+                                        <span className="text-xs text-slate-500">
                                             {new Date(a.fecha).toLocaleDateString('es-AR', { weekday: 'short' }).toUpperCase()}
                                         </span>
                                         <span className="text-lg font-bold text-white">
@@ -164,7 +164,7 @@ export default function AttendancePage() {
                                         <div className="text-sm font-medium text-white">
                                             {new Date(a.fecha).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })}
                                         </div>
-                                        <div className="text-xs text-neutral-500">
+                                        <div className="text-xs text-slate-500">
                                             Entrada: {a.hora_entrada || '-'}
                                             {a.hora_salida && ` • Salida: ${a.hora_salida}`}
                                         </div>
@@ -185,3 +185,4 @@ export default function AttendancePage() {
         </div>
     );
 }
+

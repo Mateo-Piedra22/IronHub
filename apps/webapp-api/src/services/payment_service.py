@@ -734,6 +734,138 @@ class PaymentService(BaseService):
             'fecha_proceso': hoy.isoformat()
         }
 
+    def procesar_usuarios_morosos_con_whatsapp(
+        self, 
+        enviar_recordatorios: bool = True,
+        whatsapp_manager = None
+    ) -> Dict[str, Any]:
+        """
+        Process all delinquent users with WhatsApp notifications:
+        - Increment overdue quotas
+        - Deactivate those with 3+ overdue
+        - Send WhatsApp reminders
+        
+        Args:
+            enviar_recordatorios: If True, send WhatsApp reminders
+            whatsapp_manager: Optional WhatsAppManager instance for sending messages
+        
+        Returns:
+            Dict with processed, deactivated, reminders_sent counts
+        """
+        hoy = date.today()
+        
+        # Get all active members with overdue payments
+        stmt = select(Usuario).where(
+            Usuario.activo == True,
+            Usuario.rol == 'socio',
+            Usuario.fecha_proximo_vencimiento < hoy
+        )
+        
+        usuarios_morosos = self.db.execute(stmt).scalars().all()
+        
+        procesados = 0
+        desactivados = 0
+        recordatorios_enviados = 0
+        errores_envio = []
+        
+        for usuario in usuarios_morosos:
+            resultado = self._recalcular_estado_usuario(usuario.id)
+            procesados += 1
+            
+            if resultado.get('desactivado'):
+                desactivados += 1
+                # Send deactivation notification via WhatsApp
+                if enviar_recordatorios and whatsapp_manager:
+                    try:
+                        whatsapp_manager.enviar_notificacion_desactivacion(
+                            usuario_id=usuario.id,
+                            motivo=f"{resultado.get('cuotas_vencidas', 3)} cuotas vencidas",
+                            force_send=False
+                        )
+                    except Exception as e:
+                        errores_envio.append({'usuario_id': usuario.id, 'error': str(e)})
+            elif enviar_recordatorios and whatsapp_manager:
+                # Send overdue reminder for non-deactivated users
+                cuotas = resultado.get('cuotas_vencidas', 0)
+                if cuotas > 0:
+                    try:
+                        whatsapp_manager.enviar_recordatorio_cuota_vencida(usuario_id=usuario.id)
+                        recordatorios_enviados += 1
+                    except Exception as e:
+                        errores_envio.append({'usuario_id': usuario.id, 'error': str(e)})
+
+        return {
+            'procesados': procesados,
+            'desactivados': desactivados,
+            'recordatorios_enviados': recordatorios_enviados,
+            'errores_envio': len(errores_envio),
+            'fecha_proceso': hoy.isoformat()
+        }
+
+    def procesar_recordatorios_proximos_vencimientos(
+        self,
+        dias_antes: int = 3,
+        whatsapp_manager = None
+    ) -> Dict[str, Any]:
+        """
+        Send reminders to users with upcoming payment due dates.
+        
+        Args:
+            dias_antes: Days before due date to send reminder (default 3)
+            whatsapp_manager: Optional WhatsAppManager instance for sending messages
+        
+        Returns:
+            Dict with count of reminders sent
+        """
+        hoy = date.today()
+        fecha_limite = hoy + timedelta(days=dias_antes)
+        
+        # Get users with payments due in the next N days
+        stmt = select(Usuario).where(
+            Usuario.activo == True,
+            Usuario.rol == 'socio',
+            Usuario.fecha_proximo_vencimiento >= hoy,
+            Usuario.fecha_proximo_vencimiento <= fecha_limite
+        )
+        
+        usuarios = self.db.execute(stmt).scalars().all()
+        
+        recordatorios_enviados = 0
+        errores = []
+        
+        for usuario in usuarios:
+            if whatsapp_manager and usuario.telefono:
+                try:
+                    # Calculate days until due
+                    dias_restantes = (usuario.fecha_proximo_vencimiento - hoy).days if usuario.fecha_proximo_vencimiento else 0
+                    
+                    # Get gym name
+                    result = self.db.execute(
+                        text("SELECT valor FROM gym_config WHERE clave = 'gym_name' LIMIT 1")
+                    )
+                    row = result.fetchone()
+                    gym_name = row[0] if row else 'el gimnasio'
+                    
+                    user_data = {
+                        'phone': usuario.telefono,
+                        'name': usuario.nombre or 'Usuario',
+                        'due_date': usuario.fecha_proximo_vencimiento.strftime('%d/%m/%Y') if usuario.fecha_proximo_vencimiento else 'N/A',
+                        'days_remaining': dias_restantes,
+                        'gym_name': gym_name
+                    }
+                    
+                    whatsapp_manager.send_overdue_payment_notification(user_data, to=usuario.telefono)
+                    recordatorios_enviados += 1
+                except Exception as e:
+                    errores.append({'usuario_id': usuario.id, 'error': str(e)})
+        
+        return {
+            'usuarios_proximos': len(usuarios),
+            'recordatorios_enviados': recordatorios_enviados,
+            'errores': len(errores),
+            'fecha_proceso': hoy.isoformat()
+        }
+
     def obtener_usuarios_morosos(self) -> List[Dict[str, Any]]:
         """Get list of delinquent users."""
         hoy = date.today()

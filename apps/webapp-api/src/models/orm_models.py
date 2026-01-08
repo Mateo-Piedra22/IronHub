@@ -275,6 +275,8 @@ class Ejercicio(Base):
     descripcion: Mapped[Optional[str]] = mapped_column(Text)
     grupo_muscular: Mapped[Optional[str]] = mapped_column(String(100))
     objetivo: Mapped[Optional[str]] = mapped_column(String(100), server_default='general')
+    equipamiento: Mapped[Optional[str]] = mapped_column(String(100))
+    variantes: Mapped[Optional[str]] = mapped_column(Text)
     video_url: Mapped[Optional[str]] = mapped_column(String(512))
     video_mime: Mapped[Optional[str]] = mapped_column(String(50))
 

@@ -98,7 +98,7 @@ export default function ReciboPreviewModal({
             }
         >
             {loading ? (
-                <div className="text-center py-8 text-neutral-500">Cargando...</div>
+                <div className="text-center py-8 text-slate-500">Cargando...</div>
             ) : preview ? (
                 <div className="bg-white text-black rounded-lg p-6 print:p-0" id="recibo-preview">
                     {/* Header */}
@@ -189,7 +189,7 @@ export default function ReciboPreviewModal({
                     </div>
                 </div>
             ) : (
-                <div className="text-center py-8 text-neutral-500">
+                <div className="text-center py-8 text-slate-500">
                     No se pudo cargar la vista previa
                 </div>
             )}
@@ -289,15 +289,15 @@ export function ReciboConfigModal({ isOpen, onClose }: ReciboConfigModalProps) {
             }
         >
             {loading ? (
-                <div className="text-center py-8 text-neutral-500">Cargando...</div>
+                <div className="text-center py-8 text-slate-500">Cargando...</div>
             ) : (
                 <div className="space-y-4">
                     {/* Preview */}
-                    <div className="p-4 rounded-lg bg-neutral-800 border border-neutral-700 text-center">
-                        <div className="text-xs text-neutral-500 mb-1">Vista previa del próximo número</div>
+                    <div className="p-4 rounded-lg bg-slate-800 border border-slate-700 text-center">
+                        <div className="text-xs text-slate-500 mb-1">Vista previa del próximo número</div>
                         <div className="text-xl font-mono font-bold text-white">{previewNumber()}</div>
                         {nextNumber && (
-                            <div className="text-xs text-neutral-500 mt-1">Actual: {nextNumber}</div>
+                            <div className="text-xs text-slate-500 mt-1">Actual: {nextNumber}</div>
                         )}
                     </div>
 
@@ -336,7 +336,7 @@ export function ReciboConfigModal({ isOpen, onClose }: ReciboConfigModalProps) {
                     </div>
 
                     <div className="space-y-2">
-                        <label className="flex items-center gap-2 text-sm text-neutral-300">
+                        <label className="flex items-center gap-2 text-sm text-slate-300">
                             <input
                                 type="checkbox"
                                 checked={config.incluir_anio}
@@ -344,7 +344,7 @@ export function ReciboConfigModal({ isOpen, onClose }: ReciboConfigModalProps) {
                             />
                             Incluir año en el número
                         </label>
-                        <label className="flex items-center gap-2 text-sm text-neutral-300">
+                        <label className="flex items-center gap-2 text-sm text-slate-300">
                             <input
                                 type="checkbox"
                                 checked={config.incluir_mes}
@@ -352,7 +352,7 @@ export function ReciboConfigModal({ isOpen, onClose }: ReciboConfigModalProps) {
                             />
                             Incluir mes en el número
                         </label>
-                        <label className="flex items-center gap-2 text-sm text-neutral-300">
+                        <label className="flex items-center gap-2 text-sm text-slate-300">
                             <input
                                 type="checkbox"
                                 checked={config.reiniciar_anual}
@@ -366,3 +366,4 @@ export function ReciboConfigModal({ isOpen, onClose }: ReciboConfigModalProps) {
         </Modal>
     );
 }
+

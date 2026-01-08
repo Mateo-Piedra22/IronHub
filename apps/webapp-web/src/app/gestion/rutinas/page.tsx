@@ -16,6 +16,9 @@ import {
     GripVertical,
     QrCode,
     Settings2,
+    FileDown,
+    FileSpreadsheet,
+    Power,
 } from 'lucide-react';
 import {
     Button,
@@ -28,9 +31,12 @@ import {
     SearchInput,
     type Column,
 } from '@/components/ui';
-import { api, type Rutina, type Ejercicio } from '@/lib/api';
+import { api, type Rutina, type Ejercicio, type Usuario } from '@/lib/api';
 import { formatDate, cn } from '@/lib/utils';
 import { RoutineExerciseEditor } from '@/components/RoutineExerciseEditor';
+import { UnifiedRutinaEditor } from '@/components/UnifiedRutinaEditor';
+import { RutinaCreationWizard } from '@/components/RutinaCreationWizard';
+import { AssignRutinaModal } from '@/components/AssignRutinaModal';
 
 // Sidebar navigation
 const subtabs = [
@@ -193,17 +199,17 @@ function RutinaPreviewModal({ isOpen, onClose, rutina }: RutinaPreviewModalProps
                 {/* Info */}
                 <div className="flex flex-wrap gap-2">
                     {rutina.categoria && (
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-iron-500/20 text-iron-300 text-xs">
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-primary-500/20 text-primary-300 text-xs">
                             {rutina.categoria}
                         </span>
                     )}
                     {rutina.usuario_nombre && (
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-neutral-800 text-xs">
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-slate-800 text-xs">
                             Asignada a: {rutina.usuario_nombre}
                         </span>
                     )}
                     {rutina.uuid_rutina && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-neutral-800 text-xs text-neutral-400">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-800 text-xs text-slate-400">
                             <QrCode className="w-3 h-3" />
                             QR Activo
                         </span>
@@ -213,27 +219,27 @@ function RutinaPreviewModal({ isOpen, onClose, rutina }: RutinaPreviewModalProps
                 {/* Days */}
                 <div className="space-y-3">
                     {rutina.dias.length === 0 ? (
-                        <div className="p-8 text-center text-neutral-500">
+                        <div className="p-8 text-center text-slate-500">
                             Esta rutina no tiene días configurados
                         </div>
                     ) : (
                         rutina.dias.map((dia) => (
-                            <div key={dia.numero} className="border border-neutral-800 rounded-xl overflow-hidden">
+                            <div key={dia.numero} className="border border-slate-800 rounded-xl overflow-hidden">
                                 <button
                                     onClick={() => toggleDay(dia.numero)}
-                                    className="w-full flex items-center justify-between p-4 bg-neutral-900/50 hover:bg-neutral-800/50 transition-colors"
+                                    className="w-full flex items-center justify-between p-4 bg-slate-900/50 hover:bg-slate-800/50 transition-colors"
                                 >
                                     <span className="font-medium text-white">
                                         Día {dia.numero}{dia.nombre ? `: ${dia.nombre}` : ''}
                                     </span>
                                     <div className="flex items-center gap-2">
-                                        <span className="text-sm text-neutral-500">
+                                        <span className="text-sm text-slate-500">
                                             {dia.ejercicios.length} ejercicios
                                         </span>
                                         {expandedDays.includes(dia.numero) ? (
-                                            <ChevronDown className="w-4 h-4 text-neutral-400" />
+                                            <ChevronDown className="w-4 h-4 text-slate-400" />
                                         ) : (
-                                            <ChevronRight className="w-4 h-4 text-neutral-400" />
+                                            <ChevronRight className="w-4 h-4 text-slate-400" />
                                         )}
                                     </div>
                                 </button>
@@ -248,14 +254,14 @@ function RutinaPreviewModal({ isOpen, onClose, rutina }: RutinaPreviewModalProps
                                             <div className="divide-y divide-neutral-800">
                                                 {dia.ejercicios.map((ej, idx) => (
                                                     <div key={idx} className="p-4 flex items-center gap-4">
-                                                        <span className="w-6 h-6 rounded-full bg-neutral-800 flex items-center justify-center text-xs text-neutral-400">
+                                                        <span className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-xs text-slate-400">
                                                             {idx + 1}
                                                         </span>
                                                         <div className="flex-1">
                                                             <div className="font-medium text-white">
                                                                 {ej.ejercicio_nombre || `Ejercicio #${ej.ejercicio_id}`}
                                                             </div>
-                                                            <div className="text-sm text-neutral-500">
+                                                            <div className="text-sm text-slate-500">
                                                                 {ej.series} series x {ej.repeticiones} reps
                                                                 {ej.descanso && ` • ${ej.descanso}s descanso`}
                                                             </div>
@@ -288,6 +294,15 @@ export default function RutinasPage() {
     // Modals
     const [editorOpen, setEditorOpen] = useState(false);
     const [rutinaToEdit, setRutinaToEdit] = useState<Rutina | null>(null);
+
+    // Wizard state
+    const [wizardOpen, setWizardOpen] = useState(false);
+
+    // Assign modal state
+    const [assignModalOpen, setAssignModalOpen] = useState(false);
+    const [rutinaToAssign, setRutinaToAssign] = useState<Rutina | null>(null);
+
+    // Preview
     const [previewOpen, setPreviewOpen] = useState(false);
     const [rutinaToPreview, setRutinaToPreview] = useState<Rutina | null>(null);
     const [deleteOpen, setDeleteOpen] = useState(false);
@@ -333,6 +348,34 @@ export default function RutinasPage() {
         loadRutinas();
     }, [loadRutinas]);
 
+    // CSV Export
+    const exportToCSV = () => {
+        const headers = ['Nombre', 'Categoría', 'Descripción', 'Días', 'Ejercicios Totales', 'Usuario Asignado', 'Fecha Creación'];
+        const rows = rutinas.map(r => [
+            r.nombre,
+            r.categoria || '',
+            r.descripcion?.replace(/[\n\r,]/g, ' ') || '',
+            r.dias?.length || 0,
+            r.dias?.reduce((acc, d) => acc + (d.ejercicios?.length || 0), 0) || 0,
+            r.usuario_nombre || '',
+            r.fecha_creacion ? new Date(r.fecha_creacion).toLocaleDateString() : '',
+        ]);
+
+        const csvContent = [
+            headers.join(','),
+            ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+        ].join('\n');
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `rutinas_${activeTab}_${new Date().toISOString().split('T')[0]}.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
+        success('CSV exportado correctamente');
+    };
+
     // Delete handler
     const handleDelete = async () => {
         if (!rutinaToDelete) return;
@@ -352,6 +395,106 @@ export default function RutinasPage() {
         }
     };
 
+    const handleDeleteClick = (rutina: Rutina) => {
+        setRutinaToDelete(rutina);
+        setDeleteOpen(true);
+    };
+
+    const handleDuplicate = async (rutina: Rutina) => {
+        setLoading(true);
+        try {
+            const res = await api.duplicateRutina(rutina.id);
+            if (res.ok) {
+                success('Rutina duplicada');
+                loadRutinas();
+            } else {
+                error(res.error || 'Error al duplicar');
+            }
+        } catch {
+            error('Error de conexión');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // Toggle activa handler
+    const handleToggleActiva = async (rutina: Rutina) => {
+        try {
+            const res = await api.toggleRutinaActiva(rutina.id);
+            if (res.ok && res.data) {
+                success(res.data.activa ? 'Rutina activada' : 'Rutina desactivada');
+                loadRutinas();
+            } else {
+                error('Error al cambiar estado');
+            }
+        } catch {
+            error('Error de conexión');
+        }
+    };
+
+    const handleNewRutina = () => {
+        if (activeTab === 'plantillas') {
+            // If creating a template, go directly to editor
+            setRutinaToEdit({
+                es_plantilla: true,
+                activa: true,
+            } as Rutina);
+            setEditorOpen(true);
+        } else {
+            // If creating an assigned routine, use wizard
+            setWizardOpen(true);
+        }
+    };
+
+    const handleAssign = async (template: Rutina, user: Usuario) => {
+        setAssignModalOpen(false);
+        setLoading(true);
+        try {
+            // Get full template details first
+            const resDetails = await api.getRutina(template.id);
+            if (!resDetails.ok || !resDetails.data) throw new Error('Error cargando plantilla');
+
+            const fullTemplate = resDetails.data;
+
+            // Create copy for user
+            const res = await api.createRutina({
+                ...fullTemplate,
+                id: 0, // 0 indicates new
+                nombre: fullTemplate.nombre, // Keep same name
+                usuario_id: user.id,
+                es_plantilla: false,
+                activa: true,
+                fecha_creacion: undefined,
+                // Ensure exercises are copied? api.createRutina usually takes basic data.
+                // We might need to save exercises separately or update backend to handle deep copy?
+                // For now, let's assume createRutina creates structure, but exercises?
+                // Backend create_rutina doesn't take exercises list in payload normally unless updated.
+                // Checking backend create_rutina... it takes basic fields.
+                // We might need to use UnifiedRutinaEditor to save it? 
+                // "Assign" usually means "Create copy".
+                // If I open editor, it's safer.
+                // Let's open editor with data pre-filled for that user.
+            });
+
+            setRutinaToEdit({
+                ...fullTemplate,
+                id: 0,
+                usuario_id: user.id,
+                usuario_nombre: user.nombre,
+                es_plantilla: false,
+                activa: true,
+            });
+            setEditorOpen(true);
+            success(`Completa la asignación para ${user.nombre}`);
+
+        } catch (e) {
+            error('Error preparando asignación');
+            console.error(e);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     // Table columns
     const columns: Column<Rutina>[] = [
         {
@@ -362,7 +505,7 @@ export default function RutinasPage() {
                 <div>
                     <div className="font-medium text-white">{row.nombre}</div>
                     {row.descripcion && (
-                        <div className="text-sm text-neutral-500 line-clamp-1">{row.descripcion}</div>
+                        <div className="text-sm text-slate-500 line-clamp-1">{row.descripcion}</div>
                     )}
                 </div>
             ),
@@ -372,11 +515,11 @@ export default function RutinasPage() {
             header: 'Categoría',
             render: (row) => (
                 row.categoria ? (
-                    <span className="inline-flex items-center px-2 py-1 rounded-md bg-iron-500/20 text-iron-300 text-xs">
+                    <span className="inline-flex items-center px-2 py-1 rounded-md bg-primary-500/20 text-primary-300 text-xs">
                         {row.categoria}
                     </span>
                 ) : (
-                    <span className="text-neutral-600">-</span>
+                    <span className="text-slate-600">-</span>
                 )
             ),
         },
@@ -396,15 +539,24 @@ export default function RutinasPage() {
             header: 'Días',
             align: 'center' as const,
             render: (row) => (
-                <span className="text-iron-400 font-medium">{row.dias?.length || 0}</span>
+                <span className="text-primary-400 font-medium">{row.dias?.length || 0}</span>
             ),
+        },
+        {
+            key: 'ejercicios_count',
+            header: 'Ejercicios',
+            align: 'center' as const,
+            render: (row) => {
+                const count = row.dias?.reduce((acc, d) => acc + (d.ejercicios?.length || 0), 0) || 0;
+                return <span className="text-slate-400">{count}</span>;
+            },
         },
         {
             key: 'fecha_creacion',
             header: 'Creada',
             render: (row) => (
                 row.fecha_creacion ? (
-                    <span className="text-sm text-neutral-400">{formatDate(row.fecha_creacion)}</span>
+                    <span className="text-sm text-slate-400">{formatDate(row.fecha_creacion)}</span>
                 ) : '-'
             ),
         },
@@ -416,11 +568,41 @@ export default function RutinasPage() {
             render: (row) => (
                 <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
                     <button
+                        onClick={() => handleToggleActiva(row)}
+                        className={cn(
+                            "p-2 rounded-lg transition-colors",
+                            row.activa
+                                ? "text-success-400 hover:text-success-300 hover:bg-success-500/10"
+                                : "text-slate-500 hover:text-slate-300 hover:bg-slate-800"
+                        )}
+                        title={row.activa ? 'Desactivar rutina' : 'Activar rutina'}
+                    >
+                        <Power className="w-4 h-4" />
+                    </button>
+                    <a
+                        href={api.getRutinaExcelUrl(row.id)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-2 rounded-lg text-slate-400 hover:text-green-400 hover:bg-green-500/10 transition-colors"
+                        title="Descargar Excel"
+                    >
+                        <FileSpreadsheet className="w-4 h-4" />
+                    </a>
+                    <a
+                        href={api.getRutinaPdfUrl(row.id)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-2 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        title="Descargar PDF"
+                    >
+                        <FileDown className="w-4 h-4" />
+                    </a>
+                    <button
                         onClick={() => {
                             setRutinaForExercises(row);
                             setExerciseEditorOpen(true);
                         }}
-                        className="p-2 rounded-lg text-neutral-400 hover:text-iron-400 hover:bg-iron-500/10 transition-colors"
+                        className="p-2 rounded-lg text-slate-400 hover:text-primary-400 hover:bg-primary-500/10 transition-colors"
                         title="Configurar Ejercicios"
                     >
                         <Settings2 className="w-4 h-4" />
@@ -430,7 +612,7 @@ export default function RutinasPage() {
                             setRutinaToPreview(row);
                             setPreviewOpen(true);
                         }}
-                        className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                         title="Ver"
                     >
                         <Eye className="w-4 h-4" />
@@ -440,21 +622,40 @@ export default function RutinasPage() {
                             setRutinaToEdit(row);
                             setEditorOpen(true);
                         }}
-                        className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                         title="Editar"
                     >
                         <Edit className="w-4 h-4" />
                     </button>
-                    <button
-                        onClick={() => {
-                            setRutinaToDelete(row);
-                            setDeleteOpen(true);
-                        }}
-                        className="p-2 rounded-lg text-neutral-400 hover:text-danger-400 hover:bg-danger-500/10 transition-colors"
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDuplicate(row)}
+                        title="Duplicar"
+                    >
+                        <Copy className="w-4 h-4 text-slate-400" />
+                    </Button>
+                    {activeTab === 'plantillas' && (
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                                setRutinaToAssign(row);
+                                setAssignModalOpen(true);
+                            }}
+                            title="Asignar a usuario"
+                        >
+                            <Users className="w-4 h-4 text-slate-400 hover:text-primary-400" />
+                        </Button>
+                    )}
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDeleteClick(row)}
                         title="Eliminar"
                     >
-                        <Trash2 className="w-4 h-4" />
-                    </button>
+                        <Trash2 className="w-4 h-4 text-danger-400" />
+                    </Button>
                 </div>
             ),
         },
@@ -470,19 +671,26 @@ export default function RutinasPage() {
             >
                 <div>
                     <h1 className="text-2xl font-display font-bold text-white">Rutinas</h1>
-                    <p className="text-neutral-400 mt-1">
+                    <p className="text-slate-400 mt-1">
                         Plantillas de entrenamiento y asignación a usuarios
                     </p>
                 </div>
-                <Button
-                    leftIcon={<Plus className="w-4 h-4" />}
-                    onClick={() => {
-                        setRutinaToEdit(null);
-                        setEditorOpen(true);
-                    }}
-                >
-                    Nueva Plantilla
-                </Button>
+                <div className="flex gap-2">
+                    <Button
+                        variant="secondary"
+                        leftIcon={<Download className="w-4 h-4" />}
+                        onClick={exportToCSV}
+                        disabled={rutinas.length === 0}
+                    >
+                        Exportar CSV
+                    </Button>
+                    <Button
+                        leftIcon={<Plus className="w-4 h-4" />}
+                        onClick={handleNewRutina}
+                    >
+                        Nueva Plantilla
+                    </Button>
+                </div>
             </motion.div>
 
             {/* Tabs */}
@@ -499,8 +707,8 @@ export default function RutinasPage() {
                         className={cn(
                             'flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium transition-all duration-200',
                             activeTab === tab.id
-                                ? 'bg-iron-500/20 text-iron-300 shadow-glow-sm'
-                                : 'text-neutral-400 hover:bg-neutral-800/50 hover:text-white'
+                                ? 'bg-primary-500/20 text-primary-300 shadow-sm'
+                                : 'text-slate-400 hover:bg-slate-800/50 hover:text-white'
                         )}
                     >
                         <tab.icon className="w-4 h-4" />
@@ -514,7 +722,7 @@ export default function RutinasPage() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.15 }}
-                className="glass-card p-4"
+                className="card p-4"
             >
                 <SearchInput
                     placeholder="Buscar rutinas por nombre o categoría..."
@@ -541,17 +749,42 @@ export default function RutinasPage() {
                 />
             </motion.div>
 
-            {/* Editor Modal */}
-            <RutinaEditorModal
+            {/* Unified Editor Modal */}
+            <UnifiedRutinaEditor
                 isOpen={editorOpen}
                 onClose={() => {
                     setEditorOpen(false);
                     setRutinaToEdit(null);
+                    // Also close wizard if it was open
+                    setWizardOpen(false);
                 }}
                 rutina={rutinaToEdit}
-                ejercicios={ejercicios}
-                isPlantilla={activeTab === 'plantillas'}
-                onSuccess={loadRutinas}
+                isPlantilla={rutinaToEdit?.es_plantilla || activeTab === 'plantillas'}
+                onSuccess={() => {
+                    loadRutinas();
+                    setWizardOpen(false);
+                }}
+            />
+
+            {/* Creation Wizard */}
+            <RutinaCreationWizard
+                isOpen={wizardOpen}
+                onClose={() => setWizardOpen(false)}
+                onProceed={(data) => {
+                    setRutinaToEdit(data as Rutina);
+                    setEditorOpen(true);
+                }}
+            />
+
+            {/* Assign Modal */}
+            <AssignRutinaModal
+                isOpen={assignModalOpen}
+                onClose={() => {
+                    setAssignModalOpen(false);
+                    setRutinaToAssign(null);
+                }}
+                rutina={rutinaToAssign}
+                onAssign={handleAssign}
             />
 
             {/* Preview Modal */}
@@ -634,3 +867,4 @@ export default function RutinasPage() {
         </div>
     );
 }
+

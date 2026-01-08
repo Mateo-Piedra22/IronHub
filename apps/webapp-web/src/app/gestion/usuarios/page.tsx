@@ -305,7 +305,7 @@ export default function UsuariosPage() {
                     </div>
                     <div>
                         <div className="font-medium text-white">{row.nombre}</div>
-                        {row.dni && <div className="text-xs text-neutral-500">DNI: {row.dni}</div>}
+                        {row.dni && <div className="text-xs text-slate-500">DNI: {row.dni}</div>}
                     </div>
                 </div>
             ),
@@ -320,7 +320,7 @@ export default function UsuariosPage() {
                             href={getWhatsAppLink(row.telefono)}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-center gap-1 text-sm text-iron-400 hover:text-iron-300"
+                            className="flex items-center gap-1 text-sm text-primary-400 hover:text-primary-300"
                             onClick={(e) => e.stopPropagation()}
                         >
                             <Phone className="w-3 h-3" />
@@ -330,14 +330,14 @@ export default function UsuariosPage() {
                     {row.email && (
                         <a
                             href={`mailto:${row.email}`}
-                            className="flex items-center gap-1 text-sm text-neutral-400 hover:text-white"
+                            className="flex items-center gap-1 text-sm text-slate-400 hover:text-white"
                             onClick={(e) => e.stopPropagation()}
                         >
                             <Mail className="w-3 h-3" />
                             {row.email}
                         </a>
                     )}
-                    {!row.telefono && !row.email && <span className="text-neutral-600">-</span>}
+                    {!row.telefono && !row.email && <span className="text-slate-600">-</span>}
                 </div>
             ),
         },
@@ -347,7 +347,7 @@ export default function UsuariosPage() {
             sortable: true,
             render: (row) => (
                 <span className="text-sm">
-                    {row.tipo_cuota_nombre || <span className="text-neutral-600">Sin asignar</span>}
+                    {row.tipo_cuota_nombre || <span className="text-slate-600">Sin asignar</span>}
                 </span>
             ),
         },
@@ -357,7 +357,7 @@ export default function UsuariosPage() {
             sortable: true,
             render: (row) => {
                 if (!row.fecha_proximo_vencimiento) {
-                    return <span className="text-neutral-600">-</span>;
+                    return <span className="text-slate-600">-</span>;
                 }
                 const days = row.dias_restantes ?? 0;
                 const isExpired = days <= 0;
@@ -371,7 +371,7 @@ export default function UsuariosPage() {
                         )}>
                             {formatDateRelative(row.fecha_proximo_vencimiento)}
                         </div>
-                        <div className="text-xs text-neutral-500">
+                        <div className="text-xs text-slate-500">
                             {formatDate(row.fecha_proximo_vencimiento)}
                         </div>
                     </div>
@@ -421,7 +421,7 @@ export default function UsuariosPage() {
                             setSelectedUsuario(row);
                             setFormModalOpen(true);
                         }}
-                        className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                         title="Editar"
                     >
                         <Edit className="w-4 h-4" />
@@ -431,7 +431,7 @@ export default function UsuariosPage() {
                             setUsuarioToDelete(row);
                             setDeleteModalOpen(true);
                         }}
-                        className="p-2 rounded-lg text-neutral-400 hover:text-danger-400 hover:bg-danger-500/10 transition-colors"
+                        className="p-2 rounded-lg text-slate-400 hover:text-danger-400 hover:bg-danger-500/10 transition-colors"
                         title="Eliminar"
                     >
                         <Trash2 className="w-4 h-4" />
@@ -451,7 +451,7 @@ export default function UsuariosPage() {
             >
                 <div>
                     <h1 className="text-2xl font-display font-bold text-white">Usuarios</h1>
-                    <p className="text-neutral-400 mt-1">
+                    <p className="text-slate-400 mt-1">
                         Gestiona los socios del gimnasio
                     </p>
                 </div>
@@ -471,7 +471,7 @@ export default function UsuariosPage() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 }}
-                className="glass-card p-4"
+                className="card p-4"
             >
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
                     <div className="flex-1">
@@ -588,4 +588,5 @@ export default function UsuariosPage() {
         </div>
     );
 }
+
 

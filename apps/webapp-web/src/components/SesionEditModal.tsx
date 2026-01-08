@@ -182,7 +182,7 @@ export function SesionEditModal({ isOpen, onClose, sesion, profesorId, onSuccess
                             value={fecha}
                             onChange={(e) => setFecha(e.target.value)}
                         />
-                        {dayName && <div className="text-xs text-neutral-500 mt-1 capitalize">{dayName}</div>}
+                        {dayName && <div className="text-xs text-slate-500 mt-1 capitalize">{dayName}</div>}
                     </div>
                     <Input
                         label="Inicio"
@@ -206,8 +206,8 @@ export function SesionEditModal({ isOpen, onClose, sesion, profesorId, onSuccess
                         onChange={(e) => setTipo(e.target.value)}
                         options={TIPOS_SESION}
                     />
-                    <div className="text-xs text-neutral-500 mt-1">
-                        Sugerencia según horarios: <span className="text-neutral-300">{suggestedType}</span>
+                    <div className="text-xs text-slate-500 mt-1">
+                        Sugerencia según horarios: <span className="text-slate-300">{suggestedType}</span>
                     </div>
                     {typeWarning && (
                         <div className="mt-2 p-2 rounded-lg bg-warning-500/10 border border-warning-500/20 text-xs text-warning-400 flex items-center gap-2">
@@ -239,13 +239,13 @@ export function SesionEditModal({ isOpen, onClose, sesion, profesorId, onSuccess
                 </div>
 
                 {/* Summary */}
-                <div className="p-3 rounded-xl bg-neutral-900 border border-neutral-800 space-y-1 text-sm">
-                    <div className="flex items-center gap-2 text-neutral-400">
+                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-1 text-sm">
+                    <div className="flex items-center gap-2 text-slate-400">
                         <Calculator className="w-4 h-4" />
                         <span>Minutos calculados:</span>
                         <span className="text-white font-medium">{calculatedMinutes}</span>
                     </div>
-                    <div className="flex items-center gap-2 text-neutral-400">
+                    <div className="flex items-center gap-2 text-slate-400">
                         <Clock className="w-4 h-4" />
                         <span>Horas:</span>
                         <span className="text-white font-medium">{hoursDisplay}</span>
@@ -257,3 +257,4 @@ export function SesionEditModal({ isOpen, onClose, sesion, profesorId, onSuccess
 }
 
 export default SesionEditModal;
+

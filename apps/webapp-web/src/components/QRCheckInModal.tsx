@@ -214,7 +214,7 @@ export function QRCheckInModal({ isOpen, onClose, userId, userName }: QRCheckInM
 
                 {/* Token (masked) */}
                 {token && (
-                    <div className="font-mono text-sm text-neutral-500">
+                    <div className="font-mono text-sm text-slate-500">
                         Token: {token.slice(0, 4)}****{token.slice(-4)}
                     </div>
                 )}
@@ -222,7 +222,7 @@ export function QRCheckInModal({ isOpen, onClose, userId, userName }: QRCheckInM
                 {/* Countdown */}
                 <div className="w-full space-y-2">
                     <div className="flex items-center justify-center gap-2">
-                        <Clock className="w-4 h-4 text-neutral-400" />
+                        <Clock className="w-4 h-4 text-slate-400" />
                         <span className="font-medium">
                             {status === "waiting" && `Tiempo restante: ${formatTime(timeLeft)}`}
                             {status === "confirmed" && "¡Confirmado!"}
@@ -232,11 +232,11 @@ export function QRCheckInModal({ isOpen, onClose, userId, userName }: QRCheckInM
                     </div>
 
                     {/* Progress bar */}
-                    <div className="h-2 w-full bg-neutral-800 rounded-full overflow-hidden">
+                    <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
                         <motion.div
                             className={`h-full rounded-full ${status === "confirmed" ? "bg-success-500" :
                                     status === "expired" ? "bg-danger-500" :
-                                        "bg-iron-500"
+                                        "bg-primary-500"
                                 }`}
                             initial={{ width: "100%" }}
                             animate={{ width: `${progress}%` }}
@@ -246,7 +246,7 @@ export function QRCheckInModal({ isOpen, onClose, userId, userName }: QRCheckInM
                 </div>
 
                 {/* Status message */}
-                <div className="text-sm text-neutral-400 text-center">
+                <div className="text-sm text-slate-400 text-center">
                     {status === "waiting" && "Escanea el código para registrar asistencia"}
                     {status === "confirmed" && "Asistencia registrada exitosamente"}
                     {status === "expired" && "El código ha expirado"}
@@ -269,3 +269,4 @@ export function QRCheckInModal({ isOpen, onClose, userId, userName }: QRCheckInM
 }
 
 export default QRCheckInModal;
+

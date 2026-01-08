@@ -50,27 +50,27 @@ export default function WhatsAppPage() {
         <div className="space-y-6">
             <div>
                 <h1 className="page-title">WhatsApp</h1>
-                <p className="text-neutral-400 mt-1">Estado de configuración de WhatsApp por gimnasio</p>
+                <p className="text-slate-400 mt-1">Estado de configuración de WhatsApp por gimnasio</p>
             </div>
 
             {/* Stats */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="glass-card p-4">
-                    <div className="text-sm text-neutral-500">Total gimnasios</div>
+                <div className="card p-4">
+                    <div className="text-sm text-slate-500">Total gimnasios</div>
                     <div className="text-2xl font-bold text-white">{gyms.length}</div>
                 </div>
-                <div className="glass-card p-4">
-                    <div className="text-sm text-neutral-500">Configurados</div>
+                <div className="card p-4">
+                    <div className="text-sm text-slate-500">Configurados</div>
                     <div className="text-2xl font-bold text-success-400">{configuredGyms.length}</div>
                 </div>
-                <div className="glass-card p-4">
-                    <div className="text-sm text-neutral-500">Sin configurar</div>
+                <div className="card p-4">
+                    <div className="text-sm text-slate-500">Sin configurar</div>
                     <div className="text-2xl font-bold text-warning-400">{notConfiguredGyms.length}</div>
                 </div>
             </div>
 
             {/* Test Section */}
-            <div className="glass-card p-4">
+            <div className="card p-4">
                 <h3 className="font-semibold text-white mb-3">Prueba de WhatsApp</h3>
                 <div className="flex flex-wrap items-end gap-3">
                     <div>
@@ -119,10 +119,10 @@ export default function WhatsAppPage() {
             </div>
 
             {/* Gyms List */}
-            <div className="glass-card overflow-hidden">
+            <div className="card overflow-hidden">
                 {loading ? (
                     <div className="flex items-center justify-center py-16">
-                        <Loader2 className="w-8 h-8 animate-spin text-iron-400" />
+                        <Loader2 className="w-8 h-8 animate-spin text-primary-400" />
                     </div>
                 ) : (
                     <table className="data-table">
@@ -138,7 +138,7 @@ export default function WhatsAppPage() {
                             {gyms.map((gym) => (
                                 <tr key={gym.id}>
                                     <td className="font-medium text-white">{gym.nombre}</td>
-                                    <td className="text-neutral-400">{gym.subdominio}</td>
+                                    <td className="text-slate-400">{gym.subdominio}</td>
                                     <td>
                                         {gym.wa_configured ? (
                                             <span className="flex items-center gap-1 text-success-400">
@@ -146,7 +146,7 @@ export default function WhatsAppPage() {
                                                 Configurado
                                             </span>
                                         ) : (
-                                            <span className="flex items-center gap-1 text-neutral-500">
+                                            <span className="flex items-center gap-1 text-slate-500">
                                                 <X className="w-4 h-4" />
                                                 Sin configurar
                                             </span>
@@ -155,7 +155,7 @@ export default function WhatsAppPage() {
                                     <td>
                                         <a
                                             href={`/dashboard/gyms/${gym.id}`}
-                                            className="flex items-center gap-1 text-iron-400 hover:text-iron-300 text-sm"
+                                            className="flex items-center gap-1 text-primary-400 hover:text-primary-300 text-sm"
                                         >
                                             Configurar
                                             <ExternalLink className="w-3 h-3" />
@@ -170,3 +170,4 @@ export default function WhatsAppPage() {
         </div>
     );
 }
+

@@ -93,12 +93,12 @@ export function RutinaExportModal({ isOpen, onClose, rutina }: RutinaExportModal
         >
             <div className="space-y-4">
                 {/* Preview info */}
-                <div className="p-4 bg-neutral-900 rounded-xl border border-neutral-800">
+                <div className="p-4 bg-slate-900 rounded-xl border border-slate-800">
                     <div className="flex items-center gap-3">
                         <FileSpreadsheet className="w-10 h-10 text-success-400" />
                         <div>
                             <div className="font-medium text-white">{rutina.nombre}</div>
-                            <div className="text-sm text-neutral-400">
+                            <div className="text-sm text-slate-400">
                                 {rutina.dias?.length || 0} días • {rutina.categoria || "General"}
                             </div>
                         </div>
@@ -115,7 +115,7 @@ export function RutinaExportModal({ isOpen, onClose, rutina }: RutinaExportModal
 
                 {/* Weeks */}
                 <div>
-                    <label className="block text-sm font-medium text-neutral-300 mb-2">
+                    <label className="block text-sm font-medium text-slate-300 mb-2">
                         Semanas a exportar
                     </label>
                     <Select
@@ -132,7 +132,7 @@ export function RutinaExportModal({ isOpen, onClose, rutina }: RutinaExportModal
 
                 {/* QR Placement */}
                 <div>
-                    <label className="block text-sm font-medium text-neutral-300 mb-2">
+                    <label className="block text-sm font-medium text-slate-300 mb-2">
                         <QrCode className="w-4 h-4 inline mr-2" />
                         Ubicación del QR
                     </label>
@@ -145,7 +145,7 @@ export function RutinaExportModal({ isOpen, onClose, rutina }: RutinaExportModal
                             { value: "none", label: "Sin QR" },
                         ]}
                     />
-                    <p className="mt-1 text-xs text-neutral-500">
+                    <p className="mt-1 text-xs text-slate-500">
                         El código QR permite al usuario escanear y ver su rutina en la app.
                     </p>
                 </div>
@@ -155,3 +155,4 @@ export function RutinaExportModal({ isOpen, onClose, rutina }: RutinaExportModal
 }
 
 export default RutinaExportModal;
+

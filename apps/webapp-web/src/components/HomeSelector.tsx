@@ -75,7 +75,7 @@ export default function HomeSelector({ gymName, logoUrl }: HomeSelectorProps) {
         <div className="min-h-screen flex items-center justify-center p-6">
             {/* Background effects */}
             <div className="fixed inset-0 pointer-events-none">
-                <div className="absolute -top-40 -right-40 h-[500px] w-[500px] rounded-full bg-iron-600/20 blur-[100px]" />
+                <div className="absolute -top-40 -right-40 h-[500px] w-[500px] rounded-full bg-primary-600/20 blur-[100px]" />
                 <div className="absolute bottom-0 -left-40 h-[400px] w-[400px] rounded-full bg-gold-600/10 blur-[100px]" />
             </div>
 
@@ -84,7 +84,7 @@ export default function HomeSelector({ gymName, logoUrl }: HomeSelectorProps) {
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="glass-card p-5"
+                    className="card p-5"
                 >
                     {/* Brand */}
                     <div className="flex items-center gap-3 mb-4">
@@ -95,7 +95,7 @@ export default function HomeSelector({ gymName, logoUrl }: HomeSelectorProps) {
                                 className="w-11 h-11 rounded-xl object-cover"
                             />
                         ) : (
-                            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-iron-500 to-iron-700 flex items-center justify-center">
+                            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center">
                                 <Dumbbell className="w-5 h-5 text-white" />
                             </div>
                         )}
@@ -103,7 +103,7 @@ export default function HomeSelector({ gymName, logoUrl }: HomeSelectorProps) {
                             <h1 className="text-xl font-display font-bold text-white">
                                 {gymName || 'IronHub'}
                             </h1>
-                            <p className="text-sm text-neutral-400">
+                            <p className="text-sm text-slate-400">
                                 Portal de acceso para clientes, dueño y profesores.
                             </p>
                         </div>
@@ -120,29 +120,29 @@ export default function HomeSelector({ gymName, logoUrl }: HomeSelectorProps) {
                             >
                                 <Link
                                     href={option.href}
-                                    className="block p-4 rounded-xl bg-neutral-800/50 border border-neutral-700/50 hover:border-iron-500/50 hover:bg-neutral-800 transition-all duration-200 group"
+                                    className="block p-4 rounded-xl bg-slate-800/50 border border-slate-700/50 hover:border-primary-500/50 hover:bg-slate-800 transition-all duration-200 group"
                                 >
                                     <div className="flex items-center gap-2 mb-2">
-                                        <div className="w-8 h-8 rounded-lg bg-neutral-700/50 group-hover:bg-iron-500/20 flex items-center justify-center transition-colors">
-                                            <option.icon className="w-4 h-4 text-neutral-400 group-hover:text-iron-400 transition-colors" />
+                                        <div className="w-8 h-8 rounded-lg bg-slate-700/50 group-hover:bg-primary-500/20 flex items-center justify-center transition-colors">
+                                            <option.icon className="w-4 h-4 text-slate-400 group-hover:text-primary-400 transition-colors" />
                                         </div>
                                         <span className="font-semibold text-white">
                                             {option.title}
                                         </span>
-                                        <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-neutral-700/50 text-neutral-400 border border-neutral-600/50">
+                                        <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-slate-700/50 text-slate-400 border border-slate-600/50">
                                             {option.roleChip}
                                         </span>
                                     </div>
-                                    <p className="text-sm text-neutral-500 mb-3">
+                                    <p className="text-sm text-slate-500 mb-3">
                                         {option.description}
                                     </p>
                                     <span
                                         className={`inline-flex items-center text-sm font-medium px-3 py-1.5 rounded-lg transition-colors ${
                                             option.variant === 'primary'
-                                                ? 'bg-iron-500/20 text-iron-400 group-hover:bg-iron-500/30'
+                                                ? 'bg-primary-500/20 text-primary-400 group-hover:bg-primary-500/30'
                                                 : option.variant === 'accent'
                                                 ? 'bg-gold-500/20 text-gold-400 group-hover:bg-gold-500/30'
-                                                : 'bg-neutral-700/50 text-neutral-300 group-hover:bg-neutral-700'
+                                                : 'bg-slate-700/50 text-slate-300 group-hover:bg-slate-700'
                                         }`}
                                     >
                                         {option.buttonText}
@@ -158,26 +158,26 @@ export default function HomeSelector({ gymName, logoUrl }: HomeSelectorProps) {
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.3 }}
-                    className="glass-card p-4 text-center"
+                    className="card p-4 text-center"
                 >
                     <div className="flex items-center justify-center gap-2 flex-wrap text-sm">
-                        <Link href="/checkin" className="text-neutral-400 hover:text-white transition-colors">
+                        <Link href="/checkin" className="text-slate-400 hover:text-white transition-colors">
                             Check-in
                         </Link>
-                        <span className="text-neutral-600">•</span>
-                        <Link href="/gestion-login" className="text-neutral-400 hover:text-white transition-colors">
+                        <span className="text-slate-600">•</span>
+                        <Link href="/gestion-login" className="text-slate-400 hover:text-white transition-colors">
                             Gestión
                         </Link>
-                        <span className="text-neutral-600">•</span>
-                        <Link href="/usuario-login" className="text-neutral-400 hover:text-white transition-colors">
+                        <span className="text-slate-600">•</span>
+                        <Link href="/usuario-login" className="text-slate-400 hover:text-white transition-colors">
                             Usuarios
                         </Link>
-                        <span className="text-neutral-600">•</span>
-                        <Link href="/login" className="text-neutral-400 hover:text-white transition-colors">
+                        <span className="text-slate-600">•</span>
+                        <Link href="/login" className="text-slate-400 hover:text-white transition-colors">
                             Dashboard
                         </Link>
                     </div>
-                    <p className="text-xs text-neutral-600 mt-3">
+                    <p className="text-xs text-slate-600 mt-3">
                         Gym Management System - Powered by MotionA - {new Date().getFullYear()}. Todos los derechos reservados.
                     </p>
                 </motion.footer>
@@ -191,13 +191,14 @@ export default function HomeSelector({ gymName, logoUrl }: HomeSelectorProps) {
                 className="fixed bottom-5 left-5 z-50 group"
                 aria-label="Contactar por WhatsApp"
             >
-                <div className="w-12 h-12 rounded-full bg-iron-500 hover:bg-iron-400 flex items-center justify-center shadow-lg hover:shadow-xl transition-all hover:scale-110">
+                <div className="w-12 h-12 rounded-full bg-primary-500 hover:bg-primary-400 flex items-center justify-center shadow-lg hover:shadow-xl transition-all hover:scale-110">
                     <MessageCircle className="w-6 h-6 text-white" />
                 </div>
-                <span className="absolute left-14 top-1/2 -translate-y-1/2 px-3 py-1.5 rounded-lg bg-neutral-800 text-white text-sm border border-neutral-700 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                <span className="absolute left-14 top-1/2 -translate-y-1/2 px-3 py-1.5 rounded-lg bg-slate-800 text-white text-sm border border-slate-700 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
                     Contactame
                 </span>
             </a>
         </div>
     );
 }
+

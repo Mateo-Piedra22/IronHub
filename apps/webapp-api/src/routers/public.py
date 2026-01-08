@@ -227,56 +227,43 @@ async def api_rutina_qr_scan(uuid_rutina: str, request: Request):
     if not uid or len(uid) < 8:
         return JSONResponse({"ok": False, "error": "UUID inválido"}, status_code=400)
 
-    # Intentar obtener desde DB; si no está disponible, caer a preview efímero
     rutina = None
     try:
         from src.database.connection import SessionLocal
         from src.services.gym_service import GymService
+        from sqlalchemy import text
+        
         session = SessionLocal()
         try:
-            # Use GymService to get routine by UUID (if method exists)
-            # Fallback: query rutinas table directly
-            from sqlalchemy import text
+            # First get rutina_id by UUID
             result = session.execute(
-                text("SELECT id, nombre_rutina, descripcion, dias_semana, categoria, activa, usuario_id FROM rutinas WHERE uuid_rutina = :uuid"),
+                text("SELECT id FROM rutinas WHERE uuid_rutina = :uuid AND activa = TRUE"),
                 {"uuid": uid}
             )
             row = result.fetchone()
             if row:
-                rutina = {
-                    "id": row[0],
-                    "nombre_rutina": row[1],
-                    "descripcion": row[2],
-                    "dias_semana": row[3],
-                    "categoria": row[4],
-                    "activa": row[5],
-                    "usuario_id": row[6],
-                }
+                rutina_id = row[0]
+                # Use gym_service to get full routine with exercises
+                svc = GymService(session)
+                rutina = svc.obtener_rutina_completa(rutina_id)
         finally:
             session.close()
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.error(f"Error in qr_scan: {e}")
         rutina = None
+    
     if rutina is None:
-        # Fallback defensivo: si existe una rutina efímera guardada para este UUID, utilizarla
+        # Fallback to ephemeral preview if available
         try:
             rutina = _get_excel_preview_routine(uid)
         except Exception:
             rutina = None
+    
     if not rutina:
         return JSONResponse({"ok": False, "error": "Rutina no encontrada"}, status_code=404)
-    # Bloquear si la rutina no está activa o no corresponde a la única activa del usuario
+    
     if not bool(rutina.get("activa", True)):
         return JSONResponse({"ok": False, "error": "Rutina inactiva"}, status_code=403)
-    try:
-        # Logic to verify if it is the only active routine or valid one
-        # (Simplified from original server.py logic which checked if user has exactly this routine active)
-        # If we found it via UUID and it is active, it should be fine for QR scan.
-        # The original code had extra checks:
-        # "SELECT id FROM rutinas WHERE usuario_id = %s AND activa = TRUE"
-        # If multiple active routines, QR might point to a specific one, which is allowed.
-        # The original code seemed to enforce single active routine logic but it was commented/complex.
-        # We will trust `obtener_rutina_completa_por_uuid_dict` returning the routine.
-        
-        return JSONResponse({"ok": True, "rutina": rutina})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    
+    return JSONResponse({"ok": True, "rutina": rutina})

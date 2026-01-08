@@ -15,12 +15,12 @@ export default function PaymentsPage() {
             <div className="flex items-center justify-between flex-wrap gap-4">
                 <div>
                     <h1 className="page-title">Pagos</h1>
-                    <p className="text-neutral-400 mt-1">Gestión completa de pagos, métodos y planes</p>
+                    <p className="text-slate-400 mt-1">Gestión completa de pagos, métodos y planes</p>
                 </div>
             </div>
 
             {/* Tabs */}
-            <div className="flex gap-2 border-b border-neutral-800 pb-2">
+            <div className="flex gap-2 border-b border-slate-800 pb-2">
                 {[
                     { id: 'historial', label: 'Historial', icon: DollarSign },
                     { id: 'metodos', label: 'Métodos de Pago', icon: CreditCard },
@@ -31,8 +31,8 @@ export default function PaymentsPage() {
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id as TabType)}
                         className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-all ${activeTab === tab.id
-                            ? 'bg-iron-500/20 text-iron-400 border-b-2 border-iron-500'
-                            : 'text-neutral-400 hover:text-white hover:bg-neutral-800/50'
+                            ? 'bg-primary-500/20 text-primary-400 border-b-2 border-primary-500'
+                            : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
                             }`}
                     >
                         <tab.icon className="w-4 h-4" />
@@ -117,13 +117,13 @@ function HistorialTab() {
                 </button>
             </div>
 
-            <div className="glass-card overflow-hidden">
+            <div className="card overflow-hidden">
                 {loading ? (
                     <div className="flex items-center justify-center py-16">
-                        <Loader2 className="w-8 h-8 animate-spin text-iron-400" />
+                        <Loader2 className="w-8 h-8 animate-spin text-primary-400" />
                     </div>
                 ) : payments.length === 0 ? (
-                    <div className="p-8 text-center text-neutral-500">No hay pagos registrados</div>
+                    <div className="p-8 text-center text-slate-500">No hay pagos registrados</div>
                 ) : (
                     <table className="data-table">
                         <thead>
@@ -140,17 +140,17 @@ function HistorialTab() {
                         <tbody>
                             {payments.map((p) => (
                                 <tr key={p.id}>
-                                    <td className="text-neutral-500">{p.id}</td>
+                                    <td className="text-slate-500">{p.id}</td>
                                     <td className="font-medium text-white">{p.gym_id}</td>
                                     <td className="text-success-400 font-medium">${p.amount}</td>
-                                    <td className="text-neutral-400">{p.currency}</td>
+                                    <td className="text-slate-400">{p.currency}</td>
                                     <td>
                                         <span className={`badge ${p.status === 'paid' ? 'badge-success' : 'badge-warning'}`}>
                                             {p.status}
                                         </span>
                                     </td>
-                                    <td className="text-neutral-400">{p.valid_until || '—'}</td>
-                                    <td className="text-neutral-400">{p.created_at?.slice(0, 10)}</td>
+                                    <td className="text-slate-400">{p.valid_until || '—'}</td>
+                                    <td className="text-slate-400">{p.created_at?.slice(0, 10)}</td>
                                 </tr>
                             ))}
                         </tbody>
@@ -294,13 +294,13 @@ function MetodosTab() {
                 </button>
             </div>
 
-            <div className="glass-card overflow-hidden">
+            <div className="card overflow-hidden">
                 {loading ? (
                     <div className="flex items-center justify-center py-16">
-                        <Loader2 className="w-8 h-8 animate-spin text-iron-400" />
+                        <Loader2 className="w-8 h-8 animate-spin text-primary-400" />
                     </div>
                 ) : metodos.length === 0 ? (
-                    <div className="p-8 text-center text-neutral-500">No hay métodos de pago configurados</div>
+                    <div className="p-8 text-center text-slate-500">No hay métodos de pago configurados</div>
                 ) : (
                     <table className="data-table">
                         <thead>
@@ -324,10 +324,10 @@ function MetodosTab() {
                                                 className="w-4 h-4 rounded-full"
                                                 style={{ backgroundColor: m.color || '#3498db' }}
                                             />
-                                            <span className="text-neutral-400 text-sm">{m.color}</span>
+                                            <span className="text-slate-400 text-sm">{m.color}</span>
                                         </div>
                                     </td>
-                                    <td className="text-neutral-400">{m.comision || 0}%</td>
+                                    <td className="text-slate-400">{m.comision || 0}%</td>
                                     <td>
                                         <span className={`badge ${m.activo ? 'badge-success' : 'badge-neutral'}`}>
                                             {m.activo ? 'Activo' : 'Inactivo'}
@@ -337,13 +337,13 @@ function MetodosTab() {
                                         <div className="flex gap-2">
                                             <button
                                                 onClick={() => setEditItem(m)}
-                                                className="p-1.5 rounded hover:bg-neutral-700 text-neutral-400 hover:text-white"
+                                                className="p-1.5 rounded hover:bg-slate-700 text-slate-400 hover:text-white"
                                             >
                                                 <Pencil className="w-4 h-4" />
                                             </button>
                                             <button
                                                 onClick={() => handleDelete(m.id)}
-                                                className="p-1.5 rounded hover:bg-red-500/20 text-neutral-400 hover:text-red-400"
+                                                className="p-1.5 rounded hover:bg-red-500/20 text-slate-400 hover:text-red-400"
                                             >
                                                 <Trash2 className="w-4 h-4" />
                                             </button>
@@ -455,13 +455,13 @@ function PlanesTab() {
                 </button>
             </div>
 
-            <div className="glass-card overflow-hidden">
+            <div className="card overflow-hidden">
                 {loading ? (
                     <div className="flex items-center justify-center py-16">
-                        <Loader2 className="w-8 h-8 animate-spin text-iron-400" />
+                        <Loader2 className="w-8 h-8 animate-spin text-primary-400" />
                     </div>
                 ) : planes.length === 0 ? (
-                    <div className="p-8 text-center text-neutral-500">No hay planes configurados</div>
+                    <div className="p-8 text-center text-slate-500">No hay planes configurados</div>
                 ) : (
                     <table className="data-table">
                         <thead>
@@ -479,24 +479,24 @@ function PlanesTab() {
                                 <tr key={p.id}>
                                     <td className="font-medium text-white">{p.nombre}</td>
                                     <td className="text-success-400 font-medium">${p.precio}</td>
-                                    <td className="text-neutral-400">{p.duracion_dias} días</td>
+                                    <td className="text-slate-400">{p.duracion_dias} días</td>
                                     <td>
                                         <span className={`badge ${p.activo ? 'badge-success' : 'badge-neutral'}`}>
                                             {p.activo ? 'Activo' : 'Inactivo'}
                                         </span>
                                     </td>
-                                    <td className="text-neutral-400 max-w-xs truncate">{p.descripcion || '—'}</td>
+                                    <td className="text-slate-400 max-w-xs truncate">{p.descripcion || '—'}</td>
                                     <td>
                                         <div className="flex gap-2">
                                             <button
                                                 onClick={() => setEditItem(p)}
-                                                className="p-1.5 rounded hover:bg-neutral-700 text-neutral-400 hover:text-white"
+                                                className="p-1.5 rounded hover:bg-slate-700 text-slate-400 hover:text-white"
                                             >
                                                 <Pencil className="w-4 h-4" />
                                             </button>
                                             <button
                                                 onClick={() => handleDelete(p.id)}
-                                                className="p-1.5 rounded hover:bg-red-500/20 text-neutral-400 hover:text-red-400"
+                                                className="p-1.5 rounded hover:bg-red-500/20 text-slate-400 hover:text-red-400"
                                             >
                                                 <Trash2 className="w-4 h-4" />
                                             </button>
@@ -567,7 +567,7 @@ function EstadisticasTab() {
             className="space-y-6"
         >
             <div className="flex items-center gap-4">
-                <label className="text-neutral-400">Año:</label>
+                <label className="text-slate-400">Año:</label>
                 <select
                     value={year}
                     onChange={(e) => setYear(Number(e.target.value))}
@@ -581,10 +581,10 @@ function EstadisticasTab() {
 
             {loading ? (
                 <div className="flex items-center justify-center py-16">
-                    <Loader2 className="w-8 h-8 animate-spin text-iron-400" />
+                    <Loader2 className="w-8 h-8 animate-spin text-primary-400" />
                 </div>
             ) : !stats ? (
-                <div className="p-8 text-center text-neutral-500">No hay estadísticas disponibles</div>
+                <div className="p-8 text-center text-slate-500">No hay estadísticas disponibles</div>
             ) : (
                 <>
                     {/* Summary Cards */}
@@ -596,7 +596,7 @@ function EstadisticasTab() {
                     </div>
 
                     {/* Monthly Chart (Simple) */}
-                    <div className="glass-card p-6">
+                    <div className="card p-6">
                         <h3 className="text-lg font-semibold text-white mb-4">Recaudación Mensual</h3>
                         <div className="grid grid-cols-12 gap-2 h-48">
                             {months.map((month, idx) => {
@@ -608,11 +608,11 @@ function EstadisticasTab() {
                                 return (
                                     <div key={month} className="flex flex-col items-center justify-end h-full">
                                         <div
-                                            className="w-full bg-gradient-to-t from-iron-500 to-iron-400 rounded-t transition-all hover:from-iron-400 hover:to-iron-300"
+                                            className="w-full bg-gradient-to-t from-primary-500 to-primary-400 rounded-t transition-all hover:from-primary-400 hover:to-primary-300"
                                             style={{ height: `${Math.max(height, 2)}%` }}
                                             title={`$${total.toLocaleString()}`}
                                         />
-                                        <span className="text-xs text-neutral-400 mt-2">{month}</span>
+                                        <span className="text-xs text-slate-400 mt-2">{month}</span>
                                     </div>
                                 );
                             })}
@@ -621,14 +621,14 @@ function EstadisticasTab() {
 
                     {/* By Payment Method */}
                     {stats.por_metodo && stats.por_metodo.length > 0 && (
-                        <div className="glass-card p-6">
+                        <div className="card p-6">
                             <h3 className="text-lg font-semibold text-white mb-4">Por Método de Pago</h3>
                             <div className="space-y-3">
                                 {stats.por_metodo.map((m, idx) => (
                                     <div key={idx} className="flex items-center justify-between">
-                                        <span className="text-neutral-300">{m.metodo}</span>
+                                        <span className="text-slate-300">{m.metodo}</span>
                                         <div className="flex items-center gap-4">
-                                            <span className="text-neutral-400">{m.cantidad} pagos</span>
+                                            <span className="text-slate-400">{m.cantidad} pagos</span>
                                             <span className="text-success-400 font-medium">${m.total.toLocaleString()}</span>
                                         </div>
                                     </div>
@@ -658,11 +658,11 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.95, opacity: 0 }}
                 onClick={(e) => e.stopPropagation()}
-                className="glass-card w-full max-w-md p-6"
+                className="card w-full max-w-md p-6"
             >
                 <div className="flex items-center justify-between mb-4">
                     <h2 className="text-xl font-bold text-white">{title}</h2>
-                    <button onClick={onClose} className="text-neutral-400 hover:text-white">
+                    <button onClick={onClose} className="text-slate-400 hover:text-white">
                         <X className="w-5 h-5" />
                     </button>
                 </div>
@@ -674,8 +674,8 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 
 function StatCard({ label, value, highlight }: { label: string; value: string | number; highlight?: boolean }) {
     return (
-        <div className="glass-card p-4">
-            <div className="text-neutral-400 text-sm">{label}</div>
+        <div className="card p-4">
+            <div className="text-slate-400 text-sm">{label}</div>
             <div className={`text-2xl font-bold mt-1 ${highlight ? 'text-success-400' : 'text-white'}`}>
                 {value}
             </div>
@@ -780,7 +780,7 @@ function MetodoForm({
                         onChange={(e) => setFormData({ ...formData, activo: e.target.checked })}
                         className="w-4 h-4"
                     />
-                    <label htmlFor="activo" className="text-neutral-300">Activo</label>
+                    <label htmlFor="activo" className="text-slate-300">Activo</label>
                 </div>
                 <div className="flex justify-end gap-3 pt-2">
                     <button type="button" onClick={onClose} className="btn-secondary">
@@ -880,7 +880,7 @@ function PlanForm({
                         onChange={(e) => setFormData({ ...formData, activo: e.target.checked })}
                         className="w-4 h-4"
                     />
-                    <label htmlFor="plan-activo" className="text-neutral-300">Activo</label>
+                    <label htmlFor="plan-activo" className="text-slate-300">Activo</label>
                 </div>
                 <div className="flex justify-end gap-3 pt-2">
                     <button type="button" onClick={onClose} className="btn-secondary">
@@ -894,3 +894,4 @@ function PlanForm({
         </Modal>
     );
 }
+

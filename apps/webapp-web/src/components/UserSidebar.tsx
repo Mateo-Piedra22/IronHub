@@ -26,6 +26,7 @@ import {
     UserCheck,
     UserMinus,
     Loader2,
+    FileDown,
 } from 'lucide-react';
 import { Button, Modal, ConfirmModal, Input, useToast } from '@/components/ui';
 import { api, type Usuario, type Etiqueta, type Estado, type Pago, type EstadoTemplate, type Asistencia } from '@/lib/api';
@@ -92,6 +93,9 @@ export default function UserSidebar({
     const [qrStatus, setQrStatus] = useState<'waiting' | 'used' | 'expired'>('waiting');
     const qrPollRef = useRef<NodeJS.Timeout | null>(null);
 
+    // Rutina
+    const [rutinaActiva, setRutinaActiva] = useState<{ id: number; nombre_rutina: string; dias_semana: number; activa: boolean } | null>(null);
+
     // Load data when usuario changes
     useEffect(() => {
         if (usuario && isOpen) {
@@ -102,12 +106,24 @@ export default function UserSidebar({
             loadSuggestions();
             loadEstadoTemplates();
             loadAsistenciaStatus();
+            loadRutinaActiva();
         }
         // Cleanup QR polling on unmount
         return () => {
             if (qrPollRef.current) clearInterval(qrPollRef.current);
         };
     }, [usuario?.id, isOpen]);
+
+    const loadRutinaActiva = async () => {
+        if (!usuario) return;
+        const res = await api.getRutinas({ usuario_id: usuario.id });
+        if (res.ok && res.data?.rutinas) {
+            const activa = res.data.rutinas.find((r: any) => r.activa) as { id: number; nombre_rutina: string; dias_semana: number; activa: boolean } | undefined;
+            setRutinaActiva(activa || null);
+        } else {
+            setRutinaActiva(null);
+        }
+    };
 
     const loadEtiquetas = async () => {
         if (!usuario) return;
@@ -356,10 +372,10 @@ export default function UserSidebar({
                 initial={{ opacity: 0, x: 300 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 300 }}
-                className="fixed right-0 top-0 h-full w-[400px] max-w-full bg-neutral-900 border-l border-neutral-800 z-50 flex flex-col overflow-hidden"
+                className="fixed right-0 top-0 h-full w-[400px] max-w-full bg-slate-900 border-l border-slate-800 z-50 flex flex-col overflow-hidden"
             >
                 {/* Header */}
-                <div className="p-4 border-b border-neutral-800 flex items-center justify-between">
+                <div className="p-4 border-b border-slate-800 flex items-center justify-between">
                     <div className="flex items-center gap-3">
                         <div
                             className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium"
@@ -369,12 +385,12 @@ export default function UserSidebar({
                         </div>
                         <div>
                             <h3 className="font-semibold text-white">{usuario.nombre}</h3>
-                            {usuario.dni && <p className="text-xs text-neutral-500">DNI: {usuario.dni}</p>}
+                            {usuario.dni && <p className="text-xs text-slate-500">DNI: {usuario.dni}</p>}
                         </div>
                     </div>
                     <button
                         onClick={onClose}
-                        className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800"
+                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
                     >
                         <X className="w-5 h-5" />
                     </button>
@@ -382,8 +398,8 @@ export default function UserSidebar({
 
                 {/* Stats Cards */}
                 <div className="grid grid-cols-2 gap-3 p-4">
-                    <div className="glass-card p-3">
-                        <div className="text-xs text-neutral-500">Estado</div>
+                    <div className="card p-3">
+                        <div className="text-xs text-slate-500">Estado</div>
                         <div className={cn(
                             'font-semibold',
                             usuario.activo ? 'text-success-400' : 'text-danger-400'
@@ -391,16 +407,16 @@ export default function UserSidebar({
                             {usuario.activo ? 'Activo' : 'Inactivo'}
                         </div>
                     </div>
-                    <div className="glass-card p-3">
-                        <div className="text-xs text-neutral-500">Vencimiento</div>
+                    <div className="card p-3">
+                        <div className="text-xs text-slate-500">Vencimiento</div>
                         <div className="font-semibold text-white">
                             {usuario.fecha_proximo_vencimiento
                                 ? formatDate(usuario.fecha_proximo_vencimiento)
                                 : '—'}
                         </div>
                     </div>
-                    <div className="glass-card p-3">
-                        <div className="text-xs text-neutral-500">Cuotas vencidas</div>
+                    <div className="card p-3">
+                        <div className="text-xs text-slate-500">Cuotas vencidas</div>
                         <div className={cn(
                             'font-semibold',
                             (usuario.cuotas_vencidas || 0) > 0 ? 'text-danger-400' : 'text-white'
@@ -408,8 +424,8 @@ export default function UserSidebar({
                             {usuario.cuotas_vencidas || 0}
                         </div>
                     </div>
-                    <div className="glass-card p-3">
-                        <div className="text-xs text-neutral-500">Tipo cuota</div>
+                    <div className="card p-3">
+                        <div className="text-xs text-slate-500">Tipo cuota</div>
                         <div className="font-semibold text-white truncate">
                             {usuario.tipo_cuota_nombre || '—'}
                         </div>
@@ -423,7 +439,7 @@ export default function UserSidebar({
                             href={getWhatsAppLink(usuario.telefono)}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-center gap-2 text-sm text-iron-400 hover:text-iron-300"
+                            className="flex items-center gap-2 text-sm text-primary-400 hover:text-primary-300"
                         >
                             <Phone className="w-4 h-4" />
                             {usuario.telefono}
@@ -432,7 +448,7 @@ export default function UserSidebar({
                     {usuario.email && (
                         <a
                             href={`mailto:${usuario.email}`}
-                            className="flex items-center gap-2 text-sm text-neutral-400 hover:text-white"
+                            className="flex items-center gap-2 text-sm text-slate-400 hover:text-white"
                         >
                             <Mail className="w-4 h-4" />
                             {usuario.email}
@@ -440,9 +456,34 @@ export default function UserSidebar({
                     )}
                 </div>
 
+                {/* Rutina Actual */}
+                <div className="px-4 pb-4 border-b border-slate-800">
+                    <h4 className="text-xs font-medium text-slate-500 mb-2">Rutina Actual</h4>
+                    {rutinaActiva ? (
+                        <div className="bg-slate-900 rounded-lg p-3">
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <p className="font-medium text-white">{rutinaActiva.nombre_rutina}</p>
+                                    <p className="text-xs text-slate-400">{rutinaActiva.dias_semana} día(s) por semana</p>
+                                </div>
+                                <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() => window.open(api.getRutinaExcelUrl(rutinaActiva.id), '_blank')}
+                                >
+                                    <FileDown className="w-3 h-3 mr-1" />
+                                    Excel
+                                </Button>
+                            </div>
+                        </div>
+                    ) : (
+                        <p className="text-xs text-slate-500">Sin rutina activa asignada</p>
+                    )}
+                </div>
+
                 {/* Quick Actions */}
                 <div className="px-4 pb-4">
-                    <h4 className="text-xs font-medium text-neutral-500 mb-2">Acciones rápidas</h4>
+                    <h4 className="text-xs font-medium text-slate-500 mb-2">Acciones rápidas</h4>
                     <div className="flex flex-wrap gap-2">
                         <Button size="sm" variant="secondary" onClick={() => onEdit(usuario)}>
                             <Edit className="w-3 h-3 mr-1" />
@@ -483,13 +524,13 @@ export default function UserSidebar({
                         </Button>
                     </div>
                     {/* Attendance stat */}
-                    <div className="mt-2 text-xs text-neutral-500">
+                    <div className="mt-2 text-xs text-slate-500">
                         Asistencias (30 días): <span className="font-medium text-white">{asistencias30d}</span>
                     </div>
                 </div>
 
                 {/* Tabs */}
-                <div className="flex border-b border-neutral-800 px-4">
+                <div className="flex border-b border-slate-800 px-4">
                     {[
                         { id: 'notas', label: 'Notas', icon: FileText },
                         { id: 'etiquetas', label: 'Etiquetas', icon: Tag },
@@ -501,8 +542,8 @@ export default function UserSidebar({
                             className={cn(
                                 'flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors',
                                 activeTab === tab.id
-                                    ? 'text-iron-400 border-iron-400'
-                                    : 'text-neutral-500 border-transparent hover:text-white'
+                                    ? 'text-primary-400 border-primary-400'
+                                    : 'text-slate-500 border-transparent hover:text-white'
                             )}
                         >
                             <tab.icon className="w-3.5 h-3.5" />
@@ -519,13 +560,13 @@ export default function UserSidebar({
                                 value={notas}
                                 onChange={(e) => handleNotasChange(e.target.value)}
                                 placeholder="Apunta comentarios, lesiones, preferencias, objetivos..."
-                                className="w-full h-40 bg-neutral-800 border border-neutral-700 rounded-lg p-3 text-white text-sm resize-none focus:outline-none focus:border-iron-500"
+                                className="w-full h-40 bg-slate-800 border border-slate-700 rounded-lg p-3 text-white text-sm resize-none focus:outline-none focus:border-primary-500"
                             />
                             <div className="flex items-center justify-between">
-                                <span className="text-xs text-neutral-500">{notas.length} caracteres</span>
+                                <span className="text-xs text-slate-500">{notas.length} caracteres</span>
                                 <div className="flex items-center gap-2">
                                     {notasSaving && (
-                                        <span className="text-xs text-neutral-500">Guardando...</span>
+                                        <span className="text-xs text-slate-500">Guardando...</span>
                                     )}
                                     <Button size="sm" onClick={handleSaveNotasNow}>
                                         <Save className="w-3 h-3 mr-1" />
@@ -556,13 +597,13 @@ export default function UserSidebar({
                             />
                             {availableSuggestions.length > 0 && (
                                 <div>
-                                    <p className="text-xs text-neutral-500 mb-2">Sugerencias:</p>
+                                    <p className="text-xs text-slate-500 mb-2">Sugerencias:</p>
                                     <div className="flex flex-wrap gap-2">
                                         {availableSuggestions.slice(0, 5).map((s) => (
                                             <button
                                                 key={s}
                                                 onClick={() => setEtiquetaInput(s)}
-                                                className="px-2 py-1 text-xs bg-neutral-800 border border-neutral-700 rounded-full hover:bg-neutral-700"
+                                                className="px-2 py-1 text-xs bg-slate-800 border border-slate-700 rounded-full hover:bg-slate-700"
                                             >
                                                 {s}
                                             </button>
@@ -574,19 +615,19 @@ export default function UserSidebar({
                                 {filteredEtiquetas.map((e) => (
                                     <div
                                         key={e.id}
-                                        className="flex items-center gap-1 px-2 py-1 bg-iron-500/20 text-iron-400 rounded-full text-sm"
+                                        className="flex items-center gap-1 px-2 py-1 bg-primary-500/20 text-primary-400 rounded-full text-sm"
                                     >
                                         <span>{e.nombre}</span>
                                         <button
                                             onClick={() => handleDeleteEtiqueta(e.id)}
-                                            className="hover:text-iron-300"
+                                            className="hover:text-primary-300"
                                         >
                                             <X className="w-3 h-3" />
                                         </button>
                                     </div>
                                 ))}
                                 {filteredEtiquetas.length === 0 && (
-                                    <p className="text-sm text-neutral-500">Sin etiquetas</p>
+                                    <p className="text-sm text-slate-500">Sin etiquetas</p>
                                 )}
                             </div>
                         </div>
@@ -598,7 +639,7 @@ export default function UserSidebar({
                                 <select
                                     value={estadoForm.nombre}
                                     onChange={(e) => setEstadoForm({ ...estadoForm, nombre: e.target.value })}
-                                    className="w-full bg-neutral-800 border border-neutral-700 rounded-lg p-2 text-white text-sm"
+                                    className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-white text-sm"
                                 >
                                     <option value="">Plantilla de estado...</option>
                                     {estadoTemplates.map((t) => (
@@ -628,7 +669,7 @@ export default function UserSidebar({
                                     onChange={(e) => setEstadoFilter(e.target.value)}
                                     placeholder="Filtrar estados..."
                                 />
-                                <label className="flex items-center gap-1 text-xs text-neutral-400 whitespace-nowrap">
+                                <label className="flex items-center gap-1 text-xs text-slate-400 whitespace-nowrap">
                                     <input
                                         type="checkbox"
                                         checked={showExpiredEstados}
@@ -646,19 +687,19 @@ export default function UserSidebar({
                                             className={cn(
                                                 'flex items-center justify-between p-3 rounded-lg border',
                                                 isExpired
-                                                    ? 'bg-neutral-800/50 border-neutral-700 opacity-60'
-                                                    : 'bg-neutral-800 border-neutral-700'
+                                                    ? 'bg-slate-800/50 border-slate-700 opacity-60'
+                                                    : 'bg-slate-800 border-slate-700'
                                             )}
                                         >
                                             <div className="flex items-center gap-2">
-                                                <div className="w-2 h-2 rounded-full bg-iron-500" />
+                                                <div className="w-2 h-2 rounded-full bg-primary-500" />
                                                 <div>
                                                     <div className="font-medium text-white">{e.nombre}</div>
                                                     {e.descripcion && (
-                                                        <div className="text-xs text-neutral-500">{e.descripcion}</div>
+                                                        <div className="text-xs text-slate-500">{e.descripcion}</div>
                                                     )}
                                                     {e.fecha_vencimiento && (
-                                                        <div className="text-xs text-neutral-500">
+                                                        <div className="text-xs text-slate-500">
                                                             Vence: {formatDate(e.fecha_vencimiento)}
                                                             {isExpired && ' (vencido)'}
                                                         </div>
@@ -667,7 +708,7 @@ export default function UserSidebar({
                                             </div>
                                             <button
                                                 onClick={() => handleDeleteEstado(e.id)}
-                                                className="p-1 text-neutral-400 hover:text-danger-400"
+                                                className="p-1 text-slate-400 hover:text-danger-400"
                                             >
                                                 <Trash2 className="w-4 h-4" />
                                             </button>
@@ -675,7 +716,7 @@ export default function UserSidebar({
                                     );
                                 })}
                                 {filteredEstados.length === 0 && (
-                                    <p className="text-sm text-neutral-500">Sin estados</p>
+                                    <p className="text-sm text-slate-500">Sin estados</p>
                                 )}
                             </div>
                         </div>
@@ -683,8 +724,8 @@ export default function UserSidebar({
                 </div>
 
                 {/* Payment History */}
-                <div className="border-t border-neutral-800 p-4 max-h-[200px] overflow-y-auto">
-                    <h4 className="text-xs font-medium text-neutral-500 mb-2 flex items-center gap-1">
+                <div className="border-t border-slate-800 p-4 max-h-[200px] overflow-y-auto">
+                    <h4 className="text-xs font-medium text-slate-500 mb-2 flex items-center gap-1">
                         <History className="w-3 h-3" />
                         Historial de pagos
                     </h4>
@@ -694,7 +735,7 @@ export default function UserSidebar({
                                 key={p.id}
                                 className="flex items-center justify-between text-sm py-1"
                             >
-                                <span className="text-neutral-400">
+                                <span className="text-slate-400">
                                     {formatDate(p.fecha)}
                                 </span>
                                 <span className="text-white font-medium">
@@ -703,7 +744,7 @@ export default function UserSidebar({
                             </div>
                         ))}
                         {pagos.length === 0 && (
-                            <p className="text-sm text-neutral-500">Sin pagos registrados</p>
+                            <p className="text-sm text-slate-500">Sin pagos registrados</p>
                         )}
                     </div>
                 </div>
@@ -726,11 +767,11 @@ export default function UserSidebar({
                                     className="w-48 h-48"
                                 />
                             </div>
-                            <div className="flex items-center justify-center gap-2 text-sm text-neutral-400">
+                            <div className="flex items-center justify-center gap-2 text-sm text-slate-400">
                                 <Loader2 className="w-4 h-4 animate-spin" />
                                 Esperando que el usuario escanee...
                             </div>
-                            <p className="text-xs text-neutral-500">
+                            <p className="text-xs text-slate-500">
                                 El código expira en 5 minutos.
                             </p>
                         </>
@@ -743,7 +784,7 @@ export default function UserSidebar({
                             <p className="text-lg font-semibold text-success-400">
                                 ¡Asistencia registrada!
                             </p>
-                            <p className="text-sm text-neutral-400">
+                            <p className="text-sm text-slate-400">
                                 El usuario escaneó el código correctamente.
                             </p>
                         </>
@@ -756,7 +797,7 @@ export default function UserSidebar({
                             <p className="text-lg font-semibold text-danger-400">
                                 Código expirado
                             </p>
-                            <p className="text-sm text-neutral-400">
+                            <p className="text-sm text-slate-400">
                                 Genera un nuevo código para intentar de nuevo.
                             </p>
                             <Button onClick={handleGenerateQR} isLoading={qrLoading}>
@@ -775,3 +816,4 @@ export default function UserSidebar({
         </>
     );
 }
+

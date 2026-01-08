@@ -117,7 +117,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     if (loading) {
         return (
             <div className="flex items-center justify-center py-16">
-                <Loader2 className="w-8 h-8 animate-spin text-iron-400" />
+                <Loader2 className="w-8 h-8 animate-spin text-primary-400" />
             </div>
         );
     }
@@ -125,8 +125,8 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     if (!gym) {
         return (
             <div className="text-center py-16">
-                <p className="text-neutral-500">Gimnasio no encontrado</p>
-                <Link href="/dashboard/gyms" className="text-iron-400 hover:text-iron-300 mt-2 inline-block">
+                <p className="text-slate-500">Gimnasio no encontrado</p>
+                <Link href="/dashboard/gyms" className="text-primary-400 hover:text-primary-300 mt-2 inline-block">
                     Volver a gimnasios
                 </Link>
             </div>
@@ -137,12 +137,12 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         <div className="space-y-6">
             {/* Header */}
             <div className="flex items-center gap-4">
-                <Link href="/dashboard/gyms" className="p-2 rounded-lg bg-neutral-800 text-neutral-400 hover:text-white">
+                <Link href="/dashboard/gyms" className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white">
                     <ArrowLeft className="w-5 h-5" />
                 </Link>
                 <div>
                     <h1 className="page-title">{gym.nombre}</h1>
-                    <p className="text-neutral-400">{gym.subdominio} · ID: {gym.id}</p>
+                    <p className="text-slate-400">{gym.subdominio} · ID: {gym.id}</p>
                 </div>
                 <span
                     className={`ml-auto badge ${gym.status === 'active' ? 'badge-success' : gym.status === 'maintenance' ? 'badge-warning' : 'badge-danger'
@@ -159,8 +159,8 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                         key={sec.id}
                         onClick={() => setActiveSection(sec.id)}
                         className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-colors ${activeSection === sec.id
-                                ? 'bg-iron-500/20 text-iron-400'
-                                : 'bg-neutral-800/50 text-neutral-400 hover:text-white'
+                                ? 'bg-primary-500/20 text-primary-400'
+                                : 'bg-slate-800/50 text-slate-400 hover:text-white'
                             }`}
                     >
                         <sec.icon className="w-4 h-4" />
@@ -174,7 +174,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                 <motion.div
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="glass-card p-3 flex items-center gap-2 text-iron-400"
+                    className="card p-3 flex items-center gap-2 text-primary-400"
                 >
                     <Check className="w-4 h-4" />
                     {message}
@@ -182,21 +182,21 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
             )}
 
             {/* Content */}
-            <div className="glass-card p-6">
+            <div className="card p-6">
                 {activeSection === 'subscription' && (
                     <div className="space-y-6">
                         <h2 className="text-lg font-semibold text-white">Suscripción</h2>
                         <div className="grid grid-cols-2 gap-4 max-w-md">
                             <div>
-                                <div className="text-sm text-neutral-500">Estado</div>
+                                <div className="text-sm text-slate-500">Estado</div>
                                 <div className="text-white font-medium">{gym.status}</div>
                             </div>
                             <div>
-                                <div className="text-sm text-neutral-500">Creado</div>
+                                <div className="text-sm text-slate-500">Creado</div>
                                 <div className="text-white">{gym.created_at?.slice(0, 10) || '—'}</div>
                             </div>
                         </div>
-                        <div className="pt-4 border-t border-neutral-800">
+                        <div className="pt-4 border-t border-slate-800">
                             <h3 className="font-medium text-white mb-3">Enviar recordatorio</h3>
                             <div className="flex gap-3">
                                 <input type="text" className="input flex-1" placeholder="Mensaje de recordatorio" />
@@ -213,7 +213,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                     <div className="space-y-6">
                         <h2 className="text-lg font-semibold text-white">Historial de Pagos</h2>
                         {payments.length === 0 ? (
-                            <p className="text-neutral-500">Sin pagos registrados</p>
+                            <p className="text-slate-500">Sin pagos registrados</p>
                         ) : (
                             <table className="data-table">
                                 <thead>
@@ -238,7 +238,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                 </tbody>
                             </table>
                         )}
-                        <div className="pt-4 border-t border-neutral-800">
+                        <div className="pt-4 border-t border-slate-800">
                             <h3 className="font-medium text-white mb-3">Registrar pago</h3>
                             <form className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                 <input type="number" className="input" placeholder="Monto" />
@@ -316,14 +316,14 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                     checked={waConfig.nonblocking || false}
                                     onChange={(e) => setWaConfig({ ...waConfig, nonblocking: e.target.checked })}
                                 />
-                                <span className="text-neutral-300">Envío no bloqueante</span>
+                                <span className="text-slate-300">Envío no bloqueante</span>
                             </label>
                         </div>
                         <button onClick={handleSaveWhatsApp} disabled={saving} className="btn-primary flex items-center gap-2">
                             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                             Guardar
                         </button>
-                        <div className="pt-4 border-t border-neutral-800">
+                        <div className="pt-4 border-t border-slate-800">
                             <h3 className="font-medium text-white mb-3">Prueba de WhatsApp</h3>
                             <div className="flex gap-3">
                                 <input type="text" className="input w-48" placeholder="+5493411234567" />
@@ -367,7 +367,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                 <button className="btn-secondary">Desactivar</button>
                             </div>
                         </div>
-                        <div className="pt-4 border-t border-neutral-800">
+                        <div className="pt-4 border-t border-slate-800">
                             <h3 className="font-medium text-white mb-3">Recordatorio en WebApp</h3>
                             <div className="flex gap-3">
                                 <input type="text" className="input flex-1" placeholder="Mensaje de recordatorio" />
@@ -394,7 +394,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                 <input type="text" className="input" placeholder="https://..." />
                             </div>
                             <div className="md:col-span-2">
-                                <h3 className="text-sm font-medium text-neutral-300 mb-2">Colores</h3>
+                                <h3 className="text-sm font-medium text-slate-300 mb-2">Colores</h3>
                                 <div className="grid grid-cols-4 gap-3">
                                     <div>
                                         <label className="label text-xs">Primario</label>
@@ -426,47 +426,47 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                     <div className="space-y-6">
                         <h2 className="text-lg font-semibold text-white">Salud del Gimnasio</h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="p-4 rounded-lg bg-neutral-800/50 border border-neutral-700 flex items-center justify-between">
+                            <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <div className="w-3 h-3 rounded-full bg-success-400" />
                                     <div>
                                         <div className="font-medium text-white">Base de datos</div>
-                                        <div className="text-xs text-neutral-500">{gym.db_name}</div>
+                                        <div className="text-xs text-slate-500">{gym.db_name}</div>
                                     </div>
                                 </div>
                                 <span className="text-success-400 text-sm">OK</span>
                             </div>
-                            <div className="p-4 rounded-lg bg-neutral-800/50 border border-neutral-700 flex items-center justify-between">
+                            <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <div className={`w-3 h-3 rounded-full ${gym.wa_configured ? 'bg-success-400' : 'bg-warning-400'}`} />
                                     <div>
                                         <div className="font-medium text-white">WhatsApp</div>
-                                        <div className="text-xs text-neutral-500">{gym.wa_configured ? 'Configurado' : 'Sin configurar'}</div>
+                                        <div className="text-xs text-slate-500">{gym.wa_configured ? 'Configurado' : 'Sin configurar'}</div>
                                     </div>
                                 </div>
                                 <span className={gym.wa_configured ? 'text-success-400 text-sm' : 'text-warning-400 text-sm'}>
                                     {gym.wa_configured ? 'OK' : 'Pendiente'}
                                 </span>
                             </div>
-                            <div className="p-4 rounded-lg bg-neutral-800/50 border border-neutral-700 flex items-center justify-between">
+                            <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <div className={`w-3 h-3 rounded-full ${gym.status === 'active' ? 'bg-success-400' : 'bg-danger-400'}`} />
                                     <div>
                                         <div className="font-medium text-white">Estado</div>
-                                        <div className="text-xs text-neutral-500">{gym.status}</div>
+                                        <div className="text-xs text-slate-500">{gym.status}</div>
                                     </div>
                                 </div>
                             </div>
-                            <div className="p-4 rounded-lg bg-neutral-800/50 border border-neutral-700 flex items-center justify-between">
+                            <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
-                                    <div className="w-3 h-3 rounded-full bg-iron-400" />
+                                    <div className="w-3 h-3 rounded-full bg-primary-400" />
                                     <div>
                                         <div className="font-medium text-white">WebApp URL</div>
                                         <a
                                             href={`https://${gym.subdominio}.${process.env.NEXT_PUBLIC_TENANT_DOMAIN || 'ironhub.motiona.xyz'}`}
                                             target="_blank"
                                             rel="noopener noreferrer"
-                                            className="text-xs text-iron-400 hover:text-iron-300"
+                                            className="text-xs text-primary-400 hover:text-primary-300"
                                         >
                                             {gym.subdominio}.{process.env.NEXT_PUBLIC_TENANT_DOMAIN || 'ironhub.motiona.xyz'}
                                         </a>

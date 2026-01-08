@@ -54,10 +54,10 @@ export default function SubscriptionsPage() {
             <div className="flex items-center justify-between flex-wrap gap-4">
                 <div>
                     <h1 className="page-title">Suscripciones</h1>
-                    <p className="text-neutral-400 mt-1">Dashboard de vencimientos próximos</p>
+                    <p className="text-slate-400 mt-1">Dashboard de vencimientos próximos</p>
                 </div>
                 <div className="flex items-center gap-3">
-                    <label className="text-sm text-neutral-400">Próximos días:</label>
+                    <label className="text-sm text-slate-400">Próximos días:</label>
                     <select
                         value={days}
                         onChange={(e) => setDays(Number(e.target.value))}
@@ -80,13 +80,13 @@ export default function SubscriptionsPage() {
                 </div>
             </div>
 
-            <div className="glass-card overflow-hidden">
+            <div className="card overflow-hidden">
                 {loading ? (
                     <div className="flex items-center justify-center py-16">
-                        <Loader2 className="w-8 h-8 animate-spin text-iron-400" />
+                        <Loader2 className="w-8 h-8 animate-spin text-primary-400" />
                     </div>
                 ) : expirations.length === 0 ? (
-                    <div className="p-8 text-center text-neutral-500">
+                    <div className="p-8 text-center text-slate-500">
                         No hay vencimientos en los próximos {days} días
                     </div>
                 ) : (
@@ -104,8 +104,8 @@ export default function SubscriptionsPage() {
                             {expirations.map((exp) => (
                                 <tr key={exp.gym_id}>
                                     <td className="font-medium text-white">{exp.nombre}</td>
-                                    <td className="text-neutral-400">{exp.subdominio}</td>
-                                    <td className="text-neutral-400">{exp.valid_until}</td>
+                                    <td className="text-slate-400">{exp.subdominio}</td>
+                                    <td className="text-slate-400">{exp.valid_until}</td>
                                     <td>
                                         <span
                                             className={`badge ${exp.days_remaining <= 7
@@ -126,7 +126,7 @@ export default function SubscriptionsPage() {
                                                     `Recordatorio: su suscripción vence el ${exp.valid_until}`
                                                 );
                                             }}
-                                            className="p-2 rounded-lg bg-neutral-800 text-neutral-400 hover:text-white"
+                                            className="p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white"
                                         >
                                             <Send className="w-4 h-4" />
                                         </button>
@@ -140,3 +140,4 @@ export default function SubscriptionsPage() {
         </div>
     );
 }
+

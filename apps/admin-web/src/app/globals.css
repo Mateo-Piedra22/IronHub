@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,8 +6,8 @@
 
 @layer base {
     :root {
-        --background: 9 9 11;
-        --foreground: 250 250 250;
+        --background: 2 6 23;
+        --foreground: 248 250 252;
         --sidebar-width: 280px;
     }
 
@@ -18,11 +18,11 @@
     }
 
     body {
-        @apply bg-neutral-950 text-neutral-50 font-sans;
+        @apply bg-slate-950 text-slate-50 font-sans;
     }
 
     ::selection {
-        @apply bg-iron-600 text-white;
+        @apply bg-primary-600 text-white;
     }
 
     ::-webkit-scrollbar {
@@ -31,43 +31,43 @@
     }
 
     ::-webkit-scrollbar-track {
-        @apply bg-neutral-900;
+        @apply bg-slate-900;
     }
 
     ::-webkit-scrollbar-thumb {
-        @apply bg-neutral-700 rounded-full;
+        @apply bg-slate-700 rounded-full;
     }
 
     ::-webkit-scrollbar-thumb:hover {
-        @apply bg-neutral-600;
+        @apply bg-slate-600;
     }
 }
 
 @layer components {
 
-    /* Glass surfaces */
-    .glass {
-        @apply bg-neutral-900/60 backdrop-blur-xl border border-neutral-800/50;
+    /* Card surfaces - Clean, solid backgrounds */
+    .card {
+        @apply bg-slate-900 border border-slate-800 rounded-xl;
     }
 
-    .glass-card {
-        @apply glass rounded-2xl;
+    .card-elevated {
+        @apply bg-slate-800 border border-slate-700 rounded-xl shadow-card;
     }
 
     /* Sidebar */
     .sidebar {
-        @apply fixed left-0 top-0 bottom-0 w-[280px] glass border-r border-neutral-800/50;
+        @apply fixed left-0 top-0 bottom-0 w-[280px] bg-slate-900 border-r border-slate-800;
         @apply flex flex-col;
     }
 
     .sidebar-item {
-        @apply flex items-center gap-3 px-4 py-3 rounded-xl text-neutral-400;
-        @apply transition-all duration-200;
-        @apply hover:bg-neutral-800/50 hover:text-white;
+        @apply flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400;
+        @apply transition-colors duration-200;
+        @apply hover:bg-slate-800 hover:text-white;
     }
 
     .sidebar-item.active {
-        @apply bg-iron-500/20 text-iron-300 border border-iron-500/30;
+        @apply bg-primary-600/10 text-primary-400 border-l-2 border-primary-500;
     }
 
     /* Main content area */
@@ -86,7 +86,7 @@
 
     /* Stats cards */
     .stat-card {
-        @apply glass-card p-6;
+        @apply card p-6;
     }
 
     .stat-value {
@@ -94,7 +94,7 @@
     }
 
     .stat-label {
-        @apply text-sm text-neutral-400 mt-1;
+        @apply text-sm text-slate-400 mt-1;
     }
 
     /* Data table */
@@ -103,48 +103,55 @@
     }
 
     .data-table th {
-        @apply text-left text-xs font-medium text-neutral-500 uppercase tracking-wider px-4 py-3;
+        @apply text-left text-xs font-medium text-slate-500 uppercase tracking-wider px-4 py-3;
     }
 
     .data-table td {
-        @apply px-4 py-4 text-sm text-neutral-300 border-t border-neutral-800/50;
+        @apply px-4 py-4 text-sm text-slate-300 border-t border-slate-800;
     }
 
     .data-table tr:hover td {
-        @apply bg-neutral-800/30;
+        @apply bg-slate-800/50;
     }
 
     /* Form elements */
     .input {
         @apply w-full px-4 py-3 rounded-xl;
-        @apply bg-neutral-900 border border-neutral-800;
-        @apply text-white placeholder-neutral-500;
-        @apply focus:outline-none focus:ring-2 focus:ring-iron-500/50 focus:border-iron-500;
-        @apply transition-all duration-200;
+        @apply bg-slate-900 border border-slate-700;
+        @apply text-white placeholder-slate-500;
+        @apply focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500;
+        @apply transition-colors duration-200;
     }
 
     .label {
-        @apply block text-sm font-medium text-neutral-300 mb-2;
+        @apply block text-sm font-medium text-slate-300 mb-2;
     }
 
     /* Buttons */
     .btn-primary {
         @apply px-6 py-3 rounded-xl font-semibold text-white;
-        @apply bg-gradient-to-r from-iron-600 to-iron-500;
-        @apply hover:shadow-glow-md transition-all duration-300;
+        @apply bg-primary-600 hover:bg-primary-500;
+        @apply transition-colors duration-200;
         @apply active:scale-[0.98];
     }
 
     .btn-secondary {
         @apply px-6 py-3 rounded-xl font-medium;
-        @apply bg-neutral-800 border border-neutral-700 text-neutral-200;
-        @apply hover:bg-neutral-700 transition-all duration-200;
+        @apply bg-slate-800 border border-slate-700 text-slate-200;
+        @apply hover:bg-slate-700 hover:border-slate-600;
+        @apply transition-colors duration-200;
     }
 
     .btn-danger {
         @apply px-6 py-3 rounded-xl font-medium;
-        @apply bg-danger-600/20 border border-danger-500/30 text-danger-400;
-        @apply hover:bg-danger-600/30 transition-all duration-200;
+        @apply bg-danger-600/10 border border-danger-500/20 text-danger-400;
+        @apply hover:bg-danger-600/20 transition-colors duration-200;
+    }
+
+    .btn-ghost {
+        @apply px-6 py-3 rounded-xl font-medium;
+        @apply text-slate-400 hover:text-white hover:bg-slate-800;
+        @apply transition-colors duration-200;
     }
 
     /* Badges */
@@ -153,34 +160,35 @@
     }
 
     .badge-success {
-        @apply bg-success-500/20 text-success-400 border border-success-500/30;
+        @apply bg-success-500/10 text-success-400 border border-success-500/20;
     }
 
     .badge-warning {
-        @apply bg-warning-500/20 text-warning-400 border border-warning-500/30;
+        @apply bg-warning-500/10 text-warning-400 border border-warning-500/20;
     }
 
     .badge-danger {
-        @apply bg-danger-500/20 text-danger-400 border border-danger-500/30;
+        @apply bg-danger-500/10 text-danger-400 border border-danger-500/20;
     }
 
     .badge-neutral {
-        @apply bg-neutral-700/50 text-neutral-300 border border-neutral-600/50;
+        @apply bg-slate-700/50 text-slate-300 border border-slate-600/50;
     }
 
     /* Modal */
     .modal-overlay {
-        @apply fixed inset-0 bg-black/60 backdrop-blur-sm z-50;
+        @apply fixed inset-0 bg-black/60 z-50;
         @apply flex items-center justify-center p-4;
     }
 
     .modal-content {
-        @apply glass-card max-w-lg w-full max-h-[90vh] overflow-auto;
+        @apply bg-slate-900 border border-slate-800 rounded-2xl shadow-elevated;
+        @apply max-w-lg w-full max-h-[90vh] overflow-auto;
     }
 
     /* Toast */
     .toast {
-        @apply glass-card px-4 py-3 flex items-center gap-3;
+        @apply card px-4 py-3 flex items-center gap-3;
         @apply shadow-elevated;
     }
 }

@@ -1104,13 +1104,36 @@ async def api_ejercicios_delete(
 
 @router.get("/api/rutinas")
 async def api_rutinas_list(
-    usuario_id: Optional[int] = None, 
+    usuario_id: Optional[int] = None,
+    search: str = "",
+    plantillas: Optional[bool] = None,
+    es_plantilla: Optional[bool] = None, # Alias for plantillas
+    include_exercises: bool = False,
     _=Depends(require_gestion_access),
     svc: GymService = Depends(get_gym_service)
 ):
-    """Get routines using SQLAlchemy."""
+    """Get routines using SQLAlchemy. Includes exercises when filtering by user."""
     try:
-        return svc.obtener_rutinas(usuario_id)
+        rutinas = svc.obtener_rutinas(usuario_id, include_exercises=include_exercises)
+        
+        # Filter by search
+        if search:
+            s = search.lower()
+            rutinas = [r for r in rutinas if s in (r.get('nombre_rutina') or '').lower()]
+            
+        # Filter by template status if requested
+        # plantillas=True or es_plantilla=True => usuario_id is None
+        # plantillas=False => usuario_id is not None? Or just return all?
+        # Usually 'plantillas' means "show me templates".
+        
+        is_template_req = plantillas if plantillas is not None else es_plantilla
+        if is_template_req is not None:
+            if is_template_req:
+                rutinas = [r for r in rutinas if r.get('usuario_id') is None]
+            else:
+                rutinas = [r for r in rutinas if r.get('usuario_id') is not None]
+
+        return {"rutinas": rutinas}
     except Exception as e:
         logger.error(f"Error listing rutinas: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -1147,25 +1170,143 @@ async def api_rutinas_create(
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.get("/api/rutinas/{rutina_id}/export/pdf")
-async def api_rutina_export_pdf(rutina_id: int, weeks: int = 1, filename: Optional[str] = None, qr_mode: str = "auto", sheet: Optional[str] = None, _=Depends(require_gestion_access), gym_svc: GymService = Depends(get_gym_service)):
+async def api_rutina_export_pdf(rutina_id: int, weeks: int = 1, filename: Optional[str] = None, qr_mode: str = "auto", sheet: Optional[str] = None, _=Depends(require_gestion_access), svc: GymService = Depends(get_gym_service)):
+    """Export routine as PDF using RoutineTemplateManager."""
     rm = get_rm()
     if rm is None:
-        raise HTTPException(status_code=503, detail="Servicio no disponible")
+        raise HTTPException(status_code=503, detail="RoutineTemplateManager no disponible")
     try:
-        rutina = db.obtener_rutina_completa(rutina_id)  # type: ignore
-        if not rutina:
+        rutina_data = svc.obtener_rutina_completa(rutina_id)
+        if not rutina_data:
             raise HTTPException(status_code=404, detail="Rutina no encontrada")
-        # Simplified: assume helpers handle usuario resolution or do it here (omitted for brevity, relying on existing logic in RM or DB)
-        # But wait, RM needs 'usuario' object.
-        # I'll create a minimal dummy user if not found, similar to original code
-        usuario = Usuario(nombre="Usuario")
-        ejercicios_por_dia = _build_exercises_by_day(rutina)
+        
+        # Build Rutina object for RoutineTemplateManager
+        rutina = Rutina(
+            id=rutina_data['id'],
+            nombre_rutina=rutina_data['nombre_rutina'],
+            descripcion=rutina_data.get('descripcion'),
+            categoria=rutina_data.get('categoria'),
+            uuid_rutina=rutina_data.get('uuid_rutina')
+        )
+        rutina.ejercicios = rutina_data.get('ejercicios', [])
+        
+        # Build Usuario object
+        usuario = Usuario(nombre=rutina_data.get('usuario_nombre') or 'Usuario')
+        
+        ejercicios_por_dia = _build_exercises_by_day(rutina_data)
         
         xlsx_path = rm.generate_routine_excel(rutina, usuario, ejercicios_por_dia, weeks=weeks, qr_mode=qr_mode, sheet=sheet)
         pdf_path = rm.convert_excel_to_pdf(xlsx_path)
-        return FileResponse(pdf_path, media_type="application/pdf", filename=filename or "rutina.pdf")
+        return FileResponse(pdf_path, media_type="application/pdf", filename=filename or f"rutina_{rutina_id}.pdf")
+    except HTTPException:
+        raise
     except Exception as e:
         logging.exception("Error exporting PDF")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/api/rutinas/{rutina_id}")
+async def api_rutina_get(rutina_id: int, _=Depends(require_gestion_access), svc: GymService = Depends(get_gym_service)):
+    """Get a single routine with all exercises."""
+    try:
+        rutina = svc.obtener_rutina_completa(rutina_id)
+        if not rutina:
+            raise HTTPException(status_code=404, detail="Rutina no encontrada")
+        return rutina
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting rutina: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@router.put("/api/rutinas/{rutina_id}")
+async def api_rutina_update(rutina_id: int, request: Request, _=Depends(require_gestion_access), svc: GymService = Depends(get_gym_service)):
+    """Update a routine."""
+    try:
+        payload = await request.json()
+        success = svc.actualizar_rutina(rutina_id, payload)
+        if success:
+            return {"ok": True}
+        return JSONResponse({"error": "No se pudo actualizar"}, status_code=500)
+    except Exception as e:
+        logger.error(f"Error updating rutina: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@router.delete("/api/rutinas/{rutina_id}")
+async def api_rutina_delete(rutina_id: int, _=Depends(require_gestion_access), svc: GymService = Depends(get_gym_service)):
+    """Delete a routine."""
+    try:
+        success = svc.eliminar_rutina(rutina_id)
+        if success:
+            return {"ok": True}
+        return JSONResponse({"error": "No se pudo eliminar"}, status_code=500)
+    except Exception as e:
+        logger.error(f"Error deleting rutina: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@router.put("/api/rutinas/{rutina_id}/toggle-activa")
+async def api_rutina_toggle_activa(rutina_id: int, _=Depends(require_gestion_access), svc: GymService = Depends(get_gym_service)):
+    """Toggle activa status of a routine. If activating, deactivates other rutinas for the same user."""
+    try:
+        rutina = svc.obtener_rutina_completa(rutina_id)
+        if not rutina:
+            raise HTTPException(status_code=404, detail="Rutina no encontrada")
+        
+        new_status = not rutina.get('activa', False)
+        
+        # If activating this rutina and it has a user, deactivate others first
+        if new_status and rutina.get('usuario_id'):
+            svc.desactivar_rutinas_usuario(rutina['usuario_id'], except_rutina_id=rutina_id)
+        
+        success = svc.actualizar_rutina(rutina_id, {'activa': new_status})
+        if success:
+            return {"ok": True, "activa": new_status}
+        return JSONResponse({"error": "No se pudo actualizar"}, status_code=500)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error toggling rutina activa: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@router.get("/api/rutinas/{rutina_id}/export/excel")
+async def api_rutina_export_excel(
+    rutina_id: int,
+    weeks: int = 1,
+    qr_mode: str = "inline",
+    sheet: Optional[str] = None,
+    user_override: Optional[str] = None,
+    filename: Optional[str] = None,
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service),
+    rm: RoutineTemplateManager = Depends(get_rm)
+):
+    """Export a routine as Excel."""
+    try:
+        rutina_data = svc.obtener_rutina_completa(rutina_id)
+        if not rutina_data:
+            raise HTTPException(status_code=404, detail="Rutina no encontrada")
+        
+        # Build Rutina object
+        rutina = Rutina(
+            id=rutina_data['id'],
+            nombre_rutina=rutina_data.get('nombre_rutina') or rutina_data.get('nombre', ''),
+            descripcion=rutina_data.get('descripcion'),
+            dias_semana=rutina_data.get('dias_semana', 1),
+            uuid_rutina=rutina_data.get('uuid_rutina')
+        )
+        
+        # Build Usuario object
+        user_name = user_override or rutina_data.get('usuario_nombre') or 'Usuario'
+        usuario = Usuario(nombre=user_name)
+        
+        ejercicios_por_dia = _build_exercises_by_day(rutina_data)
+        
+        xlsx_path = rm.generate_routine_excel(rutina, usuario, ejercicios_por_dia, weeks=weeks, qr_mode=qr_mode, sheet=sheet)
+        excel_filename = filename or f"rutina_{rutina_id}.xlsx"
+        return FileResponse(xlsx_path, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename=excel_filename)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("Error exporting Excel")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/api/maintenance_status")

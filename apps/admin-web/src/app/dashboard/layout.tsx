@@ -28,16 +28,16 @@ export default function DashboardLayout({
             {/* Sidebar */}
             <aside className="sidebar">
                 {/* Logo */}
-                <div className="p-6 border-b border-neutral-800/50">
+                <div className="p-6 border-b border-slate-800/50">
                     <Link href="/dashboard" className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-iron-500 to-iron-700 flex items-center justify-center shadow-glow-sm">
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center shadow-sm">
                             <Dumbbell className="w-5 h-5 text-white" />
                         </div>
                         <div>
                             <span className="text-lg font-display font-bold text-white">
-                                Iron<span className="text-iron-400">Hub</span>
+                                Iron<span className="text-primary-400">Hub</span>
                             </span>
-                            <span className="block text-xs text-neutral-500">Admin Panel</span>
+                            <span className="block text-xs text-slate-500">Admin Panel</span>
                         </div>
                     </Link>
                 </div>
@@ -58,14 +58,14 @@ export default function DashboardLayout({
                             >
                                 <item.icon className="w-5 h-5" />
                                 <span>{item.name}</span>
-                                {isActive && <ChevronRight className="w-4 h-4 ml-auto text-iron-400" />}
+                                {isActive && <ChevronRight className="w-4 h-4 ml-auto text-primary-400" />}
                             </Link>
                         );
                     })}
                 </nav>
 
                 {/* Footer */}
-                <div className="p-4 border-t border-neutral-800/50">
+                <div className="p-4 border-t border-slate-800/50">
                     <button
                         onClick={() => {
                             // TODO: Implement logout
@@ -86,3 +86,4 @@ export default function DashboardLayout({
         </div>
     );
 }
+

@@ -135,7 +135,7 @@ function CuotaFormModal({ isOpen, onClose, item, onSuccess }: CuotaFormModalProp
                     value={formData.precio}
                     onChange={(e) => setFormData({ ...formData, precio: e.target.value })}
                     placeholder="0"
-                    leftIcon={<span className="text-neutral-400">$</span>}
+                    leftIcon={<span className="text-slate-400">$</span>}
                 />
                 <Input
                     label="Duración (días)"
@@ -363,8 +363,8 @@ export default function ConfiguracionPage() {
             return (
                 <div className="space-y-2">
                     {Array.from({ length: 3 }).map((_, i) => (
-                        <div key={i} className="glass-card p-4 animate-pulse">
-                            <div className="h-5 bg-neutral-800 rounded w-1/3" />
+                        <div key={i} className="card p-4 animate-pulse">
+                            <div className="h-5 bg-slate-800 rounded w-1/3" />
                         </div>
                     ))}
                 </div>
@@ -375,7 +375,7 @@ export default function ConfiguracionPage() {
 
         if (items.length === 0) {
             return (
-                <div className="glass-card p-8 text-center text-neutral-500">
+                <div className="card p-8 text-center text-slate-500">
                     No hay elementos configurados
                 </div>
             );
@@ -387,7 +387,7 @@ export default function ConfiguracionPage() {
                     <div
                         key={item.id}
                         className={cn(
-                            'glass-card p-4 flex items-center justify-between gap-4',
+                            'card p-4 flex items-center justify-between gap-4',
                             !item.activo && 'opacity-50'
                         )}
                     >
@@ -398,7 +398,7 @@ export default function ConfiguracionPage() {
                                     'w-8 h-8 rounded-lg flex items-center justify-center transition-colors',
                                     item.activo
                                         ? 'bg-success-500/20 text-success-400 hover:bg-success-500/30'
-                                        : 'bg-neutral-800 text-neutral-500 hover:bg-neutral-700'
+                                        : 'bg-slate-800 text-slate-500 hover:bg-slate-700'
                                 )}
                             >
                                 {item.activo ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
@@ -406,7 +406,7 @@ export default function ConfiguracionPage() {
                             <div>
                                 <div className="font-medium text-white">{item.nombre}</div>
                                 {activeTab === 'cuotas' && (item as TipoCuota).precio !== undefined && (
-                                    <div className="text-sm text-neutral-400">
+                                    <div className="text-sm text-slate-400">
                                         {formatCurrency((item as TipoCuota).precio || 0)}
                                         {(item as TipoCuota).duracion_dias && ` • ${(item as TipoCuota).duracion_dias} días`}
                                     </div>
@@ -424,7 +424,7 @@ export default function ConfiguracionPage() {
                                         setSimpleFormOpen(true);
                                     }
                                 }}
-                                className="p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+                                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                             >
                                 <Edit className="w-4 h-4" />
                             </button>
@@ -436,7 +436,7 @@ export default function ConfiguracionPage() {
                                     });
                                     setDeleteOpen(true);
                                 }}
-                                className="p-2 rounded-lg text-neutral-400 hover:text-danger-400 hover:bg-danger-500/10 transition-colors"
+                                className="p-2 rounded-lg text-slate-400 hover:text-danger-400 hover:bg-danger-500/10 transition-colors"
                             >
                                 <Trash2 className="w-4 h-4" />
                             </button>
@@ -455,10 +455,10 @@ export default function ConfiguracionPage() {
                 animate={{ opacity: 1, y: 0 }}
             >
                 <h1 className="text-2xl font-display font-bold text-white flex items-center gap-3">
-                    <Settings className="w-6 h-6 text-iron-400" />
+                    <Settings className="w-6 h-6 text-primary-400" />
                     Configuración
                 </h1>
-                <p className="text-neutral-400 mt-1">
+                <p className="text-slate-400 mt-1">
                     Configura tipos de cuota, métodos de pago y conceptos
                 </p>
             </motion.div>
@@ -477,8 +477,8 @@ export default function ConfiguracionPage() {
                         className={cn(
                             'flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium transition-all duration-200',
                             activeTab === tab.id
-                                ? 'bg-iron-500/20 text-iron-300 shadow-glow-sm'
-                                : 'text-neutral-400 hover:bg-neutral-800/50 hover:text-white'
+                                ? 'bg-primary-500/20 text-primary-300 shadow-sm'
+                                : 'text-slate-400 hover:bg-slate-800/50 hover:text-white'
                         )}
                     >
                         <tab.icon className="w-4 h-4" />
@@ -557,3 +557,4 @@ export default function ConfiguracionPage() {
         </div>
     );
 }
+
