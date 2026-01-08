@@ -17,8 +17,9 @@ from pathlib import Path
 from fastapi import APIRouter, Request, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.responses import JSONResponse, FileResponse
 
-from src.dependencies import get_gym_service, require_gestion_access, require_owner
+from src.dependencies import get_gym_service, require_gestion_access, require_owner, get_rm
 from src.services.gym_service import GymService
+from src.routine_manager import RoutineTemplateManager
 from src.utils import _resolve_existing_dir, _apply_change_idempotent, _filter_existing_columns
 from src.models import Rutina, RutinaEjercicio, Ejercicio, Clase, ClaseHorario, Usuario
 from src.utils import _resolve_logo_url, get_gym_name

@@ -222,7 +222,7 @@ function FeaturesSection() {
     );
 }
 
-// Gyms Showcase Section
+// Gyms Showcase Section - Premium Horizontal Carousel
 function GymsSection() {
     const [gyms, setGyms] = useState<Array<{
         id: number;
@@ -239,7 +239,6 @@ function GymsSection() {
                 const data = await fetchPublicGyms();
                 setGyms(data);
             } catch {
-                // Show empty state on error
                 setGyms([]);
             } finally {
                 setLoading(false);
@@ -248,14 +247,24 @@ function GymsSection() {
         loadGyms();
     }, []);
 
+    // Premium gradient colors for gym cards
+    const gradients = [
+        'from-blue-600 to-cyan-500',
+        'from-purple-600 to-pink-500',
+        'from-emerald-600 to-teal-500',
+        'from-orange-600 to-amber-500',
+        'from-rose-600 to-red-500',
+        'from-indigo-600 to-violet-500',
+    ];
+
     return (
-        <section id="gyms" className="py-24 relative">
+        <section id="gyms" className="py-24 relative overflow-hidden">
             <div className="max-w-7xl mx-auto px-6">
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
-                    className="text-center mb-16"
+                    className="text-center mb-12"
                 >
                     <h2 className="section-heading mb-4">
                         Gimnasios <span className="gradient-text">Conectados</span>
@@ -269,52 +278,124 @@ function GymsSection() {
                     <div className="flex justify-center items-center py-12">
                         <div className="w-8 h-8 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
                     </div>
+                ) : gyms.length === 0 ? (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="text-center py-16"
+                    >
+                        <div className="w-20 h-20 mx-auto rounded-2xl bg-slate-800/50 flex items-center justify-center mb-6">
+                            <Users className="w-10 h-10 text-slate-500" />
+                        </div>
+                        <h3 className="text-xl font-semibold text-slate-300 mb-2">
+                            Próximamente más gimnasios
+                        </h3>
+                        <p className="text-slate-500 max-w-md mx-auto">
+                            Estamos trabajando para incorporar más gimnasios a nuestra plataforma.
+                        </p>
+                    </motion.div>
                 ) : (
-                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {gyms.map((gym, index) => (
-                            <motion.a
-                                key={gym.id}
-                                href={`https://${gym.subdominio}.ironhub.motiona.xyz`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                initial={{ opacity: 0, y: 20 }}
-                                whileInView={{ opacity: 1, y: 0 }}
-                                viewport={{ once: true }}
-                                transition={{ delay: index * 0.1 }}
-                                className="feature-card group cursor-pointer"
+                    <>
+                        {/* Horizontal Scroll Carousel */}
+                        <div className="relative">
+                            {/* Gradient fade left */}
+                            <div className="absolute left-0 top-0 bottom-0 w-12 bg-gradient-to-r from-slate-950 to-transparent z-10 pointer-events-none" />
+                            
+                            {/* Scrollable container */}
+                            <div 
+                                className="flex gap-6 overflow-x-auto pb-4 snap-x snap-mandatory scrollbar-hide"
+                                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
                             >
-                                {/* Gym Avatar */}
-                                <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-gold-600 flex items-center justify-center mb-4 shadow-sm group-hover:shadow-md transition-all">
-                                    <span className="text-2xl font-display font-bold text-white">
-                                        {gym.nombre.charAt(0)}
-                                    </span>
-                                </div>
+                                {/* Spacer for left padding */}
+                                <div className="flex-shrink-0 w-4" />
+                                
+                                {gyms.map((gym, index) => (
+                                    <motion.a
+                                        key={gym.id}
+                                        href={`https://${gym.subdominio}.ironhub.motiona.xyz`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        initial={{ opacity: 0, scale: 0.9 }}
+                                        whileInView={{ opacity: 1, scale: 1 }}
+                                        viewport={{ once: true }}
+                                        transition={{ delay: index * 0.05 }}
+                                        whileHover={{ y: -8, transition: { duration: 0.2 } }}
+                                        className="flex-shrink-0 w-72 snap-start"
+                                    >
+                                        <div className="card h-full p-6 group cursor-pointer hover:border-primary-500/50 transition-all duration-300">
+                                            {/* Gym Avatar with gradient */}
+                                            <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${gradients[index % gradients.length]} flex items-center justify-center mb-5 shadow-lg group-hover:shadow-xl transition-shadow`}>
+                                                <span className="text-2xl font-display font-bold text-white drop-shadow-sm">
+                                                    {gym.nombre.charAt(0).toUpperCase()}
+                                                </span>
+                                            </div>
 
-                                <h3 className="text-xl font-semibold text-white mb-1 group-hover:text-primary-300 transition-colors">
-                                    {gym.nombre}
-                                </h3>
-                                <p className="text-slate-500 text-sm mb-4">
-                                    {gym.subdominio}.ironhub.motiona.xyz
-                                </p>
+                                            {/* Gym Name */}
+                                            <h3 className="text-xl font-semibold text-white mb-1 group-hover:text-primary-300 transition-colors truncate">
+                                                {gym.nombre}
+                                            </h3>
+                                            
+                                            {/* Subdomain */}
+                                            <p className="text-slate-500 text-sm mb-5 truncate">
+                                                {gym.subdominio}.ironhub.motiona.xyz
+                                            </p>
 
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-2">
-                                        <Users className="w-4 h-4 text-slate-500" />
-                                        <span className="text-sm text-slate-400">Activo</span>
-                                    </div>
-                                    <div className="flex items-center gap-1.5">
-                                        <div className="w-2 h-2 rounded-full bg-success-500" />
-                                        <span className="text-xs text-success-400">Online</span>
-                                    </div>
+                                            {/* Status */}
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-2 h-2 rounded-full bg-success-500 animate-pulse" />
+                                                    <span className="text-xs text-success-400 font-medium">Online</span>
+                                                </div>
+                                                <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <ExternalLink className="w-4 h-4 text-primary-400" />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </motion.a>
+                                ))}
+                                
+                                {/* Spacer for right padding */}
+                                <div className="flex-shrink-0 w-4" />
+                            </div>
+                            
+                            {/* Gradient fade right */}
+                            <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-slate-950 to-transparent z-10 pointer-events-none" />
+                        </div>
+                        
+                        {/* Scroll hint */}
+                        <div className="flex justify-center mt-6">
+                            <div className="flex items-center gap-2 text-slate-500 text-sm">
+                                <span>Desliza para ver más</span>
+                                <ChevronRight className="w-4 h-4 animate-pulse" />
+                            </div>
+                        </div>
+                        
+                        {/* Stats */}
+                        <motion.div
+                            initial={{ opacity: 0, y: 20 }}
+                            whileInView={{ opacity: 1, y: 0 }}
+                            viewport={{ once: true }}
+                            className="mt-12 text-center"
+                        >
+                            <div className="inline-flex items-center gap-3 px-6 py-3 rounded-full bg-slate-800/50 border border-slate-700/50">
+                                <div className="flex -space-x-2">
+                                    {gyms.slice(0, 4).map((gym, i) => (
+                                        <div
+                                            key={gym.id}
+                                            className={`w-8 h-8 rounded-full bg-gradient-to-br ${gradients[i % gradients.length]} border-2 border-slate-900 flex items-center justify-center`}
+                                        >
+                                            <span className="text-xs font-bold text-white">
+                                                {gym.nombre.charAt(0)}
+                                            </span>
+                                        </div>
+                                    ))}
                                 </div>
-
-                                {/* Hover arrow */}
-                                <div className="absolute top-6 right-6 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <ExternalLink className="w-5 h-5 text-primary-400" />
-                                </div>
-                            </motion.a>
-                        ))}
-                    </div>
+                                <span className="text-slate-300 text-sm font-medium">
+                                    {gyms.length} gimnasios activos
+                                </span>
+                            </div>
+                        </motion.div>
+                    </>
                 )}
             </div>
         </section>

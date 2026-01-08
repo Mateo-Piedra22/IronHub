@@ -81,10 +81,13 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         }
         setSaving(true);
         try {
-            // Would call API endpoint
-            await new Promise(r => setTimeout(r, 500));
-            showMessage('Contraseña actualizada');
-            setNewPassword('');
+            const res = await api.setGymOwnerPassword(gymId, newPassword);
+            if (res.ok) {
+                showMessage('Contraseña actualizada');
+                setNewPassword('');
+            } else {
+                showMessage(res.error || 'Error al cambiar contraseña');
+            }
         } catch {
             showMessage('Error al cambiar contraseña');
         } finally {
@@ -159,8 +162,8 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                         key={sec.id}
                         onClick={() => setActiveSection(sec.id)}
                         className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-colors ${activeSection === sec.id
-                                ? 'bg-primary-500/20 text-primary-400'
-                                : 'bg-slate-800/50 text-slate-400 hover:text-white'
+                            ? 'bg-primary-500/20 text-primary-400'
+                            : 'bg-slate-800/50 text-slate-400 hover:text-white'
                             }`}
                     >
                         <sec.icon className="w-4 h-4" />

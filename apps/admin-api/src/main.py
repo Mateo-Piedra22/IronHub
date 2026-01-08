@@ -141,6 +141,33 @@ async def check_session(request: Request):
     return {"logged_in": is_logged_in(request)}
 
 
+@app.post("/admin/password")
+async def change_admin_password(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...)
+):
+    """Change the admin owner password."""
+    require_admin(request)
+    adm = get_admin_service()
+    
+    # Verify current password
+    if not adm.verificar_owner_password(current_password):
+        raise HTTPException(status_code=400, detail="Contraseña actual incorrecta")
+    
+    # Validate new password
+    if len(new_password.strip()) < 8:
+        raise HTTPException(status_code=400, detail="La nueva contraseña debe tener al menos 8 caracteres")
+    
+    # Set new password
+    success = adm.set_admin_owner_password(new_password)
+    if not success:
+        raise HTTPException(status_code=500, detail="Error al actualizar la contraseña")
+    
+    adm.log_action("owner", "change_password", None, "Admin password changed")
+    return {"ok": True}
+
+
 # ========== GYM ROUTES ==========
 
 @app.get("/gyms")
@@ -155,7 +182,13 @@ async def list_gyms(
     require_admin(request)
     adm = get_admin_service()
     result = adm.listar_gimnasios_avanzado(page, page_size, q or None, status or None, "id", "DESC")
-    return result
+    # Map 'items' to 'gyms' to match frontend expectations
+    return {
+        "gyms": result.get("items", []),
+        "total": result.get("total", 0),
+        "page": result.get("page", 1),
+        "page_size": result.get("page_size", 20)
+    }
 
 
 @app.get("/gyms/public")
@@ -283,6 +316,27 @@ async def set_gym_status(
     return {"ok": ok}
 
 
+@app.post("/gyms/{gym_id}/owner-password")
+async def set_gym_owner_password(
+    request: Request,
+    gym_id: int,
+    new_password: str = Form(...)
+):
+    """Set the owner password for a specific gym."""
+    require_admin(request)
+    adm = get_admin_service()
+    
+    if len(new_password.strip()) < 6:
+        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 6 caracteres")
+    
+    success = adm.set_gym_owner_password(gym_id, new_password)
+    if not success:
+        raise HTTPException(status_code=500, detail="Error al actualizar la contraseña")
+    
+    adm.log_action("owner", "set_gym_owner_password", gym_id, "Password changed")
+    return {"ok": True}
+
+
 # ========== METRICS ROUTES ==========
 
 @app.get("/metrics")
@@ -400,3 +454,120 @@ async def suggest_subdomain(request: Request, name: str = Query(...)):
     
     suggested = adm.sugerir_subdominio_unico(name)
     return {"suggested": suggested}
+
+
+# ========== PLANS ROUTES ==========
+
+@app.get("/plans")
+async def list_plans(request: Request):
+    """List all available plans."""
+    require_admin(request)
+    adm = get_admin_service()
+    plans = adm.listar_planes()
+    return {"plans": plans}
+
+
+@app.post("/plans")
+async def create_plan(
+    request: Request,
+    name: str = Form(...),
+    amount: float = Form(...),
+    currency: str = Form("ARS"),
+    period_days: int = Form(30)
+):
+    """Create a new plan."""
+    require_admin(request)
+    adm = get_admin_service()
+    
+    result = adm.crear_plan(name, amount, currency, period_days)
+    if result.get("ok"):
+        adm.log_action("owner", "create_plan", None, f"Plan: {name}, Amount: {amount} {currency}")
+    return result
+
+
+@app.put("/plans/{plan_id}")
+async def update_plan(
+    request: Request,
+    plan_id: int,
+    name: str = Form(None),
+    amount: str = Form(None),
+    currency: str = Form(None),
+    period_days: str = Form(None)
+):
+    """Update an existing plan."""
+    require_admin(request)
+    adm = get_admin_service()
+    
+    updates = {}
+    if name: updates["name"] = name
+    if amount: updates["amount"] = float(amount)
+    if currency: updates["currency"] = currency
+    if period_days: updates["period_days"] = int(period_days)
+    
+    result = adm.actualizar_plan(plan_id, updates)
+    if result.get("ok"):
+        adm.log_action("owner", "update_plan", None, f"Plan ID: {plan_id}")
+    return result
+
+
+@app.post("/plans/{plan_id}/toggle")
+async def toggle_plan(
+    request: Request,
+    plan_id: int,
+    active: str = Form(...)
+):
+    """Toggle a plan's active status."""
+    require_admin(request)
+    adm = get_admin_service()
+    
+    is_active = active.lower() in ("true", "1", "yes")
+    result = adm.toggle_plan(plan_id, is_active)
+    if result.get("ok"):
+        adm.log_action("owner", "toggle_plan", None, f"Plan ID: {plan_id}, Active: {is_active}")
+    return result
+
+
+@app.delete("/plans/{plan_id}")
+async def delete_plan(request: Request, plan_id: int):
+    """Delete a plan."""
+    require_admin(request)
+    adm = get_admin_service()
+    
+    result = adm.eliminar_plan(plan_id)
+    if result.get("ok"):
+        adm.log_action("owner", "delete_plan", None, f"Plan ID: {plan_id}")
+    return result
+
+
+# ========== CRON & AUTOMATION ROUTES ==========
+
+@app.post("/cron/reminders")
+async def cron_daily_reminders(request: Request, token: str = Query(None), days: int = Query(7)):
+    """Cron endpoint for daily subscription reminders. Requires CRON_TOKEN."""
+    import os
+    expected_token = os.getenv("CRON_TOKEN", "").strip()
+    
+    # Check token from query or header
+    header_token = request.headers.get("x-cron-token", "")
+    if not expected_token or (token != expected_token and header_token != expected_token):
+        raise HTTPException(status_code=403, detail="Invalid cron token")
+    
+    adm = get_admin_service()
+    result = adm.enviar_recordatorios_vencimiento(days)
+    return {"ok": True, "sent": result.get("sent", 0)}
+
+
+@app.post("/gyms/batch/auto-suspend")
+async def auto_suspend_overdue(
+    request: Request,
+    grace_days: int = Form(0)
+):
+    """Automatically suspend gyms that are overdue by more than grace_days."""
+    require_admin(request)
+    adm = get_admin_service()
+    
+    result = adm.auto_suspender_vencidos(grace_days)
+    if result.get("suspended"):
+        adm.log_action("owner", "auto_suspend_overdue", None, f"Suspended: {result.get('suspended')}, Grace: {grace_days}")
+    return result
+

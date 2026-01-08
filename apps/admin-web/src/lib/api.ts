@@ -119,6 +119,17 @@ export interface EstadisticasPagos {
     por_metodo: { metodo: string; cantidad: number; total: number }[];
 }
 
+// Admin Plans
+export interface Plan {
+    id: number;
+    name: string;
+    amount: number;
+    currency: string;
+    period_days: number;
+    active: boolean;
+    created_at?: string;
+}
+
 export interface ApiResponse<T> {
     ok: boolean;
     data?: T;
@@ -188,6 +199,13 @@ export const api = {
 
     checkSession: () => request<{ ok: boolean }>('/session'),
 
+    changeAdminPassword: (currentPassword: string, newPassword: string) =>
+        request<{ ok: boolean }>('/admin/password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ current_password: currentPassword, new_password: newPassword }),
+        }),
+
     // Gyms
     getGyms: (params?: { page?: number; page_size?: number; q?: string; status?: string }) => {
         const searchParams = new URLSearchParams();
@@ -226,6 +244,13 @@ export const api = {
             body: new URLSearchParams({ status, ...(reason && { reason }) }),
         }),
 
+    setGymOwnerPassword: (gymId: number, newPassword: string) =>
+        request<{ ok: boolean }>(`/gyms/${gymId}/owner-password`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ new_password: newPassword }),
+        }),
+
     // Metrics
     getMetrics: () => request<Metrics>('/metrics'),
 
@@ -247,6 +272,41 @@ export const api = {
 
     getRecentPayments: (limit = 10) =>
         request<{ payments: Payment[] }>(`/payments/recent?limit=${limit}`),
+
+    // Plans
+    getPlans: () =>
+        request<{ plans: Plan[] }>('/plans'),
+
+    createPlan: (data: { name: string; amount: number; currency: string; period_days: number }) =>
+        request<{ ok: boolean; id: number }>('/plans', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                name: data.name,
+                amount: String(data.amount),
+                currency: data.currency,
+                period_days: String(data.period_days),
+            }),
+        }),
+
+    updatePlan: (id: number, data: Partial<{ name: string; amount: number; currency: string; period_days: number }>) =>
+        request<{ ok: boolean }>(`/plans/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams(
+                Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)]))
+            ),
+        }),
+
+    togglePlan: (id: number, active: boolean) =>
+        request<{ ok: boolean }>(`/plans/${id}/toggle`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ active: String(active) }),
+        }),
+
+    deletePlan: (id: number) =>
+        request<{ ok: boolean }>(`/plans/${id}`, { method: 'DELETE' }),
 
     // Subdomain
     checkSubdomain: (subdomain: string) =>

@@ -1595,11 +1595,180 @@ class AdminService:
         try:
             with self.db.get_connection_context() as conn:
                 cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                cur.execute("SELECT id, name, amount, currency, period_days, active FROM plans ORDER BY amount ASC")
+                cur.execute("SELECT id, name, amount, currency, period_days, active, created_at FROM plans ORDER BY amount ASC")
                 rows = cur.fetchall()
                 return [dict(r) for r in rows]
         except Exception:
             return []
+
+    def crear_plan(self, name: str, amount: float, currency: str, period_days: int) -> Dict[str, Any]:
+        try:
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO plans (name, amount, currency, period_days, active) VALUES (%s, %s, %s, %s, true) RETURNING id",
+                    (name.strip(), float(amount), currency.upper(), int(period_days))
+                )
+                row = cur.fetchone()
+                conn.commit()
+                return {"ok": True, "id": row[0] if row else None}
+        except Exception as e:
+            logger.error(f"Error creating plan: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def actualizar_plan(self, plan_id: int, updates: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            if not updates:
+                return {"ok": False, "error": "no_updates"}
+            
+            sets: List[str] = []
+            params: List[Any] = []
+            
+            if "name" in updates:
+                sets.append("name = %s")
+                params.append(str(updates["name"]).strip())
+            if "amount" in updates:
+                sets.append("amount = %s")
+                params.append(float(updates["amount"]))
+            if "currency" in updates:
+                sets.append("currency = %s")
+                params.append(str(updates["currency"]).upper())
+            if "period_days" in updates:
+                sets.append("period_days = %s")
+                params.append(int(updates["period_days"]))
+            
+            if not sets:
+                return {"ok": False, "error": "no_valid_updates"}
+            
+            params.append(int(plan_id))
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute(f"UPDATE plans SET {', '.join(sets)} WHERE id = %s", params)
+                conn.commit()
+            return {"ok": True}
+        except Exception as e:
+            logger.error(f"Error updating plan {plan_id}: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def toggle_plan(self, plan_id: int, active: bool) -> Dict[str, Any]:
+        try:
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute("UPDATE plans SET active = %s WHERE id = %s", (bool(active), int(plan_id)))
+                conn.commit()
+            return {"ok": True}
+        except Exception as e:
+            logger.error(f"Error toggling plan {plan_id}: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def eliminar_plan(self, plan_id: int) -> Dict[str, Any]:
+        try:
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor()
+                # Check if plan is in use
+                cur.execute("SELECT COUNT(*) FROM gym_subscriptions WHERE plan_id = %s", (int(plan_id),))
+                count = cur.fetchone()[0]
+                if count > 0:
+                    return {"ok": False, "error": "plan_in_use", "count": count}
+                
+                cur.execute("DELETE FROM plans WHERE id = %s", (int(plan_id),))
+                conn.commit()
+            return {"ok": True}
+        except Exception as e:
+            logger.error(f"Error deleting plan {plan_id}: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def enviar_recordatorios_vencimiento(self, days: int = 7) -> Dict[str, Any]:
+        """Send reminder to gyms expiring in the next N days."""
+        try:
+            sent = 0
+            upcoming = self.listar_proximos_vencimientos(days)
+            
+            for gym in upcoming:
+                gym_id = gym.get("gym_id") or gym.get("id")
+                if gym_id:
+                    # Try to send WhatsApp reminder
+                    try:
+                        msg = f"Recordatorio: Su suscripción a IronHub vence el {gym.get('valid_until', 'pronto')}. Por favor renueve para evitar interrupciones."
+                        self._enviar_whatsapp_a_owner(gym_id, msg)
+                        sent += 1
+                    except Exception:
+                        pass
+            
+            return {"ok": True, "sent": sent, "total": len(upcoming)}
+        except Exception as e:
+            logger.error(f"Error sending reminders: {e}")
+            return {"ok": False, "error": str(e), "sent": 0}
+
+    def auto_suspender_vencidos(self, grace_days: int = 0) -> Dict[str, Any]:
+        """Automatically suspend gyms that are past their due date by grace_days."""
+        try:
+            suspended = 0
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                # Find gyms with expired subscriptions
+                cur.execute("""
+                    SELECT g.id, g.nombre, gs.next_due_date
+                    FROM gyms g
+                    JOIN gym_subscriptions gs ON gs.gym_id = g.id
+                    WHERE g.status = 'active' 
+                    AND gs.next_due_date < CURRENT_DATE - INTERVAL '%s days'
+                """, (grace_days,))
+                rows = cur.fetchall()
+                
+                for row in rows:
+                    gym_id = row["id"]
+                    try:
+                        self.set_estado_gimnasio(
+                            gym_id, 
+                            "suspended", 
+                            hard_suspend=False, 
+                            reason=f"Subscription expired (auto-suspended after {grace_days} grace days)"
+                        )
+                        suspended += 1
+                    except Exception:
+                        pass
+                
+            return {"ok": True, "suspended": suspended}
+        except Exception as e:
+            logger.error(f"Error auto-suspending: {e}")
+            return {"ok": False, "error": str(e), "suspended": 0}
+
+    def _enviar_whatsapp_a_owner(self, gym_id: int, message: str) -> bool:
+        """Send WhatsApp message to gym owner phone."""
+        try:
+            gym = self.obtener_gimnasio(gym_id)
+            if not gym:
+                return False
+            
+            owner_phone = gym.get("owner_phone", "").strip()
+            if not owner_phone:
+                return False
+            
+            # Get WhatsApp config
+            phone_id = gym.get("whatsapp_phone_id", "").strip()
+            access_token = gym.get("whatsapp_access_token", "").strip()
+            
+            if not phone_id or not access_token:
+                return False
+            
+            if requests is None:
+                return False
+            
+            url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
+            headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+            payload = {
+                "messaging_product": "whatsapp",
+                "to": owner_phone.lstrip("+"),
+                "type": "text",
+                "text": {"body": message}
+            }
+            
+            resp = requests.post(url, json=payload, headers=headers, timeout=10)
+            return resp.status_code == 200
+        except Exception as e:
+            logger.error(f"Error sending WhatsApp to owner of gym {gym_id}: {e}")
+            return False
 
     def listar_templates(self) -> List[Dict[str, Any]]:
         # Placeholder: return empty list or hardcoded templates
