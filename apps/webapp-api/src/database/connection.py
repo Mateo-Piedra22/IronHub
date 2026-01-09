@@ -71,6 +71,54 @@ except Exception as e:
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+def get_admin_database_url() -> str:
+    """Construye la URL de conexión para la DB Admin."""
+    # 1. URL explícita
+    url = os.getenv("ADMIN_DATABASE_URL")
+    if url:
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql+psycopg2://", 1)
+        return url
+
+    # 2. Construcción por partes (si existe ADMIN_DB_HOST o ADMIN_DB_NAME)
+    host = os.getenv("ADMIN_DB_HOST")
+    db_name = os.getenv("ADMIN_DB_NAME")
+    
+    if host or db_name:
+        user = os.getenv("ADMIN_DB_USER", os.getenv("DB_USER", "postgres"))
+        password = os.getenv("ADMIN_DB_PASSWORD", os.getenv("DB_PASSWORD", ""))
+        host = host or os.getenv("DB_HOST", "localhost")
+        port = os.getenv("ADMIN_DB_PORT", os.getenv("DB_PORT", "5432"))
+        db_name = db_name or os.getenv("DB_NAME", "gym_management") # Debería ser distinto
+        sslmode = os.getenv("ADMIN_DB_SSLMODE", os.getenv("DB_SSLMODE", ""))
+        
+        auth = f"{user}:{password}" if password else user
+        base_url = f"postgresql+psycopg2://{auth}@{host}:{port}/{db_name}"
+        if sslmode:
+            base_url += f"?sslmode={sslmode}"
+        return base_url
+        
+    # 3. Fallback a la misma DB (Producción monolito)
+    return get_database_url()
+
+ADMIN_DATABASE_URL = get_admin_database_url()
+
+# Configuración del Engine Admin
+try:
+    admin_engine = create_engine(
+        ADMIN_DATABASE_URL,
+        pool_pre_ping=True,
+        pool_size=5,
+        max_overflow=10,
+        pool_recycle=1800,
+        connect_args={"options": "-c timezone=America/Argentina/Buenos_Aires"}
+    )
+except Exception as e:
+    logger.error(f"Error creando admin engine: {e}")
+    admin_engine = create_engine(ADMIN_DATABASE_URL, pool_pre_ping=True)
+
+admin_session_factory = sessionmaker(autocommit=False, autoflush=False, bind=admin_engine)
+AdminSessionLocal = scoped_session(admin_session_factory)
 SessionLocal = scoped_session(session_factory)
 
 def get_db() -> Generator[Session, None, None]:

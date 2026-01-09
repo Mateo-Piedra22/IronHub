@@ -234,7 +234,8 @@ class AuthService(BaseService):
                     finally:
                         session.close()
         except Exception as e:
-            logger.error(f"Error reading admin hash: {e}")
+             # Log warning but don't crash, allow fallback
+            logger.warning(f"Could not fetch admin hash: {e}")
 
         # 3. AUTO-HEALING: Sync Admin -> Local if different
         if admin_hash and local_user_id:

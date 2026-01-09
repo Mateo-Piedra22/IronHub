@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 CURRENT_TENANT = contextvars.ContextVar("current_tenant", default=None)
 
 # Import local modules
-from src.database.connection import SessionLocal
+from src.database.connection import SessionLocal, AdminSessionLocal
 from src.database.tenant_connection import get_tenant_session_factory
 from src.services.user_service import UserService
 from src.services.teacher_service import TeacherService
@@ -180,7 +180,7 @@ def get_admin_db() -> Generator[Session, None, None]:
     Get admin database session (always uses global/admin database).
     Used by public router for tenant-independent operations.
     """
-    session = SessionLocal()
+    session = AdminSessionLocal()
     try:
         yield session
     finally:
