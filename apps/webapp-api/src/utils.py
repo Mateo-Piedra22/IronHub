@@ -20,14 +20,60 @@ except ImportError:
     CURRENT_TENANT = None
     get_db_session = None
 
-# Placeholder for dependencies not available in standalone mode
+# Helper class to wrap database session with obtener_configuracion method
+class _DatabaseWrapper:
+    def __init__(self, session):
+        self._session = session
+    
+    def obtener_configuracion(self, clave: str, timeout_ms: int = 1000) -> Optional[str]:
+        """Get configuration value from configuracion table."""
+        try:
+            from sqlalchemy import text
+            result = self._session.execute(
+                text("SELECT valor FROM configuracion WHERE clave = :clave LIMIT 1"),
+                {"clave": clave}
+            )
+            row = result.fetchone()
+            if row:
+                return str(row[0])
+        except Exception:
+            pass
+        return None
+
 def get_db():
-    return None
+    """Get database wrapper with configuration access."""
+    try:
+        from src.database.connection import SessionLocal
+        session = SessionLocal()
+        return _DatabaseWrapper(session)
+    except Exception:
+        return None
 
 def get_admin_db():
+    """Get admin database connection for cross-tenant operations."""
+    try:
+        # Try to import and return the admin service
+        from src.dependencies import get_admin_db as deps_get_admin_db
+        return deps_get_admin_db()
+    except ImportError:
+        pass
+    # Fallback: try to create a direct admin connection
+    try:
+        import os
+        admin_url = os.getenv("ADMIN_DATABASE_URL")
+        if admin_url:
+            # Create a simple wrapper for admin DB
+            from sqlalchemy import create_engine
+            from sqlalchemy.orm import sessionmaker
+            engine = create_engine(admin_url)
+            Session = sessionmaker(bind=engine)
+            return _DatabaseWrapper(Session())
+    except Exception:
+        pass
     return None
 
 DatabaseManager = None
+
 
 def read_theme_vars(path: Path) -> Dict[str, str]:
     return {}

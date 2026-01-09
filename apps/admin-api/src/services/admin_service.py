@@ -1599,13 +1599,13 @@ class AdminService:
                 
                 with psycopg2.connect(**pg_params) as t_conn:
                     with t_conn.cursor() as t_cur:
-                        # Update gym_config table
-                        updates = []
+                        # Update configuracion table (key-value store)
+                        # NOTE: gym_config is a fixed-column table, configuracion is key-value
                         
-                        # Helper to update config
+                        # Helper to upsert config in configuracion table
                         def _upsert_config(k, v):
                             t_cur.execute(
-                                "INSERT INTO gym_config (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                                "INSERT INTO configuracion (clave, valor) VALUES (%s, %s) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor",
                                 (k, v)
                             )
 
@@ -1933,17 +1933,53 @@ class AdminService:
         return []
 
     def set_gym_owner_password(self, gym_id: int, new_password: str) -> bool:
+        """
+        Set the owner password for a specific gym.
+        Updates both:
+        1. gym_config table in the tenant database (owner_password key)
+        2. owner_password_hash in the admin gyms table for backup
+        
+        The password is hashed using bcrypt.
+        """
         try:
-            if not (new_password or "").strip(): return False
+            if not (new_password or "").strip():
+                return False
             
+            # Hash the password with bcrypt
+            import bcrypt
+            password_hash = bcrypt.hashpw(
+                new_password.encode('utf-8'), 
+                bcrypt.gensalt()
+            ).decode('utf-8')
+            
+            # Get gym info including db_name
             with self.db.get_connection_context() as conn:
                 cur = conn.cursor()
-                cur.execute("SELECT db_name FROM gyms WHERE id = %s", (int(gym_id),))
+                cur.execute("SELECT db_name, subdominio FROM gyms WHERE id = %s", (int(gym_id),))
                 row = cur.fetchone()
-            if not row: return False
+                
+            if not row:
+                logger.error(f"Gym {gym_id} not found")
+                return False
+                
             db_name = str(row[0] or "").strip()
-            if not db_name: return False
+            subdominio = str(row[1] or "").strip()
+            
+            if not db_name:
+                logger.error(f"Gym {gym_id} has no db_name")
+                return False
 
+            # 1. Update the admin DB gyms table
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "UPDATE gyms SET owner_password_hash = %s WHERE id = %s",
+                    (password_hash, int(gym_id))
+                )
+                conn.commit()
+                logger.info(f"Updated owner_password_hash in admin gyms table for gym {gym_id}")
+
+            # 2. Update the tenant's gym_config table
             params = self.resolve_admin_db_params()
             params["database"] = db_name
             
@@ -1958,47 +1994,50 @@ class AdminService:
                 "application_name": "gym_admin_set_owner_password"
             }
 
-            ph = self._hash_password(new_password)
-
             with psycopg2.connect(**pg_params) as t_conn:
                 with t_conn.cursor() as t_cur:
-                    # Use 'pin' column for password as per ORM model (Usuario.pin, not password_hash)
-                    # The user indicated "detail Not Found", which might come from FastAPI/Starlette if the endpoint itself failed
-                    # OR if the psycopg2 query failed.
-                    # But 'pin' is the password field in this system for simplicity or legacy.
-                    # However, ORM 'pin' is usually a PIN code. 
-                    # If the system uses 'password_hash' it must be in the table.
-                    # Let's check ORM again. 'Usuario' has 'pin', 'rol'. It does NOT have 'password_hash' in the provided snippet!
-                    # Line 24: pin: Mapped[Optional[str]] = mapped_column(String(10), server_default='1234')
-                    # Wait, 'pin' is String(10). A hashed password won't fit!
-                    # We need to ensure the 'usuarios' table has a password field or we use 'pin' correctly.
-                    # If the owner logs in with 'pin', then we should update 'pin'.
-                    # But 'pin' is usually 4-6 digits.
-                    # If we want a real password, we need a column for it.
-                    # Let's check if we added it.
-                    # In _ensure_schema we added columns to 'gyms'.
-                    # We did NOT add columns to TENANT 'usuarios' table in this service easily.
-                    # But let's look at ORM 'Usuario' again.
-                    # It only has 'pin'.
-                    # If the authentication system uses 'pin', we update 'pin'.
-                    # BUT the user request says "Cambiar contraseña de dueño".
-                    # If I update 'pin' with a long hash, it will fail or truncate if column is varchar(10).
-                    # We should update 'pin' with the plain text password IF it's treated as such, 
-                    # OR we need to add a password column.
-                    # Given constraints, let's assume 'pin' is the password for now, but we must ensure it fits.
-                    # If 'pin' is indeed varchar(10), we can't put a hash.
-                    # However, the prompt implies a "password".
-                    # Let's check if we can add 'password_hash' to Usuario model or if it exists in database but not in model snippet?
-                    # The snippet showed `pin: ... String(10)`.
-                    # This is a problem. The owner needs a secure way to login.
-                    # If the login uses `admin_users` table (global admin), that's one thing.
-                    # But this is "Dueño" of a specific gym.
-                    # Usually they login to the tenant app.
-                    # Let's check how tenant login works? We don't have that code here (it's in `apps/webapp`).
-                    # Assuming we need to update `pin` for now as it's the only creds field.
-                    # But we should check if we can alter the table to allow longer pins/passwords.
-                    # For now, let's try to update 'pin' directly.
-                    t_cur.execute("UPDATE usuarios SET pin = %s WHERE rol = 'owner'", (new_password,))
+                    # Try to update gym_config table (new schema)
+                    try:
+                        # Check if gym_config table exists
+                        t_cur.execute("""
+                            SELECT EXISTS (
+                                SELECT FROM information_schema.tables 
+                                WHERE table_name = 'gym_config'
+                            )
+                        """)
+                        gym_config_exists = t_cur.fetchone()[0]
+                        
+                        if gym_config_exists:
+                            # Upsert into gym_config
+                            t_cur.execute("""
+                                INSERT INTO gym_config (clave, valor) 
+                                VALUES ('owner_password', %s)
+                                ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor
+                            """, (password_hash,))
+                            logger.info(f"Updated gym_config.owner_password for gym {gym_id}")
+                    except Exception as e:
+                        logger.warning(f"Could not update gym_config: {e}")
+                    
+                    # Also try configuracion table (legacy schema)
+                    try:
+                        t_cur.execute("""
+                            SELECT EXISTS (
+                                SELECT FROM information_schema.tables 
+                                WHERE table_name = 'configuracion'
+                            )
+                        """)
+                        config_exists = t_cur.fetchone()[0]
+                        
+                        if config_exists:
+                            t_cur.execute("""
+                                INSERT INTO configuracion (clave, valor) 
+                                VALUES ('owner_password', %s)
+                                ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor
+                            """, (password_hash,))
+                            logger.info(f"Updated configuracion.owner_password for gym {gym_id}")
+                    except Exception as e:
+                        logger.warning(f"Could not update configuracion: {e}")
+                        
                 t_conn.commit()
             
             return True
@@ -2006,72 +2045,15 @@ class AdminService:
             logger.error(f"Error setting owner password for gym {gym_id}: {e}")
             return False
 
-    def cambiar_password_owner(self, gym_id: int, new_password: str) -> bool:
-        try:
-            if not new_password: return False
-            
-            # 1. Update in Admin DB (if we store it there for recovery/sync)
-            with self.db.get_connection_context() as conn:
-                cur = conn.cursor()
-                # We assume there's an owner_password_hash or similar column in gyms table
-                # If not, we might need to create it or use a different approach.
-                # Based on utils.py _get_password, it checks 'owner_password_hash' in gyms table.
-                cur.execute("UPDATE gyms SET owner_password_hash = %s WHERE id = %s", (new_password, int(gym_id)))
-                conn.commit()
-            
-            # 2. Push to Tenant DB (so the owner can login in the webapp)
-            # We need to connect to the tenant DB
-            with self.db.get_connection_context() as conn:
-                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                cur.execute("SELECT db_name, subdominio FROM gyms WHERE id = %s", (int(gym_id),))
-                row = cur.fetchone()
-            
-            if not row: return False
-            
-            db_name = row.get("db_name")
-            if not db_name: return False
-            
-            # Get tenant connection params
-            # Reuse logic from _bootstrap_tenant_db or similar?
-            # We can use resolve_admin_db_params but switch database name
-            pg_params = self.resolve_admin_db_params()
-            pg_params["database"] = db_name
-            
-            # Try to connect to tenant DB
-            try:
-                with psycopg2.connect(**pg_params) as t_conn:
-                    with t_conn.cursor() as t_cur:
-                        # Update the owner user
-                        # Assuming 'rol'='owner' or 'rol'='admin' and updating 'password' or 'pin'
-                        # Check utils.py: it reads owner_password config or owner_password_hash from gyms table.
-                        # It does NOT seem to read from 'usuarios' table for the *owner* specifically in the simplified logic?
-                        # Let's check utils.py again.
-                        # It checks db.obtener_configuracion('owner_password')
-                        
-                        # So we should update 'configuracion' table in tenant DB
-                        t_cur.execute(
-                            "INSERT INTO configuracion (key, value) VALUES ('owner_password', %s) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-                            (new_password,)
-                        )
-                        
-                        # ALSO update the 'usuarios' table if there is an owner user there, just in case
-                        # We'll try to update 'pin' if it exists and user is owner
-                        try:
-                            t_cur.execute("UPDATE usuarios SET pin = %s WHERE rol IN ('owner', 'dueño', 'admin')", (new_password,))
-                        except Exception:
-                            pass # Table might not exist or column might be too short
-                            
-                    t_conn.commit()
-            except Exception as e:
-                logger.error(f"Error pushing password to tenant DB {db_name}: {e}")
-                # If we updated Admin DB successfully, we might consider this a partial success or failure?
-                # Let's return True if Admin DB was updated, as utils.py has a fallback to read from Admin DB.
-                pass
 
-            return True
-        except Exception as e:
-            logger.error(f"Error changing owner password for gym {gym_id}: {e}")
-            return False
+    def cambiar_password_owner(self, gym_id: int, new_password: str) -> bool:
+        """
+        Change owner password for a gym. This is an alias/older version of set_gym_owner_password.
+        Uses bcrypt hashing and updates both admin DB and tenant DB.
+        """
+        # Delegate to the properly implemented method
+        return self.set_gym_owner_password(gym_id, new_password)
+
 
     def listar_auditoria_avanzada(self, page: int, page_size: int, actor: Optional[str], action: Optional[str], gym_id: Optional[int], date_from: Optional[str], date_to: Optional[str]) -> Dict[str, Any]:
         try:
