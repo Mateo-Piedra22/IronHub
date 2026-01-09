@@ -18,14 +18,17 @@ class AdminService(BaseService):
         super().__init__(db)
 
     def cambiar_contrasena_dueno(self, current: str, new: str) -> Dict[str, Any]:
-        """Change owner password."""
+        """Change owner password. Syncs with Admin DB if possible."""
         try:
+            # 1. Verify current password in Local DB
             row = self.db.execute(text("SELECT id, pin FROM usuarios WHERE rol IN ('dueno', 'owner', 'admin') ORDER BY id LIMIT 1")).fetchone()
             if not row:
                 return {'ok': False, 'error': 'Owner not found'}
             
             owner_id, stored = row[0], row[1] or ""
             valid = False
+            
+            # Check against stored hash (or plain text)
             if stored.startswith("$2"):
                 try: valid = bcrypt.checkpw(current.encode(), stored.encode())
                 except: valid = False
@@ -35,9 +38,41 @@ class AdminService(BaseService):
             if not valid:
                 return {'ok': False, 'error': 'Current password incorrect'}
             
+            # 2. Generate new bcrypt hash
             new_hash = bcrypt.hashpw(new.encode(), bcrypt.gensalt()).decode()
+            
+            # 3. Update Local DB (usuarios table)
+            # Safe now that we migrated column to VARCHAR(100)
             self.db.execute(text("UPDATE usuarios SET pin = :pin WHERE id = :id"), {'pin': new_hash, 'id': owner_id})
             self.db.commit()
+            
+            # 4. Sync with Admin DB (gyms table)
+            try:
+                from src.dependencies import get_current_tenant
+                from src.database.connection import SessionLocal
+                
+                tenant = get_current_tenant()
+                if tenant:
+                    # Open separate session for Admin DB
+                    admin_db = SessionLocal()
+                    try:
+                        # Update owner_password_hash in gyms table
+                        admin_db.execute(
+                            text("UPDATE gyms SET owner_password_hash = :hash WHERE subdominio = :sub"), 
+                            {'hash': new_hash, 'sub': tenant}
+                        )
+                        admin_db.commit()
+                        logger.info(f"Synced owner password for tenant '{tenant}' to Admin DB.")
+                    except Exception as ex:
+                        logger.error(f"Failed to sync password to Admin DB: {ex}")
+                        admin_db.rollback()
+                    finally:
+                        admin_db.close()
+            except ImportError:
+                pass
+            except Exception as e:
+                logger.error(f"Error syncing to admin db: {e}")
+                
             return {'ok': True}
         except Exception as e:
             logger.error(f"Error changing password: {e}")

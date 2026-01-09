@@ -91,14 +91,21 @@ async def api_usuario_get(
         if not u:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
             
-        # Aplicar visibilidad de PIN: profesor no ve PIN de otro profesor
-        pin_value = getattr(u, "pin", None)
-        try:
-            prof_uid = request.session.get("gestion_profesor_user_id")
-            if prof_uid and str(getattr(u, "rol", "")).strip().lower() == "profesor" and int(usuario_id) != int(prof_uid):
-                pin_value = None
-        except Exception:
-            pass
+        # Aplicar visibilidad de PIN: 
+        # 1. DUEÑO/ADMIN: NUNCA mostrar el PIN/HASH (Seguridad Estricta)
+        user_role = str(getattr(u, "rol", "")).strip().lower()
+        if user_role in ("dueño", "dueno", "owner", "admin", "administrador"):
+            pin_value = None # Ocultar totalmente el hash del dueño
+            
+        # 2. PROFESORES: Un profesor no debe ver el PIN de otro profesor
+        elif user_role == "profesor":
+            try:
+                prof_uid = request.session.get("gestion_profesor_user_id")
+                # Si soy un profesor viendo a otro (y no a mi mismo), ocultar
+                if prof_uid and int(usuario_id) != int(prof_uid):
+                     pin_value = None
+            except Exception:
+                pass
             
         return {
             "id": u.id,

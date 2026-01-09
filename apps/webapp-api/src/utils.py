@@ -368,8 +368,10 @@ def get_gym_name(default: str = "Gimnasio") -> str:
 
 def _get_password() -> str:
     # 1. Intentar obtener desde tabla usuarios (Donde AdminService actualiza la contraseña)
+    # PRIORIDAD: Esto es lo que usa el login normal. Si hay algo aquí, úsalo.
     try:
         db = get_db()
+        # Si get_db falla (ej: sin tenant context), esto lanzará excepción y pasamos al siguiente bloque.
         if db and hasattr(db, '_session'):
             from sqlalchemy import text
             # Buscar usuario con rol dueño/admin/owner
@@ -380,6 +382,8 @@ def _get_password() -> str:
             if row and row[0]:
                 val = str(row[0]).strip()
                 if val:
+                    # PRECAUCIÓN: Si la base de datos tiene texto plano (ej: '123456'), devolvemos eso.
+                    # El verificador (_verify_owner_password) manejará si es hash o no.
                     return val
     except Exception:
         pass
@@ -393,24 +397,46 @@ def _get_password() -> str:
                 return pwd.strip()
     except Exception:
         pass
-    # 3. Fallback: leer desde Admin DB por subdominio
+
+    # 3. Fallback: leer desde Admin DB usando CURRENT_TENANT
     try:
         tenant = None
         try:
             tenant = CURRENT_TENANT.get()
         except Exception:
-            tenant = None
+            pass
+            
+        # Si no hay tenant en contexto, intentar adivinar por entorno (para dev local)
+        if not tenant:
+            tenant = os.getenv("DEFAULT_TENANT", "testingiron") # Un default razonable para dev
+
         if tenant:
             adm = get_admin_db()
             if adm is not None:
-                with adm.db.get_connection_context() as conn:  # type: ignore
-                    cur = conn.cursor()
-                    cur.execute("SELECT owner_password_hash FROM gyms WHERE subdominio = %s", (str(tenant).strip().lower(),))
-                    row = cur.fetchone()
-                    if row and isinstance(row[0], str) and row[0].strip():
-                        return row[0].strip()
+                # get_admin_db retorna un generador, necesitamos la sesión
+                session_gen = adm
+                session = next(session_gen)
+                try:
+                    from sqlalchemy import text
+                    result = session.execute(
+                        text("SELECT owner_password_hash FROM gyms WHERE subdominio = :sub"),
+                        {'sub': list([str(tenant).strip().lower()])} # Param as list to be safe or simple dict
+                    )
+                    # Use simple params actually
+                    result = session.execute(
+                        text("SELECT owner_password_hash FROM gyms WHERE subdominio = :sub"),
+                        {'sub': str(tenant).strip().lower()}
+                    )
+                    row = result.fetchone()
+                    if row and row[0]:
+                         val = str(row[0]).strip()
+                         if val:
+                             return val
+                finally:
+                    session.close()
     except Exception:
         pass
+        
     # 4. Fallback: variables de entorno
     try:
         env_pwd = (os.getenv("WEBAPP_OWNER_PASSWORD", "") or os.getenv("OWNER_PASSWORD", "")).strip()
@@ -418,6 +444,7 @@ def _get_password() -> str:
         env_pwd = ""
     if env_pwd:
         return env_pwd
+        
     return "admin"
 
 def _verify_owner_password(password: str) -> bool:

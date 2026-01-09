@@ -21,7 +21,7 @@ class Usuario(Base):
     nombre: Mapped[str] = mapped_column(String(255), nullable=False)
     dni: Mapped[Optional[str]] = mapped_column(String(20), unique=True)
     telefono: Mapped[str] = mapped_column(String(50), nullable=False)
-    pin: Mapped[Optional[str]] = mapped_column(String(10), server_default='1234')
+    pin: Mapped[Optional[str]] = mapped_column(String(100), server_default='123456')
     rol: Mapped[str] = mapped_column(String(50), nullable=False, server_default='socio')
     notas: Mapped[Optional[str]] = mapped_column(Text)
     fecha_registro: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
