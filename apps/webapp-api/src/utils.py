@@ -85,6 +85,68 @@ def _compute_base_dir() -> Path:
 
 BASE_DIR = _compute_base_dir()
 
+
+def resource_path(relative_path: str) -> str:
+    """
+    Get the absolute path to a resource, works for both development and PyInstaller.
+    In Vercel/serverless environments, falls back to the current working directory.
+    """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base = getattr(sys, '_MEIPASS', None)
+        if base:
+            return str(Path(base) / relative_path)
+    except Exception:
+        pass
+    
+    try:
+        # Frozen executable
+        if getattr(sys, 'frozen', False):
+            base = Path(sys.executable).parent
+            return str(base / relative_path)
+    except Exception:
+        pass
+    
+    # Development: relative to the src/ directory
+    try:
+        # utils.py is in src/, so go up one level to get to webapp-api root
+        src_dir = Path(__file__).resolve().parent
+        api_root = src_dir.parent
+        result = api_root / relative_path
+        if result.exists():
+            return str(result)
+    except Exception:
+        pass
+    
+    # Fallback: current working directory
+    return str(Path.cwd() / relative_path)
+
+
+def get_webapp_base_url() -> str:
+    """
+    Get the base URL for the webapp.
+    Reads from environment variables with sensible defaults.
+    """
+    # Try various environment variables
+    candidates = [
+        os.getenv("WEBAPP_BASE_URL"),
+        os.getenv("NEXT_PUBLIC_API_URL"),
+        os.getenv("VERCEL_URL"),
+        os.getenv("VERCEL_BRANCH_URL"),
+        os.getenv("VERCEL_PROJECT_PRODUCTION_URL"),
+    ]
+    
+    for url in candidates:
+        if url and url.strip():
+            url = url.strip()
+            # Ensure it has a protocol
+            if not url.startswith("http://") and not url.startswith("https://"):
+                url = f"https://{url}"
+            return url.rstrip("/")
+    
+    # Default fallback
+    return "http://127.0.0.1:8000"
+
 def _resolve_existing_dir(*parts: str) -> Path:
     candidates = []
     try:
