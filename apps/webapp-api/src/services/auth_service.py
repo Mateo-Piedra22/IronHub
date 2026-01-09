@@ -190,17 +190,28 @@ class AuthService(BaseService):
     def verificar_owner_password(self, password: str) -> bool:
         """
         Verify owner password.
-        Owner password is stored in gym_config table.
+        Checks 'usuarios' table for owner/admin pin.
         """
         try:
+            # Check usuarios table (AdminService updates this)
             result = self.db.execute(
-                text("SELECT valor FROM gym_config WHERE clave = 'owner_password' LIMIT 1")
+                text("SELECT pin FROM usuarios WHERE rol IN ('dueno', 'owner', 'admin') AND activo = true ORDER BY id LIMIT 1")
             )
             row = result.fetchone()
             if row and row[0]:
                 stored_pw = str(row[0]).strip()
+                
+                # Try bcrypt verification
+                if stored_pw.startswith('$2'):
+                    try:
+                        import bcrypt
+                        return bcrypt.checkpw(password.encode('utf-8'), stored_pw.encode('utf-8'))
+                    except Exception:
+                        pass
+                
+                # Direct comparison
                 return stored_pw == password
-            # Fallback: check for legacy password locations
+                
             return False
         except Exception as e:
             logger.error(f"Error verifying owner password: {e}")

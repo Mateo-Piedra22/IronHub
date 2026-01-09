@@ -367,7 +367,24 @@ def get_gym_name(default: str = "Gimnasio") -> str:
     return default
 
 def _get_password() -> str:
-    # Leer directamente desde la base de datos para sincronización inmediata
+    # 1. Intentar obtener desde tabla usuarios (Donde AdminService actualiza la contraseña)
+    try:
+        db = get_db()
+        if db and hasattr(db, '_session'):
+            from sqlalchemy import text
+            # Buscar usuario con rol dueño/admin/owner
+            result = db._session.execute(
+                text("SELECT pin FROM usuarios WHERE rol IN ('dueno', 'owner', 'admin') AND activo = true ORDER BY id LIMIT 1")
+            )
+            row = result.fetchone()
+            if row and row[0]:
+                val = str(row[0]).strip()
+                if val:
+                    return val
+    except Exception:
+        pass
+
+    # 2. Leer desde la base de datos (Legacy configuracion)
     try:
         db = get_db()
         if db and hasattr(db, 'obtener_configuracion'):
@@ -376,7 +393,7 @@ def _get_password() -> str:
                 return pwd.strip()
     except Exception:
         pass
-    # Fallback: leer desde Admin DB por subdominio
+    # 3. Fallback: leer desde Admin DB por subdominio
     try:
         tenant = None
         try:
@@ -394,7 +411,7 @@ def _get_password() -> str:
                         return row[0].strip()
     except Exception:
         pass
-    # Fallback: variables de entorno
+    # 4. Fallback: variables de entorno
     try:
         env_pwd = (os.getenv("WEBAPP_OWNER_PASSWORD", "") or os.getenv("OWNER_PASSWORD", "")).strip()
     except Exception:
