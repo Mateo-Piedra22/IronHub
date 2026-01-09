@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 from src.dependencies import require_gestion_access, get_gym_service
 from src.services.gym_service import GymService
-from src.services.storage_service import StorageService
+from src.services.b2_storage import simple_upload as b2_upload, get_file_url
 from src.utils import _get_tenant_from_request
 
 router = APIRouter()
@@ -30,12 +30,11 @@ async def api_upload_exercise_video(request: Request, file: UploadFile = File(..
         if len(data) > 50 * 1024 * 1024:
             return JSONResponse({"ok": False, "error": "El video es demasiado grande (max 50MB)"}, status_code=400)
         
-        storage = StorageService()
         tenant = _get_tenant_from_request(request) or "common"
         ext = os.path.splitext(file.filename)[1] if file.filename else ".mp4"
         filename = f"exercise_{int(time.time())}_{os.urandom(4).hex()}{ext}"
         
-        public_url = storage.upload_file(data, filename, ctype, subfolder=f"exercises/{tenant}")
+        public_url = b2_upload(data, filename, ctype, subfolder=f"exercises/{tenant}")
         if not public_url:
             return JSONResponse({"ok": False, "error": "Error subiendo el video"}, status_code=500)
         
@@ -63,10 +62,9 @@ async def api_list_exercises(
         items = exercises[offset:offset + page_size]
         
         # Ensure full CDN URLs
-        storage = StorageService()
         for item in items:
             if item.get("video_url"):
-                item["video_url"] = storage.get_file_url(item["video_url"])
+                item["video_url"] = get_file_url(item["video_url"])
         
         return {"items": items, "total": total, "page": page}
     except Exception as e:

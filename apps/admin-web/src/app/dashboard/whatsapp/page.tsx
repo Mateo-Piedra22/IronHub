@@ -36,11 +36,18 @@ export default function WhatsAppPage() {
         if (!testGymId || !testNumber.trim()) return;
         setSending(true);
         try {
-            // This would call an API endpoint for WhatsApp test
-            await new Promise((r) => setTimeout(r, 1000));
-            alert('Mensaje de prueba enviado (simulado)');
-        } catch {
-            alert('Error al enviar');
+            const res = await api.sendWhatsAppTest(testGymId, testNumber, testMessage);
+            if (res.ok && res.data) {
+                if (res.data.ok) {
+                    alert(`✅ ${res.data.message || 'Mensaje enviado correctamente'}`);
+                } else {
+                    alert(`❌ Error: ${res.data.error || 'Error desconocido'}`);
+                }
+            } else {
+                alert(`❌ Error: ${res.error || 'Error de conexión'}`);
+            }
+        } catch (e) {
+            alert(`❌ Error: ${String(e)}`);
         } finally {
             setSending(false);
         }

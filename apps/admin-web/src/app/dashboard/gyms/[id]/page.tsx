@@ -1,15 +1,25 @@
 'use client';
 
-import { useState, useEffect, use } from 'react';
+import { useState, useEffect, use, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
     Loader2, ArrowLeft, MessageSquare, Wrench, Palette, CreditCard,
-    Key, Activity, FileText, Save, Send, Check, X, AlertCircle
+    Key, Activity, FileText, Save, Send, Check, X, AlertCircle, Upload
 } from 'lucide-react';
 import Link from 'next/link';
 import { api, type Gym, type GymDetails, type WhatsAppConfig, type Payment } from '@/lib/api';
 
 type Section = 'subscription' | 'payments' | 'whatsapp' | 'maintenance' | 'branding' | 'health' | 'password';
+
+interface BrandingConfig {
+    nombre_publico: string;
+    direccion: string;
+    logo_url: string;
+    color_primario: string;
+    color_secundario: string;
+    color_fondo: string;
+    color_texto: string;
+}
 
 export default function GymDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const resolvedParams = use(params);
@@ -34,6 +44,19 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     // Payments
     const [payments, setPayments] = useState<Payment[]>([]);
 
+    // Branding
+    const [branding, setBranding] = useState<BrandingConfig>({
+        nombre_publico: '',
+        direccion: '',
+        logo_url: '',
+        color_primario: '#6366f1',
+        color_secundario: '#22c55e',
+        color_fondo: '#0a0a0a',
+        color_texto: '#ffffff',
+    });
+    const [uploading, setUploading] = useState(false);
+    const logoInputRef = useRef<HTMLInputElement>(null);
+
     useEffect(() => {
         async function load() {
             setLoading(true);
@@ -45,6 +68,14 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                 const payRes = await api.getGymPayments(gymId);
                 if (payRes.ok && payRes.data) {
                     setPayments(payRes.data.payments || []);
+                }
+                // Load branding
+                const brandRes = await api.getGymBranding(gymId);
+                if (brandRes.ok && brandRes.data?.branding) {
+                    setBranding(prev => ({
+                        ...prev,
+                        ...brandRes.data!.branding
+                    }));
                 }
             } catch {
                 // Ignore
@@ -71,6 +102,42 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
             showMessage('Error al guardar');
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleSaveBranding = async () => {
+        setSaving(true);
+        try {
+            const res = await api.saveGymBranding(gymId, branding);
+            if (res.ok) {
+                showMessage('Branding guardado correctamente');
+            } else {
+                showMessage(res.error || 'Error al guardar branding');
+            }
+        } catch {
+            showMessage('Error al guardar branding');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setUploading(true);
+        try {
+            const res = await api.uploadGymLogo(gymId, file);
+            if (res.ok && res.data?.url) {
+                setBranding(prev => ({ ...prev, logo_url: res.data!.url }));
+                showMessage('Logo subido correctamente');
+            } else {
+                showMessage(res.error || 'Error al subir logo');
+            }
+        } catch {
+            showMessage('Error al subir logo');
+        } finally {
+            setUploading(false);
         }
     };
 
@@ -383,43 +450,117 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                 {activeSection === 'branding' && (
                     <div className="space-y-6">
                         <h2 className="text-lg font-semibold text-white">Branding</h2>
+
+                        {/* Logo Upload */}
+                        <div className="flex items-start gap-6">
+                            <div className="flex-shrink-0">
+                                {branding.logo_url ? (
+                                    <img
+                                        src={branding.logo_url}
+                                        alt="Logo"
+                                        className="w-24 h-24 rounded-xl object-cover border border-slate-700"
+                                    />
+                                ) : (
+                                    <div className="w-24 h-24 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-500">
+                                        <Palette className="w-8 h-8" />
+                                    </div>
+                                )}
+                            </div>
+                            <div className="space-y-2">
+                                <label className="label">Logo del gimnasio</label>
+                                <input
+                                    ref={logoInputRef}
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={handleLogoUpload}
+                                    className="hidden"
+                                />
+                                <button
+                                    onClick={() => logoInputRef.current?.click()}
+                                    disabled={uploading}
+                                    className="btn-secondary flex items-center gap-2"
+                                >
+                                    {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                                    {uploading ? 'Subiendo...' : 'Subir logo'}
+                                </button>
+                                <p className="text-xs text-slate-500">PNG, JPG, GIF, WebP. Máx. 5MB</p>
+                            </div>
+                        </div>
+
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
                             <div>
                                 <label className="label">Nombre público</label>
-                                <input type="text" className="input" defaultValue={gym.nombre} />
+                                <input
+                                    type="text"
+                                    className="input"
+                                    value={branding.nombre_publico || gym.nombre}
+                                    onChange={(e) => setBranding(prev => ({ ...prev, nombre_publico: e.target.value }))}
+                                />
                             </div>
                             <div>
                                 <label className="label">Dirección</label>
-                                <input type="text" className="input" placeholder="Calle, número, ciudad" />
+                                <input
+                                    type="text"
+                                    className="input"
+                                    placeholder="Calle, número, ciudad"
+                                    value={branding.direccion}
+                                    onChange={(e) => setBranding(prev => ({ ...prev, direccion: e.target.value }))}
+                                />
                             </div>
                             <div className="md:col-span-2">
-                                <label className="label">Logo URL</label>
-                                <input type="text" className="input" placeholder="https://..." />
+                                <label className="label">Logo URL (o sube uno arriba)</label>
+                                <input
+                                    type="text"
+                                    className="input"
+                                    placeholder="https://..."
+                                    value={branding.logo_url}
+                                    onChange={(e) => setBranding(prev => ({ ...prev, logo_url: e.target.value }))}
+                                />
                             </div>
                             <div className="md:col-span-2">
                                 <h3 className="text-sm font-medium text-slate-300 mb-2">Colores</h3>
                                 <div className="grid grid-cols-4 gap-3">
                                     <div>
                                         <label className="label text-xs">Primario</label>
-                                        <input type="color" className="w-full h-10 rounded border-0" defaultValue="#6366f1" />
+                                        <input
+                                            type="color"
+                                            className="w-full h-10 rounded border-0 cursor-pointer"
+                                            value={branding.color_primario}
+                                            onChange={(e) => setBranding(prev => ({ ...prev, color_primario: e.target.value }))}
+                                        />
                                     </div>
                                     <div>
                                         <label className="label text-xs">Secundario</label>
-                                        <input type="color" className="w-full h-10 rounded border-0" defaultValue="#22c55e" />
+                                        <input
+                                            type="color"
+                                            className="w-full h-10 rounded border-0 cursor-pointer"
+                                            value={branding.color_secundario}
+                                            onChange={(e) => setBranding(prev => ({ ...prev, color_secundario: e.target.value }))}
+                                        />
                                     </div>
                                     <div>
                                         <label className="label text-xs">Fondo</label>
-                                        <input type="color" className="w-full h-10 rounded border-0" defaultValue="#0a0a0a" />
+                                        <input
+                                            type="color"
+                                            className="w-full h-10 rounded border-0 cursor-pointer"
+                                            value={branding.color_fondo}
+                                            onChange={(e) => setBranding(prev => ({ ...prev, color_fondo: e.target.value }))}
+                                        />
                                     </div>
                                     <div>
                                         <label className="label text-xs">Texto</label>
-                                        <input type="color" className="w-full h-10 rounded border-0" defaultValue="#ffffff" />
+                                        <input
+                                            type="color"
+                                            className="w-full h-10 rounded border-0 cursor-pointer"
+                                            value={branding.color_texto}
+                                            onChange={(e) => setBranding(prev => ({ ...prev, color_texto: e.target.value }))}
+                                        />
                                     </div>
                                 </div>
                             </div>
                         </div>
-                        <button className="btn-primary flex items-center gap-2">
-                            <Save className="w-4 h-4" />
+                        <button onClick={handleSaveBranding} disabled={saving} className="btn-primary flex items-center gap-2">
+                            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                             Guardar branding
                         </button>
                     </div>

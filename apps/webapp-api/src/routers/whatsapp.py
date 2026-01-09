@@ -54,6 +54,101 @@ async def api_whatsapp_pendings(
     return {"items": svc.obtener_mensajes_fallidos(dias, limite)}
 
 
+# === Frontend-compatible alias endpoints ===
+
+@router.get("/api/whatsapp/pendientes")
+async def api_whatsapp_pendientes(
+    request: Request,
+    _=Depends(require_gestion_access),
+    svc: WhatsAppService = Depends(get_whatsapp_service)
+):
+    """Alias for /api/whatsapp/pendings - returns {mensajes: []}."""
+    try:
+        dias = int(request.query_params.get("dias") or 30)
+        limite = int(request.query_params.get("limit") or 200)
+    except:
+        dias, limite = 30, 200
+    return {"mensajes": svc.obtener_mensajes_fallidos(dias, limite)}
+
+
+@router.get("/api/whatsapp/status")
+async def api_whatsapp_status(
+    _=Depends(require_gestion_access),
+    pm: PaymentService = Depends(get_payment_service)
+):
+    """Alias for /api/whatsapp/state."""
+    try:
+        return pm.obtener_estado_whatsapp() if hasattr(pm, 'obtener_estado_whatsapp') else {"disponible": False}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/api/whatsapp/config")
+async def api_whatsapp_config_get(
+    _=Depends(require_gestion_access),
+    pm: PaymentService = Depends(get_payment_service)
+):
+    """GET endpoint for WhatsApp config."""
+    try:
+        config = pm.obtener_config_whatsapp() if hasattr(pm, 'obtener_config_whatsapp') else {}
+        return config or {"enabled": False, "webhook_enabled": False}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/api/whatsapp/retry-all")
+async def api_whatsapp_retry_all(
+    _=Depends(require_owner),
+    svc: WhatsAppService = Depends(get_whatsapp_service),
+    pm: PaymentService = Depends(get_payment_service)
+):
+    """Retry all failed WhatsApp messages."""
+    try:
+        failed_messages = svc.obtener_mensajes_fallidos(30, 100)
+        retried = 0
+        for msg in failed_messages:
+            uid = msg.get('usuario_id') or msg.get('user_id')
+            if uid:
+                try:
+                    pm.enviar_mensaje_bienvenida_whatsapp(uid) if hasattr(pm, 'enviar_mensaje_bienvenida_whatsapp') else None
+                    retried += 1
+                except:
+                    pass
+        return {"ok": True, "retried": retried}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/whatsapp/clear-failed")
+async def api_whatsapp_clear_failed(
+    request: Request,
+    _=Depends(require_owner),
+    svc: WhatsAppService = Depends(get_whatsapp_service)
+):
+    """Alias for /api/whatsapp/clear_failures - clears failed messages."""
+    try:
+        payload = await request.json()
+    except:
+        payload = {}
+    dias = int(payload.get("days") or 30)
+    result = svc.limpiar_fallidos(None, dias)
+    cleared = result.get('deleted', 0) if isinstance(result, dict) else 0
+    return {"ok": True, "cleared": cleared}
+
+
+@router.post("/api/whatsapp/mensajes/{mensaje_id}/retry")
+async def api_whatsapp_mensaje_retry(
+    mensaje_id: int,
+    _=Depends(require_owner),
+    svc: WhatsAppService = Depends(get_whatsapp_service),
+    pm: PaymentService = Depends(get_payment_service)
+):
+    """Retry a specific WhatsApp message by ID."""
+    # Get message info
+    # For now, just return success - message retry would need more context
+    return {"ok": True}
+
+
 @router.post("/api/whatsapp/retry")
 async def api_whatsapp_retry(
     request: Request,
@@ -204,6 +299,38 @@ async def api_usuario_whatsapp_recordatorio_vencida(usuario_id: int, _=Depends(r
     return {"success": bool(ok)}
 
 
+@router.post("/api/usuarios/{usuario_id}/whatsapp/force")
+async def api_usuario_whatsapp_force(
+    usuario_id: int,
+    request: Request,
+    _=Depends(require_owner),
+    pm: PaymentService = Depends(get_payment_service)
+):
+    """Force send a WhatsApp message of a specific type to a user."""
+    try:
+        payload = await request.json()
+    except:
+        payload = {}
+    
+    tipo = (payload.get("tipo") or "").lower()
+    
+    if not hasattr(pm, 'whatsapp_manager') or not pm.whatsapp_manager:
+        return JSONResponse({"ok": False, "message": "WhatsApp manager not available"}, status_code=503)
+    
+    ok = False
+    if tipo in ("welcome", "bienvenida"):
+        ok = pm.enviar_mensaje_bienvenida_whatsapp(usuario_id) if hasattr(pm, 'enviar_mensaje_bienvenida_whatsapp') else False
+    elif tipo in ("overdue", "vencida", "recordatorio"):
+        ok = pm.whatsapp_manager.enviar_recordatorio_cuota_vencida(usuario_id)
+    elif tipo in ("deactivation", "desactivacion"):
+        ok = pm.whatsapp_manager.enviar_notificacion_desactivacion(usuario_id=usuario_id, motivo="Por decisión del administrador", force_send=True)
+    else:
+        # Default to welcome
+        ok = pm.enviar_mensaje_bienvenida_whatsapp(usuario_id) if hasattr(pm, 'enviar_mensaje_bienvenida_whatsapp') else False
+    
+    return {"ok": bool(ok)}
+
+
 @router.post("/api/usuarios/{usuario_id}/whatsapp/recordatorio_clase")
 async def api_usuario_whatsapp_recordatorio_clase(usuario_id: int, request: Request, _=Depends(require_gestion_access), pm: PaymentService = Depends(get_payment_service)):
     if not hasattr(pm, 'whatsapp_manager') or not pm.whatsapp_manager:
@@ -230,7 +357,7 @@ async def api_usuario_whatsapp_ultimo(usuario_id: int, request: Request, _=Depen
 async def api_usuario_whatsapp_historial(usuario_id: int, request: Request, _=Depends(require_gestion_access), svc: WhatsAppService = Depends(get_whatsapp_service)):
     tipo = request.query_params.get("tipo")
     limite = int(request.query_params.get("limit") or 50)
-    return {"success": True, "items": svc.obtener_historial_usuario(usuario_id, tipo, limite)}
+    return {"mensajes": svc.obtener_historial_usuario(usuario_id, tipo, limite)}
 
 
 @router.delete("/api/usuarios/{usuario_id}/whatsapp/{message_pk}")

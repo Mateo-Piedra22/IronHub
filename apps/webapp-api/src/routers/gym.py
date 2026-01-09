@@ -23,7 +23,7 @@ from src.routine_manager import RoutineTemplateManager
 from src.utils import _resolve_existing_dir, _apply_change_idempotent, _filter_existing_columns
 from src.models import Rutina, RutinaEjercicio, Ejercicio, Clase, ClaseHorario, Usuario
 from src.utils import _resolve_logo_url, get_gym_name
-from src.services.storage_service import StorageService
+from src.services.b2_storage import simple_upload as b2_upload
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -96,7 +96,6 @@ async def api_gym_logo(
         
         # 1. Try Cloud Storage (B2 + Cloudflare)
         try:
-            storage = StorageService()
             from src.utils import _get_tenant_from_request
             tenant = _get_tenant_from_request(request) or "common"
             
@@ -105,7 +104,7 @@ async def api_gym_logo(
             elif "jpeg" in ctype or "jpg" in ctype: ext = ".jpg"
             
             filename = f"gym_logo_{int(time.time())}{ext}"
-            uploaded_url = storage.upload_file(data, filename, ctype, subfolder=f"logos/{tenant}")
+            uploaded_url = b2_upload(data, filename, ctype, subfolder=f"logos/{tenant}")
             if uploaded_url:
                 public_url = uploaded_url
         except Exception as e:
@@ -817,7 +816,8 @@ async def api_clases(
 ):
     """Get all classes using SQLAlchemy."""
     try:
-        return svc.obtener_clases()
+        clases = svc.obtener_clases()
+        return {"clases": clases}
     except Exception as e:
         logger.error(f"Error getting clases: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -850,6 +850,67 @@ async def api_clases_create(
     except Exception as e:
         logger.error(f"Error creating clase: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/api/clases/{clase_id}")
+async def api_clase_get(
+    clase_id: int,
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Get a single clase by ID."""
+    try:
+        clase = svc.obtener_clase(clase_id)
+        if not clase:
+            raise HTTPException(status_code=404, detail="Clase no encontrada")
+        return clase
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting clase: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.put("/api/clases/{clase_id}")
+async def api_clase_update(
+    clase_id: int,
+    request: Request,
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Update a clase."""
+    try:
+        payload = await request.json()
+        success = svc.actualizar_clase(clase_id, payload)
+        if success:
+            clase = svc.obtener_clase(clase_id)
+            return clase or {"ok": True}
+        return JSONResponse({"error": "No se pudo actualizar"}, status_code=400)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating clase: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.delete("/api/clases/{clase_id}")
+async def api_clase_delete(
+    clase_id: int,
+    _=Depends(require_owner),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Delete a clase."""
+    try:
+        success = svc.eliminar_clase(clase_id)
+        if success:
+            return {"ok": True}
+        return JSONResponse({"error": "No se pudo eliminar"}, status_code=400)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting clase: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 
 # --- API Bloques ---
 
@@ -1266,6 +1327,56 @@ async def api_rutina_toggle_activa(rutina_id: int, _=Depends(require_gestion_acc
         raise
     except Exception as e:
         logger.error(f"Error toggling rutina activa: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@router.post("/api/rutinas/{rutina_id}/assign")
+async def api_rutina_assign(
+    rutina_id: int,
+    request: Request,
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service)
+):
+    """Assign a routine (plantation) to a user, creating a copy for that user."""
+    try:
+        payload = await request.json()
+        usuario_id = payload.get("usuario_id")
+        
+        if not usuario_id:
+            raise HTTPException(status_code=400, detail="usuario_id requerido")
+        
+        # Get the original routine
+        rutina = svc.obtener_rutina_completa(rutina_id)
+        if not rutina:
+            raise HTTPException(status_code=404, detail="Rutina no encontrada")
+        
+        # Duplicate the routine for the user
+        new_rutina_data = {
+            'nombre': rutina.get('nombre', 'Rutina'),
+            'descripcion': rutina.get('descripcion'),
+            'categoria': rutina.get('categoria'),
+            'usuario_id': usuario_id,
+            'es_plantilla': False,
+            'activa': True,
+            'dias': rutina.get('dias', [])
+        }
+        
+        new_id = svc.crear_rutina(new_rutina_data)
+        if not new_id:
+            return JSONResponse({"error": "No se pudo asignar"}, status_code=500)
+        
+        # Deactivate other routines for this user
+        try:
+            svc.desactivar_otras_rutinas(usuario_id, new_id)
+        except Exception:
+            pass
+        
+        # Return the newly created routine
+        new_rutina = svc.obtener_rutina_completa(new_id)
+        return new_rutina or {"id": new_id, "ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error assigning rutina: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.get("/api/rutinas/{rutina_id}/export/excel")

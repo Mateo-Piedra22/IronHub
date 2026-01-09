@@ -39,9 +39,11 @@ function Header() {
             <div className="max-w-7xl mx-auto px-6 py-4">
                 <nav className="flex items-center justify-between">
                     <Link href="/" className="flex items-center gap-3 group">
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center shadow-sm group-hover:shadow-md transition-shadow">
-                            <Dumbbell className="w-5 h-5 text-white" />
-                        </div>
+                        <img
+                            src="/images/logo-ironhub.png"
+                            alt="IronHub"
+                            className="w-10 h-10 rounded-xl shadow-sm group-hover:shadow-md transition-shadow"
+                        />
                         <span className="text-xl font-display font-bold text-white">
                             Iron<span className="text-primary-400">Hub</span>
                         </span>
@@ -300,15 +302,15 @@ function GymsSection() {
                         <div className="relative">
                             {/* Gradient fade left */}
                             <div className="absolute left-0 top-0 bottom-0 w-12 bg-gradient-to-r from-slate-950 to-transparent z-10 pointer-events-none" />
-                            
+
                             {/* Scrollable container */}
-                            <div 
+                            <div
                                 className="flex gap-6 overflow-x-auto pb-4 snap-x snap-mandatory scrollbar-hide"
                                 style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
                             >
                                 {/* Spacer for left padding */}
                                 <div className="flex-shrink-0 w-4" />
-                                
+
                                 {gyms.map((gym, index) => (
                                     <motion.a
                                         key={gym.id}
@@ -334,7 +336,7 @@ function GymsSection() {
                                             <h3 className="text-xl font-semibold text-white mb-1 group-hover:text-primary-300 transition-colors truncate">
                                                 {gym.nombre}
                                             </h3>
-                                            
+
                                             {/* Subdomain */}
                                             <p className="text-slate-500 text-sm mb-5 truncate">
                                                 {gym.subdominio}.ironhub.motiona.xyz
@@ -353,15 +355,15 @@ function GymsSection() {
                                         </div>
                                     </motion.a>
                                 ))}
-                                
+
                                 {/* Spacer for right padding */}
                                 <div className="flex-shrink-0 w-4" />
                             </div>
-                            
+
                             {/* Gradient fade right */}
                             <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-slate-950 to-transparent z-10 pointer-events-none" />
                         </div>
-                        
+
                         {/* Scroll hint */}
                         <div className="flex justify-center mt-6">
                             <div className="flex items-center gap-2 text-slate-500 text-sm">
@@ -369,7 +371,7 @@ function GymsSection() {
                                 <ChevronRight className="w-4 h-4 animate-pulse" />
                             </div>
                         </div>
-                        
+
                         {/* Stats */}
                         <motion.div
                             initial={{ opacity: 0, y: 20 }}
@@ -437,7 +439,7 @@ function AboutSection() {
 
                         <div className="flex flex-wrap gap-4 mt-8">
                             <div className="card px-4 py-3">
-                                <div className="text-2xl font-bold text-white">2026</div>
+                                <div className="text-2xl font-bold text-white">2025</div>
                                 <div className="text-xs text-slate-500">Año de Fundación</div>
                             </div>
                             <div className="card px-4 py-3">
@@ -506,8 +508,8 @@ function ContactSection() {
                                     </div>
                                     <div>
                                         <div className="text-sm text-slate-500">Email</div>
-                                        <a href="mailto:contacto@motiona.xyz" className="text-white hover:text-primary-300 transition-colors">
-                                            contacto@motiona.xyz
+                                        <a href="mailto:soporte@motiona.xyz" className="text-white hover:text-primary-300 transition-colors">
+                                            soporte@motiona.xyz
                                         </a>
                                     </div>
                                 </div>
@@ -528,7 +530,7 @@ function ContactSection() {
                                     </div>
                                     <div>
                                         <div className="text-sm text-slate-500">WhatsApp</div>
-                                        <span className="text-white">+54 9 11 XXXX-XXXX</span>
+                                        <span className="text-white">+54 9 343 447-3599</span>
                                     </div>
                                 </div>
                             </div>
@@ -558,21 +560,44 @@ function Footer() {
     return (
         <footer className="py-12 border-t border-slate-800/50">
             <div className="max-w-7xl mx-auto px-6">
-                <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                    {/* IronHub Logo */}
                     <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center">
-                            <Dumbbell className="w-4 h-4 text-white" />
-                        </div>
+                        <img
+                            src="/images/logo-ironhub.png"
+                            alt="IronHub"
+                            className="w-8 h-8 rounded-lg"
+                        />
                         <span className="font-display font-bold text-white">IronHub</span>
                     </div>
 
-                    <p className="text-slate-500 text-sm">
-                        © {new Date().getFullYear()} MotionA. Todos los derechos reservados.
-                    </p>
+                    {/* MotionA - Powered By */}
+                    <div className="flex flex-col items-center gap-2">
+                        <span className="text-slate-500 text-xs">Desarrollado por</span>
+                        <a
+                            href="https://motiona.xyz"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-2 group hover:opacity-80 transition-opacity"
+                        >
+                            <img
+                                src="/images/logo-motiona.png"
+                                alt="MotionA"
+                                className="w-8 h-8 rounded-lg"
+                            />
+                            <span className="text-white font-semibold group-hover:text-primary-400 transition-colors">MotionA</span>
+                        </a>
+                    </div>
 
-                    <div className="flex items-center gap-6">
-                        <a href="#" className="text-slate-500 hover:text-white text-sm transition-colors">Términos</a>
-                        <a href="#" className="text-slate-500 hover:text-white text-sm transition-colors">Privacidad</a>
+                    {/* Copyright & Links */}
+                    <div className="flex flex-col items-end gap-2">
+                        <div className="flex items-center gap-6">
+                            <a href="#" className="text-slate-500 hover:text-white text-sm transition-colors">Términos</a>
+                            <a href="#" className="text-slate-500 hover:text-white text-sm transition-colors">Privacidad</a>
+                        </div>
+                        <p className="text-slate-500 text-sm">
+                            © {new Date().getFullYear()} MotionA. Todos los derechos reservados.
+                        </p>
                     </div>
                 </div>
             </div>

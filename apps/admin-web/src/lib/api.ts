@@ -254,10 +254,10 @@ export const api = {
     // Metrics
     getMetrics: () => request<Metrics>('/metrics'),
 
-    getWarnings: () => request<{ warnings: any[] }>('/warnings'),
+    getWarnings: () => request<{ warnings: any[] }>('/metrics/warnings'),
 
     getExpirations: (days = 30) =>
-        request<{ expirations: any[] }>(`/expirations?days=${days}`),
+        request<{ expirations: any[] }>(`/metrics/expirations?days=${days}`),
 
     // Payments
     getGymPayments: (gymId: number) =>
@@ -272,6 +272,47 @@ export const api = {
 
     getRecentPayments: (limit = 10) =>
         request<{ payments: Payment[] }>(`/payments/recent?limit=${limit}`),
+
+    // Branding
+    getGymBranding: (gymId: number) =>
+        request<{ branding: Record<string, string> }>(`/gyms/${gymId}/branding`),
+
+    saveGymBranding: (gymId: number, branding: {
+        nombre_publico?: string;
+        direccion?: string;
+        logo_url?: string;
+        color_primario?: string;
+        color_secundario?: string;
+        color_fondo?: string;
+        color_texto?: string;
+    }) =>
+        request<{ ok: boolean }>(`/gyms/${gymId}/branding`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams(
+                Object.fromEntries(Object.entries(branding).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]))
+            ),
+        }),
+
+    uploadGymLogo: async (gymId: number, file: File): Promise<ApiResponse<{ ok: boolean; url: string; key: string }>> => {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const res = await fetch(`${API_URL}/gyms/${gymId}/logo`, {
+                method: 'POST',
+                credentials: 'include',
+                body: formData,
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                return { ok: false, error: data.error || data.detail || 'Upload failed' };
+            }
+            return { ok: true, data };
+        } catch (error) {
+            return { ok: false, error: 'Network error' };
+        }
+    },
 
     // Plans
     getPlans: () =>
@@ -367,6 +408,13 @@ export const api = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config),
+        }),
+
+    sendWhatsAppTest: (gymId: number, phone: string, message: string) =>
+        request<{ ok: boolean; message?: string; error?: string }>(`/gyms/${gymId}/whatsapp/test`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ phone, message }),
         }),
 
     // ========== PAYMENT MANAGEMENT (Restored from deprecated) ==========

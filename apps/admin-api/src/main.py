@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, Request, HTTPException, Form, Query
+from fastapi import FastAPI, Request, HTTPException, Form, Query, UploadFile, File
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -434,6 +434,80 @@ async def get_gym_audit(request: Request, gym_id: int, limit: int = Query(50, ge
     return {"audit": audit}
 
 
+# ========== BRANDING ROUTES ==========
+
+@app.get("/gyms/{gym_id}/branding")
+async def get_gym_branding(request: Request, gym_id: int):
+    """Get branding configuration for a gym."""
+    require_admin(request)
+    adm = get_admin_service()
+    
+    branding = adm.get_gym_branding(gym_id)
+    return {"branding": branding}
+
+
+@app.post("/gyms/{gym_id}/branding")
+async def save_gym_branding(
+    request: Request,
+    gym_id: int,
+    nombre_publico: str = Form(None),
+    direccion: str = Form(None),
+    logo_url: str = Form(None),
+    color_primario: str = Form(None),
+    color_secundario: str = Form(None),
+    color_fondo: str = Form(None),
+    color_texto: str = Form(None)
+):
+    """Save branding configuration for a gym."""
+    require_admin(request)
+    adm = get_admin_service()
+    
+    branding = {}
+    if nombre_publico is not None: branding["nombre_publico"] = nombre_publico
+    if direccion is not None: branding["direccion"] = direccion
+    if logo_url is not None: branding["logo_url"] = logo_url
+    if color_primario is not None: branding["color_primario"] = color_primario
+    if color_secundario is not None: branding["color_secundario"] = color_secundario
+    if color_fondo is not None: branding["color_fondo"] = color_fondo
+    if color_texto is not None: branding["color_texto"] = color_texto
+    
+    result = adm.save_gym_branding(gym_id, branding)
+    return result
+
+
+@app.post("/gyms/{gym_id}/logo")
+async def upload_gym_logo(
+    request: Request,
+    gym_id: int,
+    file: UploadFile = File(...)
+):
+    """Upload a logo image for a gym to B2 storage."""
+    require_admin(request)
+    adm = get_admin_service()
+    
+    # Validate file type
+    allowed_types = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: {', '.join(allowed_types)}")
+    
+    # Read file content
+    content = await file.read()
+    
+    # Limit file size (5MB)
+    max_size = 5 * 1024 * 1024
+    if len(content) > max_size:
+        raise HTTPException(status_code=400, detail="File too large. Max 5MB.")
+    
+    # Upload to B2
+    result = adm.upload_gym_asset(gym_id, content, file.filename or "logo.png", file.content_type)
+    
+    if result.get("ok"):
+        # Automatically save as logo_url in branding
+        adm.save_gym_branding(gym_id, {"logo_url": result["url"]})
+    
+    return result
+
+
 # ========== SUBDOMAIN ROUTES ==========
 
 @app.get("/subdomain/check")
@@ -570,4 +644,68 @@ async def auto_suspend_overdue(
     if result.get("suspended"):
         adm.log_action("owner", "auto_suspend_overdue", None, f"Suspended: {result.get('suspended')}, Grace: {grace_days}")
     return result
+
+
+# ========== WHATSAPP ROUTES ==========
+
+@app.post("/gyms/{gym_id}/whatsapp/test")
+async def send_whatsapp_test(
+    request: Request,
+    gym_id: int,
+    phone: str = Form(...),
+    message: str = Form("Mensaje de prueba desde IronHub Admin")
+):
+    """Send a test WhatsApp message using a gym's WhatsApp configuration."""
+    require_admin(request)
+    adm = get_admin_service()
+    
+    # Get gym info
+    gym = adm.obtener_gimnasio(gym_id)
+    if not gym:
+        raise HTTPException(status_code=404, detail="Gimnasio no encontrado")
+    
+    phone_id = (gym.get("whatsapp_phone_id") or "").strip()
+    access_token = (gym.get("whatsapp_access_token") or "").strip()
+    
+    if not phone_id or not access_token:
+        return {"ok": False, "error": "WhatsApp no configurado para este gimnasio"}
+    
+    # Normalize phone number
+    import re
+    phone_clean = re.sub(r"[^\d]", "", phone)
+    if not phone_clean.startswith("549"):
+        if phone_clean.startswith("0"):
+            phone_clean = "549" + phone_clean[1:]
+        elif phone_clean.startswith("9"):
+            phone_clean = "54" + phone_clean
+        else:
+            phone_clean = "549" + phone_clean
+    
+    # Send via WhatsApp API
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": phone_clean,
+                "type": "text",
+                "text": {"body": message}
+            }
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json"
+            }
+            response = await client.post(url, json=payload, headers=headers)
+            
+            if response.status_code == 200:
+                adm.log_action("owner", "whatsapp_test", gym_id, f"Sent test to {phone_clean}")
+                return {"ok": True, "message": f"Mensaje enviado a {phone_clean}"}
+            else:
+                error_data = response.json() if response.content else {}
+                error_msg = error_data.get("error", {}).get("message", response.text)
+                return {"ok": False, "error": error_msg}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 

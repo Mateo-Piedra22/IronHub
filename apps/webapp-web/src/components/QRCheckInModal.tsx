@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
 import { QrCode, Clock, Check, X, RefreshCw } from "lucide-react";
 import { Modal, Button, useToast } from "@/components/ui";
+import QRCodeLib from "qrcode";
 
 interface QRCheckInModalProps {
     isOpen: boolean;
@@ -18,7 +19,7 @@ export function QRCheckInModal({ isOpen, onClose, userId, userName }: QRCheckInM
     const [timeLeft, setTimeLeft] = useState(0);
     const [status, setStatus] = useState<"generating" | "waiting" | "confirmed" | "expired">("generating");
     const [loading, setLoading] = useState(false);
-    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const [qrDataUrl, setQrDataUrl] = useState<string>("");
     const pollingRef = useRef<NodeJS.Timeout | null>(null);
     const countdownRef = useRef<NodeJS.Timeout | null>(null);
     const { success, error } = useToast();
@@ -34,13 +35,28 @@ export function QRCheckInModal({ isOpen, onClose, userId, userName }: QRCheckInM
             });
             if (res.ok) {
                 const data = await res.json();
-                setToken(data.token || data.qr_token);
+                const tokenValue = data.token || data.qr_token;
+                setToken(tokenValue);
                 const expires = new Date(data.expires_at || Date.now() + 5 * 60 * 1000);
                 setExpiresAt(expires);
                 setStatus("waiting");
-                // Draw QR code
-                if (canvasRef.current && data.token) {
-                    drawQRCode(canvasRef.current, data.token);
+
+                // Generate real QR code
+                if (tokenValue) {
+                    try {
+                        const dataUrl = await QRCodeLib.toDataURL(tokenValue, {
+                            width: 200,
+                            margin: 2,
+                            color: {
+                                dark: '#000000',
+                                light: '#ffffff'
+                            },
+                            errorCorrectionLevel: 'M'
+                        });
+                        setQrDataUrl(dataUrl);
+                    } catch (qrErr) {
+                        console.error("Error generating QR:", qrErr);
+                    }
                 }
             } else {
                 error("Error al generar QR");
@@ -53,53 +69,6 @@ export function QRCheckInModal({ isOpen, onClose, userId, userName }: QRCheckInM
             setLoading(false);
         }
     }, [userId, error]);
-
-    // Simple QR code drawing (placeholder - in production use a library like qrcode)
-    const drawQRCode = (canvas: HTMLCanvasElement, tokenData: string) => {
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-
-        // Clear canvas
-        ctx.fillStyle = "#fff";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        // Draw placeholder pattern (in production, use proper QR generation)
-        ctx.fillStyle = "#000";
-        const size = canvas.width;
-        const cellSize = Math.floor(size / 25);
-
-        // Generate simple visual pattern from token
-        const hash = tokenData.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
-        for (let y = 0; y < 25; y++) {
-            for (let x = 0; x < 25; x++) {
-                // Border patterns
-                const isBorder = x < 7 && y < 7 || x >= 18 && y < 7 || x < 7 && y >= 18;
-                const isInnerBorder = (x >= 2 && x <= 4 && y >= 2 && y <= 4) ||
-                    (x >= 20 && x <= 22 && y >= 2 && y <= 4) ||
-                    (x >= 2 && x <= 4 && y >= 20 && y <= 22);
-
-                if (isBorder) {
-                    const edge = x === 0 || x === 6 || y === 0 || y === 6 ||
-                        x === 18 || x === 24 || y === 18 || y === 24;
-                    if (edge || isInnerBorder) {
-                        ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
-                    }
-                } else {
-                    // Data pattern based on hash
-                    const fill = ((hash * (x + 1) * (y + 1)) % 3) === 0;
-                    if (fill) {
-                        ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
-                    }
-                }
-            }
-        }
-
-        // Draw center text
-        ctx.fillStyle = "#333";
-        ctx.font = "10px monospace";
-        ctx.textAlign = "center";
-        ctx.fillText(tokenData.slice(0, 8) + "...", size / 2, size / 2);
-    };
 
     // Countdown timer
     useEffect(() => {
@@ -184,14 +153,21 @@ export function QRCheckInModal({ isOpen, onClose, userId, userName }: QRCheckInM
                 {/* User name */}
                 <div className="text-lg font-semibold text-white">{userName}</div>
 
-                {/* QR Canvas */}
+                {/* QR Code */}
                 <div className="relative p-4 bg-white rounded-xl shadow-lg">
-                    <canvas
-                        ref={canvasRef}
-                        width={200}
-                        height={200}
-                        className="rounded-lg"
-                    />
+                    {qrDataUrl ? (
+                        <img
+                            src={qrDataUrl}
+                            alt="QR Code"
+                            width={200}
+                            height={200}
+                            className="rounded-lg"
+                        />
+                    ) : (
+                        <div className="w-[200px] h-[200px] flex items-center justify-center bg-slate-100 rounded-lg">
+                            <RefreshCw className="w-8 h-8 text-slate-400 animate-spin" />
+                        </div>
+                    )}
                     {status === "confirmed" && (
                         <motion.div
                             initial={{ scale: 0 }}
@@ -235,8 +211,8 @@ export function QRCheckInModal({ isOpen, onClose, userId, userName }: QRCheckInM
                     <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
                         <motion.div
                             className={`h-full rounded-full ${status === "confirmed" ? "bg-success-500" :
-                                    status === "expired" ? "bg-danger-500" :
-                                        "bg-primary-500"
+                                status === "expired" ? "bg-danger-500" :
+                                    "bg-primary-500"
                                 }`}
                             initial={{ width: "100%" }}
                             animate={{ width: `${progress}%` }}

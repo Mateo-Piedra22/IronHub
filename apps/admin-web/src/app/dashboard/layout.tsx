@@ -30,9 +30,11 @@ export default function DashboardLayout({
                 {/* Logo */}
                 <div className="p-6 border-b border-slate-800/50">
                     <Link href="/dashboard" className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center shadow-sm">
-                            <Dumbbell className="w-5 h-5 text-white" />
-                        </div>
+                        <img
+                            src="/images/logo-ironhub.png"
+                            alt="IronHub"
+                            className="w-10 h-10 rounded-xl shadow-sm"
+                        />
                         <div>
                             <span className="text-lg font-display font-bold text-white">
                                 Iron<span className="text-primary-400">Hub</span>
@@ -65,7 +67,7 @@ export default function DashboardLayout({
                 </nav>
 
                 {/* Footer */}
-                <div className="p-4 border-t border-slate-800/50">
+                <div className="p-4 border-t border-slate-800/50 space-y-3">
                     <button
                         onClick={() => {
                             // TODO: Implement logout
@@ -76,6 +78,21 @@ export default function DashboardLayout({
                         <LogOut className="w-5 h-5" />
                         <span>Cerrar Sesión</span>
                     </button>
+
+                    {/* MotionA Credit */}
+                    <a
+                        href="https://motiona.xyz"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-center gap-2 py-2 text-slate-500 hover:text-slate-300 transition-colors text-xs"
+                    >
+                        <img
+                            src="/images/logo-motiona.png"
+                            alt="MotionA"
+                            className="w-5 h-5 rounded"
+                        />
+                        <span>by MotionA</span>
+                    </a>
                 </div>
             </aside>
 

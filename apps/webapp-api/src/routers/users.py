@@ -73,7 +73,8 @@ async def api_usuarios_list(
     _=Depends(require_gestion_access)
 ):
     try:
-        return user_service.list_users(q, limit, offset)
+        items = user_service.list_users(q, limit, offset)
+        return {"usuarios": items, "total": len(items)}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -278,7 +279,7 @@ async def api_usuario_etiquetas_get(
 ):
     try:
         items = user_service.get_user_tags(usuario_id)
-        return {"items": items}
+        return {"etiquetas": items}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -325,7 +326,7 @@ async def api_usuario_estados_get(
         if not user_service.get_user(usuario_id):
              raise HTTPException(status_code=404, detail="Usuario no encontrado")
         items = user_service.get_user_states(usuario_id, solo_activos=True)
-        return {"items": items}
+        return {"estados": items}
     except HTTPException:
         raise
     except Exception as e:
@@ -409,6 +410,19 @@ async def api_estados_plantillas(
     try:
         items = user_service.get_state_templates()
         return {"items": items}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/api/estados/templates")
+async def api_estados_templates(
+    user_service: UserService = Depends(get_user_service), 
+    _=Depends(require_gestion_access)
+):
+    """Get predefined state templates (frontend-compatible alias)"""
+    try:
+        items = user_service.get_state_templates()
+        return {"templates": items}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

@@ -148,6 +148,74 @@ class GymService(BaseService):
             self.db.rollback()
             return None
 
+    def obtener_clase(self, clase_id: int) -> Optional[Dict[str, Any]]:
+        """Get a single class by ID."""
+        try:
+            result = self.db.execute(
+                text("""
+                    SELECT id, nombre, descripcion, activo, capacidad, 
+                           color, icono, duracion_minutos
+                    FROM clases
+                    WHERE id = :id LIMIT 1
+                """),
+                {'id': clase_id}
+            )
+            row = result.fetchone()
+            if not row:
+                return None
+            return {
+                'id': row[0],
+                'nombre': row[1],
+                'descripcion': row[2],
+                'activo': row[3],
+                'capacidad': row[4],
+                'color': row[5],
+                'icono': row[6],
+                'duracion_minutos': row[7]
+            }
+        except Exception as e:
+            logger.error(f"Error getting clase {clase_id}: {e}")
+            return None
+
+    def actualizar_clase(self, clase_id: int, data: Dict[str, Any]) -> bool:
+        """Update a class."""
+        try:
+            # Build update query dynamically based on provided fields
+            allowed_fields = ['nombre', 'descripcion', 'activo', 'capacidad', 'color', 'icono', 'duracion_minutos']
+            updates = []
+            params = {'id': clase_id}
+            
+            for field in allowed_fields:
+                if field in data:
+                    updates.append(f"{field} = :{field}")
+                    params[field] = data[field]
+            
+            if not updates:
+                return True  # Nothing to update
+            
+            query = f"UPDATE clases SET {', '.join(updates)} WHERE id = :id"
+            self.db.execute(text(query), params)
+            self.db.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error updating clase {clase_id}: {e}")
+            self.db.rollback()
+            return False
+
+    def eliminar_clase(self, clase_id: int) -> bool:
+        """Delete a class."""
+        try:
+            self.db.execute(
+                text("DELETE FROM clases WHERE id = :id"),
+                {'id': clase_id}
+            )
+            self.db.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting clase {clase_id}: {e}")
+            self.db.rollback()
+            return False
+
     # ========== Bloques (Schedule Blocks) ==========
 
     def obtener_bloques_clase(self, clase_id: int) -> List[Dict[str, Any]]:

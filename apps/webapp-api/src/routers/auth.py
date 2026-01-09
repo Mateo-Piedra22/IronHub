@@ -282,6 +282,129 @@ async def api_auth_logout(request: Request):
     request.session.clear()
     return JSONResponse({"ok": True})
 
+
+@router.post("/api/auth/login")
+async def api_auth_login(
+    request: Request,
+    svc: AuthService = Depends(get_auth_service)
+):
+    """
+    JSON API endpoint for general login (DNI + password/PIN).
+    Returns user info and session for the Next.js SPA.
+    """
+    try:
+        data = await request.json()
+        dni = str(data.get("dni") or "").strip()
+        password = str(data.get("password") or "").strip()  # could be PIN or owner password
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Datos inválidos"}, status_code=400)
+    
+    if not dni and not password:
+        return JSONResponse({"ok": False, "error": "Credenciales requeridas"}, status_code=400)
+    
+    # If no DNI, try owner login with just password
+    if not dni and password:
+        if _verify_owner_password(password):
+            request.session.clear()
+            request.session["logged_in"] = True
+            request.session["role"] = "owner"
+            return JSONResponse({
+                "ok": True,
+                "user": {
+                    "id": 0,
+                    "nombre": "Dueño",
+                    "rol": "owner",
+                    "dni": None
+                }
+            })
+        return JSONResponse({"ok": False, "error": "Credenciales inválidas"}, status_code=401)
+    
+    # Rate limiting check
+    if is_rate_limited_login(request, dni):
+        return JSONResponse({"ok": False, "error": "Demasiados intentos"}, status_code=429)
+    
+    # Register attempt before verification
+    register_login_attempt(request, dni)
+    
+    # Get user by DNI using SQLAlchemy
+    user = svc.obtener_usuario_por_dni(dni)
+    if not user:
+        return JSONResponse({"ok": False, "error": "Credenciales inválidas"}, status_code=401)
+    
+    # Verify PIN using AuthService
+    pin_result = svc.verificar_pin(user.id, password)
+    if not pin_result['valid']:
+        return JSONResponse({"ok": False, "error": "Credenciales inválidas"}, status_code=401)
+    
+    if not user.activo:
+        return JSONResponse({"ok": False, "error": "Usuario inactivo"}, status_code=403)
+    
+    # Success: clear rate limits
+    clear_login_attempts(request, dni)
+    
+    # Set session
+    request.session.clear()
+    request.session["user_id"] = int(user.id)
+    request.session["role"] = getattr(user, 'rol', None) or "user"
+    request.session["usuario_nombre"] = user.nombre or ""
+    
+    # Issue JWT token
+    jwt_token = None
+    try:
+        jwt_token = _issue_usuario_jwt(int(user.id))
+        if jwt_token:
+            request.session["usuario_jwt"] = jwt_token
+    except Exception:
+        pass
+    
+    return JSONResponse({
+        "ok": True,
+        "user": {
+            "id": user.id,
+            "nombre": user.nombre or "",
+            "rol": getattr(user, 'rol', None) or "user",
+            "dni": user.dni
+        }
+    })
+
+
+@router.get("/api/auth/session")
+async def api_auth_session(request: Request):
+    """
+    JSON API endpoint to check current session status.
+    Returns authenticated status and user info if logged in.
+    """
+    user_id = request.session.get("user_id")
+    role = request.session.get("role")
+    logged_in = request.session.get("logged_in", False)
+    
+    if user_id:
+        nombre = request.session.get("usuario_nombre", "")
+        return JSONResponse({
+            "authenticated": True,
+            "user": {
+                "id": user_id,
+                "nombre": nombre,
+                "rol": role or "user",
+                "dni": None  # Don't expose DNI in session check
+            }
+        })
+    elif logged_in and role in ("owner", "dueño"):
+        return JSONResponse({
+            "authenticated": True,
+            "user": {
+                "id": 0,
+                "nombre": "Dueño",
+                "rol": "owner",
+                "dni": None
+            }
+        })
+    else:
+        return JSONResponse({
+            "authenticated": False,
+            "user": None
+        })
+
 @router.post("/checkin/auth")
 async def checkin_auth(request: Request):
     try:

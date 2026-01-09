@@ -8,7 +8,11 @@ import {
     Clock,
     Users,
     RefreshCw,
-    Download,
+    QrCode,
+    Copy,
+    ExternalLink,
+    Check,
+    Monitor,
 } from 'lucide-react';
 import {
     Button,
@@ -29,8 +33,33 @@ export default function AsistenciasPage() {
     const [filterDesde, setFilterDesde] = useState('');
     const [filterHasta, setFilterHasta] = useState('');
 
+    // Station state
+    const [stationKey, setStationKey] = useState<string | null>(null);
+    const [stationUrl, setStationUrl] = useState<string | null>(null);
+    const [loadingStation, setLoadingStation] = useState(true);
+    const [copied, setCopied] = useState(false);
+
     // Stats
     const [todayCount, setTodayCount] = useState(0);
+
+    // Load station key on mount
+    useEffect(() => {
+        const loadStationKey = async () => {
+            setLoadingStation(true);
+            try {
+                const res = await api.getStationKey();
+                if (res.ok && res.data) {
+                    setStationKey(res.data.station_key);
+                    setStationUrl(res.data.station_url);
+                }
+            } catch {
+                // Station key not available
+            } finally {
+                setLoadingStation(false);
+            }
+        };
+        loadStationKey();
+    }, []);
 
     // Load
     const loadAsistencias = useCallback(async () => {
@@ -59,6 +88,26 @@ export default function AsistenciasPage() {
     useEffect(() => {
         loadAsistencias();
     }, [loadAsistencias]);
+
+    // Copy URL handler
+    const handleCopyUrl = async () => {
+        if (!stationUrl) return;
+        try {
+            await navigator.clipboard.writeText(stationUrl);
+            setCopied(true);
+            success('URL copiada al portapapeles');
+            setTimeout(() => setCopied(false), 2000);
+        } catch {
+            error('No se pudo copiar');
+        }
+    };
+
+    // Open station handler
+    const handleOpenStation = () => {
+        if (stationKey) {
+            window.open(`/station/${stationKey}`, '_blank');
+        }
+    };
 
     // Table columns
     const columns: Column<Asistencia>[] = [
@@ -119,6 +168,58 @@ export default function AsistenciasPage() {
                 >
                     Abrir Check-in
                 </Button>
+            </motion.div>
+
+            {/* Station QR Card */}
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.05 }}
+                className="card p-6 border border-primary-500/30 bg-gradient-to-br from-primary-500/10 to-transparent"
+            >
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                    <div className="flex items-start gap-4">
+                        <div className="w-14 h-14 rounded-xl bg-primary-500/20 flex items-center justify-center flex-shrink-0">
+                            <Monitor className="w-7 h-7 text-primary-400" />
+                        </div>
+                        <div>
+                            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                                <QrCode className="w-5 h-5" />
+                                Pantalla de Estación QR
+                            </h2>
+                            <p className="text-slate-400 text-sm mt-1">
+                                Abrí esta URL en una pantalla del gimnasio. Los socios escanean el QR con su celular para registrar asistencia.
+                            </p>
+                            {stationUrl && !loadingStation && (
+                                <div className="mt-3 flex items-center gap-2 flex-wrap">
+                                    <code className="px-3 py-1.5 rounded-lg bg-slate-900/70 text-primary-300 text-sm font-mono border border-slate-700">
+                                        {stationUrl}
+                                    </code>
+                                    <button
+                                        onClick={handleCopyUrl}
+                                        className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+                                        title="Copiar URL"
+                                    >
+                                        {copied ? <Check className="w-4 h-4 text-success-400" /> : <Copy className="w-4 h-4" />}
+                                    </button>
+                                </div>
+                            )}
+                            {loadingStation && (
+                                <div className="mt-3 text-sm text-slate-500">Cargando URL...</div>
+                            )}
+                        </div>
+                    </div>
+                    <div className="flex gap-2 lg:flex-shrink-0">
+                        <Button
+                            variant="primary"
+                            leftIcon={<ExternalLink className="w-4 h-4" />}
+                            onClick={handleOpenStation}
+                            disabled={!stationKey || loadingStation}
+                        >
+                            Abrir Pantalla
+                        </Button>
+                    </div>
+                </div>
             </motion.div>
 
             {/* Stats */}

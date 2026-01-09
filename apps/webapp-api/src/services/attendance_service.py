@@ -184,6 +184,164 @@ class AttendanceService(BaseService):
             self.db.rollback()
             return False, str(e)
 
+    def validar_token_y_registrar_sin_sesion(self, token: str) -> Tuple[bool, str]:
+        """Validate token and register attendance without requiring session user_id.
+        Gets user_id from the token itself."""
+        try:
+            # Get user_id from token
+            status = self.obtener_estado_token(token)
+            
+            if not status.get('exists'):
+                return False, "Token no encontrado"
+            
+            if status.get('expired'):
+                return False, "Token expirado"
+            
+            if status.get('used'):
+                return False, "Token ya utilizado"
+            
+            usuario_id = status.get('usuario_id')
+            if not usuario_id:
+                return False, "Token no asociado a usuario"
+            
+            # Check if user is active
+            is_active, reason = self.verificar_usuario_activo(usuario_id)
+            if not is_active:
+                return False, reason
+            
+            # Get user name for response
+            result = self.db.execute(
+                text("SELECT nombre FROM usuarios WHERE id = :id LIMIT 1"),
+                {'id': usuario_id}
+            )
+            row = result.fetchone()
+            nombre = row[0] if row else ""
+            
+            # Register attendance
+            self.db.execute(
+                text("""
+                    INSERT INTO asistencias (usuario_id, fecha, hora_registro)
+                    VALUES (:id, CURRENT_DATE, CURRENT_TIME)
+                    ON CONFLICT (usuario_id, fecha) DO NOTHING
+                """),
+                {'id': usuario_id}
+            )
+            
+            # Mark token as used
+            self.marcar_token_usado(token)
+            
+            self.db.commit()
+            return True, nombre or "Asistencia registrada"
+        except Exception as e:
+            logger.error(f"Error validating token without session: {e}")
+            self.db.rollback()
+            return False, str(e)
+
+    def registrar_asistencia_por_dni(self, dni: str) -> Tuple[bool, str]:
+        """Register attendance for a user by DNI lookup."""
+        try:
+            # Find user by DNI
+            result = self.db.execute(
+                text("SELECT id, nombre, activo FROM usuarios WHERE dni = :dni LIMIT 1"),
+                {'dni': dni}
+            )
+            row = result.fetchone()
+            
+            if not row:
+                return False, "DNI no encontrado"
+            
+            usuario_id = row[0]
+            nombre = row[1] or ""
+            activo = bool(row[2]) if row[2] is not None else True
+            
+            if not activo:
+                return False, "Usuario inactivo"
+            
+            # Check if already attended today
+            check = self.db.execute(
+                text("""
+                    SELECT 1 FROM asistencias 
+                    WHERE usuario_id = :id AND fecha::date = CURRENT_DATE LIMIT 1
+                """),
+                {'id': usuario_id}
+            )
+            if check.fetchone():
+                return True, f"{nombre} - Ya registrado hoy"
+            
+            # Register attendance
+            self.db.execute(
+                text("""
+                    INSERT INTO asistencias (usuario_id, fecha, hora_registro)
+                    VALUES (:id, CURRENT_DATE, CURRENT_TIME)
+                    ON CONFLICT (usuario_id, fecha) DO NOTHING
+                """),
+                {'id': usuario_id}
+            )
+            
+            self.db.commit()
+            return True, nombre
+        except Exception as e:
+            logger.error(f"Error registering attendance by DNI: {e}")
+            self.db.rollback()
+            return False, str(e)
+
+    def registrar_asistencia_por_dni_y_pin(self, dni: str, pin: str) -> Tuple[bool, str]:
+        """Register attendance for a user by DNI + PIN verification (more secure)."""
+        try:
+            # Find user by DNI and verify PIN
+            result = self.db.execute(
+                text("SELECT id, nombre, activo, pin FROM usuarios WHERE dni = :dni LIMIT 1"),
+                {'dni': dni}
+            )
+            row = result.fetchone()
+            
+            if not row:
+                return False, "DNI no encontrado"
+            
+            usuario_id = row[0]
+            nombre = row[1] or ""
+            activo = bool(row[2]) if row[2] is not None else True
+            stored_pin = row[3] or ""
+            
+            if not activo:
+                return False, "Usuario inactivo"
+            
+            # Verify PIN
+            if not stored_pin:
+                return False, "Usuario sin PIN configurado"
+            
+            if stored_pin != pin:
+                return False, "PIN incorrecto"
+            
+            # Check if already attended today
+            check = self.db.execute(
+                text("""
+                    SELECT 1 FROM asistencias 
+                    WHERE usuario_id = :id AND fecha::date = CURRENT_DATE LIMIT 1
+                """),
+                {'id': usuario_id}
+            )
+            if check.fetchone():
+                return True, f"{nombre} - Ya registrado hoy"
+            
+            # Register attendance
+            self.db.execute(
+                text("""
+                    INSERT INTO asistencias (usuario_id, fecha, hora_registro)
+                    VALUES (:id, CURRENT_DATE, CURRENT_TIME)
+                    ON CONFLICT (usuario_id, fecha) DO NOTHING
+                """),
+                {'id': usuario_id}
+            )
+            
+            self.db.commit()
+            return True, nombre
+        except Exception as e:
+            logger.error(f"Error registering attendance by DNI+PIN: {e}")
+            self.db.rollback()
+            return False, str(e)
+
+
     # ========== Attendance Registration ==========
 
     def registrar_asistencia(self, usuario_id: int, fecha: Optional[date] = None) -> Optional[int]:
@@ -374,3 +532,281 @@ class AttendanceService(BaseService):
         except Exception as e:
             logger.error(f"Error getting attendance details: {e}")
             return []
+
+    # ========== Station QR Check-in ==========
+
+    def _ensure_station_tables(self) -> None:
+        """Ensure station tables exist."""
+        try:
+            self.db.execute(text("""
+                CREATE TABLE IF NOT EXISTS checkin_station_tokens (
+                    id SERIAL PRIMARY KEY,
+                    gym_id INTEGER NOT NULL,
+                    token VARCHAR(64) UNIQUE NOT NULL,
+                    expires_at TIMESTAMP NOT NULL,
+                    used_by INTEGER,
+                    used_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_station_tokens_token ON checkin_station_tokens(token);
+                CREATE INDEX IF NOT EXISTS idx_station_tokens_gym ON checkin_station_tokens(gym_id);
+            """))
+            self.db.commit()
+        except Exception as e:
+            logger.warning(f"Station tables may already exist: {e}")
+            self.db.rollback()
+
+    def generar_station_key(self, gym_id: int) -> str:
+        """Generate or get existing station key for a gym."""
+        try:
+            # Check if gym already has a station key
+            result = self.db.execute(
+                text("SELECT station_key FROM gym_config WHERE gym_id = :gym_id LIMIT 1"),
+                {'gym_id': gym_id}
+            )
+            row = result.fetchone()
+            if row and row[0]:
+                return row[0]
+            
+            # Generate new station key
+            station_key = secrets.token_urlsafe(16)
+            
+            # Upsert station key
+            self.db.execute(
+                text("""
+                    INSERT INTO gym_config (gym_id, station_key, created_at)
+                    VALUES (:gym_id, :key, NOW())
+                    ON CONFLICT (gym_id) DO UPDATE SET station_key = :key
+                """),
+                {'gym_id': gym_id, 'key': station_key}
+            )
+            self.db.commit()
+            return station_key
+        except Exception as e:
+            logger.error(f"Error generating station key: {e}")
+            self.db.rollback()
+            # Fallback to simple key
+            return secrets.token_urlsafe(16)
+
+    def validar_station_key(self, station_key: str) -> Optional[int]:
+        """Validate station key and return gym_id, or None if invalid."""
+        try:
+            result = self.db.execute(
+                text("SELECT gym_id FROM gym_config WHERE station_key = :key LIMIT 1"),
+                {'key': station_key}
+            )
+            row = result.fetchone()
+            return row[0] if row else None
+        except Exception as e:
+            logger.error(f"Error validating station key: {e}")
+            return None
+
+    def crear_station_token(self, gym_id: int, expires_seconds: int = 300) -> Dict[str, Any]:
+        """Create a new station token for the gym's QR display."""
+        try:
+            self._ensure_station_tables()
+            
+            # Invalidate any existing active tokens for this gym
+            self.db.execute(
+                text("DELETE FROM checkin_station_tokens WHERE gym_id = :gym_id AND used_by IS NULL"),
+                {'gym_id': gym_id}
+            )
+            
+            # Create new token
+            token = secrets.token_urlsafe(16)
+            expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_seconds)
+            
+            self.db.execute(
+                text("""
+                    INSERT INTO checkin_station_tokens (gym_id, token, expires_at)
+                    VALUES (:gym_id, :token, :expires_at)
+                """),
+                {'gym_id': gym_id, 'token': token, 'expires_at': expires_at}
+            )
+            self.db.commit()
+            
+            return {
+                'token': token,
+                'expires_at': expires_at.isoformat(),
+                'expires_in': expires_seconds
+            }
+        except Exception as e:
+            logger.error(f"Error creating station token: {e}")
+            self.db.rollback()
+            raise
+
+    def obtener_station_token_activo(self, gym_id: int) -> Optional[Dict[str, Any]]:
+        """Get active (unused, non-expired) station token for gym, or create new one."""
+        try:
+            self._ensure_station_tables()
+            
+            # Look for active token
+            result = self.db.execute(
+                text("""
+                    SELECT token, expires_at 
+                    FROM checkin_station_tokens 
+                    WHERE gym_id = :gym_id AND used_by IS NULL AND expires_at > NOW()
+                    ORDER BY created_at DESC LIMIT 1
+                """),
+                {'gym_id': gym_id}
+            )
+            row = result.fetchone()
+            
+            if row:
+                expires_at = row[1]
+                now = datetime.now(timezone.utc)
+                if expires_at.tzinfo is None:
+                    now = now.replace(tzinfo=None)
+                remaining = int((expires_at - now).total_seconds())
+                
+                return {
+                    'token': row[0],
+                    'expires_at': expires_at.isoformat() if hasattr(expires_at, 'isoformat') else str(expires_at),
+                    'expires_in': max(0, remaining)
+                }
+            
+            # No active token, create new one
+            return self.crear_station_token(gym_id)
+        except Exception as e:
+            logger.error(f"Error getting active station token: {e}")
+            return self.crear_station_token(gym_id)
+
+    def validar_station_scan(self, token: str, usuario_id: int) -> Tuple[bool, str, Optional[Dict]]:
+        """
+        Validate a station token scan and register attendance.
+        Returns (success, message, user_data).
+        """
+        try:
+            # Check token exists and is valid
+            result = self.db.execute(
+                text("""
+                    SELECT id, gym_id, expires_at, used_by 
+                    FROM checkin_station_tokens 
+                    WHERE token = :token LIMIT 1
+                """),
+                {'token': token}
+            )
+            row = result.fetchone()
+            
+            if not row:
+                return False, "Código QR inválido", None
+            
+            token_id, gym_id, expires_at, used_by = row
+            
+            # Check if already used
+            if used_by:
+                return False, "Código QR ya utilizado", None
+            
+            # Check expiration
+            now = datetime.now(timezone.utc)
+            if expires_at.tzinfo is None:
+                now = now.replace(tzinfo=None)
+            if expires_at < now:
+                return False, "Código QR expirado", None
+            
+            # Get user info
+            user_result = self.db.execute(
+                text("SELECT nombre, dni, activo FROM usuarios WHERE id = :id LIMIT 1"),
+                {'id': usuario_id}
+            )
+            user_row = user_result.fetchone()
+            
+            if not user_row:
+                return False, "Usuario no encontrado", None
+            
+            nombre, dni, activo = user_row
+            
+            if not activo:
+                return False, "Usuario inactivo", None
+            
+            # Check if already attended today
+            check = self.db.execute(
+                text("""
+                    SELECT 1 FROM asistencias 
+                    WHERE usuario_id = :id AND fecha::date = CURRENT_DATE LIMIT 1
+                """),
+                {'id': usuario_id}
+            )
+            if check.fetchone():
+                return True, f"{nombre} - Ya registrado hoy", {
+                    'nombre': nombre,
+                    'dni': dni,
+                    'already_checked': True
+                }
+            
+            # Register attendance
+            self.db.execute(
+                text("""
+                    INSERT INTO asistencias (usuario_id, fecha, hora_registro)
+                    VALUES (:id, CURRENT_DATE, CURRENT_TIME)
+                    ON CONFLICT (usuario_id, fecha) DO NOTHING
+                """),
+                {'id': usuario_id}
+            )
+            
+            # Mark token as used
+            self.db.execute(
+                text("""
+                    UPDATE checkin_station_tokens 
+                    SET used_by = :user_id, used_at = NOW() 
+                    WHERE id = :token_id
+                """),
+                {'user_id': usuario_id, 'token_id': token_id}
+            )
+            
+            self.db.commit()
+            
+            return True, "Check-in exitoso", {
+                'nombre': nombre,
+                'dni': dni,
+                'hora': datetime.now().strftime('%H:%M:%S'),
+                'already_checked': False
+            }
+        except Exception as e:
+            logger.error(f"Error validating station scan: {e}")
+            self.db.rollback()
+            return False, str(e), None
+
+    def obtener_station_checkins_recientes(self, gym_id: int, limit: int = 5) -> List[Dict[str, Any]]:
+        """Get recent check-ins for the station display."""
+        try:
+            result = self.db.execute(
+                text("""
+                    SELECT u.nombre, u.dni, a.hora_registro
+                    FROM asistencias a
+                    JOIN usuarios u ON u.id = a.usuario_id
+                    WHERE a.fecha::date = CURRENT_DATE
+                    ORDER BY a.hora_registro DESC
+                    LIMIT :limit
+                """),
+                {'limit': limit}
+            )
+            return [
+                {
+                    'nombre': row[0] or '',
+                    'dni': row[1] or '',
+                    'hora': str(row[2])[:8] if row[2] else ''
+                }
+                for row in result.fetchall()
+            ]
+        except Exception as e:
+            logger.error(f"Error getting recent station check-ins: {e}")
+            return []
+
+    def obtener_station_stats(self, gym_id: int) -> Dict[str, int]:
+        """Get today's check-in stats for station display."""
+        try:
+            result = self.db.execute(
+                text("""
+                    SELECT COUNT(*) FROM asistencias WHERE fecha::date = CURRENT_DATE
+                """)
+            )
+            total_hoy = result.scalar() or 0
+            
+            return {
+                'total_hoy': total_hoy
+            }
+        except Exception as e:
+            logger.error(f"Error getting station stats: {e}")
+            return {'total_hoy': 0}
+

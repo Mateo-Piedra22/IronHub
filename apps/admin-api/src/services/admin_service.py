@@ -1191,6 +1191,163 @@ class AdminService:
             logger.error(f"Error migrating B2 prefix: {e}")
             return False
 
+    def upload_gym_asset(self, gym_id: int, file_content: bytes, filename: str, content_type: str = "application/octet-stream") -> Dict[str, Any]:
+        """Upload a file to the gym's B2 assets folder and return the public URL."""
+        try:
+            # Get gym info
+            gym = self.obtener_gimnasio(gym_id)
+            if not gym:
+                return {"ok": False, "error": "gym_not_found"}
+            
+            subdominio = gym.get("subdominio", "").strip().lower()
+            if not subdominio:
+                return {"ok": False, "error": "invalid_subdomain"}
+            
+            bucket = os.getenv("B2_BUCKET_NAME")
+            if not bucket:
+                return {"ok": False, "error": "B2_BUCKET_NAME not configured"}
+            
+            s3 = self._b2_get_s3_client()
+            if not s3:
+                return {"ok": False, "error": "S3 client not available"}
+            
+            # Ensure assets folder exists
+            self._b2_ensure_prefix_for_sub(subdominio)
+            
+            # Sanitize filename
+            safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+            timestamp = int(time.time())
+            key = f"{subdominio}-assets/{timestamp}_{safe_filename}"
+            
+            # Upload
+            s3.put_object(
+                Bucket=bucket,
+                Key=key,
+                Body=file_content,
+                ContentType=content_type
+            )
+            
+            # Build public URL (Cloudflare R2 or B2 public bucket)
+            cdn_domain = os.getenv("CDN_CUSTOM_DOMAIN", "") or os.getenv("B2_CDN_DOMAIN", "")
+            if cdn_domain:
+                if not cdn_domain.startswith("http"):
+                    cdn_domain = f"https://{cdn_domain}"
+                public_url = f"{cdn_domain}/{key}"
+            else:
+                # Fallback to B2 native URL
+                endpoint = os.getenv("B2_ENDPOINT_URL", "").strip()
+                if endpoint:
+                    public_url = f"{endpoint}/{bucket}/{key}"
+                else:
+                    public_url = f"https://{bucket}.s3.backblazeb2.com/{key}"
+            
+            logger.info(f"Uploaded asset for gym {gym_id}: {key}")
+            return {"ok": True, "url": public_url, "key": key}
+        except Exception as e:
+            logger.error(f"Error uploading asset for gym {gym_id}: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def save_gym_branding(self, gym_id: int, branding: Dict[str, Any]) -> Dict[str, Any]:
+        """Save branding configuration for a gym (logo_url, colors, address, etc.)."""
+        try:
+            gym = self.obtener_gimnasio(gym_id)
+            if not gym:
+                return {"ok": False, "error": "gym_not_found"}
+            
+            subdominio = gym.get("subdominio", "").strip().lower()
+            if not subdominio:
+                return {"ok": False, "error": "invalid_subdomain"}
+            
+            # Get gym's tenant database
+            db_name = gym.get("db_name")
+            if not db_name:
+                return {"ok": False, "error": "no_tenant_db"}
+            
+            # Save branding to configuracion table in tenant DB
+            engine = self._get_tenant_engine(db_name)
+            if not engine:
+                return {"ok": False, "error": "could_not_connect_tenant"}
+            
+            Session = sessionmaker(bind=engine)
+            session = Session()
+            try:
+                # Branding config keys
+                config_keys = {
+                    "logo_url": branding.get("logo_url", ""),
+                    "nombre_publico": branding.get("nombre_publico", ""),
+                    "direccion": branding.get("direccion", ""),
+                    "color_primario": branding.get("color_primario", "#6366f1"),
+                    "color_secundario": branding.get("color_secundario", "#22c55e"),
+                    "color_fondo": branding.get("color_fondo", "#0a0a0a"),
+                    "color_texto": branding.get("color_texto", "#ffffff"),
+                }
+                
+                for key, value in config_keys.items():
+                    # Upsert each config
+                    existing = session.query(Configuracion).filter_by(clave=key).first()
+                    if existing:
+                        existing.valor = str(value)
+                    else:
+                        session.add(Configuracion(clave=key, valor=str(value)))
+                
+                session.commit()
+                
+                self.log_action("owner", "save_branding", gym_id, f"Updated branding for {subdominio}")
+                return {"ok": True}
+            finally:
+                session.close()
+                engine.dispose()
+        except Exception as e:
+            logger.error(f"Error saving branding for gym {gym_id}: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def get_gym_branding(self, gym_id: int) -> Dict[str, Any]:
+        """Get current branding configuration for a gym."""
+        try:
+            gym = self.obtener_gimnasio(gym_id)
+            if not gym:
+                return {}
+            
+            db_name = gym.get("db_name")
+            if not db_name:
+                return {}
+            
+            engine = self._get_tenant_engine(db_name)
+            if not engine:
+                return {}
+            
+            Session = sessionmaker(bind=engine)
+            session = Session()
+            try:
+                branding = {}
+                config_keys = ["logo_url", "nombre_publico", "direccion", "color_primario", 
+                              "color_secundario", "color_fondo", "color_texto"]
+                
+                for key in config_keys:
+                    config = session.query(Configuracion).filter_by(clave=key).first()
+                    if config:
+                        branding[key] = config.valor
+                
+                return branding
+            finally:
+                session.close()
+                engine.dispose()
+        except Exception as e:
+            logger.error(f"Error getting branding for gym {gym_id}: {e}")
+            return {}
+
+    def _get_tenant_engine(self, db_name: str):
+        """Get SQLAlchemy engine for a tenant database."""
+        try:
+            params = self.db.params.copy()
+            params["database"] = db_name
+            
+            conn_str = f"postgresql://{params.get('user')}:{params.get('password')}@{params.get('host')}:{params.get('port')}/{db_name}?sslmode={params.get('sslmode', 'require')}"
+            return create_engine(conn_str, pool_pre_ping=True)
+        except Exception as e:
+            logger.error(f"Error creating tenant engine for {db_name}: {e}")
+            return None
+
     # --- Complex Business Logic ---
 
     def crear_gimnasio(self, nombre: str, subdominio: str, whatsapp_phone_id: str | None = None, whatsapp_access_token: str | None = None, owner_phone: str | None = None, whatsapp_business_account_id: str | None = None, whatsapp_verify_token: str | None = None, whatsapp_app_secret: str | None = None, whatsapp_nonblocking: bool | None = None, whatsapp_send_timeout_seconds: float | None = None, b2_bucket_name: Optional[str] = None) -> Dict[str, Any]:

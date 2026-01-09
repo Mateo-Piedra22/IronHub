@@ -20,6 +20,346 @@ from src.models import MetodoPago, Pago
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# --- Config Endpoints (for webapp-web frontend compatibility) ---
+
+@router.get("/api/config/tipos-cuota")
+async def api_config_tipos_cuota(
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """Get subscription types. Returns {tipos: []}."""
+    try:
+        tipos = svc.obtener_tipos_cuota(solo_activos=True)
+        return {"tipos": tipos}
+    except Exception as e:
+        logger.error(f"Error obteniendo tipos_cuota: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/api/config/metodos-pago")
+async def api_config_metodos_pago(
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """Get payment methods. Returns {metodos: []}."""
+    try:
+        metodos = svc.obtener_metodos_pago(solo_activos=True)
+        return {"metodos": metodos}
+    except Exception as e:
+        logger.error(f"Error obteniendo metodos_pago: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/api/config/conceptos")
+async def api_config_conceptos(
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """Get payment concepts. Returns {conceptos: []}."""
+    try:
+        conceptos = svc.obtener_conceptos_pago(solo_activos=True)
+        return {"conceptos": conceptos}
+    except Exception as e:
+        logger.error(f"Error obteniendo conceptos: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# --- CRUD for /api/config/tipos-cuota ---
+
+@router.post("/api/config/tipos-cuota")
+async def api_config_tipos_cuota_create(
+    request: Request,
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """Create subscription type."""
+    payload = await request.json()
+    try:
+        nombre = (payload.get("nombre") or "").strip()
+        if not nombre:
+            raise HTTPException(status_code=400, detail="'nombre' es obligatorio")
+        data = {
+            'nombre': nombre,
+            'precio': float(payload.get("precio") or 0),
+            'duracion_dias': int(payload.get("duracion_dias") or 30),
+            'activo': True
+        }
+        new_id = svc.crear_tipo_cuota(data)
+        return {"ok": True, "id": new_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.put("/api/config/tipos-cuota/{tipo_id}")
+async def api_config_tipos_cuota_update(
+    tipo_id: int,
+    request: Request,
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """Update subscription type."""
+    payload = await request.json()
+    try:
+        updated = svc.actualizar_tipo_cuota(tipo_id, payload)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Tipo de cuota no encontrado")
+        return {"ok": True, "id": tipo_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.delete("/api/config/tipos-cuota/{tipo_id}")
+async def api_config_tipos_cuota_delete(
+    tipo_id: int,
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """Delete subscription type."""
+    try:
+        deleted = svc.eliminar_tipo_cuota(tipo_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Tipo de cuota no encontrado")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/api/config/tipos-cuota/{tipo_id}/toggle")
+async def api_config_tipos_cuota_toggle(
+    tipo_id: int,
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """Toggle subscription type active status."""
+    try:
+        tipo = svc.obtener_tipo_cuota(tipo_id)
+        if not tipo:
+            raise HTTPException(status_code=404, detail="Tipo de cuota no encontrado")
+        new_status = not tipo.activo
+        svc.actualizar_tipo_cuota(tipo_id, {"activo": new_status})
+        return {"ok": True, "activo": new_status}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# --- CRUD for /api/config/metodos-pago ---
+
+@router.post("/api/config/metodos-pago")
+async def api_config_metodos_pago_create(
+    request: Request,
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """Create payment method."""
+    payload = await request.json()
+    try:
+        nombre = (payload.get("nombre") or "").strip()
+        if not nombre:
+            raise HTTPException(status_code=400, detail="'nombre' es obligatorio")
+        data = {'nombre': nombre, 'activo': True, 'comision': 0}
+        new_id = svc.crear_metodo_pago(data)
+        return {"ok": True, "id": new_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.put("/api/config/metodos-pago/{metodo_id}")
+async def api_config_metodos_pago_update(
+    metodo_id: int,
+    request: Request,
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """Update payment method."""
+    payload = await request.json()
+    try:
+        updated = svc.actualizar_metodo_pago(metodo_id, payload)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Método de pago no encontrado")
+        return {"ok": True, "id": metodo_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.delete("/api/config/metodos-pago/{metodo_id}")
+async def api_config_metodos_pago_delete(
+    metodo_id: int,
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """Delete payment method."""
+    try:
+        deleted = svc.eliminar_metodo_pago(metodo_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Método de pago no encontrado")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/api/config/metodos-pago/{metodo_id}/toggle")
+async def api_config_metodos_pago_toggle(
+    metodo_id: int,
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """Toggle payment method active status."""
+    try:
+        metodo = svc.obtener_metodo_pago(metodo_id)
+        if not metodo:
+            raise HTTPException(status_code=404, detail="Método de pago no encontrado")
+        new_status = not metodo.activo
+        svc.actualizar_metodo_pago(metodo_id, {"activo": new_status})
+        return {"ok": True, "activo": new_status}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# --- CRUD for /api/config/conceptos ---
+
+@router.post("/api/config/conceptos")
+async def api_config_conceptos_create(
+    request: Request,
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """Create payment concept."""
+    payload = await request.json()
+    try:
+        nombre = (payload.get("nombre") or "").strip()
+        if not nombre:
+            raise HTTPException(status_code=400, detail="'nombre' es obligatorio")
+        data = {'nombre': nombre, 'activo': True}
+        new_id = svc.crear_concepto_pago(data)
+        return {"ok": True, "id": new_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.put("/api/config/conceptos/{concepto_id}")
+async def api_config_conceptos_update(
+    concepto_id: int,
+    request: Request,
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """Update payment concept."""
+    payload = await request.json()
+    try:
+        updated = svc.actualizar_concepto_pago(concepto_id, payload)
+        if not updated:
+            raise HTTPException(status_code=404, detail="Concepto no encontrado")
+        return {"ok": True, "id": concepto_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.delete("/api/config/conceptos/{concepto_id}")
+async def api_config_conceptos_delete(
+    concepto_id: int,
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """Delete payment concept."""
+    try:
+        deleted = svc.eliminar_concepto_pago(concepto_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Concepto no encontrado")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/api/config/conceptos/{concepto_id}/toggle")
+async def api_config_conceptos_toggle(
+    concepto_id: int,
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """Toggle payment concept active status."""
+    try:
+        concepto = svc.obtener_concepto_pago(concepto_id)
+        if not concepto:
+            raise HTTPException(status_code=404, detail="Concepto no encontrado")
+        new_status = not concepto.activo
+        svc.actualizar_concepto_pago(concepto_id, {"activo": new_status})
+        return {"ok": True, "activo": new_status}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# --- Config Recibos Endpoints (frontend-compatible aliases) ---
+
+@router.get("/api/config/recibos")
+async def api_config_recibos_get(
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """Get receipt numbering configuration (frontend-compatible alias)."""
+    try:
+        cfg = svc.get_receipt_numbering_config()
+        return cfg
+    except Exception as e:
+        logger.error(f"Error obteniendo config recibos: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.put("/api/config/recibos")
+async def api_config_recibos_put(
+    request: Request,
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """Update receipt numbering configuration (frontend-compatible alias)."""
+    try:
+        payload = await request.json()
+        ok = svc.save_receipt_numbering_config(payload)
+        if ok:
+            return {"ok": True}
+        return JSONResponse({"error": "No se pudo guardar la configuración"}, status_code=400)
+    except Exception as e:
+        logger.error(f"Error guardando config recibos: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/api/config/recibos/next-number")
+async def api_config_recibos_next_number(
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """Get next receipt number (frontend-compatible alias)."""
+    try:
+        numero = svc.get_next_receipt_number()
+        return {"numero": str(numero)}
+    except Exception as e:
+        logger.error(f"Error obteniendo numero proximo: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 # --- API Metadatos de pago ---
 
 @router.get("/api/metodos_pago")
@@ -272,6 +612,44 @@ async def api_tipos_cuota_delete(
         return JSONResponse({"error": str(e)}, status_code=500)
 
 # --- Pagos y Recibos ---
+
+@router.get("/api/pagos")
+async def api_pagos_list(
+    request: Request,
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """List payments with optional filters. Returns {pagos: [], total}."""
+    try:
+        desde = request.query_params.get("desde")
+        hasta = request.query_params.get("hasta")
+        usuario_id = request.query_params.get("usuario_id")
+        metodo_id = request.query_params.get("metodo_id")
+        limit_q = request.query_params.get("limit")
+        offset_q = request.query_params.get("offset") or request.query_params.get("page")
+        
+        limit = int(limit_q) if (limit_q and str(limit_q).isdigit()) else 50
+        offset = int(offset_q) if (offset_q and str(offset_q).isdigit()) else 0
+        
+        # Map desde/hasta to start/end for service
+        rows = svc.obtener_pagos_por_fecha(desde, hasta)
+        
+        # Filter by usuario_id if provided
+        if usuario_id and str(usuario_id).isdigit():
+            uid = int(usuario_id)
+            rows = [r for r in rows if r.get("usuario_id") == uid]
+        
+        # Filter by metodo_id if provided
+        if metodo_id and str(metodo_id).isdigit():
+            mid = int(metodo_id)
+            rows = [r for r in rows if r.get("metodo_pago_id") == mid]
+        
+        total = len(rows)
+        sliced = rows[offset:offset+limit]
+        return {"pagos": sliced, "total": total}
+    except Exception as e:
+        logger.error(f"Error obteniendo pagos: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.get("/api/pagos_detalle")
 async def api_pagos_detalle(

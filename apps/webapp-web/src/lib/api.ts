@@ -1070,11 +1070,15 @@ class ApiClient {
         });
     }
 
-    async checkInByDni(dni: string) {
-        return this.request<{ ok: boolean; usuario_nombre?: string; mensaje?: string }>('/api/checkin/dni', {
+    async checkInByDni(dni: string, pin?: string) {
+        return this.request<{ ok: boolean; usuario_nombre?: string; mensaje?: string; require_pin?: boolean }>('/api/checkin/dni', {
             method: 'POST',
-            body: JSON.stringify({ dni }),
+            body: JSON.stringify({ dni, ...(pin ? { pin } : {}) }),
         });
+    }
+
+    async getCheckinConfig() {
+        return this.request<{ require_pin: boolean }>('/api/checkin/config');
     }
 
     async createAsistencia(usuarioId: number, fecha?: string) {
@@ -1114,6 +1118,17 @@ class ApiClient {
 
     async getCheckinTokenStatus(token: string) {
         return this.request<{ exists: boolean; used: boolean; expired: boolean }>(`/api/checkin/token_status?token=${encodeURIComponent(token)}`);
+    }
+
+    async scanStationQR(token: string) {
+        return this.request<{ ok: boolean; mensaje: string; usuario?: { nombre: string; dni: string; hora: string } }>('/api/checkin/station/scan', {
+            method: 'POST',
+            body: JSON.stringify({ token }),
+        });
+    }
+
+    async getStationKey() {
+        return this.request<{ station_key: string; station_url: string }>('/api/gestion/station-key');
     }
 
     // === User Tags (Etiquetas) ===

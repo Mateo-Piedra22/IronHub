@@ -6,23 +6,22 @@ import {
     ScanLine,
     CheckCircle2,
     XCircle,
-    Camera,
-    Keyboard,
     User,
     Clock,
     LogOut,
     Phone,
     ChevronDown,
+    Camera,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
-
-type ScanStatus = 'idle' | 'scanning' | 'processing' | 'success' | 'error';
+import { Html5Qrcode } from 'html5-qrcode';
 
 interface CheckinResult {
     success: boolean;
     message: string;
     userName?: string;
+    userDni?: string;
     timestamp?: string;
 }
 
@@ -46,7 +45,7 @@ export default function CheckinPage() {
     const [authLoading, setAuthLoading] = useState(false);
     const [authError, setAuthError] = useState('');
 
-    // User quota info
+    // User info
     const [userInfo, setUserInfo] = useState<{
         cuotasVencidas?: number;
         diasRestantes?: number;
@@ -56,15 +55,13 @@ export default function CheckinPage() {
     } | null>(null);
 
     // Scanner state
-    const [mode, setMode] = useState<'camera' | 'manual'>('manual');
-    const [scanStatus, setScanStatus] = useState<ScanStatus>('idle');
+    const [scannerReady, setScannerReady] = useState(false);
+    const [scanning, setScanning] = useState(false);
     const [lastResult, setLastResult] = useState<CheckinResult | null>(null);
-    const [manualToken, setManualToken] = useState('');
-    const [recentCheckins, setRecentCheckins] = useState<Array<{ name: string; time: string }>>([]);
+    const [recentCheckins, setRecentCheckins] = useState<Array<{ name: string; dni: string; time: string }>>([]);
 
-    const videoRef = useRef<HTMLVideoElement>(null);
-    const streamRef = useRef<MediaStream | null>(null);
-    const inputRef = useRef<HTMLInputElement>(null);
+    const scannerRef = useRef<Html5Qrcode | null>(null);
+    const scannerContainerRef = useRef<HTMLDivElement>(null);
 
     // Restore saved credentials
     useEffect(() => {
@@ -126,122 +123,137 @@ export default function CheckinPage() {
         }
     };
 
-    // Start camera
-    const startCamera = useCallback(async () => {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'environment' },
-            });
-            streamRef.current = stream;
-            if (videoRef.current) {
-                videoRef.current.srcObject = stream;
+    // Initialize QR scanner when authenticated
+    useEffect(() => {
+        if (!authenticated) return;
+
+        const initScanner = async () => {
+            try {
+                scannerRef.current = new Html5Qrcode('qr-scanner-container');
+                setScannerReady(true);
+                startScanning();
+            } catch (err) {
+                console.error('Error initializing scanner:', err);
             }
-            setScanStatus('scanning');
-        } catch (err) {
-            console.error('Camera error:', err);
-            setMode('manual');
-        }
-    }, []);
+        };
 
-    // Stop camera
-    const stopCamera = useCallback(() => {
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach((track) => track.stop());
-            streamRef.current = null;
-        }
-    }, []);
+        // Small delay to ensure DOM is ready
+        const timer = setTimeout(initScanner, 500);
 
-    // Handle mode change
-    useEffect(() => {
-        if (authenticated && mode === 'camera') {
-            startCamera();
-        } else {
-            stopCamera();
-        }
-        return () => stopCamera();
-    }, [authenticated, mode, startCamera, stopCamera]);
+        return () => {
+            clearTimeout(timer);
+            if (scannerRef.current && scanning) {
+                scannerRef.current.stop().catch(() => { });
+            }
+        };
+    }, [authenticated]);
 
-    // Focus input on mount and mode change
-    useEffect(() => {
-        if (authenticated && mode === 'manual' && inputRef.current) {
-            inputRef.current.focus();
-        }
-    }, [authenticated, mode, scanStatus]);
+    // Start scanning
+    const startScanning = useCallback(async () => {
+        if (!scannerRef.current || scanning) return;
 
-    // Process token (from QR or manual - using DNI)
-    const processToken = useCallback(async (token: string) => {
-        if (!token.trim()) return;
-
-        // Check if user is inactive
-        if (userInfo && !userInfo.exento && userInfo.activo === false) {
-            setLastResult({
-                success: false,
-                message: 'Cuenta desactivada. No podés registrar asistencia.',
-            });
-            setScanStatus('error');
-            setTimeout(() => {
-                setScanStatus('idle');
-                setLastResult(null);
-            }, 3000);
-            return;
-        }
-
-        setScanStatus('processing');
         try {
-            const res = await api.checkInByDni(token);
+            setScanning(true);
+            await scannerRef.current.start(
+                { facingMode: 'environment' },
+                {
+                    fps: 10,
+                    qrbox: { width: 250, height: 250 },
+                    aspectRatio: 1,
+                },
+                async (decodedText) => {
+                    // QR scanned successfully
+                    await handleQRScanned(decodedText);
+                },
+                () => { }
+            );
+        } catch (err) {
+            console.error('Error starting scanner:', err);
+            setScanning(false);
+        }
+    }, [scanning]);
+
+    // Handle QR scan
+    const handleQRScanned = async (token: string) => {
+        // Stop scanner temporarily
+        if (scannerRef.current) {
+            await scannerRef.current.stop();
+            setScanning(false);
+        }
+
+        // Validate the token
+        try {
+            const res = await api.scanStationQR(token);
 
             if (res.ok && res.data?.ok) {
                 const timestamp = new Date().toLocaleTimeString('es-AR');
                 const result: CheckinResult = {
                     success: true,
-                    message: res.data.mensaje || 'Check-in exitoso',
-                    userName: res.data.usuario_nombre || 'Usuario',
+                    message: res.data.mensaje || '¡Check-in exitoso!',
+                    userName: res.data.usuario?.nombre || 'Usuario',
+                    userDni: res.data.usuario?.dni || '',
                     timestamp,
                 };
                 setLastResult(result);
-                setScanStatus('success');
+
+                // Add to recent list
                 setRecentCheckins((prev) => [
-                    { name: result.userName!, time: timestamp },
-                    ...prev.slice(0, 9),
+                    { name: result.userName!, dni: result.userDni!, time: timestamp },
+                    ...prev.slice(0, 4),
                 ]);
+
+                // Play success sound
+                playSuccessSound();
             } else {
                 setLastResult({
                     success: false,
-                    message: res.error || res.data?.mensaje || 'Usuario no encontrado o inactivo',
+                    message: res.data?.mensaje || res.error || 'Error al escanear',
                 });
-                setScanStatus('error');
             }
         } catch {
             setLastResult({
                 success: false,
                 message: 'Error de conexión',
             });
-            setScanStatus('error');
         }
 
-        // Reset after delay
+        // Reset after delay and restart scanner
         setTimeout(() => {
-            setScanStatus('idle');
-            setManualToken('');
             setLastResult(null);
-            if (inputRef.current) {
-                inputRef.current.focus();
-            }
-        }, 2500);
-    }, [userInfo]);
+            startScanning();
+        }, 3000);
+    };
 
-    // Manual submit
-    const handleManualSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        processToken(manualToken);
+    // Play success sound
+    const playSuccessSound = () => {
+        try {
+            const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+            const oscillator = ctx.createOscillator();
+            const gainNode = ctx.createGain();
+
+            oscillator.connect(gainNode);
+            gainNode.connect(ctx.destination);
+
+            oscillator.frequency.value = 880;
+            oscillator.type = 'sine';
+            gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+
+            oscillator.start(ctx.currentTime);
+            oscillator.stop(ctx.currentTime + 0.3);
+        } catch { }
     };
 
     // Logout
     const handleLogout = async () => {
-        stopCamera();
+        if (scannerRef.current && scanning) {
+            await scannerRef.current.stop().catch(() => { });
+        }
         await api.logout();
         setAuthenticated(false);
         setUserInfo(null);
+        setScanning(false);
+        setScannerReady(false);
     };
 
     // Get quota warning message
@@ -283,7 +295,7 @@ export default function CheckinPage() {
                             <ScanLine className="w-8 h-8 text-white" />
                         </div>
                         <h1 className="text-2xl font-display font-bold text-white">Check-in</h1>
-                        <p className="text-slate-400 mt-1">Ingresá tus datos para habilitar el lector</p>
+                        <p className="text-slate-400 mt-1">Ingresá tus datos para escanear el QR</p>
                     </div>
 
                     <div className="card p-8">
@@ -386,18 +398,18 @@ export default function CheckinPage() {
         );
     }
 
-    // Main check-in screen
+    // Main scanner screen
     return (
-        <div className="min-h-screen bg-slate-950 p-4">
+        <div className="min-h-screen bg-slate-950 flex flex-col">
             {/* Header */}
-            <div className="flex items-center justify-between mb-6">
+            <header className="flex items-center justify-between p-4 border-b border-slate-800">
                 <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-success-500 to-success-600 flex items-center justify-center">
                         <ScanLine className="w-5 h-5 text-white" />
                     </div>
                     <div>
                         <h1 className="text-lg font-display font-bold text-white">Check-in</h1>
-                        <p className="text-xs text-slate-500">Ingresa el DNI del socio</p>
+                        <p className="text-xs text-slate-500">Escanea el código QR</p>
                     </div>
                 </div>
                 <button
@@ -406,7 +418,7 @@ export default function CheckinPage() {
                 >
                     <LogOut className="w-5 h-5" />
                 </button>
-            </div>
+            </header>
 
             {/* Quota warning toast */}
             {quotaWarning && (
@@ -414,7 +426,7 @@ export default function CheckinPage() {
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     className={cn(
-                        'mb-4 p-3 rounded-xl text-sm',
+                        'mx-4 mt-4 p-3 rounded-xl text-sm',
                         quotaWarning.type === 'error'
                             ? 'bg-danger-500/10 border border-danger-500/30 text-danger-400'
                             : 'bg-warning-500/10 border border-warning-500/30 text-warning-400'
@@ -424,146 +436,118 @@ export default function CheckinPage() {
                 </motion.div>
             )}
 
-            {/* Mode toggle */}
-            <div className="flex items-center gap-2 mb-6">
-                <button
-                    onClick={() => setMode('camera')}
-                    className={cn(
-                        'flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-medium transition-all',
-                        mode === 'camera'
-                            ? 'bg-success-500/20 text-success-400 border border-success-500/30'
-                            : 'bg-slate-900 text-slate-400 border border-slate-800'
-                    )}
-                >
-                    <Camera className="w-4 h-4" />
-                    Cámara
-                </button>
-                <button
-                    onClick={() => setMode('manual')}
-                    className={cn(
-                        'flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-medium transition-all',
-                        mode === 'manual'
-                            ? 'bg-success-500/20 text-success-400 border border-success-500/30'
-                            : 'bg-slate-900 text-slate-400 border border-slate-800'
-                    )}
-                >
-                    <Keyboard className="w-4 h-4" />
-                    DNI Manual
-                </button>
-            </div>
-
             {/* Scanner area */}
-            <div className="relative aspect-square max-w-md mx-auto mb-6 rounded-2xl overflow-hidden bg-slate-900 border border-slate-800">
-                {mode === 'camera' ? (
-                    <>
-                        <video
-                            ref={videoRef}
-                            autoPlay
-                            playsInline
-                            muted
-                            className="w-full h-full object-cover"
-                        />
-                        {/* Scan overlay */}
-                        <div className="absolute inset-0 flex items-center justify-center">
-                            <div className="w-48 h-48 border-2 border-success-400 rounded-2xl relative">
-                                <div className="absolute top-0 left-0 w-6 h-6 border-t-4 border-l-4 border-success-400 rounded-tl-lg" />
-                                <div className="absolute top-0 right-0 w-6 h-6 border-t-4 border-r-4 border-success-400 rounded-tr-lg" />
-                                <div className="absolute bottom-0 left-0 w-6 h-6 border-b-4 border-l-4 border-success-400 rounded-bl-lg" />
-                                <div className="absolute bottom-0 right-0 w-6 h-6 border-b-4 border-r-4 border-success-400 rounded-br-lg" />
-                                {/* Scan line animation */}
-                                <motion.div
-                                    className="absolute left-2 right-2 h-0.5 bg-success-400"
-                                    animate={{ top: ['10%', '90%', '10%'] }}
-                                    transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
-                                />
-                            </div>
-                        </div>
-                        <div className="absolute bottom-4 left-4 right-4 text-center text-sm text-slate-400">
-                            Apunta la cámara al código QR del socio
-                        </div>
-                    </>
-                ) : (
-                    <form onSubmit={handleManualSubmit} className="flex flex-col items-center justify-center h-full p-6">
-                        <Keyboard className="w-12 h-12 text-slate-600 mb-4" />
-                        <input
-                            ref={inputRef}
-                            type="text"
-                            inputMode="numeric"
-                            value={manualToken}
-                            onChange={(e) => setManualToken(e.target.value)}
-                            placeholder="Ingresa el DNI..."
-                            disabled={scanStatus === 'processing'}
-                            className="w-full px-4 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white text-center text-lg tracking-widest focus:ring-2 focus:ring-success-500/50 focus:border-success-500 transition-all disabled:opacity-50"
-                            autoFocus
-                        />
-                        <button
-                            type="submit"
-                            disabled={scanStatus === 'processing' || !manualToken.trim()}
-                            className="mt-4 w-full py-3 rounded-xl font-semibold text-white bg-gradient-to-r from-success-500 to-success-600 disabled:opacity-50"
-                        >
-                            {scanStatus === 'processing' ? 'Verificando...' : 'Registrar Entrada'}
-                        </button>
-                    </form>
-                )}
+            <main className="flex-1 flex flex-col items-center justify-center p-4">
+                <div className="relative w-full max-w-sm">
+                    {/* Scanner container */}
+                    <div className="relative aspect-square rounded-2xl overflow-hidden bg-slate-900 border-2 border-slate-700">
+                        <div id="qr-scanner-container" className="w-full h-full" />
 
-                {/* Result overlay */}
-                <AnimatePresence>
-                    {(scanStatus === 'success' || scanStatus === 'error') && lastResult && (
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            className={cn(
-                                'absolute inset-0 flex flex-col items-center justify-center',
-                                scanStatus === 'success' ? 'bg-success-500/90' : 'bg-danger-500/90'
-                            )}
-                        >
-                            <motion.div
-                                initial={{ scale: 0 }}
-                                animate={{ scale: 1 }}
-                                transition={{ type: 'spring', damping: 15 }}
-                            >
-                                {scanStatus === 'success' ? (
-                                    <CheckCircle2 className="w-20 h-20 text-white" />
-                                ) : (
-                                    <XCircle className="w-20 h-20 text-white" />
-                                )}
-                            </motion.div>
-                            <p className="text-white text-xl font-bold mt-4">{lastResult.message}</p>
-                            {lastResult.userName && (
-                                <p className="text-white/80 mt-2">{lastResult.userName}</p>
-                            )}
-                        </motion.div>
-                    )}
-                </AnimatePresence>
-            </div>
-
-            {/* Recent checkins */}
-            {recentCheckins.length > 0 && (
-                <div className="max-w-md mx-auto">
-                    <h2 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
-                        <Clock className="w-4 h-4" />
-                        Últimos Check-ins
-                    </h2>
-                    <div className="space-y-2">
-                        {recentCheckins.slice(0, 5).map((c, i) => (
-                            <div
-                                key={i}
-                                className="flex items-center justify-between p-3 rounded-xl bg-slate-900/50 border border-slate-800"
-                            >
-                                <div className="flex items-center gap-3">
-                                    <div className="w-8 h-8 rounded-full bg-success-500/20 flex items-center justify-center">
-                                        <User className="w-4 h-4 text-success-400" />
-                                    </div>
-                                    <span className="text-white text-sm">{c.name}</span>
+                        {/* Scanning indicator */}
+                        {scanning && !lastResult && (
+                            <div className="absolute inset-0 pointer-events-none">
+                                <div className="absolute inset-4 border-2 border-success-400 rounded-xl">
+                                    <motion.div
+                                        className="absolute left-0 right-0 h-0.5 bg-success-400"
+                                        animate={{ top: ['0%', '100%', '0%'] }}
+                                        transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
+                                    />
                                 </div>
-                                <span className="text-xs text-slate-500">{c.time}</span>
                             </div>
-                        ))}
+                        )}
+
+                        {/* Result overlay */}
+                        <AnimatePresence>
+                            {lastResult && (
+                                <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className={cn(
+                                        'absolute inset-0 flex flex-col items-center justify-center p-6',
+                                        lastResult.success ? 'bg-success-500' : 'bg-danger-500'
+                                    )}
+                                >
+                                    <motion.div
+                                        initial={{ scale: 0 }}
+                                        animate={{ scale: 1 }}
+                                        transition={{ type: 'spring', damping: 15 }}
+                                    >
+                                        {lastResult.success ? (
+                                            <CheckCircle2 className="w-20 h-20 text-white" />
+                                        ) : (
+                                            <XCircle className="w-20 h-20 text-white" />
+                                        )}
+                                    </motion.div>
+
+                                    <p className="text-white text-xl font-bold mt-4 text-center">
+                                        {lastResult.success ? '¡Check-in exitoso!' : lastResult.message}
+                                    </p>
+
+                                    {lastResult.success && lastResult.userName && (
+                                        <div className="mt-4 text-center">
+                                            <p className="text-white/90 text-2xl font-semibold">{lastResult.userName}</p>
+                                            {lastResult.userDni && (
+                                                <p className="text-white/70 text-lg mt-1">DNI: {lastResult.userDni}</p>
+                                            )}
+                                            {lastResult.timestamp && (
+                                                <p className="text-white/60 text-sm mt-2 flex items-center justify-center gap-2">
+                                                    <Clock className="w-4 h-4" />
+                                                    {lastResult.timestamp}
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+
+                        {/* Loading state */}
+                        {!scannerReady && !lastResult && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
+                                <div className="text-center">
+                                    <Camera className="w-12 h-12 text-slate-600 mx-auto mb-4 animate-pulse" />
+                                    <p className="text-slate-500">Iniciando cámara...</p>
+                                </div>
+                            </div>
+                        )}
                     </div>
+
+                    {/* Instructions */}
+                    <p className="text-center text-slate-400 text-sm mt-4">
+                        Apunta la cámara al código QR que se muestra en la pantalla del gimnasio
+                    </p>
                 </div>
-            )}
+
+                {/* Recent check-ins */}
+                {recentCheckins.length > 0 && (
+                    <div className="w-full max-w-sm mt-8">
+                        <h2 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
+                            <Clock className="w-4 h-4" />
+                            Últimos Check-ins
+                        </h2>
+                        <div className="space-y-2">
+                            {recentCheckins.map((c, i) => (
+                                <div
+                                    key={i}
+                                    className="flex items-center justify-between p-3 rounded-xl bg-slate-900/50 border border-slate-800"
+                                >
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-8 h-8 rounded-full bg-success-500/20 flex items-center justify-center">
+                                            <User className="w-4 h-4 text-success-400" />
+                                        </div>
+                                        <div>
+                                            <span className="text-white text-sm">{c.name}</span>
+                                            <p className="text-xs text-slate-500">DNI: {c.dni}</p>
+                                        </div>
+                                    </div>
+                                    <span className="text-xs text-slate-500">{c.time}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </main>
         </div>
     );
 }
-

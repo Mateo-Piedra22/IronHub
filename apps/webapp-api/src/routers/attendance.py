@@ -46,6 +46,88 @@ async def api_checkin_validate(
         return JSONResponse({"success": False, "message": str(e)}, status_code=500)
 
 
+# Alias endpoint for frontend compatibility (frontend calls /api/checkin instead of /api/checkin/validate)
+@router.post("/api/checkin")
+async def api_checkin(
+    request: Request,
+    svc: AttendanceService = Depends(get_attendance_service)
+):
+    """Check-in by token - alias for /api/checkin/validate."""
+    rid = getattr(getattr(request, 'state', object()), 'request_id', '-')
+    try:
+        data = await request.json()
+        token = str(data.get("token", "")).strip()
+        
+        if not token:
+            return JSONResponse({"ok": False, "mensaje": "Token requerido"}, status_code=400)
+        
+        # Validate token and register attendance
+        ok, msg = svc.validar_token_y_registrar_sin_sesion(token)
+        
+        return JSONResponse({
+            "ok": ok,
+            "usuario_nombre": msg if ok else None,
+            "mensaje": msg if not ok else "Asistencia registrada"
+        }, status_code=200 if ok else 400)
+    except Exception as e:
+        logger.exception(f"Error en /api/checkin rid={rid}")
+        return JSONResponse({"ok": False, "mensaje": str(e)}, status_code=500)
+
+
+@router.post("/api/checkin/dni")
+async def api_checkin_by_dni(
+    request: Request,
+    svc: AttendanceService = Depends(get_attendance_service)
+):
+    """
+    Check-in by DNI with optional PIN verification.
+    
+    PIN requirement is controlled by CHECKIN_REQUIRE_PIN env var:
+    - "true" or "1": PIN is required (more secure)
+    - "false" or "0" (default): PIN is optional (faster access)
+    """
+    import os
+    rid = getattr(getattr(request, 'state', object()), 'request_id', '-')
+    
+    # Configuration switch for PIN requirement
+    require_pin = os.getenv("CHECKIN_REQUIRE_PIN", "false").lower() in ("true", "1", "yes")
+    
+    try:
+        data = await request.json()
+        dni = str(data.get("dni", "")).strip()
+        pin = str(data.get("pin", "")).strip() if require_pin else None
+        
+        if not dni:
+            return JSONResponse({"ok": False, "mensaje": "DNI requerido"}, status_code=400)
+        
+        if require_pin and not pin:
+            return JSONResponse({"ok": False, "mensaje": "PIN requerido", "require_pin": True}, status_code=400)
+        
+        # Check-in with or without PIN verification
+        if require_pin:
+            ok, msg = svc.registrar_asistencia_por_dni_y_pin(dni, pin)
+        else:
+            ok, msg = svc.registrar_asistencia_por_dni(dni)
+        
+        return JSONResponse({
+            "ok": ok,
+            "usuario_nombre": msg if ok else None,
+            "mensaje": msg if not ok else "Asistencia registrada"
+        }, status_code=200 if ok else 400)
+    except Exception as e:
+        logger.exception(f"Error en /api/checkin/dni rid={rid}")
+        return JSONResponse({"ok": False, "mensaje": str(e)}, status_code=500)
+
+
+# Endpoint to check if PIN is required (for frontend to know)
+@router.get("/api/checkin/config")
+async def api_checkin_config():
+    """Returns check-in configuration for the frontend."""
+    import os
+    require_pin = os.getenv("CHECKIN_REQUIRE_PIN", "false").lower() in ("true", "1", "yes")
+    return {"require_pin": require_pin}
+
+
 @router.get("/api/checkin/token_status")
 async def api_checkin_token_status(
     request: Request,
@@ -96,6 +178,66 @@ async def api_checkin_create_token(
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/api/asistencias")
+async def api_asistencias_list(
+    request: Request,
+    _=Depends(require_gestion_access),
+    svc: AttendanceService = Depends(get_attendance_service)
+):
+    """List attendance records with optional filters. Returns {asistencias: [], total}."""
+    try:
+        usuario_id = request.query_params.get("usuario_id")
+        desde = request.query_params.get("desde")
+        hasta = request.query_params.get("hasta")
+        limit_q = request.query_params.get("limit")
+        
+        limit = int(limit_q) if (limit_q and str(limit_q).isdigit()) else 50
+        
+        # Get attendance records
+        records = svc.obtener_asistencias_detallado(desde, hasta)
+        
+        # Filter by usuario_id if provided
+        if usuario_id and str(usuario_id).isdigit():
+            uid = int(usuario_id)
+            records = [r for r in records if r.get("usuario_id") == uid]
+        
+        total = len(records)
+        sliced = records[:limit] if limit else records
+        return {"asistencias": sliced, "total": total}
+    except Exception as e:
+        logger.error(f"Error listing asistencias: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/api/usuario_asistencias")
+async def api_usuario_asistencias(
+    request: Request,
+    _=Depends(require_gestion_access),
+    svc: AttendanceService = Depends(get_attendance_service)
+):
+    """Get attendance records for a specific user. Returns {asistencias: []}."""
+    try:
+        usuario_id = request.query_params.get("usuario_id")
+        limit_q = request.query_params.get("limit")
+        
+        if not usuario_id or not str(usuario_id).isdigit():
+            raise HTTPException(status_code=400, detail="usuario_id requerido")
+        
+        limit = int(limit_q) if (limit_q and str(limit_q).isdigit()) else 50
+        
+        # Get all attendance and filter by user
+        records = svc.obtener_asistencias_detallado(None, None)
+        user_records = [r for r in records if r.get("usuario_id") == int(usuario_id)]
+        
+        sliced = user_records[:limit] if limit else user_records
+        return {"asistencias": sliced}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting usuario asistencias: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @router.post("/api/asistencias/registrar")
@@ -256,3 +398,204 @@ async def api_asistencias_detalle(
         return svc.obtener_asistencias_detalle(start, end, q, lim, off)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ========== Station QR Check-in (Public Endpoints) ==========
+
+@router.get("/api/checkin/station/info/{station_key}")
+async def api_station_info(
+    station_key: str,
+    svc: AttendanceService = Depends(get_attendance_service)
+):
+    """
+    Get station info (public - no auth required).
+    Used by the station display page to validate key and get gym info.
+    """
+    try:
+        gym_id = svc.validar_station_key(station_key)
+        if not gym_id:
+            return JSONResponse({"valid": False, "error": "Station key inválida"}, status_code=404)
+        
+        # Get gym name
+        from sqlalchemy import text
+        result = svc.db.execute(
+            text("SELECT nombre, logo_url FROM gimnasios WHERE id = :id LIMIT 1"),
+            {'id': gym_id}
+        )
+        row = result.fetchone()
+        gym_name = row[0] if row else "Gimnasio"
+        logo_url = row[1] if row and len(row) > 1 else None
+        
+        return {
+            "valid": True,
+            "gym_id": gym_id,
+            "gym_name": gym_name,
+            "logo_url": logo_url
+        }
+    except Exception as e:
+        logger.error(f"Error getting station info: {e}")
+        return JSONResponse({"valid": False, "error": str(e)}, status_code=500)
+
+
+@router.get("/api/checkin/station/token/{station_key}")
+async def api_station_token(
+    station_key: str,
+    svc: AttendanceService = Depends(get_attendance_service)
+):
+    """
+    Get current active station token (public - no auth required).
+    Used by station display to show QR code.
+    """
+    try:
+        gym_id = svc.validar_station_key(station_key)
+        if not gym_id:
+            return JSONResponse({"error": "Station key inválida"}, status_code=404)
+        
+        token_data = svc.obtener_station_token_activo(gym_id)
+        return token_data
+    except Exception as e:
+        logger.error(f"Error getting station token: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/api/checkin/station/regenerate/{station_key}")
+async def api_station_regenerate(
+    station_key: str,
+    svc: AttendanceService = Depends(get_attendance_service)
+):
+    """Force regenerate station token (public - used after each check-in)."""
+    try:
+        gym_id = svc.validar_station_key(station_key)
+        if not gym_id:
+            return JSONResponse({"error": "Station key inválida"}, status_code=404)
+        
+        token_data = svc.crear_station_token(gym_id)
+        return token_data
+    except Exception as e:
+        logger.error(f"Error regenerating station token: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/api/checkin/station/recent/{station_key}")
+async def api_station_recent(
+    station_key: str,
+    svc: AttendanceService = Depends(get_attendance_service)
+):
+    """
+    Get recent check-ins for station display (public - no auth required).
+    """
+    try:
+        gym_id = svc.validar_station_key(station_key)
+        if not gym_id:
+            return JSONResponse({"error": "Station key inválida"}, status_code=404)
+        
+        recent = svc.obtener_station_checkins_recientes(gym_id, limit=5)
+        stats = svc.obtener_station_stats(gym_id)
+        
+        return {
+            "checkins": recent,
+            "stats": stats
+        }
+    except Exception as e:
+        logger.error(f"Error getting recent check-ins: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/api/checkin/station/scan")
+async def api_station_scan(
+    request: Request,
+    svc: AttendanceService = Depends(get_attendance_service)
+):
+    """
+    User scans station QR to register attendance.
+    Requires user to be authenticated (session with checkin_user_id or user_id).
+    """
+    try:
+        data = await request.json()
+        token = str(data.get("token", "")).strip()
+        
+        if not token:
+            return JSONResponse({"ok": False, "mensaje": "Token requerido"}, status_code=400)
+        
+        # Get user ID from session
+        usuario_id = request.session.get("checkin_user_id") or request.session.get("user_id")
+        if not usuario_id:
+            return JSONResponse({"ok": False, "mensaje": "Debes iniciar sesión primero"}, status_code=401)
+        
+        # Validate and register
+        ok, msg, user_data = svc.validar_station_scan(token, int(usuario_id))
+        
+        return JSONResponse({
+            "ok": ok,
+            "mensaje": msg,
+            "usuario": user_data
+        }, status_code=200 if ok else 400)
+    except Exception as e:
+        logger.error(f"Error in station scan: {e}")
+        return JSONResponse({"ok": False, "mensaje": str(e)}, status_code=500)
+
+
+# Admin endpoint to generate/get station key
+@router.get("/api/gestion/station-key")
+async def api_get_station_key(
+    request: Request,
+    _=Depends(require_owner),
+    svc: AttendanceService = Depends(get_attendance_service)
+):
+    """Get or generate station key for the current gym (requires owner auth)."""
+    try:
+        gym_id = request.session.get("gym_id")
+        if not gym_id:
+            return JSONResponse({"error": "Gym ID no encontrado"}, status_code=400)
+        
+        station_key = svc.generar_station_key(int(gym_id))
+        
+        # Build the station URL
+        host = request.headers.get("host", "")
+        protocol = "https" if request.headers.get("x-forwarded-proto") == "https" else "http"
+        station_url = f"{protocol}://{host}/station/{station_key}"
+        
+        return {
+            "station_key": station_key,
+            "station_url": station_url
+        }
+    except Exception as e:
+        logger.error(f"Error getting station key: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/api/gestion/station-key/regenerate") 
+async def api_regenerate_station_key(
+    request: Request,
+    _=Depends(require_owner),
+    svc: AttendanceService = Depends(get_attendance_service)
+):
+    """Regenerate station key (invalidates old URL)."""
+    try:
+        gym_id = request.session.get("gym_id")
+        if not gym_id:
+            return JSONResponse({"error": "Gym ID no encontrado"}, status_code=400)
+        
+        import secrets as sec
+        new_key = sec.token_urlsafe(16)
+        
+        from sqlalchemy import text
+        svc.db.execute(
+            text("UPDATE gym_config SET station_key = :key WHERE gym_id = :gym_id"),
+            {'key': new_key, 'gym_id': gym_id}
+        )
+        svc.db.commit()
+        
+        host = request.headers.get("host", "")
+        protocol = "https" if request.headers.get("x-forwarded-proto") == "https" else "http"
+        station_url = f"{protocol}://{host}/station/{new_key}"
+        
+        return {
+            "station_key": new_key,
+            "station_url": station_url
+        }
+    except Exception as e:
+        logger.error(f"Error regenerating station key: {e}")
+        svc.db.rollback()
+        return JSONResponse({"error": str(e)}, status_code=500)
+

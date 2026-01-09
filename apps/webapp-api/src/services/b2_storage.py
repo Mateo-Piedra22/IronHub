@@ -240,3 +240,58 @@ def upload_exercise_video(file_content: bytes, filename: str, tenant: str) -> Tu
     
     success, url, _ = upload_file(file_content, filename, tenant, "videos", content_type)
     return success, url
+
+
+# ============================================================================
+# Compatibility Layer (for code using old StorageService interface)
+# ============================================================================
+
+def simple_upload(
+    file_data: bytes,
+    file_name: str,
+    content_type: str,
+    subfolder: str = ""
+) -> Optional[str]:
+    """
+    Simple upload function compatible with old StorageService.upload_file() interface.
+    
+    Args:
+        file_data: File content as bytes
+        file_name: Original filename
+        content_type: MIME type
+        subfolder: Path like "exercises/tenant" or "logos/tenant"
+    
+    Returns:
+        CDN URL if successful, None if failed
+    """
+    # Parse tenant and folder from subfolder (e.g., "exercises/mygym" -> tenant="mygym", folder="exercises")
+    parts = subfolder.strip("/").split("/", 1)
+    if len(parts) == 2:
+        folder, tenant = parts[0], parts[1]
+    elif len(parts) == 1:
+        folder = parts[0]
+        tenant = "common"
+    else:
+        folder = "uploads"
+        tenant = "common"
+    
+    success, url, _ = upload_file(file_data, file_name, tenant, folder, content_type)
+    return url if success else None
+
+
+def get_file_url(file_path: str) -> str:
+    """
+    Get public URL for a file. Compatible with old StorageService.get_file_url().
+    
+    If the path is already a full URL, returns it unchanged.
+    Otherwise, constructs CDN URL.
+    """
+    if not file_path:
+        return ""
+    
+    # Already a URL
+    if file_path.startswith("http") or file_path.startswith("/"):
+        return file_path
+    
+    return get_cdn_url(file_path)
+
