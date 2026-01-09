@@ -22,72 +22,107 @@ router = APIRouter()
 templates_dir = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(templates_dir))
 
-@router.get("/login", response_class=HTMLResponse)
+@router.get("/login")
 async def public_login_page(request: Request, error: str = ""):
-    theme_vars = _resolve_theme_vars()
-    ctx = {
-        "request": request,
-        "theme": theme_vars,
-        "error": error,
+    """Login page - returns JSON for API. Frontend (Next.js) handles the UI."""
+    if error:
+        return JSONResponse({"ok": False, "error": error, "login_required": True}, status_code=401)
+    return JSONResponse({
+        "ok": False,
+        "login_required": True,
         "gym_name": get_gym_name("Gimnasio"),
-        "logo_url": _resolve_logo_url(),
-    }
-    return templates.TemplateResponse("login.html", ctx)
+        "logo_url": _resolve_logo_url()
+    }, status_code=401)
 
 @router.post("/login")
 async def public_login_post(request: Request):
+    """Public login - supports both form and JSON requests."""
+    content_type = request.headers.get("content-type", "")
+    accept_header = request.headers.get("accept", "")
+    is_json_request = content_type.startswith("application/json") or "application/json" in accept_header
+    
     try:
-        form = await request.form()
-        password = str(form.get("password") or "").strip()
+        if content_type.startswith("application/json"):
+            data = await request.json()
+            password = str(data.get("password") or "").strip()
+        else:
+            form = await request.form()
+            password = str(form.get("password") or "").strip()
     except Exception:
         password = ""
+    
+    def error_response(message: str):
+        if is_json_request:
+            return JSONResponse({"ok": False, "error": message}, status_code=401)
+        return RedirectResponse(url=f"/login?error={message}", status_code=303)
+    
+    def success_response():
+        if is_json_request:
+            return JSONResponse({"ok": True, "redirect": "/dashboard", "role": "dueño"})
+        return RedirectResponse(url="/dashboard", status_code=303)
         
     if not password:
-        return RedirectResponse(url="/login?error=Contrase%C3%B1a%20requerida", status_code=303)
+        return error_response("Contraseña requerida")
         
     if _verify_owner_password(password):
         request.session.clear()
         request.session["logged_in"] = True
         request.session["role"] = "dueño"
-        return RedirectResponse(url="/dashboard", status_code=303)
+        return success_response()
         
-    return RedirectResponse(url="/login?error=Credenciales%20inv%C3%A1lidas", status_code=303)
+    return error_response("Credenciales inválidas")
 
-@router.get("/usuario/login", response_class=HTMLResponse)
+@router.get("/usuario/login")
 async def usuario_login_page(request: Request, error: str = ""):
-    theme_vars = _resolve_theme_vars()
-    ctx = {
-        "request": request,
-        "theme": theme_vars,
-        "error": error,
+    """Usuario login page - returns JSON for API. Frontend handles the UI."""
+    if error:
+        return JSONResponse({"ok": False, "error": error, "login_required": True}, status_code=401)
+    return JSONResponse({
+        "ok": False,
+        "login_required": True,
         "gym_name": get_gym_name("Gimnasio"),
-        "logo_url": _resolve_logo_url(),
-    }
-    return templates.TemplateResponse("usuario_login.html", ctx)
+        "logo_url": _resolve_logo_url()
+    }, status_code=401)
 
 @router.post("/usuario/login")
 async def usuario_login_post(
     request: Request,
     svc: AuthService = Depends(get_auth_service)
 ):
-    """
-    Usuario login endpoint with rate limiting using SQLAlchemy.
-    Ported from legacy server.py lines 5673-5740.
-    """
+    """Usuario login endpoint with rate limiting using SQLAlchemy."""
+    content_type = request.headers.get("content-type", "")
+    accept_header = request.headers.get("accept", "")
+    is_json_request = content_type.startswith("application/json") or "application/json" in accept_header
+    
     try:
-        form = await request.form()
-        dni = str(form.get("dni") or "").strip()
-        pin = str(form.get("pin") or "").strip()
+        if content_type.startswith("application/json"):
+            data = await request.json()
+            dni = str(data.get("dni") or "").strip()
+            pin = str(data.get("pin") or "").strip()
+        else:
+            form = await request.form()
+            dni = str(form.get("dni") or "").strip()
+            pin = str(form.get("pin") or "").strip()
     except Exception:
         dni = ""
         pin = ""
+    
+    def error_response(message: str):
+        if is_json_request:
+            return JSONResponse({"ok": False, "error": message}, status_code=401)
+        return RedirectResponse(url=f"/usuario/login?error={message}", status_code=303)
+    
+    def success_response(user_data: dict = None):
+        if is_json_request:
+            return JSONResponse({"ok": True, "redirect": "/usuario/panel", **(user_data or {})})
+        return RedirectResponse(url="/usuario/panel", status_code=303)
         
     if not dni or not pin:
-        return RedirectResponse(url="/usuario/login?error=Ingrese%20DNI%20y%20PIN", status_code=303)
+        return error_response("Ingrese DNI y PIN")
 
     # Rate limiting check (10 IP / 5 DNI per 5 minutes)
     if is_rate_limited_login(request, dni):
-        return RedirectResponse(url="/usuario/login?error=Demasiados%20intentos.%20Intente%20m%C3%A1s%20tarde", status_code=303)
+        return error_response("Demasiados intentos. Intente más tarde")
 
     # Register attempt before verification
     register_login_attempt(request, dni)
@@ -95,16 +130,16 @@ async def usuario_login_post(
     # Get user by DNI using SQLAlchemy
     user = svc.obtener_usuario_por_dni(dni)
     if not user:
-        return RedirectResponse(url="/usuario/login?error=DNI%20no%20encontrado", status_code=303)
+        return error_response("DNI no encontrado")
 
     # Verify PIN using AuthService
     pin_result = svc.verificar_pin(user.id, pin)
     
     if not pin_result['valid']:
-        return RedirectResponse(url="/usuario/login?error=PIN%20inv%C3%A1lido", status_code=303)
+        return error_response("PIN inválido")
     
     if not pin_result['activo']:
-        return RedirectResponse(url="/usuario/login?error=Usuario%20inactivo", status_code=303)
+        return error_response("Usuario inactivo")
 
     # Success: clear rate limits
     clear_login_attempts(request, dni)
@@ -119,21 +154,30 @@ async def usuario_login_post(
     request.session["role"] = "user"
 
     # Set usuario_nombre
+    user_name = None
     try:
         if user.nombre:
             request.session["usuario_nombre"] = user.nombre
+            user_name = user.nombre
     except Exception:
         pass
 
     # Issue JWT token
+    jwt_token = None
     try:
         tok = _issue_usuario_jwt(int(user.id))
         if tok:
             request.session["usuario_jwt"] = tok
+            jwt_token = tok
     except Exception:
         pass
 
-    return RedirectResponse(url="/usuario/panel", status_code=303)
+    return success_response({
+        "user_id": int(user.id),
+        "user_name": user_name,
+        "jwt": jwt_token
+    })
+
 
 @router.get("/logout")
 @router.post("/logout")
@@ -158,18 +202,29 @@ async def checkin_logout(request: Request):
     request.session.clear()
     return RedirectResponse(url="/checkin", status_code=303)
 
-@router.get("/gestion/login", response_class=HTMLResponse)
+@router.get("/gestion/login")
 async def login_page(request: Request, error: str = ""):
-    theme_vars = _resolve_theme_vars()
-    logo_url = _resolve_logo_url()
-    gym_name = get_gym_name()
-    return templates.TemplateResponse("gestion_login.html", {
-        "request": request,
-        "error": error,
-        "theme_vars": theme_vars,
-        "logo_url": logo_url,
-        "gym_name": gym_name
-    })
+    """
+    Gestion login page. For API/JSON requests, returns JSON.
+    For browser requests, returns a 404 since templates are not included.
+    The frontend (Next.js) handles the login UI.
+    """
+    accept_header = request.headers.get("accept", "")
+    
+    # For JSON/API requests, return JSON response
+    if "application/json" in accept_header or error:
+        if error:
+            return JSONResponse({"ok": False, "error": error, "login_required": True}, status_code=401)
+        return JSONResponse({"ok": False, "login_required": True, "message": "Login required"}, status_code=401)
+    
+    # For browser requests without JSON accept header, redirect to frontend login
+    # The frontend handles the actual login UI
+    return JSONResponse({
+        "ok": False,
+        "login_required": True,
+        "message": "Please use the frontend application for login"
+    }, status_code=401)
+
 
 @router.get("/gestion/logout")
 @router.post("/gestion/logout")
@@ -203,12 +258,26 @@ async def gestion_auth(
     """Gestion (professor/owner) authentication using SQLAlchemy."""
     try:
         content_type = request.headers.get("content-type", "")
+        accept_header = request.headers.get("accept", "")
+        is_json_request = content_type.startswith("application/json") or "application/json" in accept_header
+        
         if content_type.startswith("application/json"):
             data = await request.json()
         else:
             data = await request.form()
     except Exception:
         data = {}
+        is_json_request = True  # Assume JSON for error responses
+    
+    def error_response(message: str):
+        if is_json_request:
+            return JSONResponse({"ok": False, "error": message}, status_code=401)
+        return RedirectResponse(url=f"/gestion/login?error={message}", status_code=303)
+    
+    def success_response(redirect_url: str, session_data: dict = None):
+        if is_json_request:
+            return JSONResponse({"ok": True, "redirect": redirect_url, **(session_data or {})})
+        return RedirectResponse(url=redirect_url, status_code=303)
         
     usuario_id_raw = data.get("usuario_id")
     owner_password = str(data.get("owner_password", "")).strip()
@@ -217,13 +286,13 @@ async def gestion_auth(
     # Owner login logic
     if isinstance(usuario_id_raw, str) and usuario_id_raw == "__OWNER__":
         if not owner_password:
-            return RedirectResponse(url="/gestion/login?error=Ingrese%20la%20contrase%C3%B1a", status_code=303)
+            return error_response("Ingrese la contraseña")
         if _verify_owner_password(owner_password):
             request.session.clear()
             request.session["logged_in"] = True
             request.session["role"] = "dueño"
-            return RedirectResponse(url="/gestion", status_code=303)
-        return RedirectResponse(url="/gestion/login?error=Credenciales%20inv%C3%A1lidas", status_code=303)
+            return success_response("/gestion", {"role": "dueño"})
+        return error_response("Credenciales inválidas")
 
     # Professor/User login logic
     try:
@@ -234,12 +303,12 @@ async def gestion_auth(
     pin = str(pin_raw or "").strip()
     
     if not usuario_id or not pin:
-        return RedirectResponse(url="/gestion/login?error=Par%C3%A1metros%20inv%C3%A1lidos", status_code=303)
+        return error_response("Parámetros inválidos")
     
     # Verify PIN using AuthService
     pin_result = svc.verificar_pin(usuario_id, pin)
     if not pin_result['valid']:
-        return RedirectResponse(url="/gestion/login?error=PIN%20inv%C3%A1lido", status_code=303)
+        return error_response("PIN inválido")
     
     # Clear session
     try:
@@ -250,6 +319,7 @@ async def gestion_auth(
     # Get user info
     user = svc.obtener_usuario_por_id(usuario_id)
     user_role = getattr(user, 'rol', None) if user else None
+    user_name = getattr(user, 'nombre', None) if user else None
     
     # Check for professor privileges
     profesores = svc.obtener_profesores_activos()
@@ -275,7 +345,13 @@ async def gestion_auth(
         except Exception:
             pass
             
-    return RedirectResponse(url="/gestion", status_code=303)
+    return success_response("/gestion", {
+        "role": "profesor",
+        "user_id": usuario_id,
+        "user_name": user_name,
+        "profesor_id": profesor_id
+    })
+
 
 @router.post("/api/auth/logout")
 async def api_auth_logout(request: Request):

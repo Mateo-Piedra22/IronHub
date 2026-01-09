@@ -36,27 +36,25 @@ logger = logging.getLogger(__name__)
 templates_dir = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(templates_dir))
 
-@router.get("/", response_class=HTMLResponse)
+@router.get("/")
 async def index(request: Request):
-    theme_vars = _resolve_theme_vars()
-    ctx = {
-        "request": request,
-        "theme": theme_vars,
+    """Root endpoint - returns JSON with gym info. Frontend handles the UI."""
+    return JSONResponse({
+        "ok": True,
         "gym_name": get_gym_name("Gimnasio"),
         "logo_url": _resolve_logo_url(),
-    }
-    return templates.TemplateResponse("index.html", ctx)
+        "message": "IronHub Gym API"
+    })
 
-@router.get("/checkin", response_class=HTMLResponse)
+@router.get("/checkin")
 async def checkin_page(request: Request):
-    theme_vars = _resolve_theme_vars()
-    ctx = {
-        "request": request,
-        "theme": theme_vars,
+    """Check-in page - returns JSON. Frontend handles the UI."""
+    return JSONResponse({
+        "ok": True,
         "gym_name": get_gym_name("Gimnasio"),
         "logo_url": _resolve_logo_url(),
-    }
-    return templates.TemplateResponse("checkin.html", ctx)
+        "message": "Check-in endpoint"
+    })
 
 @router.get("/theme.css")
 async def theme_css():

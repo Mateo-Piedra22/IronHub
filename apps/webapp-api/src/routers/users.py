@@ -26,14 +26,15 @@ logger = logging.getLogger(__name__)
 templates_dir = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(templates_dir))
 
-@router.get("/usuario/panel", response_class=HTMLResponse)
+@router.get("/usuario/panel")
 async def usuario_panel(
     request: Request,
     user_service: UserService = Depends(get_user_service)
 ):
+    """Usuario panel - returns JSON with user data. Frontend handles the UI."""
     user_id = request.session.get("user_id")
     if not user_id:
-        return RedirectResponse(url="/usuario/login", status_code=303)
+        return JSONResponse({"ok": False, "login_required": True}, status_code=401)
 
     try:
         data = user_service.get_user_panel_data(int(user_id))
@@ -43,24 +44,24 @@ async def usuario_panel(
         
     if not data or not data.get('usuario'):
         request.session.clear()
-        return RedirectResponse(url="/usuario/login", status_code=303)
+        return JSONResponse({"ok": False, "login_required": True}, status_code=401)
 
     u = data['usuario']
     
-    theme_vars = _resolve_theme_vars()
-    ctx = {
-        "request": request,
-        "theme": theme_vars,
-        "gym_name": get_gym_name("Gimnasio"),
-        "logo_url": _resolve_logo_url(),
-        "usuario": u,
-        "active": bool(getattr(u, 'activo', False)),
+    return JSONResponse({
+        "ok": True,
+        "usuario": {
+            "id": getattr(u, 'id', None),
+            "nombre": getattr(u, 'nombre', None),
+            "dni": getattr(u, 'dni', None),
+            "activo": bool(getattr(u, 'activo', False)),
+        },
         "dias_restantes": data.get('dias_restantes'),
-        "ultimo_pago": getattr(u, 'ultimo_pago', None),
+        "ultimo_pago": str(getattr(u, 'ultimo_pago', None)) if getattr(u, 'ultimo_pago', None) else None,
         "pagos": data.get('pagos', []),
         "rutinas": data.get('rutinas', [])
-    }
-    return templates.TemplateResponse("usuario_panel.html", ctx)
+    })
+
 
 # --- API Usuarios ---
 
