@@ -49,15 +49,34 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS for wildcard subdomains
-# CORS for wildcard subdomains
+# CORS for wildcard subdomains and base domain
 base_domain = os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz")
 # Escape dots for regex
 escaped_domain = base_domain.replace(".", r"\.")
+
+# Build list of allowed origins for explicit matches + regex for subdomains
+allowed_origins = [
+    f"https://{base_domain}",
+    f"https://www.{base_domain}",
+    f"https://api.{base_domain}",
+    f"https://admin.{base_domain}",
+    f"https://admin-api.{base_domain}",
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:8000",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:8000",
+]
+
+# Add Vercel preview URLs if available
+vercel_url = os.getenv("VERCEL_URL")
+if vercel_url:
+    allowed_origins.append(f"https://{vercel_url}")
+
 app.add_middleware(
     CORSMiddleware,
-    # allow_origins=[f"https://*.{base_domain}", f"https://{base_domain}"], # Invalid wildcard usage
-    allow_origin_regex=f"https://.*\.{escaped_domain}",
+    allow_origins=allowed_origins,
+    allow_origin_regex=rf"https://.*\.{escaped_domain}|https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

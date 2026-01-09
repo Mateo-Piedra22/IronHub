@@ -4,8 +4,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Plus, Search, ExternalLink, Trash2, Power, Loader2, X, Check, AlertCircle,
-    Grid3X3, List, ChevronLeft, ChevronRight, RefreshCw, Send, Bell, CheckSquare, Square
+    Grid3X3, List, ChevronLeft, ChevronRight, RefreshCw, Send, Bell, CheckSquare, Square, Settings
 } from 'lucide-react';
+import Link from 'next/link';
 import { api, type Gym } from '@/lib/api';
 
 type ViewMode = 'cards' | 'table';
@@ -295,6 +296,13 @@ export default function GymsPage() {
             </td>
             <td>
                 <div className="flex items-center gap-1">
+                    <Link
+                        href={`/dashboard/gyms/${gym.id}`}
+                        className="p-2 rounded-lg hover:bg-primary-500/10 text-slate-400 hover:text-primary-400"
+                        title="Configuración"
+                    >
+                        <Settings className="w-4 h-4" />
+                    </Link>
                     <button
                         onClick={() => { setSelectedGym(gym); setStatusOpen(true); }}
                         className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white"
@@ -348,6 +356,13 @@ export default function GymsPage() {
             <div className="flex items-center justify-between text-sm">
                 <span className="text-slate-500">DB: {gym.db_name}</span>
                 <div className="flex items-center gap-1">
+                    <Link
+                        href={`/dashboard/gyms/${gym.id}`}
+                        className="p-1.5 rounded-lg hover:bg-primary-500/10 text-slate-400 hover:text-primary-400"
+                        title="Configuración"
+                    >
+                        <Settings className="w-4 h-4" />
+                    </Link>
                     <button
                         onClick={() => { setSelectedGym(gym); setStatusOpen(true); }}
                         className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400"
