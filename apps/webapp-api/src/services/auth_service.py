@@ -189,33 +189,91 @@ class AuthService(BaseService):
 
     def verificar_owner_password(self, password: str) -> bool:
         """
-        Verify owner password.
-        Checks 'usuarios' table for owner/admin pin.
+        Verify owner password with Auto-Healing synchronization.
+        Checks Admin DB first (as authority) and syncs to Local DB if different.
         """
+        import os
+        from sqlalchemy import text
+        
+        local_hash = None
+        admin_hash = None
+        local_user_id = None
+        
+        # 1. Get Local Hash & ID (using service's session)
         try:
-            # Check usuarios table (AdminService updates this)
             result = self.db.execute(
-                text("SELECT pin FROM usuarios WHERE rol IN ('dueno', 'owner', 'admin') AND activo = true ORDER BY id LIMIT 1")
+                text("SELECT id, pin FROM usuarios WHERE rol IN ('dueno', 'owner', 'admin') AND activo = true ORDER BY id LIMIT 1")
             )
             row = result.fetchone()
-            if row and row[0]:
-                stored_pw = str(row[0]).strip()
-                
-                # Try bcrypt verification
-                if stored_pw.startswith('$2'):
-                    try:
-                        import bcrypt
-                        return bcrypt.checkpw(password.encode('utf-8'), stored_pw.encode('utf-8'))
-                    except Exception:
-                        pass
-                
-                # Direct comparison
-                return stored_pw == password
-                
-            return False
+            if row:
+                local_user_id = row[0]
+                local_hash = str(row[1] or "").strip()
         except Exception as e:
-            logger.error(f"Error verifying owner password: {e}")
-            return False
+            logger.error(f"Error reading local owner: {e}")
+
+        # 2. Get Admin Hash
+        try:
+            from src.dependencies import get_admin_db, get_current_tenant
+            
+            tenant = get_current_tenant()
+            if not tenant:
+                 tenant = os.getenv("DEFAULT_TENANT", "testingiron")
+
+            if tenant:
+                adm_gen = get_admin_db()
+                if adm_gen:
+                    session = next(adm_gen)
+                    try:
+                        result = session.execute(
+                            text("SELECT owner_password_hash FROM gyms WHERE subdominio = :sub"),
+                            {'sub': str(tenant).strip().lower()}
+                        )
+                        row = result.fetchone()
+                        if row and row[0]:
+                            admin_hash = str(row[0]).strip()
+                    finally:
+                        session.close()
+        except Exception as e:
+            logger.error(f"Error reading admin hash: {e}")
+
+        # 3. AUTO-HEALING: Sync Admin -> Local if different
+        if admin_hash and local_user_id:
+            if admin_hash != local_hash:
+                try:
+                    logger.info("Syncing Admin password hash to Local DB...")
+                    self.db.execute(
+                        text("UPDATE usuarios SET pin = :pin WHERE id = :id"),
+                        {'pin': admin_hash, 'id': local_user_id}
+                    )
+                    self.db.commit()
+                    local_hash = admin_hash
+                except Exception as e:
+                    logger.error(f"Auto-healing failed: {e}")
+                    self.db.rollback()
+
+        # 4. Verification
+        target_hash = admin_hash if admin_hash else local_hash
+        env_pwd = (os.getenv("WEBAPP_OWNER_PASSWORD", "") or os.getenv("OWNER_PASSWORD", "")).strip()
+
+        candidates = []
+        if target_hash: candidates.append(target_hash)
+        if env_pwd: candidates.append(env_pwd)
+        if not candidates: candidates.append("admin") # Fallback
+
+        import bcrypt
+        for secret in candidates:
+            try:
+                # Bcrypt
+                if secret.startswith('$2'):
+                    if bcrypt.checkpw(password.encode('utf-8'), secret.encode('utf-8')):
+                        return True
+                # Plaintext
+                elif secret == password:
+                    return True
+            except Exception:
+                continue
+                
+        return False
 
     # ========== Session/Work Session ==========
 

@@ -32,6 +32,8 @@ from src.services.reports_service import ReportsService
 from src.services.admin_service import AdminService
 
 
+import os
+
 def set_current_tenant(tenant: str):
     """Set the current tenant subdomain in context."""
     CURRENT_TENANT.set(tenant.strip().lower() if tenant else None)
@@ -43,6 +45,30 @@ def get_current_tenant() -> Optional[str]:
         return CURRENT_TENANT.get()
     except LookupError:
         return None
+
+async def ensure_tenant_context(request: Request) -> Optional[str]:
+    """
+    Dependency to extract and set tenant context from request.
+    Useful for routers that don't go through main app middleware (if any).
+    """
+    host = request.headers.get("host", "")
+    tenant = request.headers.get("x-tenant")
+    
+    # Try to extract from subdomain if not in header
+    if not tenant and host:
+        base_domain = os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz")
+        # Remove port
+        host_clean = host.split(":")[0]
+        if host_clean.endswith(f".{base_domain}"):
+             candidate = host_clean.replace(f".{base_domain}", "")
+             # Avoid 'www', 'api', 'admin' if they are reserved (optional, but good practice)
+             if candidate not in ("www", "api", "admin", "admin-api"):
+                 tenant = candidate
+
+    if tenant:
+        set_current_tenant(tenant)
+        return tenant
+    return None
 
 
 def get_db_session() -> Generator[Session, None, None]:

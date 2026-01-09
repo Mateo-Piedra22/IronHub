@@ -445,107 +445,19 @@ def _get_password() -> str:
     if env_pwd:
         return env_pwd
         
-    return "admin"
-
 def _verify_owner_password(password: str) -> bool:
     """
-    Verifica la contraseña del dueño con Sincronización de Autoridad.
-    Si se detecta que la DB Admin tiene una contraseña diferente a la Local,
-    se asume que hubo un cambio administrativo y se FUERZA la actualización local.
-    Esto previene que la contraseña vieja siga funcionando (desincronización).
+    DEPRECATED: Use AuthService.verificar_owner_password() instead.
+    This function remains as a stub to prevent import errors but returns False safe-default.
     """
-    
-    local_hash = None
-    admin_hash = None
-    local_user_id = None
-
-    # 1. Get Local Hash & ID
-    try:
-        db = get_db()
-        if db and hasattr(db, '_session'):
-            from sqlalchemy import text
-            result = db._session.execute(
-                text("SELECT id, pin FROM usuarios WHERE rol IN ('dueno', 'owner', 'admin') AND activo = true ORDER BY id LIMIT 1")
-            )
-            row = result.fetchone()
-            if row:
-                local_user_id = row[0]
-                local_hash = str(row[1] or "").strip()
-    except Exception:
-        pass
-
-    # 2. Get Admin Hash
-    try:
-        tenant = None
-        try: tenant = CURRENT_TENANT.get()
-        except: pass
-        
-        if not tenant: tenant = os.getenv("DEFAULT_TENANT", "testingiron")
-
-        if tenant:
-            adm = get_admin_db()
-            if adm:
-                session_gen = adm
-                session = next(session_gen)
-                try:
-                    from sqlalchemy import text
-                    result = session.execute(
-                        text("SELECT owner_password_hash FROM gyms WHERE subdominio = :sub"),
-                        {'sub': str(tenant).strip().lower()}
-                    )
-                    row = result.fetchone()
-                    if row and row[0]:
-                        admin_hash = str(row[0]).strip()
-                finally:
-                    session.close()
-    except Exception:
-        pass
-
-    # 3. AUTO-HEALING: Sync Admin -> Local if different
-    # If Admin DB is reachable and has a hash, IT IS THE AUTHORITY.
-    if admin_hash and local_user_id:
-        if admin_hash != local_hash:
-            try:
-                # Update Local DB to match Admin DB
-                db = get_db()
-                if db and hasattr(db, '_session'):
-                    # Use a new transaction or the existing one?
-                    # The session might be in use, best to just execute update.
-                     db._session.execute(
-                        text("UPDATE usuarios SET pin = :pin WHERE id = :id"),
-                        {'pin': admin_hash, 'id': local_user_id}
-                    )
-                     db._session.commit()
-                     local_hash = admin_hash # Update local var for verification
-            except Exception as e:
-                pass # Fail safe, verify against whatever we have
-
-    # 4. Verification
-    # Use Admin hash if available (most up to date), otherwise Local hash
-    target_hash = admin_hash if admin_hash else local_hash
-    
-    # Also check Environment overrides
-    env_pwd = (os.getenv("WEBAPP_OWNER_PASSWORD", "") or os.getenv("OWNER_PASSWORD", "")).strip()
-    
-    import bcrypt
-    
-    # List of valid secrets to check against
-    valid_secrets = []
-    if target_hash: valid_secrets.append(target_hash)
-    if env_pwd: valid_secrets.append(env_pwd)
-    if not valid_secrets: valid_secrets.append("admin") # Fallback
-    
-    for secret in valid_secrets:
-        try:
-            if secret.startswith('$2'):
-                 if bcrypt.checkpw(password.encode('utf-8'), secret.encode('utf-8')):
-                     return True
-            elif secret == password:
-                 return True
-        except:
-             continue
-             
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.warning("DEPRECATED: _verify_owner_password called. Use AuthService.")
     return False
+
+def _get_password() -> str:
+    """DEPRECATED: Unused."""
+    return ""
 
 def _filter_existing_columns(conn, schema: str, table: str, data: Dict[str, Any]) -> Dict[str, Any]:
     """

@@ -4,10 +4,10 @@ from fastapi import APIRouter, Request, Depends, status, Form
 from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
-from src.dependencies import get_auth_service
+from src.dependencies import get_auth_service, ensure_tenant_context
 from src.services.auth_service import AuthService
 from src.utils import (
-    _verify_owner_password, _resolve_theme_vars, _resolve_logo_url, 
+    _resolve_theme_vars, _resolve_logo_url, 
     get_gym_name, _issue_usuario_jwt, _get_usuario_nombre
 )
 from src.rate_limit import (
@@ -253,7 +253,8 @@ async def gestion_logout(
 @router.post("/gestion/auth")
 async def gestion_auth(
     request: Request,
-    svc: AuthService = Depends(get_auth_service)
+    svc: AuthService = Depends(get_auth_service),
+    tenant: str = Depends(ensure_tenant_context)
 ):
     """Gestion (professor/owner) authentication using SQLAlchemy."""
     try:
@@ -287,7 +288,7 @@ async def gestion_auth(
     if isinstance(usuario_id_raw, str) and usuario_id_raw == "__OWNER__":
         if not owner_password:
             return error_response("Ingrese la contraseña")
-        if _verify_owner_password(owner_password):
+        if svc.verificar_owner_password(owner_password):
             request.session.clear()
             request.session["logged_in"] = True
             request.session["role"] = "dueño"
@@ -362,7 +363,8 @@ async def api_auth_logout(request: Request):
 @router.post("/api/auth/login")
 async def api_auth_login(
     request: Request,
-    svc: AuthService = Depends(get_auth_service)
+    svc: AuthService = Depends(get_auth_service),
+    tenant: str = Depends(ensure_tenant_context)
 ):
     """
     JSON API endpoint for general login (DNI + password/PIN).
@@ -380,7 +382,7 @@ async def api_auth_login(
     
     # If no DNI, try owner login with just password
     if not dni and password:
-        if _verify_owner_password(password):
+        if svc.verificar_owner_password(password):
             request.session.clear()
             request.session["logged_in"] = True
             request.session["role"] = "owner"
