@@ -1131,6 +1131,12 @@ class ApiClient {
         return this.request<{ station_key: string; station_url: string }>('/api/gestion/station-key');
     }
 
+    async regenerateStationKey() {
+        return this.request<{ station_key: string; station_url: string }>('/api/gestion/station-key/regenerate', {
+            method: 'POST',
+        });
+    }
+
     // === User Tags (Etiquetas) ===
     async getEtiquetas(usuarioId: number) {
         return this.request<{ etiquetas: Etiqueta[] }>(`/api/usuarios/${usuarioId}/etiquetas`);

@@ -138,6 +138,15 @@ async def tenant_context_middleware(request: Request, call_next):
     # Remove port if present
     host_clean = host.split(":")[0]
     
+    # Enhanced logging for debugging tenant extraction
+    x_tenant = request.headers.get("x-tenant")
+    origin = request.headers.get("origin") or request.headers.get("referer") or ""
+    
+    # Log all sources for API routes (to diagnose issues)
+    if request.url.path.startswith("/api/"):
+        logger.info(f"TENANT DEBUG - Path: {request.url.path}")
+        logger.info(f"TENANT DEBUG - Host: {host}, X-Tenant: {x_tenant}, Origin: {origin}")
+    
     # 1. Try to extract from subdomain
     if host_clean.endswith(f".{base}"):
         subdomain = host_clean.replace(f".{base}", "")
@@ -145,9 +154,11 @@ async def tenant_context_middleware(request: Request, call_next):
         if subdomain and subdomain not in ("www", "api", "admin", "admin-api"):
             tenant = subdomain
     
-    # 2. Fallback to X-Tenant header
-    if not tenant:
-        tenant = request.headers.get("x-tenant")
+    # 2. Fallback to X-Tenant header (MOST IMPORTANT for cross-origin API calls)
+    if not tenant and x_tenant:
+        tenant = x_tenant.strip().lower()
+        if request.url.path.startswith("/api/"):
+            logger.info(f"TENANT DEBUG - Using X-Tenant header: {tenant}")
     
     # 3. Try to get from session (for gestion routes)
     if not tenant:
@@ -156,28 +167,31 @@ async def tenant_context_middleware(request: Request, call_next):
             session_tenant = request.session.get("tenant")
             if session_tenant:
                 tenant = session_tenant
+                if request.url.path.startswith("/api/"):
+                    logger.info(f"TENANT DEBUG - Using session tenant: {tenant}")
         except Exception:
             pass
     
     # 4. Try to extract from Origin/Referer header (for cross-origin API calls)
-    if not tenant:
-        origin = request.headers.get("origin") or request.headers.get("referer") or ""
-        # Parse origin to extract subdomain
+    if not tenant and origin:
         import re
         match = re.search(rf"https?://([a-z0-9-]+)\.{re.escape(base)}", origin.lower())
         if match:
             candidate = match.group(1)
             if candidate not in ("www", "api", "admin", "admin-api"):
                 tenant = candidate
+                if request.url.path.startswith("/api/"):
+                    logger.info(f"TENANT DEBUG - Using Origin extraction: {tenant}")
     
     # Set tenant context if found
     if tenant:
         set_current_tenant(tenant.strip().lower())
-        logger.debug(f"Tenant context set: {tenant}")
+        if request.url.path.startswith("/api/"):
+            logger.info(f"TENANT CONTEXT SET: {tenant} for {request.url.path}")
     else:
         # For API routes, log warning if no tenant found
         if request.url.path.startswith("/api/"):
-            logger.debug(f"No tenant context for API route: {request.url.path}")
+            logger.warning(f"NO TENANT CONTEXT for API route: {request.url.path}")
     
     response = await call_next(request)
     return response
