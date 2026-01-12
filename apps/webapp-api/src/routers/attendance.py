@@ -431,16 +431,15 @@ async def api_station_info(
         db = RawPostgresManager(connection_params=admin_params)
         with db.get_connection_context() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT nombre, logo_url FROM gyms WHERE id = %s LIMIT 1", (gym_id,))
+            cur.execute("SELECT nombre FROM gyms WHERE id = %s LIMIT 1", (gym_id,))
             row = cur.fetchone()
             gym_name = row[0] if row else "Gimnasio"
-            logo_url = row[1] if row and len(row) > 1 else None
         
         return {
             "valid": True,
             "gym_id": gym_id,
             "gym_name": gym_name,
-            "logo_url": logo_url
+            "logo_url": None  # Column doesn't exist in admin DB gyms table
         }
     except Exception as e:
         logger.error(f"Error getting station info: {e}")
