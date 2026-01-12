@@ -196,7 +196,7 @@ async def api_asistencias_list(
         limit = int(limit_q) if (limit_q and str(limit_q).isdigit()) else 50
         
         # Get attendance records
-        records = svc.obtener_asistencias_detallado(desde, hasta)
+        records = svc.obtener_asistencias_detalle(start=desde, end=hasta)
         
         # Filter by usuario_id if provided
         if usuario_id and str(usuario_id).isdigit():
@@ -228,7 +228,7 @@ async def api_usuario_asistencias(
         limit = int(limit_q) if (limit_q and str(limit_q).isdigit()) else 50
         
         # Get all attendance and filter by user
-        records = svc.obtener_asistencias_detallado(None, None)
+        records = svc.obtener_asistencias_detalle(start=None, end=None)
         user_records = [r for r in records if r.get("usuario_id") == int(usuario_id)]
         
         sliced = user_records[:limit] if limit else user_records
@@ -596,14 +596,25 @@ async def api_regenerate_station_key(
             return JSONResponse({"error": "Gym ID no encontrado - asegúrate de que el gym está registrado"}, status_code=400)
         
         import secrets as sec
+        import os
         new_key = sec.token_urlsafe(16)
         
-        from sqlalchemy import text
-        svc.db.execute(
-            text("UPDATE gym_config SET station_key = :key WHERE gym_id = :gym_id"),
-            {'key': new_key, 'gym_id': gym_id}
-        )
-        svc.db.commit()
+        # Update station key in admin DB gyms table
+        from src.database.raw_manager import RawPostgresManager
+        admin_params = {
+            "host": os.getenv("ADMIN_DB_HOST", os.getenv("DB_HOST", "localhost")),
+            "port": int(os.getenv("ADMIN_DB_PORT", os.getenv("DB_PORT", 5432))),
+            "database": os.getenv("ADMIN_DB_NAME", "ironhub_admin"),
+            "user": os.getenv("ADMIN_DB_USER", os.getenv("DB_USER", "postgres")),
+            "password": os.getenv("ADMIN_DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
+            "sslmode": os.getenv("ADMIN_DB_SSLMODE", os.getenv("DB_SSLMODE", "require")),
+        }
+        
+        db = RawPostgresManager(connection_params=admin_params)
+        with db.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute("UPDATE gyms SET station_key = %s WHERE id = %s", (new_key, gym_id))
+            conn.commit()
         
         # Build the station URL
         origin = request.headers.get("origin", "")
@@ -620,6 +631,5 @@ async def api_regenerate_station_key(
         }
     except Exception as e:
         logger.error(f"Error regenerating station key: {e}")
-        svc.db.rollback()
         return JSONResponse({"error": str(e)}, status_code=500)
 

@@ -557,46 +557,72 @@ class AttendanceService(BaseService):
             self.db.rollback()
 
     def generar_station_key(self, gym_id: int) -> str:
-        """Generate or get existing station key for a gym."""
+        """Generate or get existing station key for a gym (stored in admin DB)."""
         try:
-            # Check if gym already has a station key
-            result = self.db.execute(
-                text("SELECT station_key FROM gym_config WHERE gym_id = :gym_id LIMIT 1"),
-                {'gym_id': gym_id}
-            )
-            row = result.fetchone()
-            if row and row[0]:
-                return row[0]
+            import os
+            from src.database.raw_manager import RawPostgresManager
             
-            # Generate new station key
-            station_key = secrets.token_urlsafe(16)
+            admin_params = {
+                "host": os.getenv("ADMIN_DB_HOST", os.getenv("DB_HOST", "localhost")),
+                "port": int(os.getenv("ADMIN_DB_PORT", os.getenv("DB_PORT", 5432))),
+                "database": os.getenv("ADMIN_DB_NAME", "ironhub_admin"),
+                "user": os.getenv("ADMIN_DB_USER", os.getenv("DB_USER", "postgres")),
+                "password": os.getenv("ADMIN_DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
+                "sslmode": os.getenv("ADMIN_DB_SSLMODE", os.getenv("DB_SSLMODE", "require")),
+            }
             
-            # Upsert station key
-            self.db.execute(
-                text("""
-                    INSERT INTO gym_config (gym_id, station_key, created_at)
-                    VALUES (:gym_id, :key, NOW())
-                    ON CONFLICT (gym_id) DO UPDATE SET station_key = :key
-                """),
-                {'gym_id': gym_id, 'key': station_key}
-            )
-            self.db.commit()
-            return station_key
+            db = RawPostgresManager(connection_params=admin_params)
+            with db.get_connection_context() as conn:
+                cur = conn.cursor()
+                
+                # Auto-migrate: ensure station_key column exists
+                cur.execute("""
+                    ALTER TABLE gyms ADD COLUMN IF NOT EXISTS station_key VARCHAR(64)
+                """)
+                conn.commit()
+                
+                # Check if gym already has a station key
+                cur.execute("SELECT station_key FROM gyms WHERE id = %s LIMIT 1", (gym_id,))
+                row = cur.fetchone()
+                if row and row[0]:
+                    return row[0]
+                
+                # Generate new station key
+                station_key = secrets.token_urlsafe(16)
+                
+                # Update station key in gyms table
+                cur.execute(
+                    "UPDATE gyms SET station_key = %s WHERE id = %s",
+                    (station_key, gym_id)
+                )
+                conn.commit()
+                return station_key
         except Exception as e:
             logger.error(f"Error generating station key: {e}")
-            self.db.rollback()
-            # Fallback to simple key
+            # Fallback to simple key (won't persist but at least returns something)
             return secrets.token_urlsafe(16)
 
     def validar_station_key(self, station_key: str) -> Optional[int]:
-        """Validate station key and return gym_id, or None if invalid."""
+        """Validate station key and return gym_id, or None if invalid (checks admin DB)."""
         try:
-            result = self.db.execute(
-                text("SELECT gym_id FROM gym_config WHERE station_key = :key LIMIT 1"),
-                {'key': station_key}
-            )
-            row = result.fetchone()
-            return row[0] if row else None
+            import os
+            from src.database.raw_manager import RawPostgresManager
+            
+            admin_params = {
+                "host": os.getenv("ADMIN_DB_HOST", os.getenv("DB_HOST", "localhost")),
+                "port": int(os.getenv("ADMIN_DB_PORT", os.getenv("DB_PORT", 5432))),
+                "database": os.getenv("ADMIN_DB_NAME", "ironhub_admin"),
+                "user": os.getenv("ADMIN_DB_USER", os.getenv("DB_USER", "postgres")),
+                "password": os.getenv("ADMIN_DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
+                "sslmode": os.getenv("ADMIN_DB_SSLMODE", os.getenv("DB_SSLMODE", "require")),
+            }
+            
+            db = RawPostgresManager(connection_params=admin_params)
+            with db.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT id FROM gyms WHERE station_key = %s LIMIT 1", (station_key,))
+                row = cur.fetchone()
+                return row[0] if row else None
         except Exception as e:
             logger.error(f"Error validating station key: {e}")
             return None
