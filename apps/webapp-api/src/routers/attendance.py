@@ -416,15 +416,25 @@ async def api_station_info(
         if not gym_id:
             return JSONResponse({"valid": False, "error": "Station key inválida"}, status_code=404)
         
-        # Get gym name
-        from sqlalchemy import text
-        result = svc.db.execute(
-            text("SELECT nombre, logo_url FROM gimnasios WHERE id = :id LIMIT 1"),
-            {'id': gym_id}
-        )
-        row = result.fetchone()
-        gym_name = row[0] if row else "Gimnasio"
-        logo_url = row[1] if row and len(row) > 1 else None
+        # Get gym name from admin DB gyms table
+        import os
+        from src.database.raw_manager import RawPostgresManager
+        admin_params = {
+            "host": os.getenv("ADMIN_DB_HOST", os.getenv("DB_HOST", "localhost")),
+            "port": int(os.getenv("ADMIN_DB_PORT", os.getenv("DB_PORT", 5432))),
+            "database": os.getenv("ADMIN_DB_NAME", "ironhub_admin"),
+            "user": os.getenv("ADMIN_DB_USER", os.getenv("DB_USER", "postgres")),
+            "password": os.getenv("ADMIN_DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
+            "sslmode": os.getenv("ADMIN_DB_SSLMODE", os.getenv("DB_SSLMODE", "require")),
+        }
+        
+        db = RawPostgresManager(connection_params=admin_params)
+        with db.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT nombre, logo_url FROM gyms WHERE id = %s LIMIT 1", (gym_id,))
+            row = cur.fetchone()
+            gym_name = row[0] if row else "Gimnasio"
+            logo_url = row[1] if row and len(row) > 1 else None
         
         return {
             "valid": True,

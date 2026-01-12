@@ -440,7 +440,7 @@ class PaymentService(BaseService):
                 'id': c.id,
                 'nombre': c.nombre,
                 'descripcion': c.descripcion,
-                'precio_sugerido': float(c.precio_sugerido or 0),
+                'precio_sugerido': float(c.precio_base or 0),
                 'activo': c.activo
             }
             for c in conceptos
@@ -451,7 +451,7 @@ class PaymentService(BaseService):
         concepto = ConceptoPago(
             nombre=data.get('nombre', ''),
             descripcion=data.get('descripcion'),
-            precio_sugerido=float(data.get('precio_sugerido', 0)),
+            precio_base=float(data.get('precio_sugerido', 0)),
             activo=data.get('activo', True)
         )
         self.db.add(concepto)
@@ -465,9 +465,12 @@ class PaymentService(BaseService):
         if not concepto:
             return False
 
-        for key in ['nombre', 'descripcion', 'precio_sugerido', 'activo']:
+        for key in ['nombre', 'descripcion', 'activo']:
             if key in data:
                 setattr(concepto, key, data[key])
+        # Handle precio_sugerido -> precio_base mapping
+        if 'precio_sugerido' in data:
+            concepto.precio_base = data['precio_sugerido']
 
         self.db.commit()
         return True
