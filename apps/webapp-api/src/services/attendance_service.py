@@ -645,9 +645,9 @@ class AttendanceService(BaseService):
                 {'gym_id': gym_id}
             )
             
-            # Create new token
+            # Create new token - use naive datetime (no timezone) to match PostgreSQL NOW()
             token = secrets.token_urlsafe(16)
-            expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_seconds)
+            expires_at = datetime.now() + timedelta(seconds=expires_seconds)
             
             self.db.execute(
                 text("""
@@ -687,15 +687,22 @@ class AttendanceService(BaseService):
             
             if row:
                 expires_at = row[1]
-                now = datetime.now(timezone.utc)
-                if expires_at.tzinfo is None:
-                    now = now.replace(tzinfo=None)
+                # Use naive datetime to match PostgreSQL NOW()
+                now = datetime.now()
+                # Strip timezone if present for consistent comparison
+                if hasattr(expires_at, 'tzinfo') and expires_at.tzinfo is not None:
+                    expires_at = expires_at.replace(tzinfo=None)
                 remaining = int((expires_at - now).total_seconds())
+                
+                # Ensure we have a minimum positive value to avoid instant refresh loops
+                if remaining < 5:
+                    # Token about to expire, create new one
+                    return self.crear_station_token(gym_id)
                 
                 return {
                     'token': row[0],
                     'expires_at': expires_at.isoformat() if hasattr(expires_at, 'isoformat') else str(expires_at),
-                    'expires_in': max(0, remaining)
+                    'expires_in': max(5, remaining)  # Minimum 5 seconds to prevent rapid polling
                 }
             
             # No active token, create new one
