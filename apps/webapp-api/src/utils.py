@@ -447,12 +447,49 @@ def _get_password() -> str:
         
 def _verify_owner_password(password: str) -> bool:
     """
-    DEPRECATED: Use AuthService.verificar_owner_password() instead.
-    This function remains as a stub to prevent import errors but returns False safe-default.
+    Verify owner password against stored hash or environment variable.
+    Supports bcrypt hashes and plaintext fallback.
     """
+    import os
     import logging
     logger = logging.getLogger(__name__)
-    logger.warning("DEPRECATED: _verify_owner_password called. Use AuthService.")
+    
+    if not password:
+        return False
+    
+    # Get stored password from various sources
+    stored = None
+    try:
+        stored = _get_stored_owner_password()
+    except Exception:
+        pass
+    
+    # Fallback to env vars
+    env_pwd = (os.getenv("WEBAPP_OWNER_PASSWORD", "") or os.getenv("OWNER_PASSWORD", "")).strip()
+    
+    candidates = []
+    if stored:
+        candidates.append(stored)
+    if env_pwd:
+        candidates.append(env_pwd)
+    if not candidates:
+        candidates.append("admin")  # Default fallback for dev
+    
+    import bcrypt
+    for secret in candidates:
+        try:
+            secret = str(secret).strip()
+            # Bcrypt hash verification
+            if secret.startswith('$2'):
+                if bcrypt.checkpw(password.encode('utf-8'), secret.encode('utf-8')):
+                    return True
+            # Plaintext comparison
+            elif secret == password:
+                return True
+        except Exception as e:
+            logger.debug(f"Password check failed: {e}")
+            continue
+    
     return False
 
 def _get_password() -> str:

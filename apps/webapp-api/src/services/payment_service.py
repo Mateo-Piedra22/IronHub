@@ -187,13 +187,15 @@ class PaymentService(BaseService):
             for c in conceptos:
                 cantidad = float(c.get('cantidad', 1))
                 precio = float(c.get('precio_unitario', 0))
+                line_total = cantidad * precio
                 detalle = PagoDetalle(
                     pago_id=pago.id,
                     concepto_id=c.get('concepto_id'),
                     descripcion=c.get('descripcion', ''),
                     cantidad=cantidad,
                     precio_unitario=precio,
-                    subtotal=cantidad * precio
+                    subtotal=line_total,
+                    total=line_total
                 )
                 self.db.add(detalle)
 
@@ -326,13 +328,15 @@ class PaymentService(BaseService):
             for c in conceptos:
                 cantidad = float(c.get('cantidad', 1))
                 precio = float(c.get('precio_unitario', 0))
+                line_total = cantidad * precio
                 detalle = PagoDetalle(
                     pago_id=pago.id,
                     concepto_id=c.get('concepto_id'),
                     descripcion=c.get('descripcion', ''),
                     cantidad=cantidad,
                     precio_unitario=precio,
-                    subtotal=cantidad * precio
+                    subtotal=line_total,
+                    total=line_total
                 )
                 self.db.add(detalle)
 

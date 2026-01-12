@@ -8,7 +8,8 @@ from src.dependencies import get_auth_service, ensure_tenant_context
 from src.services.auth_service import AuthService
 from src.utils import (
     _resolve_theme_vars, _resolve_logo_url, 
-    get_gym_name, _issue_usuario_jwt, _get_usuario_nombre
+    get_gym_name, _issue_usuario_jwt, _get_usuario_nombre,
+    _verify_owner_password
 )
 from src.rate_limit import (
     is_rate_limited_login, register_login_attempt, clear_login_attempts
@@ -652,21 +653,41 @@ async def api_checkin_auth(
     svc: AuthService = Depends(get_auth_service)
 ):
     """
-    JSON API endpoint for check-in authentication (DNI + phone) using SQLAlchemy.
+    JSON API endpoint for check-in authentication (DNI only).
     Used for kiosk/self-service check-in flows.
     """
     try:
         data = await request.json()
         dni = str(data.get("dni") or "").strip()
-        telefono = str(data.get("telefono") or "").strip()
+        telefono = str(data.get("telefono") or "").strip()  # Optional now
     except Exception:
         return JSONResponse({"success": False, "message": "Datos inválidos"}, status_code=400)
     
-    if not dni or not telefono:
-        return JSONResponse({"success": False, "message": "DNI y teléfono requeridos"})
+    if not dni:
+        return JSONResponse({"success": False, "message": "DNI requerido"})
     
-    # Verify checkin using AuthService
-    result = svc.verificar_checkin(dni, telefono)
+    # First try with phone if provided
+    if telefono:
+        result = svc.verificar_checkin(dni, telefono)
+    else:
+        # DNI-only verification: just find user and check active status
+        user = svc.obtener_usuario_por_dni(dni)
+        if not user:
+            result = {'valid': False, 'error': 'Usuario no encontrado'}
+        elif not user.activo:
+            result = {'valid': False, 'error': 'Usuario inactivo', 'activo': False}
+        else:
+            # Build user info dict for response
+            result = {
+                'valid': True,
+                'usuario': {
+                    'id': user.id,
+                    'nombre': user.nombre,
+                    'exento': getattr(user, 'exento', False),
+                    'cuotas_vencidas': getattr(user, 'cuotas_vencidas', 0),
+                    'fecha_vencimiento': getattr(user, 'fecha_proximo_vencimiento', None)
+                }
+            }
     
     if not result['valid']:
         error_msg = result.get('error', 'Verificación fallida')

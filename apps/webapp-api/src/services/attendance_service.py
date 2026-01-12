@@ -65,7 +65,8 @@ class AttendanceService(BaseService):
         """Create a check-in token for a user."""
         try:
             token = secrets.token_urlsafe(12)
-            expires_at = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
+            # Use naive datetime for consistency with PostgreSQL NOW()
+            expires_at = datetime.now() + timedelta(minutes=expires_minutes)
             
             self.db.execute(
                 text("""
@@ -168,7 +169,7 @@ class AttendanceService(BaseService):
             self.db.execute(
                 text("""
                     INSERT INTO asistencias (usuario_id, fecha, hora_registro)
-                    VALUES (:id, CURRENT_DATE, CURRENT_TIME)
+                    VALUES (:id, CURRENT_DATE, CURRENT_TIMESTAMP)
                     ON CONFLICT (usuario_id, fecha) DO NOTHING
                 """),
                 {'id': usuario_id}
@@ -221,7 +222,7 @@ class AttendanceService(BaseService):
             self.db.execute(
                 text("""
                     INSERT INTO asistencias (usuario_id, fecha, hora_registro)
-                    VALUES (:id, CURRENT_DATE, CURRENT_TIME)
+                    VALUES (:id, CURRENT_DATE, CURRENT_TIMESTAMP)
                     ON CONFLICT (usuario_id, fecha) DO NOTHING
                 """),
                 {'id': usuario_id}
@@ -272,7 +273,7 @@ class AttendanceService(BaseService):
             self.db.execute(
                 text("""
                     INSERT INTO asistencias (usuario_id, fecha, hora_registro)
-                    VALUES (:id, CURRENT_DATE, CURRENT_TIME)
+                    VALUES (:id, CURRENT_DATE, CURRENT_TIMESTAMP)
                     ON CONFLICT (usuario_id, fecha) DO NOTHING
                 """),
                 {'id': usuario_id}
@@ -328,7 +329,7 @@ class AttendanceService(BaseService):
             self.db.execute(
                 text("""
                     INSERT INTO asistencias (usuario_id, fecha, hora_registro)
-                    VALUES (:id, CURRENT_DATE, CURRENT_TIME)
+                    VALUES (:id, CURRENT_DATE, CURRENT_TIMESTAMP)
                     ON CONFLICT (usuario_id, fecha) DO NOTHING
                 """),
                 {'id': usuario_id}
@@ -778,7 +779,7 @@ class AttendanceService(BaseService):
             self.db.execute(
                 text("""
                     INSERT INTO asistencias (usuario_id, fecha, hora_registro)
-                    VALUES (:id, CURRENT_DATE, CURRENT_TIME)
+                    VALUES (:id, CURRENT_DATE, CURRENT_TIMESTAMP)
                     ON CONFLICT (usuario_id, fecha) DO NOTHING
                 """),
                 {'id': usuario_id}

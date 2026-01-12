@@ -565,8 +565,8 @@ class ApiClient {
         });
     }
 
-    // Check-in auth with DNI + phone (for /checkin)
-    async checkinAuth(credentials: { dni: string; telefono: string }) {
+    // Check-in auth with DNI (phone optional)
+    async checkinAuth(credentials: { dni: string; telefono?: string }) {
         return this.request<{
             success: boolean;
             message?: string;

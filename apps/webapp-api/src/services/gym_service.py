@@ -428,19 +428,20 @@ class GymService(BaseService):
     def crear_ejercicio(self, data: Dict[str, Any]) -> Optional[int]:
         """Create a new exercise."""
         try:
+            # Use only columns that exist in migration: nombre, grupo_muscular, descripcion, objetivo, video_url, video_mime
             result = self.db.execute(
                 text("""
-                    INSERT INTO ejercicios (nombre, grupo_muscular, video_url, video_mime, equipamiento, variantes)
-                    VALUES (:nombre, :grupo, :video_url, :video_mime, :equipamiento, :variantes)
+                    INSERT INTO ejercicios (nombre, grupo_muscular, descripcion, objetivo, video_url, video_mime)
+                    VALUES (:nombre, :grupo, :descripcion, :objetivo, :video_url, :video_mime)
                     RETURNING id
                 """),
                 {
                     'nombre': data.get('nombre', ''),
                     'grupo': data.get('grupo_muscular'),
+                    'descripcion': data.get('descripcion'),
+                    'objetivo': data.get('objetivo', 'general'),
                     'video_url': data.get('video_url'),
-                    'video_mime': data.get('video_mime'),
-                    'equipamiento': data.get('equipamiento'),
-                    'variantes': data.get('variantes')
+                    'video_mime': data.get('video_mime')
                 }
             )
             row = result.fetchone()

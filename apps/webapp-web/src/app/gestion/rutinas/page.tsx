@@ -218,7 +218,7 @@ function RutinaPreviewModal({ isOpen, onClose, rutina }: RutinaPreviewModalProps
 
                 {/* Days */}
                 <div className="space-y-3">
-                    {rutina.dias.length === 0 ? (
+                    {(!rutina.dias || rutina.dias.length === 0) ? (
                         <div className="p-8 text-center text-slate-500">
                             Esta rutina no tiene días configurados
                         </div>
@@ -234,7 +234,7 @@ function RutinaPreviewModal({ isOpen, onClose, rutina }: RutinaPreviewModalProps
                                     </span>
                                     <div className="flex items-center gap-2">
                                         <span className="text-sm text-slate-500">
-                                            {dia.ejercicios.length} ejercicios
+                                            {dia.ejercicios?.length || 0} ejercicios
                                         </span>
                                         {expandedDays.includes(dia.numero) ? (
                                             <ChevronDown className="w-4 h-4 text-slate-400" />
@@ -825,7 +825,7 @@ export default function RutinasPage() {
                     <RoutineExerciseEditor
                         rutinaId={rutinaForExercises.id}
                         initialDays={
-                            rutinaForExercises.dias.length > 0
+                            (rutinaForExercises.dias?.length || 0) > 0
                                 ? rutinaForExercises.dias.map((d) => ({
                                     dayNumber: d.numero,
                                     dayName: d.nombre || '',

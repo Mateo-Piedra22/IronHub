@@ -75,30 +75,28 @@ export default function CheckinPage() {
         } catch { }
     }, []);
 
-    // Auth submit with DNI + phone
+    // Auth submit with DNI only
     const handleAuth = async (e: React.FormEvent) => {
         e.preventDefault();
         setAuthError('');
 
         const dni = authDni.replace(/\D/g, '');
-        const telefono = authPhone.replace(/\D/g, '');
 
-        if (!dni || !telefono) {
-            setAuthError('Ingresá DNI y teléfono válidos');
+        if (!dni) {
+            setAuthError('Ingresá un DNI válido');
             return;
         }
 
         setAuthLoading(true);
 
         try {
-            const res = await api.checkinAuth({ dni, telefono });
+            const res = await api.checkinAuth({ dni });
 
             if (res.ok && res.data?.success) {
                 // Save for future use
                 try {
                     localStorage.setItem('checkin_saved_user', JSON.stringify({
                         dni,
-                        telefono,
                         usuario_id: res.data.usuario_id || null,
                     }));
                 } catch { }
@@ -114,7 +112,7 @@ export default function CheckinPage() {
 
                 setAuthenticated(true);
             } else {
-                setAuthError(res.error || res.data?.message || 'Credenciales inválidas');
+                setAuthError(res.error || res.data?.message || 'DNI no encontrado');
             }
         } catch {
             setAuthError('Error de conexión');
@@ -295,7 +293,7 @@ export default function CheckinPage() {
                             <ScanLine className="w-8 h-8 text-white" />
                         </div>
                         <h1 className="text-2xl font-display font-bold text-white">Check-in</h1>
-                        <p className="text-slate-400 mt-1">Ingresá tus datos para escanear el QR</p>
+                        <p className="text-slate-400 mt-1">Ingresá tu DNI para escanear el QR</p>
                     </div>
 
                     <div className="card p-8">
@@ -310,72 +308,12 @@ export default function CheckinPage() {
                                         value={authDni}
                                         onChange={(e) => setAuthDni(e.target.value)}
                                         className="w-full px-4 py-3 pl-11 rounded-xl bg-slate-900 border border-slate-800 text-white focus:ring-2 focus:ring-success-500/50 focus:border-success-500 transition-all"
-                                        placeholder="Solo números"
+                                        placeholder="Ingresá tu DNI"
                                         autoComplete="off"
+                                        autoFocus
                                     />
                                     <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
                                 </div>
-                            </div>
-
-                            {/* Phone with country prefix */}
-                            <div>
-                                <label className="block text-sm font-medium text-slate-300 mb-2">Teléfono</label>
-                                <div className="flex gap-2">
-                                    {/* Prefix selector */}
-                                    <div className="relative">
-                                        <button
-                                            type="button"
-                                            onClick={() => setShowPrefixSelector(!showPrefixSelector)}
-                                            className="flex items-center gap-1 px-3 py-3 rounded-xl bg-slate-900 border border-slate-800 text-white hover:bg-slate-800 transition-all"
-                                        >
-                                            {countryPrefix}
-                                            <ChevronDown className="w-4 h-4 text-slate-500" />
-                                        </button>
-
-                                        <AnimatePresence>
-                                            {showPrefixSelector && (
-                                                <motion.div
-                                                    initial={{ opacity: 0, y: -10 }}
-                                                    animate={{ opacity: 1, y: 0 }}
-                                                    exit={{ opacity: 0, y: -10 }}
-                                                    className="absolute top-full left-0 mt-2 w-48 bg-slate-900 border border-slate-800 rounded-xl shadow-lg z-10 overflow-hidden"
-                                                >
-                                                    {COUNTRY_PREFIXES.map((p) => (
-                                                        <button
-                                                            key={p.code}
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setCountryPrefix(p.code);
-                                                                setShowPrefixSelector(false);
-                                                            }}
-                                                            className={cn(
-                                                                'w-full px-4 py-2 text-left text-sm hover:bg-slate-800 transition-colors',
-                                                                countryPrefix === p.code ? 'text-success-400' : 'text-white'
-                                                            )}
-                                                        >
-                                                            {p.country} ({p.code})
-                                                        </button>
-                                                    ))}
-                                                </motion.div>
-                                            )}
-                                        </AnimatePresence>
-                                    </div>
-
-                                    {/* Phone input */}
-                                    <div className="relative flex-1">
-                                        <input
-                                            type="text"
-                                            inputMode="numeric"
-                                            value={authPhone}
-                                            onChange={(e) => setAuthPhone(e.target.value)}
-                                            className="w-full px-4 py-3 pl-11 rounded-xl bg-slate-900 border border-slate-800 text-white focus:ring-2 focus:ring-success-500/50 focus:border-success-500 transition-all"
-                                            placeholder="Ej: 3434473599"
-                                            autoComplete="off"
-                                        />
-                                        <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
-                                    </div>
-                                </div>
-                                <p className="text-xs text-slate-500 mt-1">Elegí el prefijo. Ingresá solo dígitos.</p>
                             </div>
 
                             {authError && (
@@ -391,6 +329,14 @@ export default function CheckinPage() {
                             >
                                 {authLoading ? 'Verificando...' : 'Continuar'}
                             </button>
+
+                            {/* Back button */}
+                            <a
+                                href="/"
+                                className="block w-full py-3 rounded-xl font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 text-center transition-all"
+                            >
+                                ← Volver al inicio
+                            </a>
                         </form>
                     </div>
                 </motion.div>
