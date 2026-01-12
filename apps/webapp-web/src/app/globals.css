@@ -31,6 +31,29 @@
     ::-webkit-scrollbar-thumb {
         @apply bg-slate-700 rounded-full hover:bg-slate-600;
     }
+
+    /* Force dark color scheme for native form elements (select, date inputs, etc.) */
+    :root {
+        color-scheme: dark;
+    }
+
+    /* Native select dropdown styling */
+    select {
+        @apply bg-slate-900 text-white;
+    }
+
+    select option {
+        @apply bg-slate-900 text-white;
+    }
+
+    select option:checked,
+    select option:hover {
+        @apply bg-slate-700;
+    }
+
+    select optgroup {
+        @apply bg-slate-900 text-slate-400 font-semibold;
+    }
 }
 
 @layer components {

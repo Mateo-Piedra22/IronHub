@@ -20,6 +20,34 @@ from starlette.middleware.sessions import SessionMiddleware
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# ============================================================================
+# STARTUP CONFIGURATION VALIDATION
+# ============================================================================
+# Log database configuration status (without exposing sensitive values)
+_db_host = os.getenv("DB_HOST", "localhost")
+_db_name = os.getenv("DB_NAME", "")
+_db_user = os.getenv("DB_USER", "postgres")
+_has_password = bool(os.getenv("DB_PASSWORD"))
+_admin_db_host = os.getenv("ADMIN_DB_HOST", os.getenv("DB_HOST", "localhost"))
+_admin_db_name = os.getenv("ADMIN_DB_NAME", "")
+
+logger.info("=" * 60)
+logger.info("WEBAPP-API STARTUP - Database Configuration")
+logger.info("=" * 60)
+logger.info(f"DB_HOST: {_db_host}")
+logger.info(f"DB_NAME: {_db_name or '(not set)'}")
+logger.info(f"DB_USER: {_db_user}")
+logger.info(f"DB_PASSWORD: {'***configured***' if _has_password else '(NOT SET)'}")
+logger.info(f"ADMIN_DB_HOST: {_admin_db_host}")
+logger.info(f"ADMIN_DB_NAME: {_admin_db_name or '(not set)'}")
+logger.info(f"TENANT_BASE_DOMAIN: {os.getenv('TENANT_BASE_DOMAIN', 'ironhub.motiona.xyz')}")
+
+if _db_host == "localhost" and not os.getenv("DEVELOPMENT_MODE"):
+    logger.warning("⚠️  DB_HOST is 'localhost' but DEVELOPMENT_MODE not set!")
+    logger.warning("⚠️  This may indicate missing production environment configuration.")
+
+logger.info("=" * 60)
+
 # Import core services
 import sys
 from pathlib import Path

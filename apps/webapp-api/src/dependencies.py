@@ -75,7 +75,9 @@ def get_db_session() -> Generator[Session, None, None]:
     """
     Get a database session for the current tenant.
     Uses CURRENT_TENANT context variable to determine which database to connect to.
-    Falls back to global database if no tenant context is set.
+    
+    IMPORTANT: If tenant is set but cannot connect, raises an error instead of
+    silently falling back to the wrong database.
     """
     tenant = get_current_tenant()
     
@@ -90,10 +92,38 @@ def get_db_session() -> Generator[Session, None, None]:
                 finally:
                     session.close()
                 return
+            else:
+                # Factory returned None - tenant lookup failed
+                logger.error(f"Tenant session factory returned None for '{tenant}'")
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Database connection unavailable for tenant '{tenant}'"
+                )
+        except HTTPException:
+            raise  # Re-raise HTTP exceptions
         except Exception as e:
-            logger.warning(f"Failed to get tenant session for '{tenant}': {e}")
+            logger.error(f"Failed to get tenant session for '{tenant}': {e}")
+            # Check if this looks like a production environment without proper config
+            db_host = os.getenv("DB_HOST", "localhost")
+            if db_host == "localhost" and not os.getenv("DEVELOPMENT_MODE"):
+                logger.critical(
+                    f"PRODUCTION CONFIG ERROR: DB_HOST is 'localhost' but DEVELOPMENT_MODE not set. "
+                    f"Ensure DB_HOST, DB_USER, DB_PASSWORD are configured for production."
+                )
+            raise HTTPException(
+                status_code=503,
+                detail=f"Database connection error: {str(e)}"
+            )
     
-    # Fallback to global database
+    # No tenant context - use global database 
+    # Also validate that we're not accidentally using localhost in production
+    db_host = os.getenv("DB_HOST", "localhost")
+    if db_host == "localhost" and not os.getenv("DEVELOPMENT_MODE"):
+        logger.warning(
+            f"No tenant context and DB_HOST is 'localhost'. "
+            f"This may indicate missing environment configuration."
+        )
+    
     session = SessionLocal()
     try:
         yield session

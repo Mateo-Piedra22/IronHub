@@ -8,6 +8,21 @@
   :root {
     --background: 2 6 23;
     --foreground: 248 250 252;
+    color-scheme: dark;
+  }
+
+  /* Native select dropdown styling */
+  select {
+    @apply bg-slate-900 text-white;
+  }
+
+  select option {
+    @apply bg-slate-900 text-white;
+  }
+
+  select option:checked,
+  select option:hover {
+    @apply bg-slate-700;
   }
 
   html {
