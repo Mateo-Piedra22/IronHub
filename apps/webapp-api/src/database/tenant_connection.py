@@ -16,6 +16,7 @@ import re
 import time
 import logging
 import threading
+import contextvars
 from typing import Dict, Any, Optional, Tuple
 from contextlib import contextmanager
 from datetime import datetime
@@ -56,12 +57,8 @@ _tenant_db_info: Dict[str, Dict[str, Any]] = {}  # Cache for tenant db_name and 
 _tenant_lock = threading.RLock()
 _tenant_last_access: Dict[str, float] = {}  # For LRU eviction
 
-# Context variable for current tenant
-try:
-    from src.dependencies import CURRENT_TENANT
-except ImportError:
-    import contextvars
-    CURRENT_TENANT = contextvars.ContextVar('current_tenant', default=None)
+# CANONICAL context variable for current tenant - ALL modules should import from here
+CURRENT_TENANT = contextvars.ContextVar('current_tenant', default=None)
 
 
 def set_current_tenant(tenant: str):
@@ -173,7 +170,7 @@ def _get_tenant_info_from_admin(tenant: str) -> Optional[Dict[str, Any]]:
         with db.get_connection_context() as conn:
             cur = conn.cursor()
             cur.execute("""
-                SELECT db_name, status, suspended_reason, suspended_until, nombre
+                SELECT id, db_name, status, suspended_reason, suspended_until, nombre
                 FROM gyms 
                 WHERE subdominio = %s
             """, (tenant,))
@@ -181,11 +178,12 @@ def _get_tenant_info_from_admin(tenant: str) -> Optional[Dict[str, Any]]:
             
             if row:
                 info = {
-                    'db_name': str(row[0]).strip() if row[0] else None,
-                    'status': str(row[1]).strip() if row[1] else 'active',
-                    'suspended_reason': str(row[2]) if row[2] else None,
-                    'suspended_until': row[3],
-                    'nombre': str(row[4]) if row[4] else tenant,
+                    'gym_id': int(row[0]) if row[0] else None,
+                    'db_name': str(row[1]).strip() if row[1] else None,
+                    'status': str(row[2]).strip() if row[2] else 'active',
+                    'suspended_reason': str(row[3]) if row[3] else None,
+                    'suspended_until': row[4],
+                    'nombre': str(row[5]) if row[5] else tenant,
                     '_cached_at': time.time()
                 }
                 
@@ -210,6 +208,22 @@ def _get_tenant_db_name(tenant: str) -> Optional[str]:
     # Fallback: construct db_name from tenant subdomain
     suffix = os.getenv("TENANT_DB_SUFFIX", "_db")
     return f"{tenant}{suffix}"
+
+
+def get_tenant_gym_id(tenant: str) -> Optional[int]:
+    """Look up the gym_id for a tenant from the admin database."""
+    info = _get_tenant_info_from_admin(tenant)
+    if info and info.get('gym_id'):
+        return info['gym_id']
+    return None
+
+
+def get_current_tenant_gym_id() -> Optional[int]:
+    """Get the gym_id for the current tenant from context."""
+    tenant = get_current_tenant()
+    if not tenant:
+        return None
+    return get_tenant_gym_id(tenant)
 
 
 def is_tenant_active(tenant: str) -> Tuple[bool, str]:

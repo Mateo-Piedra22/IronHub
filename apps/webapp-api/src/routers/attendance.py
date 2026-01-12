@@ -544,16 +544,28 @@ async def api_get_station_key(
 ):
     """Get or generate station key for the current gym (requires owner auth)."""
     try:
+        # Try to get gym_id from session first
         gym_id = request.session.get("gym_id")
+        
+        # If not in session, look up from admin DB using tenant subdomain
         if not gym_id:
-            return JSONResponse({"error": "Gym ID no encontrado"}, status_code=400)
+            from src.database.tenant_connection import get_current_tenant_gym_id
+            gym_id = get_current_tenant_gym_id()
+        
+        if not gym_id:
+            return JSONResponse({"error": "Gym ID no encontrado - asegúrate de que el gym está registrado"}, status_code=400)
         
         station_key = svc.generar_station_key(int(gym_id))
         
-        # Build the station URL
-        host = request.headers.get("host", "")
-        protocol = "https" if request.headers.get("x-forwarded-proto") == "https" else "http"
-        station_url = f"{protocol}://{host}/station/{station_key}"
+        # Build the station URL using the current tenant subdomain
+        # For cross-origin calls, use the Origin header to determine the frontend URL
+        origin = request.headers.get("origin", "")
+        if origin:
+            station_url = f"{origin}/station/{station_key}"
+        else:
+            host = request.headers.get("host", "")
+            protocol = "https" if request.headers.get("x-forwarded-proto") == "https" else "http"
+            station_url = f"{protocol}://{host}/station/{station_key}"
         
         return {
             "station_key": station_key,
@@ -572,9 +584,16 @@ async def api_regenerate_station_key(
 ):
     """Regenerate station key (invalidates old URL)."""
     try:
+        # Try to get gym_id from session first
         gym_id = request.session.get("gym_id")
+        
+        # If not in session, look up from admin DB using tenant subdomain
         if not gym_id:
-            return JSONResponse({"error": "Gym ID no encontrado"}, status_code=400)
+            from src.database.tenant_connection import get_current_tenant_gym_id
+            gym_id = get_current_tenant_gym_id()
+        
+        if not gym_id:
+            return JSONResponse({"error": "Gym ID no encontrado - asegúrate de que el gym está registrado"}, status_code=400)
         
         import secrets as sec
         new_key = sec.token_urlsafe(16)
@@ -586,9 +605,14 @@ async def api_regenerate_station_key(
         )
         svc.db.commit()
         
-        host = request.headers.get("host", "")
-        protocol = "https" if request.headers.get("x-forwarded-proto") == "https" else "http"
-        station_url = f"{protocol}://{host}/station/{new_key}"
+        # Build the station URL
+        origin = request.headers.get("origin", "")
+        if origin:
+            station_url = f"{origin}/station/{new_key}"
+        else:
+            host = request.headers.get("host", "")
+            protocol = "https" if request.headers.get("x-forwarded-proto") == "https" else "http"
+            station_url = f"{protocol}://{host}/station/{new_key}"
         
         return {
             "station_key": new_key,

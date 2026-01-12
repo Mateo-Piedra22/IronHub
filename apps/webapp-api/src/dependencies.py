@@ -4,7 +4,7 @@ Self-contained FastAPI dependency injection for webapp-api
 """
 
 import logging
-import contextvars
+import os
 from typing import Optional, Generator
 
 from fastapi import Request, HTTPException, status, Depends
@@ -13,12 +13,17 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
-# Global ContextVar for Tenant
-CURRENT_TENANT = contextvars.ContextVar("current_tenant", default=None)
+# Import tenant context functions from tenant_connection to avoid circular imports
+# tenant_connection has the canonical CURRENT_TENANT contextvar
+from src.database.tenant_connection import (
+    get_tenant_session_factory,
+    set_current_tenant,
+    get_current_tenant,
+    CURRENT_TENANT
+)
 
-# Import local modules
+# Import local services
 from src.database.connection import SessionLocal, AdminSessionLocal
-from src.database.tenant_connection import get_tenant_session_factory
 from src.services.user_service import UserService
 from src.services.teacher_service import TeacherService
 from src.services.payment_service import PaymentService
@@ -30,21 +35,6 @@ from src.services.profesor_service import ProfesorService
 from src.services.whatsapp_service import WhatsAppService
 from src.services.reports_service import ReportsService
 from src.services.admin_service import AdminService
-
-
-import os
-
-def set_current_tenant(tenant: str):
-    """Set the current tenant subdomain in context."""
-    CURRENT_TENANT.set(tenant.strip().lower() if tenant else None)
-
-
-def get_current_tenant() -> Optional[str]:
-    """Get the current tenant subdomain from context."""
-    try:
-        return CURRENT_TENANT.get()
-    except LookupError:
-        return None
 
 async def ensure_tenant_context(request: Request) -> Optional[str]:
     """
