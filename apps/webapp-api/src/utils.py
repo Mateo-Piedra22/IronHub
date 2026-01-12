@@ -460,7 +460,7 @@ def _verify_owner_password(password: str) -> bool:
     # Get stored password from various sources
     stored = None
     try:
-        stored = _get_stored_owner_password()
+        stored = _get_password()
     except Exception:
         pass
     

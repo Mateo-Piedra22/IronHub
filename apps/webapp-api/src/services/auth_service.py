@@ -328,6 +328,6 @@ class AuthService(BaseService):
             'email': getattr(user, 'email', None),
             'activo': user.activo,
             'tipo_cuota': user.tipo_cuota,
-            'fecha_vencimiento': user.fecha_vencimiento.isoformat() if user.fecha_vencimiento else None,
+            'fecha_vencimiento': user.fecha_proximo_vencimiento.isoformat() if user.fecha_proximo_vencimiento else None,
             'notas': getattr(user, 'notas', None)
         }

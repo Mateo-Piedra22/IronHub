@@ -325,6 +325,13 @@ export default function UsuarioLoginPage() {
                         <p className="text-xs text-slate-500">
                             ¿Problemas para ingresar? Comunícate con tu gimnasio
                         </p>
+                        {/* Back button */}
+                        <a
+                            href="/"
+                            className="block w-full py-3 mt-4 rounded-xl font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 text-center transition-all text-sm"
+                        >
+                            ← Volver al inicio
+                        </a>
                     </div>
                 </motion.div>
             </motion.div>

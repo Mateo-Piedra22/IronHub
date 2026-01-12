@@ -263,6 +263,13 @@ export default function GestionLoginPage() {
                             <Shield className="w-4 h-4" />
                             <span>Acceso restringido a personal autorizado</span>
                         </div>
+                        {/* Back button */}
+                        <a
+                            href="/"
+                            className="block w-full py-3 mt-4 rounded-xl font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 text-center transition-all text-sm"
+                        >
+                            ← Volver al inicio
+                        </a>
                     </div>
                 </motion.div>
             </motion.div>

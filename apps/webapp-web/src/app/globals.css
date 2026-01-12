@@ -176,4 +176,19 @@
     .modal-content {
         @apply bg-slate-900 border border-slate-800 rounded-2xl shadow-elevated;
     }
+
+    /* QR Scanner - Force video visibility */
+    #qr-scanner-container {
+        @apply relative w-full h-full;
+    }
+    
+    #qr-scanner-container video {
+        @apply w-full h-full object-cover !important;
+        max-width: 100% !important;
+        max-height: 100% !important;
+    }
+    
+    #qr-scanner-container > div {
+        @apply w-full h-full !important;
+    }
 }

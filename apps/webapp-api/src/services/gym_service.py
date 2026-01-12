@@ -663,13 +663,13 @@ class GymService(BaseService):
             # Get exercises for this routine
             ej_result = self.db.execute(
                 text("""
-                    SELECT re.id, re.rutina_id, re.ejercicio_id, re.dia, re.orden,
-                           re.series, re.repeticiones, re.descanso, re.notas,
+                    SELECT re.id, re.rutina_id, re.ejercicio_id, re.dia_semana, re.orden,
+                           re.series, re.repeticiones,
                            e.nombre as ejercicio_nombre, e.video_url, e.descripcion, e.equipamiento
-                    FROM rutinas_ejercicios re
+                    FROM rutina_ejercicios re
                     LEFT JOIN ejercicios e ON re.ejercicio_id = e.id
                     WHERE re.rutina_id = :rutina_id
-                    ORDER BY re.dia, re.orden
+                    ORDER BY re.dia_semana, re.orden
                 """),
                 {'rutina_id': rutina_id}
             )
@@ -680,17 +680,17 @@ class GymService(BaseService):
                     'id': ej_row[0],
                     'rutina_id': ej_row[1],
                     'ejercicio_id': ej_row[2],
-                    'dia': ej_row[3],
+                    'dia': ej_row[3],  # dia_semana
                     'orden': ej_row[4],
                     'series': ej_row[5],
                     'repeticiones': ej_row[6],
-                    'descanso': ej_row[7],
-                    'notas': ej_row[8],
-                    'ejercicio_nombre': ej_row[9],
-                    'nombre_ejercicio': ej_row[9],  # Alias
-                    'video_url': ej_row[10],
-                    'descripcion': ej_row[11],
-                    'equipamiento': ej_row[12]
+                    'descanso': 0,  # Not in schema, default
+                    'notas': '',    # Not in schema, default
+                    'ejercicio_nombre': ej_row[7],
+                    'nombre_ejercicio': ej_row[7],  # Alias
+                    'video_url': ej_row[8],
+                    'descripcion': ej_row[9],
+                    'equipamiento': ej_row[10]
                 }
                 rutina['ejercicios'].append(ejercicio)
                 
@@ -742,7 +742,7 @@ class GymService(BaseService):
             if 'dias' in data and isinstance(data['dias'], list):
                 # Delete existing exercises
                 self.db.execute(
-                    text("DELETE FROM rutinas_ejercicios WHERE rutina_id = :rutina_id"),
+                    text("DELETE FROM rutina_ejercicios WHERE rutina_id = :rutina_id"),
                     {'rutina_id': rutina_id}
                 )
                 
@@ -752,19 +752,17 @@ class GymService(BaseService):
                     for idx, ej in enumerate(dia.get('ejercicios', [])):
                         self.db.execute(
                             text("""
-                                INSERT INTO rutinas_ejercicios 
-                                (rutina_id, ejercicio_id, dia, orden, series, repeticiones, descanso, notas)
-                                VALUES (:rutina_id, :ejercicio_id, :dia, :orden, :series, :repeticiones, :descanso, :notas)
+                                INSERT INTO rutina_ejercicios 
+                                (rutina_id, ejercicio_id, dia_semana, orden, series, repeticiones)
+                                VALUES (:rutina_id, :ejercicio_id, :dia_semana, :orden, :series, :repeticiones)
                             """),
                             {
                                 'rutina_id': rutina_id,
                                 'ejercicio_id': ej.get('ejercicio_id'),
-                                'dia': dia_num,
+                                'dia_semana': dia_num,
                                 'orden': ej.get('orden', idx),
-                                'series': ej.get('series', ''),
-                                'repeticiones': ej.get('repeticiones', ''),
-                                'descanso': ej.get('descanso', 0),
-                                'notas': ej.get('notas', '')
+                                'series': ej.get('series'),
+                                'repeticiones': ej.get('repeticiones', '')
                             }
                         )
             
