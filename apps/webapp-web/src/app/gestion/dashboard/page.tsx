@@ -47,32 +47,27 @@ export default function DashboardPage() {
         setLoading(true);
         try {
             const [kpisRes, ingresosRes, nuevosRes, cohortRes, alertsRes] = await Promise.all([
-                fetch("/api/kpis", { credentials: "include" }),
-                fetch("/api/ingresos12m", { credentials: "include" }),
-                fetch("/api/nuevos12m", { credentials: "include" }),
-                fetch("/api/cohort_retencion_6m", { credentials: "include" }),
-                fetch("/api/delinquency_alerts_recent", { credentials: "include" }),
+                api.getKpis(),
+                api.getIngresos12m(),
+                api.getNuevos12m(),
+                api.getCohortRetencion6m(),
+                api.getDelinquencyAlertsRecent(),
             ]);
 
-            if (kpisRes.ok) {
-                const data = await kpisRes.json();
-                setKpis(data);
+            if (kpisRes.ok && kpisRes.data) {
+                setKpis(kpisRes.data);
             }
-            if (ingresosRes.ok) {
-                const data = await ingresosRes.json();
-                setIngresos12m(data.data || []);
+            if (ingresosRes.ok && ingresosRes.data) {
+                setIngresos12m(ingresosRes.data.data || []);
             }
-            if (nuevosRes.ok) {
-                const data = await nuevosRes.json();
-                setNuevos12m(data.data || []);
+            if (nuevosRes.ok && nuevosRes.data) {
+                setNuevos12m(nuevosRes.data.data || []);
             }
-            if (cohortRes.ok) {
-                const data = await cohortRes.json();
-                setCohorts(data.cohorts || []);
+            if (cohortRes.ok && cohortRes.data) {
+                setCohorts(cohortRes.data.cohorts || []);
             }
-            if (alertsRes.ok) {
-                const data = await alertsRes.json();
-                setAlerts(data.alerts || []);
+            if (alertsRes.ok && alertsRes.data) {
+                setAlerts(alertsRes.data.alerts || []);
             }
         } catch (error) {
             console.error("Error fetching dashboard data:", error);
@@ -104,12 +99,9 @@ export default function DashboardPage() {
 
     const handleExport = async (type: "usuarios" | "pagos" | "asistencias") => {
         try {
-            const response = await fetch(`/api/export/${type}/csv`, {
-                credentials: "include",
-            });
-            if (response.ok) {
-                const blob = await response.blob();
-                const url = window.URL.createObjectURL(blob);
+            const result = await api.exportToCsv(type);
+            if (result.ok && result.data) {
+                const url = window.URL.createObjectURL(result.data);
                 const a = document.createElement("a");
                 a.href = url;
                 a.download = `${type}_${new Date().toISOString().split("T")[0]}.csv`;

@@ -6,7 +6,6 @@
 
 // Environment configuration
 const TENANT_DOMAIN = process.env.NEXT_PUBLIC_TENANT_DOMAIN || 'ironhub.motiona.xyz';
-const API_PREFIX = process.env.NEXT_PUBLIC_API_SUBDOMAIN_PREFIX || 'api';
 
 /**
  * Get the current gym subdomain from the browser URL
@@ -35,21 +34,22 @@ function getCurrentSubdomain(): string {
 
 /**
  * Build the API base URL for the current tenant
- * Pattern: api.{gym}.ironhub.motiona.xyz
+ * 
+ * ARCHITECTURE: Single API deployment at api.ironhub.motiona.xyz
+ * Tenant context is passed via:
+ * - X-Tenant header (set automatically by ApiClient)
+ * - Origin header extraction (middleware on backend)
+ * - Session cookie (after login)
  */
 function getApiBaseUrl(): string {
-    // Check for static override first (for development/testing)
+    // 1. Check for explicit override (dev/testing)
     const staticUrl = process.env.NEXT_PUBLIC_API_URL;
     if (staticUrl) return staticUrl;
 
-    const subdomain = getCurrentSubdomain();
-    if (!subdomain) {
-        console.warn('No subdomain detected, API calls may fail');
-        return '';
-    }
-
-    // Build: https://api.{gym}.ironhub.motiona.xyz
-    return `https://${API_PREFIX}.${subdomain}.${TENANT_DOMAIN}`;
+    // 2. Default production API URL
+    // The API is deployed at a single domain and handles multi-tenancy
+    // via headers/cookies, not per-tenant subdomains
+    return `https://api.${TENANT_DOMAIN}`;
 }
 
 // Get API base URL (dynamically or from env)
@@ -1418,6 +1418,56 @@ class ApiClient {
     async getNextReciboNumber() {
         return this.request<{ numero: string }>('/api/config/recibos/next-number');
     }
+
+    // === Reports / Dashboard ===
+    async getKpis() {
+        return this.request<{
+            total_activos: number;
+            total_inactivos: number;
+            ingresos_mes: number;
+            asistencias_hoy: number;
+            nuevos_30_dias: number;
+        }>('/api/kpis');
+    }
+
+    async getIngresos12m() {
+        return this.request<{ data: Array<{ mes: string; total: number }> }>('/api/ingresos12m');
+    }
+
+    async getNuevos12m() {
+        return this.request<{ data: Array<{ mes: string; total: number }> }>('/api/nuevos12m');
+    }
+
+    async getCohortRetencion6m() {
+        return this.request<{ cohorts: Array<{ cohort: string; total: number; retained: number; retention_rate: number }> }>('/api/cohort_retencion_6m');
+    }
+
+    async getDelinquencyAlertsRecent() {
+        return this.request<{ alerts: Array<{ usuario_id: number; usuario_nombre: string; ultimo_pago: string | null }> }>('/api/delinquency_alerts_recent');
+    }
+
+    async exportToCsv(type: 'usuarios' | 'pagos' | 'asistencias', params?: { desde?: string; hasta?: string }) {
+        const searchParams = new URLSearchParams();
+        if (params?.desde) searchParams.set('desde', params.desde);
+        if (params?.hasta) searchParams.set('hasta', params.hasta);
+        const query = searchParams.toString();
+        const url = `${this.baseUrl}/api/export/${type}/csv${query ? `?${query}` : ''}`;
+
+        try {
+            const response = await fetch(url, {
+                credentials: 'include',
+                headers: {
+                    'X-Tenant': typeof window !== 'undefined' ? getCurrentSubdomain() : '',
+                },
+            });
+            if (!response.ok) {
+                return { ok: false, error: 'Error al exportar' };
+            }
+            return { ok: true, data: await response.blob() };
+        } catch (error) {
+            return { ok: false, error: 'Error de conexión' };
+        }
+    }
 }
 
 // Singleton instance
@@ -1425,4 +1475,5 @@ export const api = new ApiClient(API_BASE_URL);
 
 // Re-export for convenience
 export default api;
+
 

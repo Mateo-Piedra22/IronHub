@@ -91,6 +91,70 @@ app.add_middleware(
 )
 
 
+# =====================================================
+# TENANT CONTEXT MIDDLEWARE
+# =====================================================
+# This middleware extracts the tenant from the subdomain or X-Tenant header
+# and sets it in the context for all database operations.
+
+@app.middleware("http")
+async def tenant_context_middleware(request: Request, call_next):
+    """
+    Global middleware to extract and set tenant context for every request.
+    This is CRITICAL for multi-tenant database routing.
+    """
+    tenant = None
+    host = request.headers.get("host", "")
+    base = os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz")
+    
+    # Remove port if present
+    host_clean = host.split(":")[0]
+    
+    # 1. Try to extract from subdomain
+    if host_clean.endswith(f".{base}"):
+        subdomain = host_clean.replace(f".{base}", "")
+        # Skip reserved subdomains
+        if subdomain and subdomain not in ("www", "api", "admin", "admin-api"):
+            tenant = subdomain
+    
+    # 2. Fallback to X-Tenant header
+    if not tenant:
+        tenant = request.headers.get("x-tenant")
+    
+    # 3. Try to get from session (for gestion routes)
+    if not tenant:
+        try:
+            # Session middleware runs before this, so session should be available
+            session_tenant = request.session.get("tenant")
+            if session_tenant:
+                tenant = session_tenant
+        except Exception:
+            pass
+    
+    # 4. Try to extract from Origin/Referer header (for cross-origin API calls)
+    if not tenant:
+        origin = request.headers.get("origin") or request.headers.get("referer") or ""
+        # Parse origin to extract subdomain
+        import re
+        match = re.search(rf"https?://([a-z0-9-]+)\.{re.escape(base)}", origin.lower())
+        if match:
+            candidate = match.group(1)
+            if candidate not in ("www", "api", "admin", "admin-api"):
+                tenant = candidate
+    
+    # Set tenant context if found
+    if tenant:
+        set_current_tenant(tenant.strip().lower())
+        logger.debug(f"Tenant context set: {tenant}")
+    else:
+        # For API routes, log warning if no tenant found
+        if request.url.path.startswith("/api/"):
+            logger.debug(f"No tenant context for API route: {request.url.path}")
+    
+    response = await call_next(request)
+    return response
+
+
 def extract_tenant_from_request(request: Request) -> str:
     """Extract tenant subdomain from request host"""
     host = request.headers.get("host", "")
