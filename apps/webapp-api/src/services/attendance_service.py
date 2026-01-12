@@ -620,6 +620,13 @@ class AttendanceService(BaseService):
             db = RawPostgresManager(connection_params=admin_params)
             with db.get_connection_context() as conn:
                 cur = conn.cursor()
+                
+                # Auto-migrate: ensure station_key column exists
+                cur.execute("""
+                    ALTER TABLE gyms ADD COLUMN IF NOT EXISTS station_key VARCHAR(64)
+                """)
+                conn.commit()
+                
                 cur.execute("SELECT id FROM gyms WHERE station_key = %s LIMIT 1", (station_key,))
                 row = cur.fetchone()
                 return row[0] if row else None
