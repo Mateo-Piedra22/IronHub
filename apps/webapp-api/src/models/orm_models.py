@@ -127,14 +127,14 @@ class NumeracionComprobante(Base):
     __tablename__ = 'numeracion_comprobantes'
     
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    longitud_numero: Mapped[int] = mapped_column(Integer, nullable=False, server_default='8')
-    activo: Mapped[bool] = mapped_column(Boolean, server_default='true')
-    fecha_creacion: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
+    tipo_comprobante: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    prefijo: Mapped[str] = mapped_column(String(10), nullable=False, server_default='')
     numero_inicial: Mapped[int] = mapped_column(Integer, nullable=False, server_default='1')
-    reiniciar_anual: Mapped[bool] = mapped_column(Boolean, server_default='false')
-    tipo_comprobante: Mapped[str] = mapped_column(String(50), nullable=False, server_default='recibo')
-    prefijo: Mapped[Optional[str]] = mapped_column(String(10))
-    separador: Mapped[Optional[str]] = mapped_column(String(5), server_default='-')
+    separador: Mapped[str] = mapped_column(String(5), nullable=False, server_default='-')
+    reiniciar_anual: Mapped[Optional[bool]] = mapped_column(Boolean, server_default='false')
+    longitud_numero: Mapped[int] = mapped_column(Integer, nullable=False, server_default='8')
+    activo: Mapped[Optional[bool]] = mapped_column(Boolean, server_default='true')
+    fecha_creacion: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
 
 class ComprobantePago(Base):
     __tablename__ = 'comprobantes_pago'
@@ -859,18 +859,7 @@ class ThemeSchedulingConfig(Base):
     descripcion: Mapped[Optional[str]] = mapped_column(Text)
     fecha_actualizacion: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
 
-class NumeracionComprobante(Base):
-    __tablename__ = 'numeracion_comprobantes'
-    
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    tipo_comprobante: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
-    prefijo: Mapped[str] = mapped_column(String(10), nullable=False, server_default='')
-    numero_inicial: Mapped[int] = mapped_column(Integer, nullable=False, server_default='1')
-    separador: Mapped[str] = mapped_column(String(5), nullable=False, server_default='-')
-    reiniciar_anual: Mapped[Optional[bool]] = mapped_column(Boolean, server_default='false')
-    longitud_numero: Mapped[int] = mapped_column(Integer, nullable=False, server_default='8')
-    activo: Mapped[Optional[bool]] = mapped_column(Boolean, server_default='true')
-    fecha_creacion: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
+
 
 class AuditLog(Base):
     __tablename__ = 'audit_logs'
