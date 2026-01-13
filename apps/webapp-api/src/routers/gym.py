@@ -178,7 +178,7 @@ async def api_gym_logo(
             except Exception as e:
                 return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
         
-        # Save to DB using GymService
+
         if public_url:
             svc.actualizar_logo_url(public_url)
                  
@@ -853,7 +853,7 @@ async def api_gym_logo_legacy(
         with open(filepath, "wb") as f:
             f.write(content)
             
-        # Update DB config using GymService
+
         svc.actualizar_configuracion('gym_logo_url', f"/assets/{filename}")
         
         return {"ok": True, "url": f"/assets/{filename}"}
@@ -1544,7 +1544,7 @@ async def api_rutina_excel_view(
     sheet: Optional[str] = None,
     ts: int = 0,
     sig: Optional[str] = None,
-    svc: GymService = Depends(get_gym_service),
+    svc: TrainingService = Depends(get_training_service),
     rm: RoutineTemplateManager = Depends(get_rm)
 ):
     """Public endpoint that serves Excel file after verifying signature.
