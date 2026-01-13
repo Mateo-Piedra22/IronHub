@@ -294,6 +294,7 @@ async def gestion_auth(
             request.session.clear()
             request.session["logged_in"] = True
             request.session["role"] = "dueño"
+            request.session["tenant"] = tenant
             return success_response("/gestion", {"role": "dueño"})
         return error_response("Credenciales inválidas")
 
@@ -333,6 +334,7 @@ async def gestion_auth(
             break
         
     request.session["gestion_profesor_user_id"] = usuario_id
+    request.session["tenant"] = tenant
     try:
         request.session["role"] = "profesor"
     except Exception:

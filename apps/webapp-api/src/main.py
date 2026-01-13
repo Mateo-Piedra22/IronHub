@@ -116,7 +116,12 @@ base_domain = os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz")
 is_dev = os.getenv("DEVELOPMENT_MODE", "False").lower() == "true"
 
 # In production, share cookie across all subdomains to prevent session loss
-cookie_domain = f".{base_domain}" if not is_dev else None
+# BUT disable explicit domain if in Vercel Preview (to avoid domain mismatch with .vercel.app)
+vercel_env = os.getenv("VERCEL_ENV", "production") 
+if not is_dev and vercel_env != "preview":
+    cookie_domain = f".{base_domain}"
+else:
+    cookie_domain = None
 
 app.add_middleware(
     SessionMiddleware,
