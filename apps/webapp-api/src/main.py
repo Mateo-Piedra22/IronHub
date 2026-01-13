@@ -115,19 +115,20 @@ app.add_middleware(
 base_domain = os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz")
 is_dev = os.getenv("DEVELOPMENT_MODE", "False").lower() == "true"
 
-# In production, share cookie across all subdomains to prevent session loss
-# BUT disable explicit domain if in Vercel Preview (to avoid domain mismatch with .vercel.app)
-vercel_env = os.getenv("VERCEL_ENV", "production") 
-if not is_dev and vercel_env != "preview":
+# In production/testing, we MUST share the cookie across subdomains (api <-> testingiron/www)
+# We use SameSite="None" to ensure it works across all contexts, and force the domain.
+if not is_dev:
     cookie_domain = f".{base_domain}"
+    same_site = "none"
 else:
     cookie_domain = None
+    same_site = "lax"
 
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET", "webapp-session-secret"),
     https_only=not is_dev,
-    same_site="lax",
+    same_site=same_site,
     domain=cookie_domain,
 )
 
