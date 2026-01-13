@@ -1469,7 +1469,7 @@ async def api_rutina_excel_view_url(
     qr_mode: str = "inline",
     sheet: Optional[str] = None,
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service),
+    svc: TrainingService = Depends(get_training_service),
 ):
     """Generate a signed URL for Excel preview in Office Online Viewer.
     
