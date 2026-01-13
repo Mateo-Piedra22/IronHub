@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { QRScannerModal } from '@/components/QrScannerModal';
@@ -20,7 +20,7 @@ import { useAuth } from '@/lib/auth';
 import { api, type Usuario, type Pago, type Rutina } from '@/lib/api';
 import { formatDate, formatDateRelative, formatCurrency, cn } from '@/lib/utils';
 
-export default function UserDashboardPage() {
+function UserDashboardContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { user, logout, isLoading: authLoading } = useAuth();
@@ -84,13 +84,10 @@ export default function UserDashboardPage() {
     };
 
     const handleScan = (decodedText: string) => {
-        // Decoded text is likely the URL: .../api/rutinas/qr_scan/{uuid}
-        // Or just UUID if we generated it that way (but we generated full URL)
         console.log("Scanned:", decodedText);
 
         let uuid = decodedText;
         try {
-            // Try to extract UUID from URL if it looks like a URL
             if (decodedText.includes('/qr_scan/')) {
                 const parts = decodedText.split('/qr_scan/');
                 if (parts.length > 1) {
@@ -105,7 +102,6 @@ export default function UserDashboardPage() {
             // Fallback to using text as is
         }
 
-        // Clean UUID (remove trailing slashes or params if any)
         uuid = uuid.split('?')[0].split('&')[0];
 
         handleRoutineAccess(uuid);
@@ -131,7 +127,6 @@ export default function UserDashboardPage() {
         );
     }
 
-    // Calculate subscription status
     const daysRemaining = userData.dias_restantes ?? 0;
     const isExpired = daysRemaining <= 0;
     const isExpiringSoon = daysRemaining > 0 && daysRemaining <= 7;
@@ -202,7 +197,7 @@ export default function UserDashboardPage() {
                         </div>
                     </div>
 
-                    {/* Progress bar - subscription cycle */}
+                    {/* Progress bar */}
                     {!isExpired && daysRemaining > 0 && (
                         <div className="mt-4">
                             <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
@@ -249,11 +244,6 @@ export default function UserDashboardPage() {
                             if (rutina?.uuid_rutina) {
                                 router.push(`/usuario/routines?uuid=${rutina.uuid_rutina}`);
                             } else if (rutina?.id) {
-                                // Fallback if no UUID handy? But routine view needs UUID likely if public/scanned.
-                                // Actually logged in user can view by ID? 
-                                // For parity, let's use UUID if available, else maybe ID?
-                                // But detailed view from QR uses UUID.
-                                // Let's assume verified flow uses UUID.
                                 alert("Rutina sin identificador único compatible con QR");
                             } else {
                                 alert("No tienes rutina asignada");
@@ -360,5 +350,22 @@ export default function UserDashboardPage() {
                 onScan={handleScan}
             />
         </div>
+    );
+}
+
+export default function UserDashboardPage() {
+    return (
+        <Suspense
+            fallback={
+                <div className="min-h-screen flex items-center justify-center bg-slate-950">
+                    <div className="flex flex-col items-center gap-4">
+                        <div className="w-12 h-12 border-4 border-primary-500/30 border-t-primary-500 rounded-full animate-spin" />
+                        <p className="text-slate-400">Cargando...</p>
+                    </div>
+                </div>
+            }
+        >
+            <UserDashboardContent />
+        </Suspense>
     );
 }
