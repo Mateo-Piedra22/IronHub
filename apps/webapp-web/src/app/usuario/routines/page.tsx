@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Dumbbell, ChevronDown, ChevronUp, Loader2, QrCode, Lock, Info, PlayCircle } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -10,7 +10,7 @@ import { QRScannerModal } from '@/components/QrScannerModal';
 import { UserExerciseModal } from '@/components/UserExerciseModal';
 import { Button, useToast } from '@/components/ui';
 
-export default function RoutinesPage() {
+function RoutinesContent() {
     const { user } = useAuth();
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -336,6 +336,20 @@ export default function RoutinesPage() {
                 exercise={selectedExercise}
             />
         </div >
+    );
+}
+
+export default function RoutinesPage() {
+    return (
+        <Suspense
+            fallback={
+                <div className="flex items-center justify-center h-64">
+                    <Loader2 className="w-8 h-8 animate-spin text-primary-400" />
+                </div>
+            }
+        >
+            <RoutinesContent />
+        </Suspense>
     );
 }
 
