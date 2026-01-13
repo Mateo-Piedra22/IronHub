@@ -228,13 +228,19 @@ async def require_gestion_access(request: Request):
 
 async def require_owner(request: Request):
     """Require owner/admin access."""
+    # DEBUG LOGGING
+    logger.info(f"AUTH DEBUG [{request.url.path}] - Headers: {request.headers.get('cookie', 'NO COOKIE HEADER')}")
+    logger.info(f"AUTH DEBUG [{request.url.path}] - Session: {request.session}")
+    
     if not request.session.get("logged_in"):
+        logger.warning(f"AUTH FAILED: Not logged in. Session keys: {list(request.session.keys())}")
         if request.url.path.startswith("/api/"):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
         return RedirectResponse(url="/gestion/login", status_code=303)
     
     role = request.session.get("role", "").lower()
     if role not in ("dueño", "dueno", "owner", "admin", "administrador"):
+        logger.warning(f"AUTH FAILED: Invalid role {role}")
         if request.url.path.startswith("/api/"):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
         return RedirectResponse(url="/gestion", status_code=303)
