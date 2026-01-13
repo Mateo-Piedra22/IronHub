@@ -275,3 +275,35 @@ async def require_user_auth(request: Request):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
         return RedirectResponse(url="/usuario/login", status_code=303)
     return user_id
+
+async def get_current_active_user(
+    request: Request,
+    user_service: UserService = Depends(get_user_service)
+):
+    """
+    Get current active user from session or raise 401.
+    Used by gym router for member-specific actions.
+    """
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authenticated user required"
+        )
+    
+    user = user_service.get_user_by_id(user_id)
+    if not user:
+        # Invalid session data
+        request.session.clear()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found"
+        )
+        
+    if not user.activo:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Inactive user"
+        )
+        
+    return user
