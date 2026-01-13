@@ -235,51 +235,64 @@ class TrainingService(BaseService):
             rutina = self.db.get(Rutina, rutina_id)
             if not rutina:
                 return None
-
-            ejercicios = self.db.scalars(
-                select(RutinaEjercicio)
-                .options(joinedload(RutinaEjercicio.ejercicio))
-                .where(RutinaEjercicio.rutina_id == rutina_id)
-                .order_by(RutinaEjercicio.dia_semana, RutinaEjercicio.orden)
-            ).all()
-
-            # Get user name if exists
-            usuario_nombre = None
-            if rutina.usuario_id:
-                # Lazy load or query? 
-                # Assuming not loaded eager, let's just cheat or assume relationship exists
-                if hasattr(rutina, 'usuario') and rutina.usuario: # type: ignore
-                     usuario_nombre = rutina.usuario.nombre
-                
-            return {
-                'id': rutina.id,
-                'nombre_rutina': rutina.nombre_rutina,
-                'descripcion': rutina.descripcion,
-                'usuario_id': rutina.usuario_id,
-                'usuario_nombre': usuario_nombre,
-                'categoria': rutina.categoria,
-                'dias_semana': rutina.dias_semana,
-                'activa': rutina.activa,
-                'uuid_rutina': getattr(rutina, 'uuid_rutina', None),
-                'ejercicios': [
-                    {
-                        'id': re.id,
-                        'ejercicio_id': re.ejercicio_id,
-                        'nombre': re.ejercicio.nombre if re.ejercicio else None,
-                        'nombre_ejercicio': getattr(re, 'nombre_ejercicio', None) or (re.ejercicio.nombre if re.ejercicio else None),
-                        'grupo_muscular': re.ejercicio.grupo_muscular if re.ejercicio else None,
-                        'series': re.series,
-                        'repeticiones': re.repeticiones,
-                        'dia_semana': re.dia_semana,
-                        'orden': re.orden,
-                        'video_url': re.ejercicio.video_url if re.ejercicio else None
-                    }
-                    for re in ejercicios
-                ]
-            }
+            return self._build_rutina_detail(rutina)
         except Exception as e:
             logger.error(f"Error getting rutina detail: {e}")
             return None
+
+    def obtener_rutina_por_uuid(self, uuid_str: str) -> Optional[Dict[str, Any]]:
+        """Get full details of a routine by UUID."""
+        try:
+            stmt = select(Rutina).where(Rutina.uuid_rutina == uuid_str)
+            rutina = self.db.scalars(stmt).first()
+            if not rutina:
+                return None
+            return self._build_rutina_detail(rutina)
+        except Exception as e:
+            logger.error(f"Error getting rutina by uuid {uuid_str}: {e}")
+            return None
+
+    def _build_rutina_detail(self, rutina: Rutina) -> Dict[str, Any]:
+        """Helper to build routine detail dict from ORM object."""
+        ejercicios = self.db.scalars(
+            select(RutinaEjercicio)
+            .options(joinedload(RutinaEjercicio.ejercicio))
+            .where(RutinaEjercicio.rutina_id == rutina.id)
+            .order_by(RutinaEjercicio.dia_semana, RutinaEjercicio.orden)
+        ).all()
+
+        # Get user name if exists
+        usuario_nombre = None
+        if rutina.usuario_id:
+            if hasattr(rutina, 'usuario') and rutina.usuario: # type: ignore
+                 usuario_nombre = rutina.usuario.nombre
+            
+        return {
+            'id': rutina.id,
+            'nombre_rutina': rutina.nombre_rutina,
+            'descripcion': rutina.descripcion,
+            'usuario_id': rutina.usuario_id,
+            'usuario_nombre': usuario_nombre,
+            'categoria': rutina.categoria,
+            'dias_semana': rutina.dias_semana,
+            'activa': rutina.activa,
+            'uuid_rutina': getattr(rutina, 'uuid_rutina', None),
+            'ejercicios': [
+                {
+                    'id': re.id,
+                    'ejercicio_id': re.ejercicio_id,
+                    'nombre': re.ejercicio.nombre if re.ejercicio else None,
+                    'nombre_ejercicio': getattr(re, 'nombre_ejercicio', None) or (re.ejercicio.nombre if re.ejercicio else None),
+                    'grupo_muscular': re.ejercicio.grupo_muscular if re.ejercicio else None,
+                    'series': re.series,
+                    'repeticiones': re.repeticiones,
+                    'dia_semana': re.dia_semana,
+                    'orden': re.orden,
+                    'video_url': re.ejercicio.video_url if re.ejercicio else None
+                }
+                for re in ejercicios
+            ]
+        }
 
     def actualizar_rutina(self, rutina_id: int, data: Dict[str, Any]) -> bool:
         """Update a routine."""

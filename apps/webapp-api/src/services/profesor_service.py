@@ -259,8 +259,38 @@ class ProfesorService(BaseService):
             "anio_actual": anio_actual
         }).fetchall()
 
-        return [
-            {
+        results_dict = []
+        for row in result:
+            # Calculate projected hours from schedule
+            horarios_json = row.horarios
+            horas_semana = 0.0
+            
+            if horarios_json and isinstance(horarios_json, list):
+                for h in horarios_json:
+                    try:
+                        # h is a dict like {'dia': 'Lunes', 'inicio': '10:00:00', 'fin': '11:00:00'}
+                        # Note: SQL JSON_BUILD_OBJECT might return strings for times
+                        if h.get('inicio') and h.get('fin'):
+                             # Handle time string parsing
+                             fmt = "%H:%M:%S" if len(str(h['inicio'])) > 5 else "%H:%M"
+                             try:
+                                 start = datetime.strptime(str(h['inicio']), fmt)
+                                 end = datetime.strptime(str(h['fin']), fmt)
+                                 diff = (end - start).seconds / 3600.0
+                                 horas_semana += diff
+                             except ValueError:
+                                 # Try alternate format if first failed
+                                 alt_fmt = "%H:%M" if fmt == "%H:%M:%S" else "%H:%M:%S"
+                                 start = datetime.strptime(str(h['inicio']), alt_fmt)
+                                 end = datetime.strptime(str(h['fin']), alt_fmt)
+                                 diff = (end - start).seconds / 3600.0
+                                 horas_semana += diff
+                    except Exception:
+                        pass # Ignore malformed times
+            
+            horas_proyectadas = round(horas_semana * 4.3, 1)
+
+            results_dict.append({
                 "id": row.id,
                 "nombre": row.nombre,
                 "email": row.email,
@@ -268,10 +298,11 @@ class ProfesorService(BaseService):
                 "horarios_count": row.horarios_count,
                 "horarios": row.horarios,
                 "sesiones_mes": row.sesiones_mes,
-                "horas_mes": row.horas_mes
-            }
-            for row in result
-        ]
+                "horas_mes": row.horas_mes,
+                "horas_proyectadas": horas_proyectadas
+            })
+            
+        return results_dict
         
     def get_teacher_sessions(self, profesor_id: int, start_date: Optional[date] = None, end_date: Optional[date] = None):
         """Replacement for TeacherRepository.obtener_horas_trabajadas_profesor"""

@@ -17,7 +17,8 @@ from src.services.base import BaseService
 from src.database.repositories.payment_repository import PaymentRepository
 from src.database.repositories.user_repository import UserRepository
 from src.database.orm_models import (
-    Pago, Usuario, MetodoPago, ConceptoPago, PagoDetalle, TipoCuota
+    Pago, Usuario, MetodoPago, ConceptoPago, PagoDetalle, TipoCuota,
+    NumeracionComprobante, ComprobantePago
 )
 
 logger = logging.getLogger(__name__)
@@ -1116,59 +1117,73 @@ class PaymentService(BaseService):
     def get_next_receipt_number(self) -> str:
         """Get next receipt number based on configured pattern."""
         try:
-            # Get config from database or use defaults
             config = self.get_receipt_numbering_config()
             prefix = config.get('prefix', 'REC')
             current = config.get('current_number', 1)
-            padding = config.get('padding', 6)
+            padding = config.get('padding', 8) # Default 8 per legacy
+            separador = config.get('separador', '-')
             
-            next_num = f"{prefix}{str(current).zfill(padding)}"
-            return next_num
+            # Legacy format often: REC-00000001
+            # But let's follow config: prefix + separator + padded_number
+            # If separator is empty, then just prefix + padded.
+            
+            num_str = str(current).zfill(padding)
+            if separador:
+                return f"{prefix}{separador}{num_str}"
+            return f"{prefix}{num_str}"
+            
         except Exception as e:
             logger.error(f"Error getting next receipt number: {e}")
-            return "REC000001"
+            return "REC-00000001"
 
     def get_receipt_numbering_config(self) -> Dict[str, Any]:
-        """Get receipt numbering configuration from gym_config."""
+        """Get receipt numbering configuration from NumeracionComprobantes."""
         try:
-            # Try to get config from gym_config table via raw SQL
-            result = self.db.execute(
-                text("SELECT valor FROM gym_config WHERE clave = 'receipt_numbering' LIMIT 1")
-            )
-            row = result.fetchone()
-            if row and row[0]:
-                import json
-                return json.loads(row[0])
+            stmt = select(NumeracionComprobante).where(NumeracionComprobante.activo == True).limit(1)
+            nc = self.db.execute(stmt).scalar_one_or_none()
+            
+            if nc:
+                return {
+                    'prefix': nc.prefijo or 'REC',
+                    'current_number': nc.numero_inicial,
+                    'padding': nc.longitud_numero or 8,
+                    'reset_yearly': nc.reiniciar_anual,
+                    'separador': nc.separador or '-'
+                }
+            
+            # Default if no config
             return {
                 'prefix': 'REC',
                 'current_number': 1,
-                'padding': 6,
-                'reset_yearly': False
+                'padding': 8,
+                'reset_yearly': False,
+                'separador': '-'
             }
         except Exception as e:
             logger.error(f"Error getting receipt config: {e}")
-            return {
-                'prefix': 'REC',
-                'current_number': 1,
-                'padding': 6,
-                'reset_yearly': False
-            }
+            return {'prefix': 'REC', 'current_number': 1}
 
     def save_receipt_numbering_config(self, config: Dict[str, Any]) -> bool:
         """Save receipt numbering configuration."""
         try:
-            import json
-            valor = json.dumps(config)
+            stmt = select(NumeracionComprobante).where(NumeracionComprobante.activo == True).limit(1)
+            nc = self.db.execute(stmt).scalar_one_or_none()
             
-            # Upsert into gym_config
-            self.db.execute(
-                text("""
-                    INSERT INTO gym_config (clave, valor) 
-                    VALUES ('receipt_numbering', :valor)
-                    ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor
-                """),
-                {'valor': valor}
-            )
+            if not nc:
+                nc = NumeracionComprobante(activo=True)
+                self.db.add(nc)
+            
+            if 'prefix' in config:
+                nc.prefijo = config['prefix']
+            if 'current_number' in config:
+                nc.numero_inicial = int(config['current_number'])
+            if 'padding' in config:
+                nc.longitud_numero = int(config['padding'])
+            if 'reset_yearly' in config:
+                nc.reiniciar_anual = bool(config['reset_yearly'])
+            if 'separador' in config:
+                nc.separador = config['separador']
+                
             self.db.commit()
             return True
         except Exception as e:
@@ -1178,38 +1193,61 @@ class PaymentService(BaseService):
 
     def increment_receipt_number(self) -> str:
         """Increment and return new receipt number."""
-        config = self.get_receipt_numbering_config()
-        current = config.get('current_number', 1)
-        config['current_number'] = current + 1
-        self.save_receipt_numbering_config(config)
-        
-        prefix = config.get('prefix', 'REC')
-        padding = config.get('padding', 6)
-        return f"{prefix}{str(current).zfill(padding)}"
+        try:
+            stmt = select(NumeracionComprobante).where(NumeracionComprobante.activo == True).limit(1)
+            nc = self.db.execute(stmt).scalar_one_or_none()
+            
+            if not nc:
+                nc = NumeracionComprobante(
+                    prefijo='REC', 
+                    numero_inicial=1, 
+                    longitud_numero=8, 
+                    activo=True,
+                    separador='-'
+                )
+                self.db.add(nc)
+                self.db.commit()
+                self.db.refresh(nc)
+            
+            current = nc.numero_inicial
+            
+            # Prepare formatted string BEFORE increment
+            prefix = nc.prefijo or 'REC'
+            padding = nc.longitud_numero or 8
+            separador = nc.separador or '-'
+            
+            num_str = str(current).zfill(padding)
+            formatted = f"{prefix}{separador}{num_str}" if separador else f"{prefix}{num_str}"
+            
+            # Increment for NEXT time
+            nc.numero_inicial += 1
+            self.db.commit()
+            
+            return formatted
+        except Exception as e:
+            logger.error(f"Error incrementing receipt: {e}")
+            return "REC-ERROR"
 
     # ========== Comprobantes (Receipt Records) ==========
 
     def obtener_comprobante_por_pago(self, pago_id: int) -> Optional[Dict[str, Any]]:
-        """Get last emitted comprobante for a payment."""
+        """Get last emitted comprobante for a payment using ORM."""
         try:
-            result = self.db.execute(
-                text("""
-                    SELECT id, numero_comprobante, fecha_creacion, estado, archivo_pdf
-                    FROM comprobantes_pago
-                    WHERE pago_id = :pago_id AND estado = 'emitido'
-                    ORDER BY fecha_creacion DESC
-                    LIMIT 1
-                """),
-                {'pago_id': pago_id}
+            stmt = (
+                select(ComprobantePago)
+                .where(ComprobantePago.pago_id == pago_id, ComprobantePago.estado == 'emitido')
+                .order_by(ComprobantePago.fecha_creacion.desc())
+                .limit(1)
             )
-            row = result.fetchone()
-            if row:
+            comp = self.db.execute(stmt).scalar_one_or_none()
+            
+            if comp:
                 return {
-                    'id': row[0],
-                    'numero_comprobante': row[1],
-                    'fecha_creacion': row[2],
-                    'estado': row[3],
-                    'archivo_pdf': row[4]
+                    'id': comp.id,
+                    'numero_comprobante': comp.numero_comprobante,
+                    'fecha_creacion': comp.fecha_creacion,
+                    'estado': comp.estado,
+                    'archivo_pdf': comp.archivo_pdf
                 }
             return None
         except Exception as e:
@@ -1224,54 +1262,42 @@ class PaymentService(BaseService):
         monto_total: float,
         emitido_por: Optional[str] = None
     ) -> Optional[int]:
-        """Create a new comprobante (receipt record)."""
+        """Create a new comprobante (receipt record) using ORM."""
         try:
             numero = self.increment_receipt_number()
             
-            result = self.db.execute(
-                text("""
-                    INSERT INTO comprobantes_pago 
-                    (tipo_comprobante, pago_id, usuario_id, monto_total, numero_comprobante, 
-                     emitido_por, estado, fecha_creacion)
-                    VALUES (:tipo, :pago_id, :usuario_id, :monto, :numero, :emitido, 'emitido', NOW())
-                    RETURNING id
-                """),
-                {
-                    'tipo': tipo_comprobante,
-                    'pago_id': pago_id,
-                    'usuario_id': usuario_id,
-                    'monto': monto_total,
-                    'numero': numero,
-                    'emitido': emitido_por
-                }
+            nuevo_comprobante = ComprobantePago(
+                tipo_comprobante=tipo_comprobante,
+                pago_id=pago_id,
+                usuario_id=usuario_id,
+                monto_total=monto_total,
+                numero_comprobante=numero,
+                emitido_por=emitido_por,
+                estado='emitido',
+                fecha_creacion=datetime.now()
             )
-            row = result.fetchone()
+            
+            self.db.add(nuevo_comprobante)
             self.db.commit()
-            return row[0] if row else None
+            self.db.refresh(nuevo_comprobante)
+            return nuevo_comprobante.id
+            
         except Exception as e:
             logger.error(f"Error creating comprobante: {e}")
             self.db.rollback()
             return None
 
     def obtener_comprobante(self, comprobante_id: int) -> Optional[Dict[str, Any]]:
-        """Get comprobante by ID."""
+        """Get comprobante by ID using ORM."""
         try:
-            result = self.db.execute(
-                text("""
-                    SELECT id, numero_comprobante, fecha_creacion, estado, archivo_pdf
-                    FROM comprobantes_pago
-                    WHERE id = :id
-                """),
-                {'id': comprobante_id}
-            )
-            row = result.fetchone()
-            if row:
+            comp = self.db.get(ComprobantePago, comprobante_id)
+            if comp:
                 return {
-                    'id': row[0],
-                    'numero_comprobante': row[1],
-                    'fecha_creacion': row[2],
-                    'estado': row[3],
-                    'archivo_pdf': row[4]
+                    'id': comp.id,
+                    'numero_comprobante': comp.numero_comprobante,
+                    'fecha_creacion': comp.fecha_creacion,
+                    'estado': comp.estado,
+                    'archivo_pdf': comp.archivo_pdf
                 }
             return None
         except Exception as e:
@@ -1279,14 +1305,14 @@ class PaymentService(BaseService):
             return None
 
     def actualizar_comprobante_pdf(self, comprobante_id: int, filepath: str) -> bool:
-        """Update comprobante with PDF file path."""
+        """Update comprobante with PDF file path using ORM."""
         try:
-            self.db.execute(
-                text("UPDATE comprobantes_pago SET archivo_pdf = :path WHERE id = :id"),
-                {'path': filepath, 'id': comprobante_id}
-            )
-            self.db.commit()
-            return True
+            comp = self.db.get(ComprobantePago, comprobante_id)
+            if comp:
+                comp.archivo_pdf = filepath
+                self.db.commit()
+                return True
+            return False
         except Exception as e:
             logger.error(f"Error updating comprobante PDF: {e}")
             self.db.rollback()

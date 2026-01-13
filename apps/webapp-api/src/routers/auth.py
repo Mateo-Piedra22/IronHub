@@ -576,8 +576,8 @@ async def api_usuario_login(
     except Exception:
         return JSONResponse({"success": False, "message": "Datos inválidos"}, status_code=400)
     
-    if not dni or not pin:
-        return JSONResponse({"success": False, "message": "DNI y PIN requeridos"})
+    if not dni:
+        return JSONResponse({"success": False, "message": "DNI requerido"})
     
     # Rate limiting check
     if is_rate_limited_login(request, dni):
@@ -589,17 +589,19 @@ async def api_usuario_login(
     # Get user by DNI using SQLAlchemy
     user = svc.obtener_usuario_por_dni(dni)
     if not user:
-        return JSONResponse({"success": False, "message": "Credenciales inválidas"})
+        return JSONResponse({"success": False, "message": "DNI no encontrado o incorrecto"})
     
-    # Verify PIN using AuthService
-    pin_result = svc.verificar_pin(user.id, pin)
-    if not pin_result['valid']:
-        return JSONResponse({"success": False, "message": "Credenciales inválidas"})
+    # PIN OPTIONAL as per simplified flow
+    # Only verify PIN if explicitly provided and non-empty
+    if pin:
+        pin_result = svc.verificar_pin(user.id, pin)
+        if not pin_result['valid']:
+            return JSONResponse({"success": False, "message": "PIN incorrecto"})
     
     if not user.activo:
         return JSONResponse({
             "success": False, 
-            "message": "Usuario inactivo",
+            "message": "Usuario inactivo or membresía vencida",
             "activo": False
         })
     

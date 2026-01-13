@@ -43,6 +43,15 @@ class UserService(BaseService):
         # Handle PIN logic (preserve if not provided)
         if "pin" not in data or data["pin"] is None:
              data["pin"] = current_user.pin
+
+        # Handle tipo_cuota_id (legacy compatibility: store name)
+        if "tipo_cuota_id" in data and data["tipo_cuota_id"] is not None:
+            try:
+                tc = self.payment_repo.obtener_tipo_cuota_por_id(int(data["tipo_cuota_id"]))
+                if tc:
+                    data["tipo_cuota"] = tc.nombre
+            except Exception:
+                pass
              
         # Update fields
         for k, v in data.items():

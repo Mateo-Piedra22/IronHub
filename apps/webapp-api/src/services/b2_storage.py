@@ -113,8 +113,9 @@ def upload_file(
             Key=file_key,
             Body=file_content,
             ContentType=content_type,
-            # Make file publicly readable
-            ACL='public-read'
+            # Make file publicly readable and cacheable
+            ACL='public-read',
+            CacheControl='max-age=31536000'
         )
         
         cdn_url = get_cdn_url(file_key)

@@ -397,9 +397,10 @@ interface ExcelPreviewPanelProps {
     rutinaId: number | null;
     isVisible: boolean;
     draftData: any;
+    weeks: number;
 }
 
-function ExcelPreviewPanel({ rutinaId, isVisible, draftData }: ExcelPreviewPanelProps) {
+function ExcelPreviewPanel({ rutinaId, isVisible, draftData, weeks }: ExcelPreviewPanelProps) {
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [isMaximized, setIsMaximized] = useState(false);
     const [refreshKey, setRefreshKey] = useState(0);
@@ -422,6 +423,7 @@ function ExcelPreviewPanel({ rutinaId, isVisible, draftData }: ExcelPreviewPanel
                     // Draft mode
                     const res = await api.getRutinaDraftExcelViewUrl({
                         ...draftData,
+                        weeks, // Ensure weeks is explicit in draft data (though already in draftData object)
                         qr_mode: qrMode,
                         sheet_name: sheetName
                     });
@@ -431,6 +433,7 @@ function ExcelPreviewPanel({ rutinaId, isVisible, draftData }: ExcelPreviewPanel
                 } else if (rutinaId) {
                     // Saved mode
                     const res = await api.getRutinaExcelViewUrl(rutinaId, {
+                        weeks,
                         qr_mode: qrMode,
                         sheet_name: sheetName || undefined
                     });
@@ -600,9 +603,10 @@ export function UnifiedRutinaEditor({
                 notas: ''
             },
             usuario: { nombre: 'Vista Previa' },
-            ejercicios: flatExercises
+            ejercicios: flatExercises,
+            weeks: semanas // Include weeks for template generation
         };
-    }, [days, nombre, descripcion, diasSemana, categoria]);
+    }, [days, nombre, descripcion, diasSemana, categoria, semanas]);
 
     // Initialize data
     useEffect(() => {
@@ -1161,7 +1165,12 @@ export function UnifiedRutinaEditor({
                     {/* Right: Preview */}
                     {showPreview && (
                         <div className="w-1/3 card overflow-hidden">
-                            <ExcelPreviewPanel rutinaId={rutina?.id || null} isVisible={showPreview} draftData={draftData} />
+                            <ExcelPreviewPanel
+                                rutinaId={rutina?.id || null}
+                                isVisible={showPreview}
+                                draftData={draftData}
+                                weeks={semanas}
+                            />
                         </div>
                     )}
                 </div>

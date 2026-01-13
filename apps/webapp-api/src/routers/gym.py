@@ -13,10 +13,11 @@ import urllib.parse
 from datetime import datetime, timezone, date
 from typing import Optional, List, Dict, Any
 
-from fastapi import APIRouter, Request, Depends, HTTPException, Body, UploadFile, File
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi import APIRouter, Request, Depends, HTTPException, Body, UploadFile, File, status, Query
+from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 
 # Services
@@ -27,17 +28,20 @@ from src.dependencies import (
     get_gym_config_service,
     get_clase_service,
     get_training_service,
-    get_rm
+    get_user_service,
+    get_rm,
+    get_current_active_user
 )
 
 from src.models.orm_models import (
     Rutina, Usuario, RutinaEjercicio, Ejercicio, Clase, ClaseBloque, ClaseBloqueItem
 )
 from src.routine_manager import RoutineTemplateManager
-from src.utils import get_gym_name, _resolve_logo_url, _resolve_existing_dir
+from src.utils import get_gym_name, _resolve_logo_url, _resolve_existing_dir, get_webapp_base_url
 from src.services.gym_config_service import GymConfigService
 from src.services.clase_service import ClaseService
 from src.services.training_service import TrainingService
+from src.services.user_service import UserService
 from src.services.b2_storage import simple_upload as b2_upload
 
 router = APIRouter()
@@ -1222,11 +1226,6 @@ async def api_rutinas_list(
         if search:
             s = search.lower()
             rutinas = [r for r in rutinas if s in (r.get('nombre_rutina') or '').lower()]
-            
-        # Filter by template status if requested
-        # plantillas=True or es_plantilla=True => usuario_id is None
-        # plantillas=False => usuario_id is not None? Or just return all?
-        # Usually 'plantillas' means "show me templates".
         
         is_template_req = plantillas if plantillas is not None else es_plantilla
         if is_template_req is not None:
@@ -1250,7 +1249,7 @@ async def api_rutinas_create(
     """Create a routine using SQLAlchemy."""
     try:
         payload = await request.json()
-        nombre = (payload.get("nombre") or "").strip()
+        nombre = (payload.get("nombre") or payload.get("nombre_rutina") or "").strip()
         if not nombre:
             raise HTTPException(status_code=400, detail="Nombre requerido")
         
@@ -1264,6 +1263,23 @@ async def api_rutinas_create(
         })
         
         if new_id:
+            # Handle exercises 
+            # 1. Try from 'dias' (UnifiedRutinaEditor format)
+            dias = payload.get("dias")
+            if dias and isinstance(dias, list):
+                exercises_flat = []
+                for dia in dias:
+                    d_num = int(dia.get("numero") or dia.get("dayNumber") or 1)
+                    for ex in (dia.get("ejercicios") or []):
+                        ex_copy = ex.copy()
+                        ex_copy["dia_semana"] = d_num
+                        exercises_flat.append(ex_copy)
+                if exercises_flat:
+                    svc.asignar_ejercicios_rutina(new_id, exercises_flat)
+            # 2. Try from 'ejercicios' (Duplicate format or flat API usage)
+            elif payload.get("ejercicios") and isinstance(payload.get("ejercicios"), list):
+                svc.asignar_ejercicios_rutina(new_id, payload.get("ejercicios"))
+            
             return {"ok": True, "id": int(new_id)}
         return JSONResponse({"error": "No se pudo crear"}, status_code=500)
     except HTTPException:
@@ -1326,6 +1342,18 @@ async def api_rutina_update(rutina_id: int, request: Request, _=Depends(require_
     """Update a routine."""
     try:
         payload = await request.json()
+        
+        # Transform dias to exercises list if present
+        dias = payload.get("dias")
+        if dias and isinstance(dias, list) and "ejercicios" not in payload:
+            exercises_flat = []
+            for dia in dias:
+                d_num = dia.get("numero") or dia.get("dayNumber") or 1
+                for ex in (dia.get("ejercicios") or []):
+                    ex["dia_semana"] = d_num
+                    exercises_flat.append(ex)
+            payload["ejercicios"] = exercises_flat
+            
         success = svc.actualizar_rutina(rutina_id, payload)
         if success:
             return {"ok": True}
@@ -1380,14 +1408,6 @@ async def api_rutina_assign(
         payload = await request.json()
         usuario_id = payload.get("usuario_id")
         
-        # Logic to "assign" usually means cloning the routine for the user
-        # or linking it. GymService logic was cloning?
-        # Let's see original implementation... it was cloning and returning new ID.
-        
-        # TrainingService currently has no 'assign_clone' method.
-        # But we can reconstruct it using 'obtener_rutina_completa' + 'crear_rutina'.
-        
-
         rutina_origen = svc.obtener_rutina_completa(rutina_id)
         if not rutina_origen:
              raise HTTPException(status_code=404, detail="Rutina origen no encontrada")
@@ -1545,6 +1565,7 @@ async def api_rutina_excel_view(
     ts: int = 0,
     sig: Optional[str] = None,
     svc: TrainingService = Depends(get_training_service),
+    user_svc: UserService = Depends(get_user_service),
     rm: RoutineTemplateManager = Depends(get_rm)
 ):
     """Public endpoint that serves Excel file after verifying signature.
@@ -1599,8 +1620,15 @@ async def api_rutina_excel_view(
             dias_semana=rutina_data.get('dias_semana', 1),
             uuid_rutina=rutina_data.get('uuid_rutina')
         )
-        user_name = rutina_data.get('usuario_nombre') or 'Usuario'
-        usuario = Usuario(nombre=user_name)
+        
+        # Try to fetch full user to ensure DNI/Phone are available for templates
+        usuario = None
+        if rutina_data.get('usuario_id'):
+            usuario = user_svc.get_user(rutina_data['usuario_id'])
+            
+        if not usuario:
+            user_name = rutina_data.get('usuario_nombre') or 'Usuario'
+            usuario = Usuario(nombre=user_name)
         
         ejercicios_por_dia = _build_exercises_by_day(rutina_data)
         xlsx_path = rm.generate_routine_excel(rutina, usuario, ejercicios_por_dia, weeks=weeks, qr_mode=qr_mode, sheet=sheet_norm)
@@ -1764,3 +1792,45 @@ async def api_maintenance_status():
 @router.get("/api/suspension_status")
 async def api_suspension_status():
     return {"suspended": False}
+
+# --- QR Access Endpoints ---
+
+@router.post("/api/rutinas/verify_qr")
+async def api_verify_routine_qr(
+    payload: Dict[str, str],
+    svc: TrainingService = Depends(get_training_service)
+):
+    """
+    Validate a Routine QR code UUID and return the full routine details.
+    This grants ephemeral access to the routine content.
+    """
+    uuid_val = payload.get("uuid")
+    if not uuid_val:
+        raise HTTPException(status_code=400, detail="UUID requerido")
+    
+    rutina = svc.obtener_rutina_por_uuid(uuid_val)
+    if not rutina:
+        raise HTTPException(status_code=404, detail="Rutina no encontrada o inválida")
+    
+    return {
+        "ok": True,
+        "rutina": rutina,
+        "access_granted": True,
+        "expires_in_seconds": 86400
+    }
+
+@router.get("/api/rutinas/qr_scan/{uuid_val}")
+async def api_handle_qr_scan_redirect(
+    uuid_val: str
+):
+    """
+    Generic endpoint for generic QR Code Scanners.
+    Redirects to the WebApp Dashboard with a specific action parameter.
+    """
+    try:
+        base_url = get_webapp_base_url()
+    except Exception:
+        base_url = "https://ironhub.motiona.xyz"
+        
+    redirect_url = f"{str(base_url).rstrip('/')}/usuario?action=scan&uuid={uuid_val}"
+    return RedirectResponse(url=redirect_url)

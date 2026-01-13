@@ -100,6 +100,32 @@ class PagoDetalle(Base):
         Index('idx_pago_detalles_concepto_id', 'concepto_id'),
     )
 
+class ComprobantePago(Base):
+    __tablename__ = 'comprobantes_pago'
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    numero_comprobante: Mapped[str] = mapped_column(String(50), nullable=False)
+    pago_id: Mapped[int] = mapped_column(ForeignKey('pagos.id', ondelete='CASCADE'), nullable=False)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey('usuarios.id', ondelete='CASCADE'), nullable=False)
+    tipo_comprobante: Mapped[str] = mapped_column(String(50), server_default='recibo')
+    monto_total: Mapped[float] = mapped_column(Numeric(10, 2), server_default='0.0')
+    estado: Mapped[Optional[str]] = mapped_column(String(20), server_default='emitido')
+    fecha_creacion: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
+    archivo_pdf: Mapped[Optional[str]] = mapped_column(String(500))
+    plantilla_id: Mapped[Optional[int]] = mapped_column(Integer)
+    datos_comprobante: Mapped[Optional[dict]] = mapped_column(JSONB)
+    emitido_por: Mapped[Optional[str]] = mapped_column(String(255))
+    
+    pago: Mapped["Pago"] = relationship("Pago")
+    usuario: Mapped["Usuario"] = relationship("Usuario")
+
+    __table_args__ = (
+        Index('idx_comprobantes_pago_numero', 'numero_comprobante'),
+        Index('idx_comprobantes_pago_pago_id', 'pago_id'),
+        Index('idx_comprobantes_pago_usuario_id', 'usuario_id'),
+        Index('idx_comprobantes_pago_fecha', 'fecha_creacion'),
+    )
+
 class MetodoPago(Base):
     __tablename__ = 'metodos_pago'
     
@@ -277,6 +303,7 @@ class Ejercicio(Base):
     objetivo: Mapped[Optional[str]] = mapped_column(String(100), server_default='general')
     video_url: Mapped[Optional[str]] = mapped_column(String(512))
     video_mime: Mapped[Optional[str]] = mapped_column(String(50))
+    equipamiento: Mapped[Optional[str]] = mapped_column(String(100))
 
 class Rutina(Base):
     __tablename__ = 'rutinas'

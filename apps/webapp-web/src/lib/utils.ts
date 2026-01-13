@@ -30,9 +30,13 @@ export function formatNumber(value: number): string {
 /**
  * Format date to DD/MM/YYYY
  */
-export function formatDate(date: string | Date): string {
+/**
+ * Format date to DD/MM/YYYY
+ */
+export function formatDate(date: string | Date | null | undefined): string {
+    if (!date) return '-';
     const d = typeof date === 'string' ? new Date(date) : date;
-    if (isNaN(d.getTime())) return '-';
+    if (!(d instanceof Date) || isNaN(d.getTime())) return '-';
     return d.toLocaleDateString('es-AR', {
         day: '2-digit',
         month: '2-digit',
@@ -43,9 +47,10 @@ export function formatDate(date: string | Date): string {
 /**
  * Format date to human readable: "15 de enero de 2026"
  */
-export function formatDateLong(date: string | Date): string {
+export function formatDateLong(date: string | Date | null | undefined): string {
+    if (!date) return '-';
     const d = typeof date === 'string' ? new Date(date) : date;
-    if (isNaN(d.getTime())) return '-';
+    if (!(d instanceof Date) || isNaN(d.getTime())) return '-';
     return d.toLocaleDateString('es-AR', {
         day: 'numeric',
         month: 'long',
@@ -56,9 +61,10 @@ export function formatDateLong(date: string | Date): string {
 /**
  * Format date relative: "hace 2 días", "en 3 días"
  */
-export function formatDateRelative(date: string | Date): string {
+export function formatDateRelative(date: string | Date | null | undefined): string {
+    if (!date) return '-';
     const d = typeof date === 'string' ? new Date(date) : date;
-    if (isNaN(d.getTime())) return '-';
+    if (!(d instanceof Date) || isNaN(d.getTime())) return '-';
 
     const now = new Date();
     const diffMs = d.getTime() - now.getTime();

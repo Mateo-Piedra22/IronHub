@@ -3,15 +3,19 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Dumbbell, ChevronDown, ChevronUp, Loader2, QrCode, Lock, Info, PlayCircle } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { api, type Rutina, type EjercicioRutina } from '@/lib/api';
-import { QrScannerModal } from '@/components/QrScannerModal';
+import { QRScannerModal } from '@/components/QrScannerModal';
 import { UserExerciseModal } from '@/components/UserExerciseModal';
 import { Button, useToast } from '@/components/ui';
 
 export default function RoutinesPage() {
     const { user } = useAuth();
+    const router = useRouter();
+    const searchParams = useSearchParams();
     const [routines, setRoutines] = useState<Rutina[]>([]);
+    const [routine, setRoutine] = useState<Rutina | null>(null);
     const [loading, setLoading] = useState(true);
     const [expandedDay, setExpandedDay] = useState<number | null>(0);
 
@@ -21,13 +25,63 @@ export default function RoutinesPage() {
     const [selectedExercise, setSelectedExercise] = useState<EjercicioRutina | null>(null);
     const { success, error } = useToast();
 
+    // Check routine unlock status (Client-side persistence)
+    const checkUnlockStatus = useCallback((uuid: string) => {
+        if (!uuid) return false;
+        try {
+            const unlocked = localStorage.getItem(`unlocked_routine_${uuid}`);
+            if (unlocked) {
+                const timestamp = parseInt(unlocked, 10);
+                const now = Date.now();
+                // 24 hours = 86400000 ms
+                if (now - timestamp < 86400000) {
+                    return true;
+                } else {
+                    localStorage.removeItem(`unlocked_routine_${uuid}`);
+                }
+            }
+        } catch (e) {
+            // ignore
+        }
+        return false;
+    }, []);
+
+    const verifyAndUnlock = useCallback(async (uuid: string) => {
+        try {
+            const res = await api.verifyRoutineQR(uuid);
+            if (res.ok && res.data) {
+                // Determine if this is the routine we should show
+                setRoutine(res.data.rutina); // Use the returned full routine
+                setIsBlocked(false);
+                // Persist locally
+                localStorage.setItem(`unlocked_routine_${uuid}`, Date.now().toString());
+                success('¡Rutina desbloqueada!');
+
+                // Clear param to clean URL? optional
+                // router.replace('/dashboard/routines'); 
+            } else {
+                error('Rutina no válida o no encontrada');
+            }
+        } catch (e) {
+            console.error(e);
+            error('Error al verificar rutina');
+        }
+    }, [success, error]);
+
     const loadRoutines = useCallback(async () => {
         if (!user?.id) return;
         setLoading(true);
         try {
             const res = await api.getRutinas({ usuario_id: user.id });
             if (res.ok && res.data) {
-                setRoutines(res.data.rutinas || []);
+                const list = res.data.rutinas || [];
+                setRoutines(list);
+
+                // If we haven't set a specific routine yet (e.g. from QR param), pick the first one
+                setRoutine((prev) => {
+                    if (prev) return prev; // Already set by effect?
+                    return list.length > 0 ? list[0] : null;
+                });
             }
         } catch (error) {
             console.error('Error loading routines:', error);
@@ -37,10 +91,32 @@ export default function RoutinesPage() {
     }, [user?.id]);
 
     useEffect(() => {
-        loadRoutines();
-    }, [loadRoutines]);
+        loadRoutines().then(() => {
+            // After loading defaults, check params or local storage for the *current* routine
+            const paramUuid = searchParams.get('uuid');
+            if (paramUuid) {
+                verifyAndUnlock(paramUuid);
+            }
+        });
+    }, [loadRoutines, searchParams, verifyAndUnlock]);
 
-    if (loading) {
+    // Update block status when routine changes
+    useEffect(() => {
+        if (routine?.uuid_rutina) {
+            const isUnlocked = checkUnlockStatus(routine.uuid_rutina);
+            // Only set blocked if not already unlocked (to avoid locking if just unlocked)
+            // Actually, state isBlocked defaults to true.
+            if (isUnlocked) {
+                setIsBlocked(false);
+            } else {
+                // If explicitly switching routines, we might want to lock? 
+                // But for now we only support 1 routine view basically.
+                // If paramUuid verified, isBlocked became false.
+            }
+        }
+    }, [routine, checkUnlockStatus]);
+
+    if (loading && !routine) {
         return (
             <div className="flex items-center justify-center h-64">
                 <Loader2 className="w-8 h-8 animate-spin text-primary-400" />
@@ -48,39 +124,31 @@ export default function RoutinesPage() {
         );
     }
 
-    const routine = routines[0];
-
     // Verify scan
     const handleScan = (decodedText: string) => {
         try {
-            // Decoded text should be the UUID or a JSON containing it? 
-            // Legacy usually just encoded the UUID string.
-            // Let's assume it's the uuid string or a URL ending with it.
-            // But strict check: matching uuid_rutina.
-
-            // Clean the scanned text just in case (urls etc)
-            // If it's a URL like /rutina/UUID, extract UUID.
             let scannedUuid = decodedText;
-            if (decodedText.includes('/')) {
-                const parts = decodedText.split('/');
-                scannedUuid = parts[parts.length - 1];
+            // Handle URL format
+            if (decodedText.includes('/qr_scan/')) {
+                const parts = decodedText.split('/qr_scan/');
+                if (parts.length > 1) {
+                    scannedUuid = parts[1];
+                }
+            } else if (decodedText.includes('uuid=')) {
+                try {
+                    const urlObj = new URL(decodedText);
+                    const u = urlObj.searchParams.get('uuid');
+                    if (u) scannedUuid = u;
+                } catch (e) { }
             }
+            // Clean params
+            scannedUuid = scannedUuid.split('?')[0].split('&')[0];
 
-            if (!routine.uuid_rutina) {
-                // Fallback if routine has no UUID for some reason (legacy data?)
-                // Allow matching ID? No, safer to fail or warn.
-                error('Esta rutina no tiene código QR asociado. Pedile a tu profe que la actualice.');
+            if (scannedUuid) {
+                verifyAndUnlock(scannedUuid);
                 setShowScanner(false);
-                return;
-            }
-
-            if (scannedUuid === routine.uuid_rutina) {
-                setIsBlocked(false);
-                setShowScanner(false);
-                success('¡Rutina desbloqueada!');
             } else {
-                error('El código QR no coincide con tu rutina asignada.');
-                setShowScanner(false);
+                error('Código inválido');
             }
         } catch (e) {
             console.error(e);
@@ -211,6 +279,18 @@ export default function RoutinesPage() {
                                                             {exercise.notas && (
                                                                 <p className="text-xs text-slate-500 mt-1">{exercise.notas}</p>
                                                             )}
+                                                            {/* Video Link if available */}
+                                                            {exercise.ejercicio_video_url && (
+                                                                <a
+                                                                    href={exercise.ejercicio_video_url}
+                                                                    target="_blank"
+                                                                    rel="noopener noreferrer"
+                                                                    className="inline-flex items-center gap-1.5 mt-2 text-primary-400 hover:text-primary-300 text-xs font-medium bg-primary-500/10 hover:bg-primary-500/20 px-2.5 py-1.5 rounded-lg transition-colors group"
+                                                                >
+                                                                    <PlayCircle className="w-3.5 h-3.5" />
+                                                                    Ver video explicativo
+                                                                </a>
+                                                            )}
                                                         </div>
                                                         <div className="flex items-center gap-4 text-sm">
                                                             <div className="text-center hidden sm:block">
@@ -243,7 +323,7 @@ export default function RoutinesPage() {
                 </div>
             )}
 
-            <QrScannerModal
+            <QRScannerModal
                 isOpen={showScanner}
                 onClose={() => setShowScanner(false)}
                 onScan={handleScan}

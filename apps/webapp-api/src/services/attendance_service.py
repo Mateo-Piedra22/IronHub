@@ -526,7 +526,7 @@ class AttendanceService(BaseService):
                 {
                     'fecha': str(row[0]) if row[0] else None,
                     'hora': str(row[1]) if row[1] else None,
-                    'usuario': row[2] or ''
+                    'usuario_nombre': row[2] or ''
                 }
                 for row in result.fetchall()
             ]

@@ -123,6 +123,45 @@ class ConceptoPago(Base):
     activo: Mapped[bool] = mapped_column(Boolean, server_default='true')
     fecha_creacion: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
 
+class NumeracionComprobante(Base):
+    __tablename__ = 'numeracion_comprobantes'
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    longitud_numero: Mapped[int] = mapped_column(Integer, nullable=False, server_default='8')
+    activo: Mapped[bool] = mapped_column(Boolean, server_default='true')
+    fecha_creacion: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
+    numero_inicial: Mapped[int] = mapped_column(Integer, nullable=False, server_default='1')
+    reiniciar_anual: Mapped[bool] = mapped_column(Boolean, server_default='false')
+    tipo_comprobante: Mapped[str] = mapped_column(String(50), nullable=False, server_default='recibo')
+    prefijo: Mapped[Optional[str]] = mapped_column(String(10))
+    separador: Mapped[Optional[str]] = mapped_column(String(5), server_default='-')
+
+class ComprobantePago(Base):
+    __tablename__ = 'comprobantes_pago'
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    numero_comprobante: Mapped[str] = mapped_column(String(50), nullable=False)
+    pago_id: Mapped[int] = mapped_column(ForeignKey('pagos.id', ondelete='CASCADE'), nullable=False)
+    usuario_id: Mapped[int] = mapped_column(ForeignKey('usuarios.id', ondelete='CASCADE'), nullable=False)
+    tipo_comprobante: Mapped[str] = mapped_column(String(50), server_default='recibo')
+    monto_total: Mapped[float] = mapped_column(Numeric(10, 2), server_default='0.0')
+    estado: Mapped[Optional[str]] = mapped_column(String(20), server_default='emitido')
+    fecha_creacion: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
+    archivo_pdf: Mapped[Optional[str]] = mapped_column(String(500))
+    plantilla_id: Mapped[Optional[int]] = mapped_column(Integer)
+    datos_comprobante: Mapped[Optional[dict]] = mapped_column(JSONB)
+    emitido_por: Mapped[Optional[str]] = mapped_column(String(255))
+    
+    pago: Mapped["Pago"] = relationship("Pago")
+    usuario: Mapped["Usuario"] = relationship("Usuario")
+
+    __table_args__ = (
+        Index('idx_comprobantes_pago_numero', 'numero_comprobante'),
+        Index('idx_comprobantes_pago_pago_id', 'pago_id'),
+        Index('idx_comprobantes_pago_usuario_id', 'usuario_id'),
+        Index('idx_comprobantes_pago_fecha', 'fecha_creacion'),
+    )
+
 class TipoCuota(Base):
     __tablename__ = 'tipos_cuota'
     

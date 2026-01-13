@@ -232,6 +232,7 @@ export interface EjercicioRutina {
     orden: number;
     dia?: number;
     video_url?: string;
+    ejercicio_video_url?: string;
     descripcion?: string;
     equipamiento?: string;
 }
@@ -904,6 +905,21 @@ class ApiClient {
         return this.request<{ url: string }>('/api/rutinas/export/draft_url', {
             method: 'POST',
             body: JSON.stringify(data)
+        });
+    }
+
+    async verifyRoutineQR(uuid: string): Promise<ApiResponse<{
+        rutina: Rutina;
+        access_granted: boolean;
+        expires_in_seconds: number;
+    }>> {
+        return this.request<{
+            rutina: Rutina;
+            access_granted: boolean;
+            expires_in_seconds: number;
+        }>('/api/rutinas/verify_qr', {
+            method: 'POST',
+            body: JSON.stringify({ uuid })
         });
     }
 

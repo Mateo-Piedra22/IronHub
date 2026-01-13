@@ -1,110 +1,82 @@
-'use client';
-
 import { useEffect, useRef, useState } from 'react';
-import { Html5QrcodeScanner, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { X, Camera } from 'lucide-react';
-import { Modal } from '@/components/ui';
+import { Html5QrcodeScanner } from 'html5-qrcode';
+import { X } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
-interface QrScannerModalProps {
+interface QRScannerModalProps {
     isOpen: boolean;
     onClose: () => void;
     onScan: (decodedText: string) => void;
-    title?: string;
     description?: string;
 }
 
-export function QrScannerModal({ isOpen, onClose, onScan, title = "Escanear QR", description }: QrScannerModalProps) {
+export function QRScannerModal({ isOpen, onClose, onScan, description }: QRScannerModalProps) {
     const scannerRef = useRef<Html5QrcodeScanner | null>(null);
-    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         if (isOpen && !scannerRef.current) {
-            // Give the modal animation time to finish and DOM to be ready
-            const timer = setTimeout(() => {
-                try {
-                    const scanner = new Html5QrcodeScanner(
-                        "qr-reader",
-                        {
-                            fps: 10,
-                            qrbox: { width: 250, height: 250 },
-                            formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
-                            rememberLastUsedCamera: true
-                        },
-                        /* verbose= */ false
-                    );
+            // Give DOM time to render the 'reader' element
+            setTimeout(() => {
+                const scanner = new Html5QrcodeScanner(
+                    "reader",
+                    { fps: 10, qrbox: { width: 250, height: 250 } },
+                    /* verbose= */ false
+                );
 
-                    scanner.render(
-                        (decodedText) => {
-                            // On success
-                            onScan(decodedText);
-                            // Cleanup automatically on success? Or let parent close?
-                            // Let's stop scanning to prevent duplicate triggers
-                            scanner.clear().catch(console.error);
-                            scannerRef.current = null;
-                        },
-                        (errorMessage) => {
-                            // Ignore scan errors, they happen every frame no QR is found
-                        }
-                    );
-                    scannerRef.current = scanner;
-                } catch (e) {
-                    console.error("Error initializing scanner:", e);
-                    setError("No se pudo iniciar la cámara. Verificá los permisos.");
-                }
-            }, 300); // 300ms delay
-
-            return () => clearTimeout(timer);
+                scanner.render(
+                    (decodedText) => {
+                        onScan(decodedText);
+                        // Optional: Close on success? Let parent handle it.
+                        // But we should stop scanning to avoid repeated calls.
+                        scanner.clear().catch(console.error);
+                        onClose();
+                    },
+                    (errorMessage) => {
+                        // console.log(errorMessage); // Ignore parse errors
+                    }
+                );
+                scannerRef.current = scanner;
+            }, 100);
         }
 
-        // Cleanup function
         return () => {
             if (scannerRef.current) {
                 scannerRef.current.clear().catch(console.error);
                 scannerRef.current = null;
             }
         };
-    }, [isOpen, onScan]);
+    }, [isOpen, onScan, onClose]);
 
-    // Handle close specifically to cleanup
-    const handleClose = () => {
-        if (scannerRef.current) {
-            scannerRef.current.clear().catch(console.error);
-            scannerRef.current = null;
-        }
-        onClose();
-    };
+    if (!isOpen) return null;
 
     return (
-        <Modal
-            isOpen={isOpen}
-            onClose={handleClose}
-            title={title}
-            size="md"
-        >
-            <div className="space-y-4">
-                {description && (
-                    <p className="text-slate-400 text-sm">{description}</p>
-                )}
+        <AnimatePresence>
+            <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+            >
+                <motion.div
+                    initial={{ scale: 0.9, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    className="bg-slate-900 rounded-2xl w-full max-w-md overflow-hidden border border-slate-800"
+                >
+                    <div className="p-4 border-b border-slate-800 flex justify-between items-center">
+                        <h3 className="font-semibold text-white">Escanear Rutina</h3>
+                        <button onClick={onClose} className="p-2 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white">
+                            <X className="w-5 h-5" />
+                        </button>
+                    </div>
 
-                <div className="bg-black rounded-lg overflow-hidden relative min-h-[300px] flex items-center justify-center">
-                    <div id="qr-reader" className="w-full"></div>
-                    {error && (
-                        <div className="absolute inset-0 flex items-center justify-center p-4 text-center">
-                            <p className="text-red-400">{error}</p>
-                        </div>
-                    )}
-                </div>
-
-                <style jsx global>{`
-                    #qr-reader__scan_region {
-                        background: transparent !important;
-                    }
-                    #qr-reader__dashboard_section_csr span {
-                        color: white !important;
-                    }
-                `}</style>
-            </div>
-        </Modal>
+                    <div className="p-4 bg-black">
+                        <div id="reader" className="w-full rounded-xl overflow-hidden"></div>
+                        <p className="text-center text-slate-400 mt-4 text-sm">
+                            Apunta tu cámara al código QR de la rutina
+                        </p>
+                    </div>
+                </motion.div>
+            </motion.div>
+        </AnimatePresence>
     );
 }
-

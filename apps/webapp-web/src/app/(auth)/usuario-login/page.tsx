@@ -36,8 +36,8 @@ export default function UsuarioLoginPage() {
             setError('Ingresá tu DNI');
             return;
         }
-        if (!formData.pin.trim()) {
-            setError('Ingresá tu PIN');
+        if (!formData.dni.trim()) {
+            setError('Ingresá tu DNI');
             return;
         }
 
@@ -45,7 +45,7 @@ export default function UsuarioLoginPage() {
         try {
             const res = await api.usuarioLogin({
                 dni: formData.dni.trim(),
-                pin: formData.pin.trim(),
+                pin: "", // PIN is now optional/ignored by default for members
             });
 
             if (res.ok && res.data?.success) {
@@ -54,7 +54,7 @@ export default function UsuarioLoginPage() {
                     setError('Tu cuenta está inactiva. Consultá en recepción.');
                     return;
                 }
-                router.push('/dashboard');
+                router.push('/usuario');
             } else {
                 setError(res.error || res.data?.message || 'Credenciales incorrectas');
             }
@@ -145,7 +145,7 @@ export default function UsuarioLoginPage() {
                         <Dumbbell className="w-8 h-8 text-white" />
                     </motion.div>
                     <h1 className="text-2xl font-display font-bold text-white">Acceso Usuario</h1>
-                    <p className="text-slate-400 mt-1">Ingresá con tu DNI y PIN</p>
+                    <p className="text-slate-400 mt-1">Ingresá con tu DNI</p>
                 </div>
 
                 {/* Form Card */}
@@ -175,35 +175,7 @@ export default function UsuarioLoginPage() {
                                 />
                                 <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
                             </div>
-                        </div>
-
-                        {/* PIN */}
-                        <div className="space-y-2">
-                            <label htmlFor="pin" className="block text-sm font-medium text-slate-300">
-                                PIN
-                            </label>
-                            <div className="relative">
-                                <input
-                                    id="pin"
-                                    type={showPin ? 'text' : 'password'}
-                                    value={formData.pin}
-                                    onChange={(e) => setFormData({ ...formData, pin: e.target.value })}
-                                    placeholder="Ingresá tu PIN"
-                                    maxLength={6}
-                                    className="w-full px-4 py-3 pl-11 pr-12 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all"
-                                    autoComplete="current-password"
-                                />
-                                <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
-                                <button
-                                    type="button"
-                                    onClick={() => setShowPin(!showPin)}
-                                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-500 hover:text-white transition-colors"
-                                    tabIndex={-1}
-                                >
-                                    {showPin ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                                </button>
-                            </div>
-                            <p className="text-xs text-slate-500">Usá tu DNI y PIN configurados en recepción.</p>
+                            <p className="text-xs text-slate-500">Ingresá los números de tu documento sin puntos.</p>
                         </div>
 
                         {/* Error */}
@@ -238,18 +210,6 @@ export default function UsuarioLoginPage() {
                                         Entrar
                                     </>
                                 )}
-                            </button>
-                            <button
-                                type="button"
-                                onClick={togglePinChange}
-                                className={cn(
-                                    'px-4 py-3 rounded-xl font-medium transition-all',
-                                    'bg-slate-800 border border-slate-700 text-slate-300',
-                                    'hover:bg-slate-700 hover:text-white',
-                                    showPinChange && 'bg-slate-700 text-white'
-                                )}
-                            >
-                                {showPinChange ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
                             </button>
                         </div>
                     </form>
