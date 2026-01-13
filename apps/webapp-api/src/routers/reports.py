@@ -94,10 +94,7 @@ async def api_delinquency_alerts_recent(_=Depends(require_gestion_access), svc: 
     return {"alerts": svc.obtener_alertas_morosidad()}
 
 
-@router.get("/api/profesor_resumen")
-async def api_profesor_resumen(request: Request, _=Depends(require_gestion_access)):
-    """Get profesor summary (redirects to profesores router)."""
-    return {}
+
 
 
 # === Exports ===

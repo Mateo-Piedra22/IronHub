@@ -25,10 +25,12 @@ from src.database.tenant_connection import (
 # Import local services
 from src.database.connection import SessionLocal, AdminSessionLocal
 from src.services.user_service import UserService
-from src.services.teacher_service import TeacherService
+
 from src.services.payment_service import PaymentService
 from src.services.auth_service import AuthService
-from src.services.gym_service import GymService
+from src.services.gym_config_service import GymConfigService
+from src.services.clase_service import ClaseService
+from src.services.training_service import TrainingService
 from src.services.attendance_service import AttendanceService
 from src.services.inscripciones_service import InscripcionesService
 from src.services.profesor_service import ProfesorService
@@ -126,9 +128,7 @@ def get_user_service(session: Session = Depends(get_db_session)) -> UserService:
     return UserService(session)
 
 
-def get_teacher_service(session: Session = Depends(get_db_session)) -> TeacherService:
-    """Get TeacherService instance with current session."""
-    return TeacherService(session)
+
 
 
 # Aliases for backwards compatibility with routers
@@ -154,9 +154,17 @@ def get_auth_service(session: Session = Depends(get_db_session)) -> AuthService:
     return AuthService(session)
 
 
-def get_gym_service(session: Session = Depends(get_db_session)) -> GymService:
-    """Get GymService instance with current session."""
-    return GymService(session)
+def get_gym_config_service(session: Session = Depends(get_db_session)) -> GymConfigService:
+    """Get GymConfigService instance with current session."""
+    return GymConfigService(session)
+
+def get_clase_service(session: Session = Depends(get_db_session)) -> ClaseService:
+    """Get ClaseService instance with current session."""
+    return ClaseService(session)
+
+def get_training_service(session: Session = Depends(get_db_session)) -> TrainingService:
+    """Get TrainingService instance with current session."""
+    return TrainingService(session)
 
 
 def get_attendance_service(session: Session = Depends(get_db_session)) -> AttendanceService:

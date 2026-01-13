@@ -5,7 +5,7 @@ from src.services.base import BaseService
 from src.database.repositories.user_repository import UserRepository
 from src.database.repositories.payment_repository import PaymentRepository
 from src.database.repositories.gym_repository import GymRepository
-from src.database.repositories.teacher_repository import TeacherRepository
+
 from src.database.orm_models import Usuario
 
 class UserService(BaseService):

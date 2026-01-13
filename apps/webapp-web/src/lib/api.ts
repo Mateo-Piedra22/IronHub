@@ -571,6 +571,7 @@ class ApiClient {
             success: boolean;
             message?: string;
             usuario_id?: number;
+            token?: string;
             cuotas_vencidas?: number;
             dias_restantes?: number;
             fecha_proximo_vencimiento?: string;
@@ -579,6 +580,21 @@ class ApiClient {
         }>('/api/checkin/auth', {
             method: 'POST',
             body: JSON.stringify(credentials),
+        });
+    }
+
+    // Scan station QR
+    async scanStationQR(token: string) {
+        return this.request<{
+            ok: boolean;
+            mensaje: string;
+            usuario?: {
+                nombre: string;
+                dni: string;
+            };
+        }>('/api/checkin/qr', {
+            method: 'POST',
+            body: JSON.stringify({ token }),
         });
     }
 
@@ -728,6 +744,32 @@ class ApiClient {
         });
     }
 
+    async previewReceipt(data: any): Promise<ApiResponse<{ blob: Blob }>> {
+        const url = `${this.baseUrl}/api/pagos/preview`;
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                body: JSON.stringify(data),
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include'
+            });
+
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                return {
+                    ok: false,
+                    error: errData.detail || errData.error || 'Error generando vista previa'
+                };
+            }
+
+            const blob = await response.blob();
+            return { ok: true, data: { blob } };
+        } catch (e) {
+            console.error('API Error:', e);
+            return { ok: false, error: 'Error de conexión' };
+        }
+    }
+
     // === Profesores ===
     async getProfesores() {
         return this.request<{ profesores: Profesor[] }>('/api/profesores');
@@ -838,6 +880,31 @@ class ApiClient {
 
         const query = p.toString();
         return `${this.baseUrl}/api/rutinas/${id}/export/excel${query ? `?${query}` : ''}`;
+    }
+
+    /**
+     * Get a signed URL for Excel preview in Office Online Viewer.
+     * This URL can be embedded in an iframe to display the Excel file inline.
+     */
+    async getRutinaExcelViewUrl(id: number, params?: {
+        weeks?: number;
+        qr_mode?: 'inline' | 'sheet' | 'none';
+        sheet_name?: string;
+    }): Promise<ApiResponse<{ url: string }>> {
+        const p = new URLSearchParams();
+        if (params?.weeks) p.set('weeks', String(params.weeks));
+        if (params?.qr_mode) p.set('qr_mode', params.qr_mode);
+        if (params?.sheet_name) p.set('sheet', params.sheet_name);
+
+        const query = p.toString();
+        return this.request<{ url: string }>(`/api/rutinas/${id}/export/excel_view_url${query ? `?${query}` : ''}`);
+    }
+
+    async getRutinaDraftExcelViewUrl(data: any) {
+        return this.request<{ url: string }>('/api/rutinas/export/draft_url', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
     }
 
     async assignRutina(rutinaId: number, usuarioId: number) {
@@ -1120,12 +1187,7 @@ class ApiClient {
         return this.request<{ exists: boolean; used: boolean; expired: boolean }>(`/api/checkin/token_status?token=${encodeURIComponent(token)}`);
     }
 
-    async scanStationQR(token: string) {
-        return this.request<{ ok: boolean; mensaje: string; usuario?: { nombre: string; dni: string; hora: string } }>('/api/checkin/station/scan', {
-            method: 'POST',
-            body: JSON.stringify({ token }),
-        });
-    }
+
 
     async getStationKey() {
         return this.request<{ station_key: string; station_url: string }>('/api/gestion/station-key');
@@ -1474,6 +1536,7 @@ class ApiClient {
             return { ok: false, error: 'Error de conexión' };
         }
     }
+
 }
 
 // Singleton instance

@@ -37,6 +37,7 @@ import { RoutineExerciseEditor } from '@/components/RoutineExerciseEditor';
 import { UnifiedRutinaEditor } from '@/components/UnifiedRutinaEditor';
 import { RutinaCreationWizard } from '@/components/RutinaCreationWizard';
 import { AssignRutinaModal } from '@/components/AssignRutinaModal';
+import { ExcelPreviewViewer } from '@/components/ExcelPreviewViewer';
 
 // Sidebar navigation
 const subtabs = [
@@ -310,6 +311,10 @@ export default function RutinasPage() {
     const [exerciseEditorOpen, setExerciseEditorOpen] = useState(false);
     const [rutinaForExercises, setRutinaForExercises] = useState<Rutina | null>(null);
 
+    // Excel Preview
+    const [excelPreviewOpen, setExcelPreviewOpen] = useState(false);
+    const [excelPreviewUrl, setExcelPreviewUrl] = useState<string | null>(null);
+
     // Load rutinas
     const loadRutinas = useCallback(async () => {
         setLoading(true);
@@ -495,6 +500,21 @@ export default function RutinasPage() {
         }
     };
 
+    // Open Excel preview with Office Online Viewer
+    const handleOpenExcelPreview = async (rutina: Rutina) => {
+        try {
+            const res = await api.getRutinaExcelViewUrl(rutina.id, { weeks: 4 });
+            if (res.ok && res.data?.url) {
+                setExcelPreviewUrl(res.data.url);
+                setExcelPreviewOpen(true);
+            } else {
+                error('Error obteniendo URL de preview');
+            }
+        } catch {
+            error('Error al abrir preview de Excel');
+        }
+    };
+
     // Table columns
     const columns: Column<Rutina>[] = [
         {
@@ -579,15 +599,13 @@ export default function RutinasPage() {
                     >
                         <Power className="w-4 h-4" />
                     </button>
-                    <a
-                        href={api.getRutinaExcelUrl(row.id)}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                    <button
+                        onClick={() => handleOpenExcelPreview(row)}
                         className="p-2 rounded-lg text-slate-400 hover:text-green-400 hover:bg-green-500/10 transition-colors"
-                        title="Descargar Excel"
+                        title="Ver Excel"
                     >
                         <FileSpreadsheet className="w-4 h-4" />
-                    </a>
+                    </button>
                     <a
                         href={api.getRutinaPdfUrl(row.id)}
                         target="_blank"
@@ -864,6 +882,16 @@ export default function RutinasPage() {
                     />
                 </Modal>
             )}
+
+            {/* Excel Preview Viewer - Floating Panel */}
+            <ExcelPreviewViewer
+                excelUrl={excelPreviewUrl}
+                isOpen={excelPreviewOpen}
+                onMinimize={() => {
+                    setExcelPreviewOpen(false);
+                    setExcelPreviewUrl(null);
+                }}
+            />
         </div>
     );
 }

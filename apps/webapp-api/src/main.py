@@ -111,11 +111,19 @@ app.add_middleware(
 )
 
 # Session middleware
+# Configure cookie domain for cross-subdomain session sharing
+base_domain = os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz")
+is_dev = os.getenv("DEVELOPMENT_MODE", "False").lower() == "true"
+
+# In production, share cookie across all subdomains to prevent session loss
+cookie_domain = f".{base_domain}" if not is_dev else None
+
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.getenv("SESSION_SECRET", "webapp-session-secret"),
-    https_only=True,
+    https_only=not is_dev,
     same_site="lax",
+    domain=cookie_domain,
 )
 
 

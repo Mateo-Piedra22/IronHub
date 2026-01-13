@@ -410,6 +410,26 @@ async def api_metodos_pago_create(
         logger.error(f"Error creando metodo_pago: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
+@router.get("/api/pagos/defaults/{usuario_id}")
+async def api_pagos_defaults(
+    usuario_id: int,
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """
+    Get default payment values for a user (Auto-Quota).
+    Used to pre-fill the payment form.
+    """
+    try:
+        defaults = svc.obtener_datos_cuota_usuario(usuario_id)
+        if defaults:
+            return defaults
+        # Return empty defaults if no config found (not 404, just no defaults)
+        return {"nombre": None, "precio": 0, "concepto_id": None}
+    except Exception as e:
+        logger.error(f"Error getting payment defaults for {usuario_id}: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 @router.put("/api/metodos_pago/{metodo_id}")
 async def api_metodos_pago_update(
     metodo_id: int, 
@@ -719,6 +739,81 @@ async def api_pago_resumen(
     except Exception as e:
         logger.error(f"Error obteniendo pago resumen: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+@router.post("/api/pagos/preview")
+async def api_pago_preview(
+    request: Request,
+    _=Depends(require_gestion_access)
+):
+    """Generate PDF receipt preview (stateless)."""
+    try:
+        body = await request.json()
+        
+        from types import SimpleNamespace
+        from datetime import datetime
+        
+        # Mock objects for PDFGenerator
+        u_data = body.get("usuario", {})
+        usuario = SimpleNamespace(
+            id=u_data.get("id", 0),
+            nombre=u_data.get("nombre", "Vista Previa"),
+            dni=u_data.get("dni", ""),
+            tipo_cuota=u_data.get("tipo_cuota", ""),
+            email=u_data.get("email", ""),
+            telefono=u_data.get("telefono", ""),
+            # Add other fields if needed by generator access
+            estado='activo',
+            fecha_alta=None
+        )
+        
+        p_data = body.get("pago", {})
+        pago = SimpleNamespace(
+            id=0,
+            usuario_id=usuario.id,
+            monto=float(p_data.get("monto", 0)),
+            fecha_pago=datetime.now(),
+            mes=int(p_data.get("mes", datetime.now().month)),
+            año=int(p_data.get("anio", datetime.now().year)),
+            metodo_pago_id=p_data.get("metodo_pago_id"),
+            metodo_pago_nombre=p_data.get("metodo_pago_nombre"),
+        )
+        
+        detalles_override = body.get("detalles", [])
+        totales = body.get("totales", {})
+        branding = body.get("branding", {})
+        
+        try:
+            from apps.core.pdf_generator import PDFGenerator
+        except ImportError:
+            from src.pdf_generator import PDFGenerator
+            
+        pdfg = PDFGenerator(branding_config=branding)
+        
+        filepath = pdfg.generar_recibo(
+            pago=pago,
+            usuario=usuario,
+            numero_comprobante="PREVIEW",
+            detalles_override=detalles_override,
+            totales=totales,
+            observaciones=body.get("observaciones"),
+            emitido_por=body.get("emitido_por"),
+            titulo="VISTA PREVIA",
+            metodo_pago=pago.metodo_pago_nombre,
+            mostrar_logo=body.get("mostrar_logo", True),
+            mostrar_metodo=body.get("mostrar_metodo", True),
+            mostrar_dni=body.get("mostrar_dni", True),
+            tipo_cuota=body.get("tipo_cuota_override"),
+            periodo=body.get("periodo_override")
+        )
+        
+        return FileResponse(filepath, media_type="application/pdf", filename="preview.pdf")
+        
+    except Exception as e:
+        logger.error(f"Error previewing receipt: {e}")
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 
 @router.get("/api/pagos/{pago_id}/recibo.pdf")
 async def api_pago_recibo_pdf(

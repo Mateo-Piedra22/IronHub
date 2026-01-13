@@ -54,82 +54,25 @@ class PaymentService(BaseService):
         metodo_pago_id: Optional[int] = None
     ) -> int:
         """
-        Register a payment for a user.
-        
-        - Creates or updates payment for (usuario_id, mes, año)
-        - Updates user's next due date
-        - Resets overdue quota count
-        - Reactivates user if deactivated
-        
-        Returns: pago_id
+        Register a simple payment (legacy wrapper).
+        Redirects to registrar_pago_avanzado, respecting explicit month/year.
         """
-        # Validate user exists
-        usuario = self.db.get(Usuario, usuario_id)
-        if not usuario:
-            raise ValueError(f"No existe usuario con ID: {usuario_id}")
-
-        try:
-            # Check for existing payment
-            existing = self.db.execute(
-                select(Pago).where(
-                    Pago.usuario_id == usuario_id,
-                    Pago.mes == mes,
-                    Pago.año == año
-                )
-            ).scalar_one_or_none()
-
-            if existing:
-                # Update existing payment
-                existing.monto = monto
-                existing.metodo_pago_id = metodo_pago_id or existing.metodo_pago_id
-                existing.fecha_pago = datetime.now()
-                pago_id = existing.id
-            else:
-                # Create new payment
-                pago = Pago(
-                    usuario_id=usuario_id,
-                    monto=monto,
-                    mes=mes,
-                    año=año,
-                    metodo_pago_id=metodo_pago_id,
-                    fecha_pago=datetime.now()
-                )
-                self.db.add(pago)
-                self.db.flush()
-                pago_id = pago.id
-
-            # Calculate next due date using user's subscription type duration
-            duracion_dias = 30  # default
-            if usuario.tipo_cuota:
-                tipo_cuota = self.db.execute(
-                    select(TipoCuota).where(TipoCuota.nombre == usuario.tipo_cuota)
-                ).scalar_one_or_none()
-                if tipo_cuota:
-                    duracion_dias = tipo_cuota.duracion_dias or 30
-
-            fecha_pago = date.today()
-            proximo_vencimiento = fecha_pago + timedelta(days=duracion_dias)
-
-            # Update user status
-            usuario.fecha_proximo_vencimiento = proximo_vencimiento
-            usuario.ultimo_pago = fecha_pago
-            usuario.activo = True
-            usuario.cuotas_vencidas = 0
-
-            self.db.commit()
-
-            # Log the payment
-            logger.info(
-                f"Pago registrado: usuario={usuario_id}, monto={monto}, "
-                f"mes={mes}/{año}, id={pago_id}"
-            )
-
-            return pago_id
-
-        except Exception as e:
-            self.db.rollback()
-            logger.error(f"Error al registrar pago: {e}")
-            raise
+        # Create a generic concept for the payment
+        concepto = {
+            "descripcion": f"Cuota {mes}/{año}",
+            "cantidad": 1,
+            "precio_unitario": monto,
+            "concepto_id": None
+        }
+        
+        return self.registrar_pago_avanzado(
+            usuario_id=usuario_id,
+            metodo_pago_id=metodo_pago_id or 1,
+            conceptos=[concepto],
+            monto_personalizado=monto,
+            override_mes=mes,
+            override_año=año
+        )
 
     def modificar_pago(self, pago_id: int, data: Dict[str, Any]) -> bool:
         """Update an existing payment."""
@@ -278,16 +221,23 @@ class PaymentService(BaseService):
         metodo_pago_id: int,
         conceptos: List[Dict[str, Any]],
         fecha_pago: Optional[datetime] = None,
-        monto_personalizado: Optional[float] = None
+        monto_personalizado: Optional[float] = None,
+        override_mes: Optional[int] = None,
+        override_año: Optional[int] = None
     ) -> int:
         """
         Register payment with multiple concepts/line items.
         
-        Each concept can have:
-        - concepto_id: Optional concept reference
-        - descripcion: Description if no concept_id
-        - cantidad: Quantity (default 1)
-        - precio_unitario: Unit price
+        Handles UniqueConstraint(usuario_id, mes, año) by MERGING into existing payment if present.
+        
+        Args:
+            usuario_id: User ID.
+            metodo_pago_id: Payment method ID.
+            conceptos: List of concepts (items).
+            fecha_pago: Actual date of the transaction (defaults to NOW).
+            monto_personalizado: Optional total amount override.
+            override_mes: Explicitly set the quota month (e.g. paying for past month).
+            override_año: Explicitly set the quota year.
         """
         usuario = self.db.get(Usuario, usuario_id)
         if not usuario:
@@ -297,34 +247,55 @@ class PaymentService(BaseService):
             raise ValueError("Se requiere al menos un concepto de pago")
 
         try:
-            # Calculate total from concepts
-            subtotal = sum(
+            now = fecha_pago or datetime.now()
+            
+            # Determine quota period (Effective Month/Year)
+            # Use overrides if provided (for back-payments), otherwise use transaction date
+            mes_eff = override_mes if override_mes is not None else now.month
+            año_eff = override_año if override_año is not None else now.year
+            
+            # 1. Check for existing payment (Upsert Strategy)
+            pago = self.db.execute(
+                select(Pago).where(
+                    Pago.usuario_id == usuario_id,
+                    Pago.mes == mes_eff,
+                    Pago.año == año_eff
+                )
+            ).scalar_one_or_none()
+            
+            # Calculate total for THIS transaction/batch
+            subtotal_batch = sum(
                 float(c.get('cantidad', 1)) * float(c.get('precio_unitario', 0))
                 for c in conceptos
             )
-
-            # Apply commission if any
-            comision = self._calcular_comision(subtotal, metodo_pago_id)
-            total = subtotal + comision
-
-            # Use custom amount if provided
+            comision_batch = self._calcular_comision(subtotal_batch, metodo_pago_id)
+            total_batch = subtotal_batch + comision_batch
+            
             if monto_personalizado is not None:
-                total = float(monto_personalizado)
+                total_batch = float(monto_personalizado)
 
-            # Create payment
-            now = fecha_pago or datetime.now()
-            pago = Pago(
-                usuario_id=usuario_id,
-                monto=total,
-                mes=now.month,
-                año=now.year,
-                metodo_pago_id=metodo_pago_id,
-                fecha_pago=now
-            )
-            self.db.add(pago)
-            self.db.flush()
+            if pago:
+                # MERGE into existing payment
+                # Update total amount (add new batch total to existing total)
+                pago.monto = float(pago.monto) + total_batch
+                pago.metodo_pago_id = metodo_pago_id # Update method to latest used
+                pago.fecha_pago = now # Update effective date to latest transaction
+                logger.info(f"Fusionando pago para usuario {usuario_id} (Mes {mes_eff}/{año_eff}): {total_batch} añadido.")
+            else:
+                # CREATE new payment
+                pago = Pago(
+                    usuario_id=usuario_id,
+                    monto=total_batch,
+                    mes=mes_eff,
+                    año=año_eff,
+                    metodo_pago_id=metodo_pago_id,
+                    fecha_pago=now
+                )
+                self.db.add(pago)
+            
+            self.db.flush() # Ensure we have pago.id
 
-            # Create payment details
+            # Create payment details (Always append new details)
             for c in conceptos:
                 cantidad = float(c.get('cantidad', 1))
                 precio = float(c.get('precio_unitario', 0))
@@ -336,7 +307,7 @@ class PaymentService(BaseService):
                     cantidad=cantidad,
                     precio_unitario=precio,
                     subtotal=line_total,
-                    total=line_total
+                    total=line_total 
                 )
                 self.db.add(detalle)
 
@@ -344,18 +315,38 @@ class PaymentService(BaseService):
             self._actualizar_estado_usuario_tras_pago(usuario, now)
 
             self.db.commit()
-            
-            logger.info(
-                f"Pago avanzado registrado: usuario={usuario_id}, "
-                f"total={total}, conceptos={len(conceptos)}"
-            )
-            
             return pago.id
 
         except Exception as e:
             self.db.rollback()
             logger.error(f"Error en pago avanzado: {e}")
             raise
+
+    def obtener_datos_cuota_usuario(self, usuario_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Get quota information for auto-filling payment forms.
+        Based on user's assigned 'tipo_cuota'.
+        """
+        try:
+            usuario = self.db.get(Usuario, usuario_id)
+            if not usuario or not usuario.tipo_cuota:
+                return None
+            
+            tipo = self.db.execute(
+                select(TipoCuota).where(TipoCuota.nombre == usuario.tipo_cuota)
+            ).scalar_one_or_none()
+            
+            if not tipo:
+                return None
+                
+            return {
+                "nombre": tipo.nombre,
+                "precio": float(tipo.precio),
+                "concepto_id": None # Could be mapped if 'conceptos' table had a link to tipos_cuota, but it doesn't seem so.
+            }
+        except Exception as e:
+            logger.error(f"Error obteniendo datos cuota usuario {usuario_id}: {e}")
+            return None
 
     def obtener_detalles_pago(self, pago_id: int) -> List[PagoDetalle]:
         """Get payment details/line items."""

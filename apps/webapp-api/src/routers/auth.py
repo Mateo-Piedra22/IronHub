@@ -4,8 +4,9 @@ from fastapi import APIRouter, Request, Depends, status, Form
 from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
-from src.dependencies import get_auth_service, ensure_tenant_context
+from src.dependencies import get_auth_service, get_attendance_service, ensure_tenant_context, require_user_auth
 from src.services.auth_service import AuthService
+from src.services.attendance_service import AttendanceService
 from src.utils import (
     _resolve_theme_vars, _resolve_logo_url, 
     get_gym_name, _issue_usuario_jwt, _get_usuario_nombre,
@@ -697,11 +698,29 @@ async def api_checkin_auth(
             "activo": result.get('activo', False)
         })
     
-    user = result.get('usuario', {})
+    user_data = result.get('usuario', {})
+    user_id = user_data.get('id')
     
+    # Set session for subsequent requests (QR scan)
+    request.session.clear()
+    if user_id:
+        request.session["user_id"] = int(user_id)
+        request.session["role"] = "checkin"
+        request.session["checkin_auth"] = True
+    
+    # Issue JWT token
+    jwt_token = None
+    try:
+        if user_id:
+            jwt_token = _issue_usuario_jwt(int(user_id))
+            if jwt_token:
+                request.session["usuario_jwt"] = jwt_token
+    except Exception:
+        pass
+
     # Calculate days remaining
     dias_restantes = None
-    fecha_vencimiento = user.get('fecha_vencimiento')
+    fecha_vencimiento = user_data.get('fecha_vencimiento')
     if fecha_vencimiento:
         from datetime import datetime, date
         try:
@@ -717,11 +736,53 @@ async def api_checkin_auth(
     
     return JSONResponse({
         "success": True,
-        "usuario_id": user.get('id'),
+        "usuario_id": user_id,
         "activo": True,
-        "exento": bool(user.get('exento', False)),
-        "cuotas_vencidas": user.get('cuotas_vencidas', 0) or 0,
+        "exento": bool(user_data.get('exento', False)),
+        "cuotas_vencidas": user_data.get('cuotas_vencidas', 0) or 0,
         "dias_restantes": dias_restantes,
-        "fecha_proximo_vencimiento": str(fecha_vencimiento or "")
+        "fecha_proximo_vencimiento": str(fecha_vencimiento or ""),
+        "token": jwt_token
     })
+
+
+@router.post("/api/checkin/qr")
+async def api_checkin_qr(
+    request: Request,
+    svc: AttendanceService = Depends(get_attendance_service)
+):
+    """
+    Validate station QR scan and register attendance.
+    Requires authenticated user via session/cookie.
+    """
+    try:
+        # Check session
+        user_id = request.session.get("user_id")
+        if not user_id:
+            return JSONResponse({"ok": False, "mensaje": "Sesión no válida. Ingrese DNI nuevamente."}, status_code=401)
+
+        data = await request.json()
+        token = str(data.get("token") or "").strip()
+        
+        if not token:
+             return JSONResponse({"ok": False, "mensaje": "Token QR requerido"}, status_code=400)
+             
+        # Validate and Check-in
+        success, message, user_data = svc.validar_station_scan(token, user_id)
+        
+        if success:
+             return JSONResponse({
+                 "ok": True, 
+                 "mensaje": message, 
+                 "usuario": {
+                     "nombre": user_data.get("nombre"),
+                     "dni": user_data.get("dni")
+                 }
+             })
+        else:
+             return JSONResponse({"ok": False, "mensaje": message}, status_code=400)
+             
+    except Exception:
+        logger.exception("Error en checkin QR")
+        return JSONResponse({"ok": False, "mensaje": "Error de servidor"}, status_code=500)
 

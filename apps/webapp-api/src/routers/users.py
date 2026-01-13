@@ -8,10 +8,10 @@ from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from src.dependencies import (
-    get_user_service, get_teacher_service, 
+    get_user_service, get_profesor_service, 
     require_gestion_access, require_owner
 )
-from src.services import UserService, TeacherService
+from src.services import UserService, ProfesorService
 from src.utils import _resolve_theme_vars, _resolve_logo_url, get_gym_name
 
 # Fallback for UsuarioEstado if not imported correctly or available
@@ -438,17 +438,17 @@ async def api_estados_templates(
 
 @router.get("/api/profesores_basico")
 async def api_profesores_basico(
-    teacher_service: TeacherService = Depends(get_teacher_service)
+    profesor_service: ProfesorService = Depends(get_profesor_service)
 ):
     try:
-        return teacher_service.list_teachers_basic()
+        return profesor_service.list_teachers_basic()
     except Exception:
         return []
 
 @router.get("/api/profesores_detalle")
 async def api_profesores_detalle(
     request: Request, 
-    teacher_service: TeacherService = Depends(get_teacher_service),
+    profesor_service: ProfesorService = Depends(get_profesor_service),
     _=Depends(require_owner)
 ):
     start = request.query_params.get("start")
@@ -464,16 +464,16 @@ async def api_profesores_detalle(
     except Exception:
         pass
         
-    return teacher_service.get_teacher_details_list(start_date, end_date)
+    return profesor_service.get_teacher_details_list(start_date, end_date)
 
 @router.get("/api/profesores/{profesor_id}")
 async def api_profesor_get(
     profesor_id: int, 
-    teacher_service: TeacherService = Depends(get_teacher_service),
+    profesor_service: ProfesorService = Depends(get_profesor_service),
     _=Depends(require_owner)
 ):
     try:
-        data = teacher_service.get_teacher(profesor_id)
+        data = profesor_service.obtener_profesor(profesor_id)
         if not data:
             return JSONResponse({"error": "not_found"}, status_code=404)
         return data
@@ -484,7 +484,7 @@ async def api_profesor_get(
 async def api_profesor_update(
     profesor_id: int, 
     request: Request, 
-    teacher_service: TeacherService = Depends(get_teacher_service),
+    profesor_service: ProfesorService = Depends(get_profesor_service),
     _=Depends(require_owner)
 ):
     try:
@@ -493,7 +493,7 @@ async def api_profesor_update(
         payload = {}
         
     try:
-        teacher_service.update_teacher(profesor_id, payload)
+        profesor_service.actualizar_profesor(profesor_id, payload)
         return {"success": True, "updated": 1}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -501,7 +501,7 @@ async def api_profesor_update(
 @router.get("/api/profesor_sesiones")
 async def api_profesor_sesiones(
     request: Request, 
-    teacher_service: TeacherService = Depends(get_teacher_service),
+    profesor_service: ProfesorService = Depends(get_profesor_service),
     _=Depends(require_owner)
 ):
     pid = request.query_params.get("profesor_id")
@@ -522,7 +522,7 @@ async def api_profesor_sesiones(
         pass
         
     try:
-        sesiones = teacher_service.get_teacher_sessions(int(pid), start_date, end_date)
+        sesiones = profesor_service.get_teacher_sessions(int(pid), start_date, end_date)
         
         # Formatting similar to original
         out = []

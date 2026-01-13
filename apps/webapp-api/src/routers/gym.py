@@ -12,28 +12,77 @@ import threading
 import urllib.parse
 from datetime import datetime, timezone, date
 from typing import Optional, List, Dict, Any
-from pathlib import Path
 
-from fastapi import APIRouter, Request, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Request, Depends, HTTPException, Body, UploadFile, File
 from fastapi.responses import JSONResponse, FileResponse
+from pydantic import BaseModel
+from sqlalchemy import text
 
-from src.dependencies import get_gym_service, require_gestion_access, require_owner, get_rm
-from src.services.gym_service import GymService
+
+# Services
+from src.dependencies import (
+    require_gestion_access, 
+    require_owner, 
+    get_db,
+    get_gym_config_service,
+    get_clase_service,
+    get_training_service,
+    get_rm
+)
+
+from src.models.orm_models import (
+    Rutina, Usuario, RutinaEjercicio, Ejercicio, Clase, ClaseBloque, ClaseBloqueItem
+)
 from src.routine_manager import RoutineTemplateManager
-from src.utils import _resolve_existing_dir, _apply_change_idempotent, _filter_existing_columns
-from src.models import Rutina, RutinaEjercicio, Ejercicio, Clase, ClaseHorario, Usuario
-from src.utils import _resolve_logo_url, get_gym_name
+from src.utils import get_gym_name, _resolve_logo_url, _resolve_existing_dir
+from src.services.gym_config_service import GymConfigService
+from src.services.clase_service import ClaseService
+from src.services.training_service import TrainingService
 from src.services.b2_storage import simple_upload as b2_upload
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# --- Excel Preview Signing ---
+# Used to create signed URLs for Office Online Viewer (stateless, no storage needed)
+
+def _get_preview_secret() -> str:
+    """Get secret key for signing preview URLs."""
+    try:
+        secret = os.environ.get("PREVIEW_SECRET") or os.environ.get("SECRET_KEY")
+        if secret:
+            return str(secret)
+    except Exception:
+        pass
+    # Fallback - in production should use proper secret
+    return "preview-secret-key-change-in-production"
+
+def _sign_excel_view(rutina_id: int, weeks: int, filename: str, ts: int, qr_mode: str = "inline", sheet: str | None = None) -> str:
+    """Generate HMAC signature for Excel view URL."""
+    try:
+        qr = str(qr_mode or "inline").strip().lower()
+        if qr not in ("inline", "sheet", "none"):
+            qr = "inline"
+    except Exception:
+        qr = "inline"
+    try:
+        sh = (str(sheet).strip()[:64]) if (sheet is not None and str(sheet).strip()) else ""
+    except Exception:
+        sh = ""
+    try:
+        base = f"{int(rutina_id)}|{int(weeks)}|{filename}|{int(ts)}|{qr}|{sh}".encode("utf-8")
+    except Exception:
+        base = f"{rutina_id}|{weeks}|{filename}|{ts}|{qr}|{sh}".encode("utf-8")
+    secret = _get_preview_secret().encode("utf-8")
+    return hmac.new(secret, base, hashlib.sha256).hexdigest()
 
 # --- API Configuración ---
 
 @router.get("/api/gym/data")
 async def api_gym_data(
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: GymConfigService = Depends(get_gym_config_service)
 ):
     """Get gym configuration using SQLAlchemy."""
     try:
@@ -53,7 +102,8 @@ async def api_gym_data(
 async def api_gym_update(
     request: Request, 
     _=Depends(require_owner),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: GymConfigService = Depends(get_gym_config_service)
 ):
     """Update gym configuration using SQLAlchemy."""
     try:
@@ -80,7 +130,8 @@ async def api_gym_logo(
     request: Request, 
     file: UploadFile = File(...), 
     _=Depends(require_owner),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: GymConfigService = Depends(get_gym_config_service)
 ):
     """Upload gym logo using SQLAlchemy for storage."""
     try:
@@ -503,10 +554,10 @@ def _load_ejercicios_catalog(force: bool = False) -> Dict[str, Any]:
             rows = None
             try:
                 from src.database.connection import SessionLocal
-                from src.services.gym_service import GymService
+                from src.services.training_service import TrainingService
                 session = SessionLocal()
                 try:
-                    svc = GymService(session)
+                    svc = TrainingService(session)
                     rows = svc.obtener_ejercicios_catalog()
                 finally:
                     session.close()
@@ -753,7 +804,8 @@ def _build_rutina_from_draft(payload: Dict[str, Any]) -> tuple:
 @router.get("/api/gym_data")
 async def api_gym_data_legacy(
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: GymConfigService = Depends(get_gym_config_service)
 ):
     """Legacy gym data endpoint using SQLAlchemy."""
     try:
@@ -767,7 +819,8 @@ async def api_gym_data_legacy(
 async def api_gym_update_legacy(
     request: Request, 
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: GymConfigService = Depends(get_gym_config_service)
 ):
     """Legacy gym update endpoint using SQLAlchemy."""
     try:
@@ -783,7 +836,8 @@ async def api_gym_update_legacy(
 async def api_gym_logo_legacy(
     file: UploadFile = File(...), 
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: GymConfigService = Depends(get_gym_config_service)
 ):
     """Legacy gym logo upload endpoint using SQLAlchemy."""
     try:
@@ -812,7 +866,8 @@ async def api_gym_logo_legacy(
 @router.get("/api/clases")
 async def api_clases(
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: ClaseService = Depends(get_clase_service)
 ):
     """Get all classes using SQLAlchemy."""
     try:
@@ -826,7 +881,8 @@ async def api_clases(
 async def api_clases_create(
     request: Request, 
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: ClaseService = Depends(get_clase_service)
 ):
     """Create a class using SQLAlchemy."""
     try:
@@ -856,7 +912,8 @@ async def api_clases_create(
 async def api_clase_get(
     clase_id: int,
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: ClaseService = Depends(get_clase_service)
 ):
     """Get a single clase by ID."""
     try:
@@ -876,7 +933,8 @@ async def api_clase_update(
     clase_id: int,
     request: Request,
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: ClaseService = Depends(get_clase_service)
 ):
     """Update a clase."""
     try:
@@ -897,7 +955,8 @@ async def api_clase_update(
 async def api_clase_delete(
     clase_id: int,
     _=Depends(require_owner),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: ClaseService = Depends(get_clase_service)
 ):
     """Delete a clase."""
     try:
@@ -914,41 +973,13 @@ async def api_clase_delete(
 
 # --- API Bloques ---
 
-def _ensure_bloques_schema(conn) -> None:
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS clase_bloques (
-                    id SERIAL PRIMARY KEY,
-                    clase_id INTEGER NOT NULL,
-                    nombre TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT NOW(),
-                    updated_at TIMESTAMP DEFAULT NOW()
-                );
-                CREATE INDEX IF NOT EXISTS idx_clase_bloques_clase ON clase_bloques(clase_id);
-                
-                CREATE TABLE IF NOT EXISTS clase_bloque_items (
-                    id SERIAL PRIMARY KEY,
-                    bloque_id INTEGER NOT NULL REFERENCES clase_bloques(id) ON DELETE CASCADE,
-                    ejercicio_id INTEGER NOT NULL,
-                    orden INTEGER NOT NULL DEFAULT 0,
-                    series INTEGER DEFAULT 0,
-                    repeticiones TEXT,
-                    descanso_segundos INTEGER DEFAULT 0,
-                    notas TEXT
-                );
-                CREATE INDEX IF NOT EXISTS idx_bloque_items_bloque ON clase_bloque_items(bloque_id);
-                """
-            )
-    except Exception as e:
-        logger.error(f"Error asegurando esquema de bloques: {e}")
 
 @router.get("/api/clases/{clase_id}/bloques")
 async def api_clase_bloques_list(
     clase_id: int, 
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: ClaseService = Depends(get_clase_service)
 ):
     """Get workout blocks for a class using SQLAlchemy."""
     try:
@@ -962,7 +993,8 @@ async def api_clase_bloque_items(
     clase_id: int, 
     bloque_id: int, 
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: ClaseService = Depends(get_clase_service)
 ):
     """Get items in a workout block using SQLAlchemy."""
     try:
@@ -981,7 +1013,8 @@ async def api_clase_bloque_create(
     clase_id: int, 
     request: Request, 
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: ClaseService = Depends(get_clase_service)
 ):
     """Create a workout block with items using SQLAlchemy."""
     payload = await request.json()
@@ -1022,7 +1055,8 @@ async def api_clase_bloque_update(
     bloque_id: int, 
     request: Request, 
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: ClaseService = Depends(get_clase_service)
 ):
     """Update a workout block using SQLAlchemy."""
     payload = await request.json()
@@ -1065,7 +1099,8 @@ async def api_clase_bloque_delete(
     clase_id: int, 
     bloque_id: int, 
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: ClaseService = Depends(get_clase_service)
 ):
     """Delete a workout block using SQLAlchemy."""
     try:
@@ -1089,7 +1124,8 @@ async def api_clase_bloque_delete(
 async def api_ejercicios_list(
     request: Request,
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: TrainingService = Depends(get_training_service)
 ):
     """Get all exercises using SQLAlchemy with optional filters."""
     try:
@@ -1105,7 +1141,8 @@ async def api_ejercicios_list(
 async def api_ejercicios_create(
     request: Request, 
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: TrainingService = Depends(get_training_service)
 ):
     """Create an exercise using SQLAlchemy."""
     try:
@@ -1135,7 +1172,8 @@ async def api_ejercicios_update(
     ejercicio_id: int, 
     request: Request, 
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: TrainingService = Depends(get_training_service)
 ):
     """Update an exercise using SQLAlchemy."""
     try:
@@ -1151,7 +1189,8 @@ async def api_ejercicios_update(
 async def api_ejercicios_delete(
     ejercicio_id: int, 
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: TrainingService = Depends(get_training_service)
 ):
     """Delete an exercise using SQLAlchemy."""
     try:
@@ -1172,7 +1211,8 @@ async def api_rutinas_list(
     es_plantilla: Optional[bool] = None, # Alias for plantillas
     include_exercises: bool = False,
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: TrainingService = Depends(get_training_service)
 ):
     """Get routines using SQLAlchemy. Includes exercises when filtering by user."""
     try:
@@ -1204,7 +1244,8 @@ async def api_rutinas_list(
 async def api_rutinas_create(
     request: Request, 
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service)
+
+    svc: TrainingService = Depends(get_training_service)
 ):
     """Create a routine using SQLAlchemy."""
     try:
@@ -1232,7 +1273,7 @@ async def api_rutinas_create(
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.get("/api/rutinas/{rutina_id}/export/pdf")
-async def api_rutina_export_pdf(rutina_id: int, weeks: int = 1, filename: Optional[str] = None, qr_mode: str = "auto", sheet: Optional[str] = None, _=Depends(require_gestion_access), svc: GymService = Depends(get_gym_service)):
+async def api_rutina_export_pdf(rutina_id: int, weeks: int = 1, filename: Optional[str] = None, qr_mode: str = "auto", sheet: Optional[str] = None, _=Depends(require_gestion_access), svc: TrainingService = Depends(get_training_service)):
     """Export routine as PDF using RoutineTemplateManager."""
     rm = get_rm()
     if rm is None:
@@ -1267,7 +1308,7 @@ async def api_rutina_export_pdf(rutina_id: int, weeks: int = 1, filename: Option
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/api/rutinas/{rutina_id}")
-async def api_rutina_get(rutina_id: int, _=Depends(require_gestion_access), svc: GymService = Depends(get_gym_service)):
+async def api_rutina_get(rutina_id: int, _=Depends(require_gestion_access), svc: TrainingService = Depends(get_training_service)):
     """Get a single routine with all exercises."""
     try:
         rutina = svc.obtener_rutina_completa(rutina_id)
@@ -1281,7 +1322,7 @@ async def api_rutina_get(rutina_id: int, _=Depends(require_gestion_access), svc:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.put("/api/rutinas/{rutina_id}")
-async def api_rutina_update(rutina_id: int, request: Request, _=Depends(require_gestion_access), svc: GymService = Depends(get_gym_service)):
+async def api_rutina_update(rutina_id: int, request: Request, _=Depends(require_gestion_access), svc: TrainingService = Depends(get_training_service)):
     """Update a routine."""
     try:
         payload = await request.json()
@@ -1294,19 +1335,17 @@ async def api_rutina_update(rutina_id: int, request: Request, _=Depends(require_
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @router.delete("/api/rutinas/{rutina_id}")
-async def api_rutina_delete(rutina_id: int, _=Depends(require_gestion_access), svc: GymService = Depends(get_gym_service)):
+async def api_rutina_delete(rutina_id: int, _=Depends(require_gestion_access), svc: TrainingService = Depends(get_training_service)):
     """Delete a routine."""
     try:
-        success = svc.eliminar_rutina(rutina_id)
-        if success:
+        if svc.eliminar_rutina(rutina_id):
             return {"ok": True}
         return JSONResponse({"error": "No se pudo eliminar"}, status_code=500)
     except Exception as e:
         logger.error(f"Error deleting rutina: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
-
 @router.put("/api/rutinas/{rutina_id}/toggle-activa")
-async def api_rutina_toggle_activa(rutina_id: int, _=Depends(require_gestion_access), svc: GymService = Depends(get_gym_service)):
+async def api_rutina_toggle_activa(rutina_id: int, _=Depends(require_gestion_access), svc: TrainingService = Depends(get_training_service)):
     """Toggle activa status of a routine. If activating, deactivates other rutinas for the same user."""
     try:
         rutina = svc.obtener_rutina_completa(rutina_id)
@@ -1334,45 +1373,42 @@ async def api_rutina_assign(
     rutina_id: int,
     request: Request,
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service)
+    svc: TrainingService = Depends(get_training_service)
 ):
     """Assign a routine (plantation) to a user, creating a copy for that user."""
     try:
         payload = await request.json()
         usuario_id = payload.get("usuario_id")
         
-        if not usuario_id:
-            raise HTTPException(status_code=400, detail="usuario_id requerido")
+        # Logic to "assign" usually means cloning the routine for the user
+        # or linking it. GymService logic was cloning?
+        # Let's see original implementation... it was cloning and returning new ID.
         
-        # Get the original routine
-        rutina = svc.obtener_rutina_completa(rutina_id)
-        if not rutina:
-            raise HTTPException(status_code=404, detail="Rutina no encontrada")
+        # TrainingService currently has no 'assign_clone' method.
+        # But we can reconstruct it using 'obtener_rutina_completa' + 'crear_rutina'.
         
-        # Duplicate the routine for the user
-        new_rutina_data = {
-            'nombre': rutina.get('nombre', 'Rutina'),
-            'descripcion': rutina.get('descripcion'),
-            'categoria': rutina.get('categoria'),
+
+        rutina_origen = svc.obtener_rutina_completa(rutina_id)
+        if not rutina_origen:
+             raise HTTPException(status_code=404, detail="Rutina origen no encontrada")
+             
+        # Clone
+        new_data = {
+            'nombre_rutina': rutina_origen['nombre_rutina'],
+            'descripcion': rutina_origen['descripcion'],
             'usuario_id': usuario_id,
-            'es_plantilla': False,
-            'activa': True,
-            'dias': rutina.get('dias', [])
+            'dias_semana': rutina_origen['dias_semana'],
+            'categoria': rutina_origen['categoria'],
+            'activa': True
         }
-        
-        new_id = svc.crear_rutina(new_rutina_data)
-        if not new_id:
-            return JSONResponse({"error": "No se pudo asignar"}, status_code=500)
-        
-        # Deactivate other routines for this user
-        try:
-            svc.desactivar_otras_rutinas(usuario_id, new_id)
-        except Exception:
-            pass
-        
-        # Return the newly created routine
-        new_rutina = svc.obtener_rutina_completa(new_id)
-        return new_rutina or {"id": new_id, "ok": True}
+        new_id = svc.crear_rutina(new_data)
+        if new_id:
+            # Clone exercises
+            exs = rutina_origen.get('ejercicios', [])
+            svc.asignar_ejercicios_rutina(new_id, exs)
+            return {"ok": True, "id": new_id}
+            
+        return JSONResponse({"error": "No se pudo asignar"}, status_code=500)
     except HTTPException:
         raise
     except Exception as e:
@@ -1388,7 +1424,7 @@ async def api_rutina_export_excel(
     user_override: Optional[str] = None,
     filename: Optional[str] = None,
     _=Depends(require_gestion_access),
-    svc: GymService = Depends(get_gym_service),
+    svc: TrainingService = Depends(get_training_service),
     rm: RoutineTemplateManager = Depends(get_rm)
 ):
     """Export a routine as Excel."""
@@ -1420,6 +1456,306 @@ async def api_rutina_export_excel(
     except Exception as e:
         logging.exception("Error exporting Excel")
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- Excel Preview Signed URL Endpoints ---
+# These endpoints enable Excel preview in Office Online Viewer without needing cloud storage
+
+@router.get("/api/rutinas/{rutina_id}/export/excel_view_url")
+async def api_rutina_excel_view_url(
+    rutina_id: int,
+    request: Request,
+    weeks: int = 1,
+    filename: Optional[str] = None,
+    qr_mode: str = "inline",
+    sheet: Optional[str] = None,
+    _=Depends(require_gestion_access),
+    svc: GymService = Depends(get_gym_service),
+):
+    """Generate a signed URL for Excel preview in Office Online Viewer.
+    
+    This endpoint requires authentication and returns a signed URL that can be
+    used with Office Online Viewer. The signed URL points to the public
+    excel_view.xlsx endpoint which verifies the signature before serving.
+    """
+    try:
+        # Get rutina data to build filename
+        rutina_data = svc.obtener_rutina_completa(rutina_id)
+        if not rutina_data:
+            raise HTTPException(status_code=404, detail="Rutina no encontrada")
+        
+        # Build filename
+        if not filename:
+            nombre_rutina = rutina_data.get('nombre_rutina') or rutina_data.get('nombre', f'rutina_{rutina_id}')
+            usuario_nombre = rutina_data.get('usuario_nombre', '')
+            dias = rutina_data.get('dias_semana', 1)
+            parts = ['rutina', nombre_rutina, f'{dias}-dias']
+            if usuario_nombre:
+                parts.append(usuario_nombre)
+            filename = '_'.join(parts) + '.xlsx'
+        
+        # Sanitize filename
+        base_name = os.path.basename(filename)
+        if not base_name.lower().endswith('.xlsx'):
+            base_name = f"{base_name}.xlsx"
+        base_name = base_name[:150].replace('\\', '_').replace('/', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+        
+        # Normalize params
+        weeks = max(1, min(int(weeks), 4))
+        qr_mode = str(qr_mode or "inline").strip().lower()
+        if qr_mode not in ("inline", "sheet", "none"):
+            qr_mode = "inline"
+        sheet_norm = (str(sheet).strip()[:64]) if sheet else None
+        
+        # Generate signature
+        ts = int(time.time())
+        sig = _sign_excel_view(rutina_id, weeks, base_name, ts, qr_mode=qr_mode, sheet=sheet_norm)
+        
+        # Build base URL from request
+        try:
+            base_url = str(request.base_url).rstrip('/')
+        except Exception:
+            base_url = os.environ.get('API_BASE_URL', 'https://api.ironhub.motiona.xyz')
+        
+        # Build signed URL with .xlsx extension for Office compatibility
+        params = {
+            "weeks": str(weeks),
+            "filename": base_name,
+            "qr_mode": qr_mode,
+            "sheet": sheet_norm or "",
+            "ts": str(ts),
+            "sig": sig,
+        }
+        qs = urllib.parse.urlencode(params, safe="")
+        full_url = f"{base_url}/api/rutinas/{rutina_id}/export/excel_view.xlsx?{qs}"
+        
+        return JSONResponse({"url": full_url})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("Error generating Excel view URL")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/api/rutinas/{rutina_id}/export/excel_view.xlsx")
+async def api_rutina_excel_view(
+    rutina_id: int,
+    weeks: int = 1,
+    filename: Optional[str] = None,
+    qr_mode: str = "inline",
+    sheet: Optional[str] = None,
+    ts: int = 0,
+    sig: Optional[str] = None,
+    svc: GymService = Depends(get_gym_service),
+    rm: RoutineTemplateManager = Depends(get_rm)
+):
+    """Public endpoint that serves Excel file after verifying signature.
+    
+    This endpoint does NOT require authentication - instead it verifies
+    the HMAC signature generated by excel_view_url. This allows Office Online
+    Viewer to fetch the file directly.
+    """
+    # Validate signature exists
+    if not sig:
+        raise HTTPException(status_code=403, detail="Firma requerida")
+    
+    # Normalize params
+    weeks = max(1, min(int(weeks), 4))
+    qr_mode = str(qr_mode or "inline").strip().lower()
+    if qr_mode not in ("inline", "sheet", "none"):
+        qr_mode = "inline"
+    sheet_norm = (str(sheet).strip()[:64]) if sheet else None
+    
+    # Sanitize filename
+    base_name = os.path.basename(filename) if filename else f"rutina_{rutina_id}.xlsx"
+    if not base_name.lower().endswith('.xlsx'):
+        base_name = f"{base_name}.xlsx"
+    base_name = base_name[:150].replace('\\', '_').replace('/', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+    
+    # Verify timestamp (10 minute window)
+    try:
+        now = int(time.time())
+        if abs(now - int(ts)) > 600:
+            raise HTTPException(status_code=403, detail="Link de previsualización expirado")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=403, detail="Timestamp inválido")
+    
+    # Verify signature
+    expected = _sign_excel_view(rutina_id, weeks, base_name, int(ts), qr_mode=qr_mode, sheet=sheet_norm)
+    if not hmac.compare_digest(expected, str(sig)):
+        raise HTTPException(status_code=403, detail="Firma inválida")
+    
+    # Generate and serve Excel
+    try:
+        rutina_data = svc.obtener_rutina_completa(rutina_id)
+        if not rutina_data:
+            raise HTTPException(status_code=404, detail="Rutina no encontrada")
+        
+        # Build Rutina and Usuario objects
+        rutina = Rutina(
+            id=rutina_data['id'],
+            nombre_rutina=rutina_data.get('nombre_rutina') or rutina_data.get('nombre', ''),
+            descripcion=rutina_data.get('descripcion'),
+            dias_semana=rutina_data.get('dias_semana', 1),
+            uuid_rutina=rutina_data.get('uuid_rutina')
+        )
+        user_name = rutina_data.get('usuario_nombre') or 'Usuario'
+        usuario = Usuario(nombre=user_name)
+        
+        ejercicios_por_dia = _build_exercises_by_day(rutina_data)
+        xlsx_path = rm.generate_routine_excel(rutina, usuario, ejercicios_por_dia, weeks=weeks, qr_mode=qr_mode, sheet=sheet_norm)
+        
+        response = FileResponse(
+            xlsx_path,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=base_name
+        )
+        # Use inline disposition for Office Viewer compatibility
+        response.headers["Content-Disposition"] = f'inline; filename="{base_name}"'
+        response.headers["Cache-Control"] = "private, max-age=60"
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("Error generating Excel for preview")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/api/rutinas/export/draft_url")
+async def sign_draft_url(
+    request: Request,
+
+    svc: GymConfigService = Depends(get_gym_config_service)
+):
+    """
+    Generate signed URL for draft preview using compressed data in URL.
+    Payload: { "rutina": ..., "usuario": ..., "ejercicios": ... }
+    """
+    try:
+        data = await request.json()
+        
+        # Compress and encode
+        json_str = json.dumps(data)
+        compressed = zlib.compress(json_str.encode('utf-8'))
+        b64_data = base64.urlsafe_b64encode(compressed).decode('utf-8')
+        
+        ts = int(time.time())
+        rnd = secrets.token_hex(4)
+        filename = f"draft_{ts}_{rnd}.xlsx"
+        
+        # Sign
+        secret = _get_preview_secret()
+        to_sign = f"draft:{b64_data}:{ts}:{filename}:{secret}"
+        sig = hmac.new(secret.encode(), to_sign.encode(), hashlib.sha256).hexdigest()
+        
+        # Construct URL
+        base_url = str(request.base_url).rstrip('/')
+        url = f"{base_url}/api/public/rutinas/render_draft.xlsx?ts={ts}&data={b64_data}&sig={sig}&filename={filename}"
+        
+        return JSONResponse({"url": url})
+        
+    except Exception as e:
+        logger.exception("Error signing draft")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.get("/api/public/rutinas/render_draft.xlsx")
+async def render_draft_excel(
+    ts: int,
+    data: str,
+    sig: str,
+    filename: Optional[str] = None,
+    rm: RoutineTemplateManager = Depends(get_rm)
+):
+    """
+    Public endpoint to render draft excel from URL data.
+    """
+    try:
+        # Verify timestamp
+        now = int(time.time())
+        if abs(now - ts) > 600: # 10 min
+             raise HTTPException(status_code=403, detail="Expired")
+             
+        # Verify sig
+        secret = _get_preview_secret()
+        fname = filename or ""
+        to_sign = f"draft:{data}:{ts}:{fname}:{secret}"
+        expected = hmac.new(secret.encode(), to_sign.encode(), hashlib.sha256).hexdigest()
+        
+        if not hmac.compare_digest(expected, sig):
+             raise HTTPException(status_code=403, detail="Invalid signature")
+             
+        # Decode
+        try:
+            compressed = base64.urlsafe_b64decode(data)
+            json_str = zlib.decompress(compressed).decode('utf-8')
+            payload = json.loads(json_str)
+        except Exception:
+             raise HTTPException(status_code=400, detail="Corrupt data")
+             
+        # Build Objects
+        rutina_info = payload.get('rutina', {})
+        usuario_info = payload.get('usuario', {})
+        ejercicios_list = payload.get('ejercicios', [])
+        
+        rutina = Rutina(
+            nombre_rutina=rutina_info.get('nombre', 'Borrador'),
+            descripcion=rutina_info.get('descripcion', ''),
+            dias_semana=int(rutina_info.get('dias_semana', 1) or 1),
+            objetivo=rutina_info.get('objetivo', ''),
+            notas=rutina_info.get('notas', '')
+        )
+        
+        usuario = Usuario(
+            nombre=usuario_info.get('nombre', 'Usuario')
+        )
+        
+        exercises_by_day = {}
+        for ej in ejercicios_list:
+            dia = int(ej.get('dia', 1))
+            if dia not in exercises_by_day:
+                exercises_by_day[dia] = []
+            
+            # Create Ejercicio obj
+            ej_base = Ejercicio(
+                nombre=ej.get('nombre_ejercicio', 'Ejercicio'),
+                video_url=ej.get('video_url'),
+                descripcion=ej.get('descripcion')
+            )
+            
+            re = RutinaEjercicio(
+                dia_semana=dia,
+                orden=int(ej.get('orden', 0)),
+                series=str(ej.get('series', '')),
+                repeticiones=str(ej.get('repeticiones', '')),
+                descanso=int(ej.get('descanso', 0)),
+                notas=ej.get('notas', ''),
+                ejercicio=ej_base
+            )
+            exercises_by_day[dia].append(re)
+            
+        # Extract config from payload
+        qr_mode = payload.get('qr_mode', 'inline')
+        sheet_name = payload.get('sheet_name', None)
+        weeks = int(payload.get('weeks', 1))
+
+        # Generate
+        xlsx_path = rm.generate_routine_excel(rutina, usuario, exercises_by_day, weeks=weeks, qr_mode=qr_mode, sheet=sheet_name)
+        
+        fname_final = filename or f"draft_{ts}.xlsx"
+        
+        res = FileResponse(
+             xlsx_path,
+             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+             filename=fname_final
+        )
+        res.headers["Content-Disposition"] = f'inline; filename="{fname_final}"'
+        return res
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error rendering draft")
+        raise HTTPException(status_code=500, detail="Server Error")
 
 @router.get("/api/maintenance_status")
 async def api_maintenance_status():

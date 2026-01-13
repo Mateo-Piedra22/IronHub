@@ -45,6 +45,7 @@ import {
     RefreshCw,
 } from 'lucide-react';
 import { Button, Modal, Select, Input, Textarea, useToast } from '@/components/ui';
+import { ExcelPreviewViewer } from './ExcelPreviewViewer';
 import { api, type Ejercicio, type EjercicioRutina, type Rutina } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -395,10 +396,11 @@ function ExerciseEditorPanel({
 interface ExcelPreviewPanelProps {
     rutinaId: number | null;
     isVisible: boolean;
+    draftData: any;
 }
 
-function ExcelPreviewPanel({ rutinaId, isVisible }: ExcelPreviewPanelProps) {
-    const [zoom, setZoom] = useState(100);
+function ExcelPreviewPanel({ rutinaId, isVisible, draftData }: ExcelPreviewPanelProps) {
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [isMaximized, setIsMaximized] = useState(false);
     const [refreshKey, setRefreshKey] = useState(0);
     const [isLoading, setIsLoading] = useState(false);
@@ -408,26 +410,61 @@ function ExcelPreviewPanel({ rutinaId, isVisible }: ExcelPreviewPanelProps) {
     const [sheetName, setSheetName] = useState('');
     const [userOverride, setUserOverride] = useState('');
 
-    if (!isVisible || !rutinaId) {
+    useEffect(() => {
+        if (!isVisible) return;
+
+        const loadUrl = async () => {
+            setIsLoading(true);
+            try {
+                let url: string | null = null;
+
+                if (draftData) {
+                    // Draft mode
+                    const res = await api.getRutinaDraftExcelViewUrl({
+                        ...draftData,
+                        qr_mode: qrMode,
+                        sheet_name: sheetName
+                    });
+                    if (res.ok && res.data) {
+                        url = res.data.url;
+                    }
+                } else if (rutinaId) {
+                    // Saved mode
+                    const res = await api.getRutinaExcelViewUrl(rutinaId, {
+                        qr_mode: qrMode,
+                        sheet_name: sheetName || undefined
+                    });
+                    if (res.ok && res.data) {
+                        url = res.data.url;
+                    }
+                }
+                setPreviewUrl(url);
+            } catch (error) {
+                console.error("Error loading preview:", error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        const timer = setTimeout(loadUrl, 500); // Debounce
+        return () => clearTimeout(timer);
+    }, [isVisible, rutinaId, draftData, refreshKey, qrMode, sheetName]);
+
+
+    if (!isVisible) {
         return (
             <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-3 p-6">
                 <FileSpreadsheet className="w-12 h-12 text-slate-600" />
                 <p className="text-sm text-center">
-                    Guarda la rutina para ver la vista previa del Excel
+                    Abre la vista previa para ver el Excel en tiempo real
                 </p>
             </div>
         );
     }
 
-    const excelUrl = api.getRutinaExcelUrl(rutinaId, {
-        qr_mode: qrMode,
-        sheet_name: sheetName || undefined,
-        user_override: userOverride || undefined
-    });
-
     return (
         <div className={cn(
-            "flex flex-col h-full",
+            "flex flex-col h-full relative",
             isMaximized && "fixed inset-4 z-50 bg-slate-900 rounded-xl border border-slate-700 shadow-2xl"
         )}>
             {/* Controls */}
@@ -435,36 +472,23 @@ function ExcelPreviewPanel({ rutinaId, isVisible }: ExcelPreviewPanelProps) {
                 <span className="text-xs text-slate-400">Vista previa Excel</span>
                 <div className="flex items-center gap-1">
                     <button
-                        onClick={() => setZoom(z => Math.max(50, z - 25))}
-                        disabled={zoom <= 50}
-                        className="p-1.5 text-slate-400 hover:text-white disabled:opacity-50"
-                    >
-                        <ZoomOut className="w-3.5 h-3.5" />
-                    </button>
-                    <span className="text-xs text-slate-500 w-10 text-center">{zoom}%</span>
-                    <button
-                        onClick={() => setZoom(z => Math.min(200, z + 25))}
-                        disabled={zoom >= 200}
-                        className="p-1.5 text-slate-400 hover:text-white disabled:opacity-50"
-                    >
-                        <ZoomIn className="w-3.5 h-3.5" />
-                    </button>
-                    <button
                         onClick={() => { setRefreshKey(k => k + 1); setIsLoading(true); }}
                         className="p-1.5 text-slate-400 hover:text-white"
+                        title="Actualizar"
                     >
                         <RefreshCw className={cn("w-3.5 h-3.5", isLoading && "animate-spin")} />
                     </button>
                     <button
                         onClick={() => setIsMaximized(!isMaximized)}
                         className="p-1.5 text-slate-400 hover:text-white"
+                        title="Maximizar"
                     >
                         {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
                     </button>
                 </div>
             </div>
 
-            {/* Export Settings Toolbar */}
+            {/* Export Settings */}
             <div className="px-3 py-2 bg-slate-900 border-b border-slate-800 flex flex-wrap gap-3 items-center text-xs">
                 <div className="flex items-center gap-2">
                     <span className="text-slate-500">QR:</span>
@@ -478,58 +502,24 @@ function ExcelPreviewPanel({ rutinaId, isVisible }: ExcelPreviewPanelProps) {
                         <option value="none">Sin QR</option>
                     </select>
                 </div>
-                <div className="flex items-center gap-2">
-                    <span className="text-slate-500">Hoja:</span>
-                    <input
-                        type="text"
-                        placeholder="Nombre Hoja (Opcional)"
-                        value={sheetName}
-                        onChange={(e) => setSheetName(e.target.value)}
-                        className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 w-32 focus:outline-none focus:border-primary-500"
-                    />
-                </div>
-                <div className="flex items-center gap-2">
-                    <span className="text-slate-500">Usuario:</span>
-                    <input
-                        type="text"
-                        placeholder="Sobrescribir Nombre"
-                        value={userOverride}
-                        onChange={(e) => setUserOverride(e.target.value)}
-                        className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 w-32 focus:outline-none focus:border-primary-500"
-                    />
-                </div>
                 <Button
                     size="sm"
                     variant="ghost"
                     className="ml-auto h-7 px-2 text-xs"
                     onClick={() => { setRefreshKey(k => k + 1); setIsLoading(true); }}
                 >
-                    <RefreshCw className={cn("w-3 h-3 mr-1", isLoading && "animate-spin")} />
                     Actualizar
                 </Button>
             </div>
 
-            {/* Preview content */}
-            <div className="flex-1 overflow-auto bg-slate-950 flex items-center justify-center p-4">
-                <div
-                    className="bg-white rounded shadow-lg overflow-hidden"
-                    style={{ transform: `scale(${zoom / 100})`, transformOrigin: 'top left' }}
-                >
-                    {/* For now, show a download prompt since Office Online needs public URLs */}
-                    <div className="p-8 text-center text-slate-600">
-                        <FileSpreadsheet className="w-16 h-16 mx-auto mb-4 text-green-600" />
-                        <p className="font-medium mb-2">Excel generado</p>
-                        <a
-                            href={excelUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                        >
-                            <FileSpreadsheet className="w-4 h-4" />
-                            Descargar Excel
-                        </a>
-                    </div>
-                </div>
+            {/* Viewer */}
+            <div className="flex-1 relative bg-slate-950 overflow-hidden">
+                <ExcelPreviewViewer
+                    excelUrl={previewUrl}
+                    isOpen={true}
+                    onMinimize={() => { }}
+                    className="absolute inset-0 w-full h-full border-0 shadow-none rounded-none"
+                />
             </div>
         </div>
     );
@@ -582,6 +572,37 @@ export function UnifiedRutinaEditor({
         useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
         useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
     );
+
+    // Calc draft data for preview
+    const draftData = useMemo(() => {
+        const flatExercises: any[] = [];
+        days.forEach(d => {
+            d.exercises.forEach(e => {
+                flatExercises.push({
+                    dia: d.dayNumber,
+                    orden: e.orden || 0,
+                    nombre_ejercicio: e.ejercicio_nombre,
+                    series: e.series,
+                    repeticiones: e.repeticiones,
+                    descanso: e.descanso,
+                    notas: e.notas,
+                    // Additional fields if available
+                });
+            });
+        });
+
+        return {
+            rutina: {
+                nombre,
+                descripcion,
+                dias_semana: diasSemana,
+                objetivo: categoria,
+                notas: ''
+            },
+            usuario: { nombre: 'Vista Previa' },
+            ejercicios: flatExercises
+        };
+    }, [days, nombre, descripcion, diasSemana, categoria]);
 
     // Initialize data
     useEffect(() => {
@@ -1140,7 +1161,7 @@ export function UnifiedRutinaEditor({
                     {/* Right: Preview */}
                     {showPreview && (
                         <div className="w-1/3 card overflow-hidden">
-                            <ExcelPreviewPanel rutinaId={rutina?.id || null} isVisible={showPreview} />
+                            <ExcelPreviewPanel rutinaId={rutina?.id || null} isVisible={showPreview} draftData={draftData} />
                         </div>
                     )}
                 </div>
