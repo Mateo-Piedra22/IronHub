@@ -6,8 +6,8 @@ import os
 from fastapi import APIRouter, Request, Depends, UploadFile, File
 from fastapi.responses import JSONResponse
 
-from src.dependencies import require_gestion_access, get_gym_service
-from src.services.gym_service import GymService
+from src.dependencies import require_gestion_access, get_training_service
+from src.services.training_service import TrainingService
 from src.services.b2_storage import simple_upload as b2_upload, get_file_url
 from src.utils import _get_tenant_from_request
 
@@ -47,7 +47,7 @@ async def api_upload_exercise_video(request: Request, file: UploadFile = File(..
 @router.get("/api/exercises")
 async def api_list_exercises(
     request: Request, q: str = "", page: int = 1, page_size: int = 20,
-    _=Depends(require_gestion_access), svc: GymService = Depends(get_gym_service)
+    _=Depends(require_gestion_access), svc: TrainingService = Depends(get_training_service)
 ):
     """List exercises with pagination and search."""
     try:
@@ -73,7 +73,7 @@ async def api_list_exercises(
 
 
 @router.post("/api/exercises")
-async def api_create_exercise(request: Request, _=Depends(require_gestion_access), svc: GymService = Depends(get_gym_service)):
+async def api_create_exercise(request: Request, _=Depends(require_gestion_access), svc: TrainingService = Depends(get_training_service)):
     """Create a new exercise."""
     try:
         data = await request.json()
@@ -93,7 +93,7 @@ async def api_create_exercise(request: Request, _=Depends(require_gestion_access
 
 
 @router.put("/api/exercises/{eid}")
-async def api_update_exercise(eid: int, request: Request, _=Depends(require_gestion_access), svc: GymService = Depends(get_gym_service)):
+async def api_update_exercise(eid: int, request: Request, _=Depends(require_gestion_access), svc: TrainingService = Depends(get_training_service)):
     """Update an exercise."""
     try:
         data = await request.json()
@@ -104,7 +104,7 @@ async def api_update_exercise(eid: int, request: Request, _=Depends(require_gest
 
 
 @router.delete("/api/exercises/{eid}")
-async def api_delete_exercise(eid: int, _=Depends(require_gestion_access), svc: GymService = Depends(get_gym_service)):
+async def api_delete_exercise(eid: int, _=Depends(require_gestion_access), svc: TrainingService = Depends(get_training_service)):
     """Delete an exercise."""
     try:
         svc.eliminar_ejercicio(eid)
