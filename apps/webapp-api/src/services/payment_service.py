@@ -95,6 +95,9 @@ class PaymentService(BaseService):
             'phone_number_id': getattr(cfg_row, 'phone_id', '') if cfg_row else '',
             'whatsapp_business_account_id': getattr(cfg_row, 'waba_id', '') if cfg_row else '',
             'access_token': getattr(cfg_row, 'access_token', '') if cfg_row else '',
+            'enabled': self._get_configuracion_value('enabled'),
+            'webhook_enabled': self._get_configuracion_value('webhook_enabled'),
+            'webhook_verify_token': self._get_configuracion_value('webhook_verify_token'),
             'allowlist_numbers': self._get_configuracion_value('allowlist_numbers') or '',
             'allowlist_enabled': self._get_configuracion_value('allowlist_enabled'),
             'enable_webhook': self._get_configuracion_value('enable_webhook'),
@@ -137,7 +140,7 @@ class PaymentService(BaseService):
                     row.access_token = access_token
 
             # Store preferences in Configuracion
-            for k in ('allowlist_numbers', 'allowlist_enabled', 'enable_webhook', 'max_retries', 'retry_delay_seconds'):
+            for k in ('enabled', 'webhook_enabled', 'webhook_verify_token', 'allowlist_numbers', 'allowlist_enabled', 'enable_webhook', 'max_retries', 'retry_delay_seconds'):
                 if k in configuracion:
                     try:
                         val_str = str(configuracion.get(k) if configuracion.get(k) is not None else '')

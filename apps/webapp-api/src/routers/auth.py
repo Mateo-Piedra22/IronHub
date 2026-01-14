@@ -119,7 +119,13 @@ async def usuario_login_post(
             return JSONResponse({"ok": True, "redirect": "/usuario/panel", **(user_data or {})})
         return RedirectResponse(url="/usuario/panel", status_code=303)
         
-    if not dni or not pin:
+    import os
+    rp_raw = os.getenv("USUARIO_REQUIRE_PIN")
+    require_pin = str(rp_raw).lower() in ("true", "1", "yes") if rp_raw is not None and str(rp_raw).strip() != "" else False
+
+    if not dni:
+        return error_response("Ingrese DNI")
+    if require_pin and not pin:
         return error_response("Ingrese DNI y PIN")
 
     # Rate limiting check (10 IP / 5 DNI per 5 minutes)
@@ -134,14 +140,15 @@ async def usuario_login_post(
     if not user:
         return error_response("DNI no encontrado")
 
-    # Verify PIN using AuthService
-    pin_result = svc.verificar_pin(user.id, pin)
-    
-    if not pin_result['valid']:
-        return error_response("PIN inválido")
-    
-    if not pin_result['activo']:
+    if not bool(getattr(user, 'activo', False)):
         return error_response("Usuario inactivo")
+
+    if pin:
+        pin_result = svc.verificar_pin(user.id, pin)
+        if not pin_result['valid']:
+            return error_response("PIN inválido")
+    elif require_pin:
+        return error_response("PIN inválido")
 
     # Success: clear rate limits
     clear_login_attempts(request, dni)
@@ -580,12 +587,8 @@ async def api_usuario_login(
         )
 
     import os
-    dev_mode = os.getenv("DEVELOPMENT_MODE", "").lower() in ("1", "true", "yes") or os.getenv("ENV", "").lower() in ("dev", "development")
     rp_raw = os.getenv("USUARIO_REQUIRE_PIN")
-    if rp_raw is None or str(rp_raw).strip() == "":
-        require_pin = (not dev_mode)
-    else:
-        require_pin = str(rp_raw).lower() in ("true", "1", "yes")
+    require_pin = str(rp_raw).lower() in ("true", "1", "yes") if rp_raw is not None and str(rp_raw).strip() != "" else False
     
     if not dni:
         return JSONResponse({"ok": False, "mensaje": "DNI requerido", "success": False, "message": "DNI requerido"})

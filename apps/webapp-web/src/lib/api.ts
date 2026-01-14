@@ -416,6 +416,7 @@ export interface ProfesorResumen {
 export interface WhatsAppConfig {
     id?: number;
     phone_number_id?: string;
+    whatsapp_business_account_id?: string;
     access_token?: string;
     webhook_verify_token?: string;
     enabled: boolean;

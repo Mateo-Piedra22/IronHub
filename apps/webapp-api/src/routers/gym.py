@@ -1994,8 +1994,7 @@ async def render_draft_excel(
             nombre_rutina=rutina_info.get('nombre', 'Borrador'),
             descripcion=rutina_info.get('descripcion', ''),
             dias_semana=int(rutina_info.get('dias_semana', 1) or 1),
-            objetivo=rutina_info.get('objetivo', ''),
-            notas=rutina_info.get('notas', '')
+            categoria=rutina_info.get('categoria', 'general')
         )
         
         usuario = Usuario(
@@ -2022,10 +2021,8 @@ async def render_draft_excel(
             re = RutinaEjercicio(
                 dia_semana=dia,
                 orden=int(ej.get('orden', 0)),
-                series=str(ej.get('series', '')),
+                series=(int(ej.get('series') or 0) if str(ej.get('series') or '').strip().isdigit() else 0),
                 repeticiones=str(ej.get('repeticiones', '')),
-                descanso=int(ej.get('descanso', 0)),
-                notas=ej.get('notas', ''),
                 ejercicio=ej_base
             )
             exercises_by_day[dia].append(re)

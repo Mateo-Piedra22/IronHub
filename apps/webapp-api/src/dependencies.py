@@ -10,8 +10,57 @@ from typing import Optional, Generator
 from fastapi import Request, HTTPException, status, Depends
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
+
+
+_schema_guard_lock = None
+_schema_guard_done = set()
+try:
+    import threading
+    _schema_guard_lock = threading.RLock()
+except Exception:
+    _schema_guard_lock = None
+
+
+def _ensure_ejercicios_columns(session: Session, tenant: Optional[str]) -> None:
+    try:
+        key = str(tenant or "__default__")
+        if _schema_guard_lock is not None:
+            with _schema_guard_lock:
+                if key in _schema_guard_done:
+                    return
+        else:
+            if key in _schema_guard_done:
+                return
+        session.execute(
+            text("""
+                ALTER TABLE ejercicios
+                    ADD COLUMN IF NOT EXISTS objetivo VARCHAR(100) DEFAULT 'general',
+                    ADD COLUMN IF NOT EXISTS equipamiento VARCHAR(100),
+                    ADD COLUMN IF NOT EXISTS variantes TEXT;
+            """)
+        )
+
+        try:
+            session.commit()
+        except Exception:
+            session.rollback()
+    except Exception:
+        try:
+            session.rollback()
+        except Exception:
+            pass
+    finally:
+        try:
+            if _schema_guard_lock is not None:
+                with _schema_guard_lock:
+                    _schema_guard_done.add(str(tenant or "__default__"))
+            else:
+                _schema_guard_done.add(str(tenant or "__default__"))
+        except Exception:
+            pass
 
 # Import tenant context functions from tenant_connection to avoid circular imports
 # tenant_connection has the canonical CURRENT_TENANT contextvar
@@ -92,6 +141,7 @@ def get_db_session() -> Generator[Session, None, None]:
             if factory:
                 session = factory()
                 try:
+                    _ensure_ejercicios_columns(session, tenant)
                     yield session
                 finally:
                     session.close()
@@ -130,6 +180,7 @@ def get_db_session() -> Generator[Session, None, None]:
     
     session = SessionLocal()
     try:
+        _ensure_ejercicios_columns(session, None)
         yield session
     finally:
         session.close()

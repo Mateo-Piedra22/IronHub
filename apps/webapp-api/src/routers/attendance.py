@@ -257,11 +257,15 @@ async def api_checkin_create_token(
 @router.get("/api/asistencias")
 async def api_asistencias_list(
     request: Request,
-    _=Depends(require_gestion_access),
     svc: AttendanceService = Depends(get_attendance_service)
 ):
     """List attendance records with optional filters. Returns {asistencias: [], total}."""
     try:
+        logged_in = bool(request.session.get("logged_in"))
+        session_user_id = request.session.get("user_id")
+        if (not logged_in) and (session_user_id is None):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
         usuario_id = request.query_params.get("usuario_id")
         desde = request.query_params.get("desde")
         hasta = request.query_params.get("hasta")
@@ -269,7 +273,9 @@ async def api_asistencias_list(
         
         limit = int(limit_q) if (limit_q and str(limit_q).isdigit()) else 50
         
-        # Get attendance records
+        if (not logged_in) and (session_user_id is not None):
+            usuario_id = str(int(session_user_id))
+
         records = svc.obtener_asistencias_detalle(start=desde, end=hasta)
         
         # Filter by usuario_id if provided
@@ -288,14 +294,21 @@ async def api_asistencias_list(
 @router.get("/api/usuario_asistencias")
 async def api_usuario_asistencias(
     request: Request,
-    _=Depends(require_gestion_access),
     svc: AttendanceService = Depends(get_attendance_service)
 ):
     """Get attendance records for a specific user. Returns {asistencias: []}."""
     try:
+        logged_in = bool(request.session.get("logged_in"))
+        session_user_id = request.session.get("user_id")
+        if (not logged_in) and (session_user_id is None):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
         usuario_id = request.query_params.get("usuario_id")
         limit_q = request.query_params.get("limit")
         
+        if (not logged_in) and (session_user_id is not None):
+            usuario_id = str(int(session_user_id))
+
         if not usuario_id or not str(usuario_id).isdigit():
             raise HTTPException(status_code=400, detail="usuario_id requerido")
         
@@ -462,12 +475,22 @@ async def api_asistencia_por_hora_30d(
 
 @router.get("/api/asistencias_hoy_ids")
 async def api_asistencias_hoy_ids(
-    _=Depends(require_gestion_access),
+    request: Request,
     svc: AttendanceService = Depends(get_attendance_service)
 ):
     """Get list of user IDs who attended today."""
     try:
-        return svc.obtener_asistencias_hoy_ids()
+        logged_in = bool(request.session.get("logged_in"))
+        session_user_id = request.session.get("user_id")
+        if logged_in:
+            return svc.obtener_asistencias_hoy_ids()
+        if session_user_id is None:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        ids = svc.obtener_asistencias_hoy_ids()
+        try:
+            return [int(session_user_id)] if int(session_user_id) in set(int(x) for x in ids) else []
+        except Exception:
+            return []
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

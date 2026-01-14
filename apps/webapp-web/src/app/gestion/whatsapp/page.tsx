@@ -56,6 +56,7 @@ export default function WhatsAppPage() {
     // Config
     const [config, setConfig] = useState<Partial<WhatsAppConfig>>({
         phone_number_id: '',
+        whatsapp_business_account_id: '',
         access_token: '',
         webhook_verify_token: '',
         enabled: false,
@@ -88,6 +89,7 @@ export default function WhatsAppPage() {
         if (res.ok && res.data) {
             setConfig({
                 phone_number_id: res.data.phone_number_id || '',
+                whatsapp_business_account_id: res.data.whatsapp_business_account_id || '',
                 access_token: res.data.access_token || '',
                 webhook_verify_token: res.data.webhook_verify_token || '',
                 enabled: res.data.enabled ?? false,
@@ -438,6 +440,15 @@ export default function WhatsAppPage() {
                             placeholder="123456789012345"
                         />
                         <p className="text-xs text-slate-500 mt-1">ID del número de WhatsApp Business</p>
+                    </div>
+                    <div>
+                        <Input
+                            label="WhatsApp Business Account ID"
+                            value={config.whatsapp_business_account_id || ''}
+                            onChange={(e) => setConfig({ ...config, whatsapp_business_account_id: e.target.value })}
+                            placeholder="123456789012345"
+                        />
+                        <p className="text-xs text-slate-500 mt-1">ID de la cuenta WABA</p>
                     </div>
                     <div>
                         <Input

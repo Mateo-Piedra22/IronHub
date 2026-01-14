@@ -49,12 +49,36 @@ async def api_whatsapp_state(
 ):
     try:
         state = pm.obtener_estado_whatsapp() if hasattr(pm, 'obtener_estado_whatsapp') else {"disponible": False}
-        if isinstance(state, dict):
-            redacted = _redact_whatsapp_state_for_role(request, state)
-            if isinstance(redacted, dict) and "ok" not in redacted:
-                redacted = {"ok": True, "mensaje": "OK", "success": True, "message": "OK", **redacted}
-            return redacted
-        return state
+        if not isinstance(state, dict):
+            return state
+        redacted = _redact_whatsapp_state_for_role(request, state)
+        cfg = {}
+        try:
+            cfg = pm.obtener_config_whatsapp() if hasattr(pm, 'obtener_config_whatsapp') else {}
+        except Exception:
+            cfg = {}
+        enabled_flag = None
+        try:
+            enabled_flag = cfg.get('enabled') if isinstance(cfg, dict) else None
+        except Exception:
+            enabled_flag = None
+        try:
+            enabled_flag = str(enabled_flag).lower() in ('1', 'true', 'yes') if enabled_flag is not None else None
+        except Exception:
+            enabled_flag = None
+
+        available = bool(redacted.get('disponible'))
+        config_valid = bool(redacted.get('configuracion_valida'))
+        enabled = bool(enabled_flag) if enabled_flag is not None else bool(redacted.get('habilitado'))
+        enabled = bool(enabled and config_valid)
+        server_ok = bool(redacted.get('servidor_activo'))
+        payload = {
+            'available': available,
+            'enabled': enabled,
+            'server_ok': server_ok,
+            'config_valid': config_valid,
+        }
+        return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", **payload}
     except Exception as e:
         return JSONResponse(
             {"ok": False, "mensaje": str(e), "success": False, "message": str(e), "error": str(e)},
@@ -120,10 +144,7 @@ async def api_whatsapp_status(
 ):
     """Alias for /api/whatsapp/state."""
     try:
-        state = pm.obtener_estado_whatsapp() if hasattr(pm, 'obtener_estado_whatsapp') else {"disponible": False}
-        if isinstance(state, dict):
-            return _redact_whatsapp_state_for_role(request, state)
-        return state
+        return await api_whatsapp_state(request, pm=pm)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -135,11 +156,62 @@ async def api_whatsapp_config_get(
 ):
     """GET endpoint for WhatsApp config."""
     try:
-        config = pm.obtener_config_whatsapp() if hasattr(pm, 'obtener_config_whatsapp') else {}
-        data = config or {"enabled": False, "webhook_enabled": False}
-        if isinstance(data, dict) and "ok" not in data:
-            data = {"ok": True, "mensaje": "OK", "success": True, "message": "OK", **data}
-        return data
+        cfg = pm.obtener_config_whatsapp() if hasattr(pm, 'obtener_config_whatsapp') else {}
+        if not isinstance(cfg, dict):
+            cfg = {}
+
+        data = {
+            'phone_number_id': cfg.get('phone_number_id') or '',
+            'whatsapp_business_account_id': cfg.get('whatsapp_business_account_id') or '',
+            'access_token': cfg.get('access_token') or '',
+            'webhook_verify_token': cfg.get('webhook_verify_token') or '',
+            'enabled': bool(str(cfg.get('enabled') or '').lower() in ('1', 'true', 'yes')),
+            'webhook_enabled': bool(str(cfg.get('webhook_enabled') or cfg.get('enable_webhook') or '').lower() in ('1', 'true', 'yes')),
+        }
+        return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", **data}
+    except Exception as e:
+        return JSONResponse(
+            {"ok": False, "mensaje": str(e), "success": False, "message": str(e), "error": str(e)},
+            status_code=500,
+        )
+
+
+@router.put("/api/whatsapp/config")
+async def api_whatsapp_config_put(
+    request: Request,
+    _=Depends(require_owner),
+    pm: PaymentService = Depends(get_payment_service)
+):
+    try:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Payload inválido")
+
+        cfg_in: Dict[str, Any] = {}
+        if 'phone_number_id' in payload:
+            cfg_in['phone_number_id'] = payload.get('phone_number_id')
+        if 'whatsapp_business_account_id' in payload:
+            cfg_in['whatsapp_business_account_id'] = payload.get('whatsapp_business_account_id')
+        if 'waba_id' in payload and 'whatsapp_business_account_id' not in payload:
+            cfg_in['whatsapp_business_account_id'] = payload.get('waba_id')
+        if 'access_token' in payload:
+            cfg_in['access_token'] = payload.get('access_token')
+        if 'enabled' in payload:
+            cfg_in['enabled'] = bool(payload.get('enabled'))
+        if 'webhook_enabled' in payload:
+            cfg_in['webhook_enabled'] = bool(payload.get('webhook_enabled'))
+        if 'webhook_verify_token' in payload:
+            cfg_in['webhook_verify_token'] = str(payload.get('webhook_verify_token') or '')
+
+        ok = pm.configurar_whatsapp(cfg_in) if hasattr(pm, 'configurar_whatsapp') else False
+        _ = ok
+        return await api_whatsapp_config_get(pm=pm)
+    except HTTPException:
+        raise
     except Exception as e:
         return JSONResponse(
             {"ok": False, "mensaje": str(e), "success": False, "message": str(e), "error": str(e)},

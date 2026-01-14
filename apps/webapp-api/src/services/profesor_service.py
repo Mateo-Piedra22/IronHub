@@ -12,6 +12,7 @@ except Exception:
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text, select, or_, and_, func, update, delete
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import NoResultFound
 
 from src.services.base import BaseService
@@ -22,7 +23,8 @@ from src.database.orm_models import (
     ProfesorEspecialidad, 
     ProfesorCertificacion,
     Especialidad,
-    Usuario
+    Usuario,
+    Configuracion
 )
 
 logger = logging.getLogger(__name__)
@@ -83,6 +85,35 @@ class ProfesorService(BaseService):
             return local_dt.isoformat(timespec='seconds')
         except Exception:
             return utc_naive.isoformat(timespec='seconds')
+
+    def _cfg_key(self, profesor_id: int, name: str) -> str:
+        return f"profesor:{int(profesor_id)}:{name}"
+
+    def _get_cfg(self, key: str) -> Optional[str]:
+        try:
+            row = (
+                self.db.execute(
+                    select(Configuracion.valor).where(Configuracion.clave == key).limit(1)
+                )
+                .first()
+            )
+            return row[0] if row else None
+        except Exception:
+            return None
+
+    def _set_cfg(self, key: str, value: Any) -> None:
+        try:
+            try:
+                val_str = str(value if value is not None else '')
+            except Exception:
+                val_str = ''
+            stmt = insert(Configuracion).values(clave=key, valor=val_str).on_conflict_do_update(
+                index_elements=['clave'],
+                set_={'valor': val_str}
+            )
+            self.db.execute(stmt)
+        except Exception:
+            pass
 
     # ========== CRUD ==========
 
@@ -576,11 +607,41 @@ class ProfesorService(BaseService):
         """Get config-like data from Profesor model."""
         p = self.obtener_profesor(profesor_id)
         if not p: return {}
+        link_key = self._cfg_key(profesor_id, 'usuario_vinculado_id')
+        mt_key = self._cfg_key(profesor_id, 'monto_tipo')
+        linked_raw = self._get_cfg(link_key)
+        monto_tipo_raw = self._get_cfg(mt_key)
+        usuario_vinculado_id = None
+        try:
+            if linked_raw is not None and str(linked_raw).strip().isdigit():
+                usuario_vinculado_id = int(str(linked_raw).strip())
+        except Exception:
+            usuario_vinculado_id = None
+
+        usuario_vinculado_nombre = None
+        try:
+            if usuario_vinculado_id is not None:
+                u = self.db.get(Usuario, int(usuario_vinculado_id))
+                if u:
+                    usuario_vinculado_nombre = getattr(u, 'nombre', None)
+        except Exception:
+            usuario_vinculado_nombre = None
+
+        monto_tipo = 'mensual'
+        try:
+            mt = str(monto_tipo_raw or '').strip().lower()
+            if mt in ('mensual', 'hora'):
+                monto_tipo = mt
+        except Exception:
+            monto_tipo = 'mensual'
         # Mapping to match what frontend might expect
         return {
             'id': p['id'],
             'profesor_id': p['id'],
+            'usuario_vinculado_id': usuario_vinculado_id,
+            'usuario_vinculado_nombre': usuario_vinculado_nombre,
             'monto': p['tarifa_por_hora'],
+            'monto_tipo': monto_tipo,
             'especialidad': p['especialidades'],
             'experiencia_anios': p['experiencia_anios'],
             'certificaciones': p['certificaciones'],
@@ -595,8 +656,24 @@ class ProfesorService(BaseService):
         if 'experiencia_anios' in data: updates['experiencia_anios'] = data['experiencia_anios']
         if 'certificaciones' in data: updates['certificaciones'] = data['certificaciones']
         if 'notas' in data: updates['biografia'] = data['notas']
+
+        if 'usuario_vinculado_id' in data:
+            self._set_cfg(self._cfg_key(profesor_id, 'usuario_vinculado_id'), data.get('usuario_vinculado_id') or '')
+
+        if 'monto_tipo' in data:
+            mt = str(data.get('monto_tipo') or '').strip().lower()
+            if mt not in ('mensual', 'hora'):
+                mt = 'mensual'
+            self._set_cfg(self._cfg_key(profesor_id, 'monto_tipo'), mt)
         
         self.actualizar_profesor(profesor_id, updates)
+        try:
+            self.db.commit()
+        except Exception:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
         return self.obtener_config(profesor_id)
 
     # ========== Resumen ==========
