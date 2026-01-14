@@ -343,6 +343,7 @@ async def gestion_auth(
     request.session["gestion_profesor_user_id"] = usuario_id
     request.session["tenant"] = tenant
     try:
+        request.session["logged_in"] = True
         request.session["role"] = "profesor"
     except Exception:
         pass
@@ -397,6 +398,11 @@ async def api_auth_login(
             request.session.clear()
             request.session["logged_in"] = True
             request.session["role"] = "owner"
+            try:
+                if tenant:
+                    request.session["tenant"] = tenant
+            except Exception:
+                pass
             return JSONResponse({
                 "ok": True,
                 "user": {
@@ -466,19 +472,46 @@ async def api_auth_session(request: Request):
     user_id = request.session.get("user_id")
     role = request.session.get("role")
     logged_in = request.session.get("logged_in", False)
+    gestion_prof_user_id = request.session.get("gestion_profesor_user_id")
     
+    # 1) Member / generic session
     if user_id:
         nombre = request.session.get("usuario_nombre", "")
+        try:
+            rol_out = str(role or "user").strip().lower() or "user"
+        except Exception:
+            rol_out = "user"
+        # Normalize some legacy spellings
+        if rol_out in ("dueño", "dueno"):
+            rol_out = "owner"
         return JSONResponse({
             "authenticated": True,
             "user": {
                 "id": user_id,
                 "nombre": nombre,
-                "rol": role or "user",
-                "dni": None  # Don't expose DNI in session check
+                "rol": rol_out,
+                "dni": None
             }
         })
-    elif logged_in and role in ("owner", "dueño"):
+
+    # 2) Gestion profesor session (created via /gestion/auth)
+    if gestion_prof_user_id is not None:
+        return JSONResponse({
+            "authenticated": True,
+            "user": {
+                "id": int(gestion_prof_user_id),
+                "nombre": request.session.get("usuario_nombre", "") or "Profesor",
+                "rol": "profesor",
+                "dni": None,
+            }
+        })
+
+    # 3) Owner session
+    try:
+        role_norm = str(role or "").strip().lower()
+    except Exception:
+        role_norm = ""
+    if logged_in and role_norm in ("owner", "dueño", "dueno"):
         return JSONResponse({
             "authenticated": True,
             "user": {
@@ -488,11 +521,11 @@ async def api_auth_session(request: Request):
                 "dni": None
             }
         })
-    else:
-        return JSONResponse({
-            "authenticated": False,
-            "user": None
-        })
+
+    return JSONResponse({
+        "authenticated": False,
+        "user": None
+    })
 
 @router.post("/checkin/auth")
 async def checkin_auth(request: Request):
@@ -722,12 +755,8 @@ async def api_checkin_auth(
         )
 
     import os
-    dev_mode = os.getenv("DEVELOPMENT_MODE", "").lower() in ("1", "true", "yes") or os.getenv("ENV", "").lower() in ("dev", "development")
     rp_raw = os.getenv("CHECKIN_REQUIRE_PIN")
-    if rp_raw is None or str(rp_raw).strip() == "":
-        require_pin = (not dev_mode)
-    else:
-        require_pin = str(rp_raw).lower() in ("true", "1", "yes")
+    require_pin = str(rp_raw).lower() in ("true", "1", "yes") if rp_raw is not None and str(rp_raw).strip() != "" else False
     
     if not dni:
         return JSONResponse({"ok": False, "mensaje": "DNI requerido", "success": False, "message": "DNI requerido"})

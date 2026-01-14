@@ -282,11 +282,32 @@ def get_admin_db() -> Generator[Session, None, None]:
 
 async def require_gestion_access(request: Request):
     """Require gestion (management) panel access - owner or profesor."""
-    if not request.session.get("logged_in"):
-        if request.url.path.startswith("/api/"):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
-        return RedirectResponse(url="/gestion/login", status_code=303)
-    return True
+    try:
+        if request.session.get("logged_in"):
+            return True
+    except Exception:
+        pass
+
+    # Fallback: allow based on role for sessions that were created by /api/auth/login
+    try:
+        role = str(request.session.get("role") or "").strip().lower()
+    except Exception:
+        role = ""
+
+    if role in ("dueño", "dueno", "owner", "admin", "administrador"):
+        return True
+
+    if role == "profesor":
+        # A profesor session may store either user_id (generic login) or gestion_profesor_user_id (gestion login)
+        try:
+            if request.session.get("gestion_profesor_user_id") or request.session.get("user_id"):
+                return True
+        except Exception:
+            pass
+
+    if request.url.path.startswith("/api/"):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+    return RedirectResponse(url="/gestion/login", status_code=303)
 
 
 async def require_owner(request: Request):
@@ -313,12 +334,22 @@ async def require_admin(request: Request):
 
 async def require_profesor(request: Request):
     """Require profesor or higher access."""
-    if not request.session.get("logged_in"):
+    try:
+        role = str(request.session.get("role") or "").strip().lower()
+    except Exception:
+        role = ""
+
+    # Either logged_in (gestion login) OR role-based session (generic login)
+    try:
+        logged_in = bool(request.session.get("logged_in"))
+    except Exception:
+        logged_in = False
+
+    if not logged_in and role not in ("profesor", "dueño", "dueno", "owner", "admin", "administrador"):
         if request.url.path.startswith("/api/"):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
         return RedirectResponse(url="/gestion/login", status_code=303)
     
-    role = request.session.get("role", "").lower()
     if role not in ("profesor", "dueño", "dueno", "owner", "admin", "administrador"):
         if request.url.path.startswith("/api/"):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
