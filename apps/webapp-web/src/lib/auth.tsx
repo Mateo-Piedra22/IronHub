@@ -40,7 +40,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const checkSession = useCallback(async () => {
         try {
-            const res = await api.getSession();
+            const context = pathname?.startsWith('/gestion') ? 'gestion' : 'auto';
+            const res = await api.getSession(context);
             if (res.ok && res.data?.authenticated && res.data.user) {
                 setUser(res.data.user);
             } else {
@@ -51,7 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } finally {
             setIsLoading(false);
         }
-    }, []);
+    }, [pathname]);
 
     const login = useCallback(async (dni: string, password: string) => {
         const res = await api.login({ dni, password });

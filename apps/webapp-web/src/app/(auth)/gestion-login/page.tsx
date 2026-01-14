@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Dumbbell, LogIn, Eye, EyeOff, Shield, Users, KeyRound, Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 
 interface ProfesorBasico {
@@ -15,6 +16,7 @@ interface ProfesorBasico {
 
 export default function GestionLoginPage() {
     const router = useRouter();
+    const { checkSession } = useAuth();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [showPassword, setShowPassword] = useState(false);
@@ -78,6 +80,7 @@ export default function GestionLoginPage() {
             const res = await api.gestionLogin(credentials);
 
             if (res.ok && res.data?.ok !== false) {
+                await checkSession();
                 router.push('/gestion/usuarios');
             } else {
                 setError(res.error || res.data?.message || 'Credenciales incorrectas');

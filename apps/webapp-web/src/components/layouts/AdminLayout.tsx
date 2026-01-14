@@ -51,7 +51,7 @@ export default function AdminLayout({
     const handleLogout = async () => {
         setLoggingOut(true);
         try {
-            await api.logout();
+            await api.logoutGestion();
         } catch {
             // Ignore errors
         } finally {

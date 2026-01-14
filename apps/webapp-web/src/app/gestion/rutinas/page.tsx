@@ -315,6 +315,43 @@ export default function RutinasPage() {
     const [excelPreviewOpen, setExcelPreviewOpen] = useState(false);
     const [excelPreviewUrl, setExcelPreviewUrl] = useState<string | null>(null);
 
+    const openRutinaEditor = useCallback(async (r: Rutina) => {
+        setLoading(true);
+        try {
+            // Ensure we open the editor with the FULL routine payload (days + exercises)
+            const resDetails = await api.getRutina(r.id);
+            if (resDetails.ok && resDetails.data) {
+                setRutinaToEdit(resDetails.data);
+            } else {
+                setRutinaToEdit(r);
+            }
+            setEditorOpen(true);
+        } catch {
+            setRutinaToEdit(r);
+            setEditorOpen(true);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    const openExerciseEditor = useCallback(async (r: Rutina) => {
+        setLoading(true);
+        try {
+            const resDetails = await api.getRutina(r.id);
+            if (resDetails.ok && resDetails.data) {
+                setRutinaForExercises(resDetails.data);
+            } else {
+                setRutinaForExercises(r);
+            }
+            setExerciseEditorOpen(true);
+        } catch {
+            setRutinaForExercises(r);
+            setExerciseEditorOpen(true);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
     // Load rutinas
     const loadRutinas = useCallback(async () => {
         setLoading(true);
@@ -461,26 +498,6 @@ export default function RutinasPage() {
 
             const fullTemplate = resDetails.data;
 
-            // Create copy for user
-            const res = await api.createRutina({
-                ...fullTemplate,
-                id: 0, // 0 indicates new
-                nombre: fullTemplate.nombre, // Keep same name
-                usuario_id: user.id,
-                es_plantilla: false,
-                activa: true,
-                fecha_creacion: undefined,
-                // Ensure exercises are copied? api.createRutina usually takes basic data.
-                // We might need to save exercises separately or update backend to handle deep copy?
-                // For now, let's assume createRutina creates structure, but exercises?
-                // Backend create_rutina doesn't take exercises list in payload normally unless updated.
-                // Checking backend create_rutina... it takes basic fields.
-                // We might need to use UnifiedRutinaEditor to save it? 
-                // "Assign" usually means "Create copy".
-                // If I open editor, it's safer.
-                // Let's open editor with data pre-filled for that user.
-            });
-
             setRutinaToEdit({
                 ...fullTemplate,
                 id: 0,
@@ -617,8 +634,7 @@ export default function RutinasPage() {
                     </a>
                     <button
                         onClick={() => {
-                            setRutinaForExercises(row);
-                            setExerciseEditorOpen(true);
+                            openExerciseEditor(row);
                         }}
                         className="p-2 rounded-lg text-slate-400 hover:text-primary-400 hover:bg-primary-500/10 transition-colors"
                         title="Configurar Ejercicios"
@@ -637,8 +653,7 @@ export default function RutinasPage() {
                     </button>
                     <button
                         onClick={() => {
-                            setRutinaToEdit(row);
-                            setEditorOpen(true);
+                            openRutinaEditor(row);
                         }}
                         className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                         title="Editar"

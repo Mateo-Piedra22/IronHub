@@ -618,14 +618,23 @@ class ApiClient {
     }
 
     async logout() {
-        return this.request<{ ok: boolean }>('/api/auth/logout', {
+        return this.request<{ ok: boolean }>('/api/auth/logout_user', {
             method: 'POST',
         });
     }
 
-    async getSession() {
+    async logoutGestion() {
+        return this.request<{ ok: boolean }>('/api/auth/logout_gestion', {
+            method: 'POST',
+        });
+    }
+
+    async getSession(context?: 'auto' | 'gestion' | 'usuario') {
+        const p = new URLSearchParams();
+        if (context) p.set('context', context);
+        const qs = p.toString();
         return this.request<{ authenticated: boolean; user?: SessionUser }>(
-            '/api/auth/session'
+            `/api/auth/session${qs ? `?${qs}` : ''}`
         );
     }
 

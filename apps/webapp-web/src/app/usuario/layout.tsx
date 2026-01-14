@@ -6,6 +6,7 @@ import {
     Dumbbell, LayoutDashboard, CreditCard, Calendar,
     Clipboard, LogOut, User, Bell
 } from 'lucide-react';
+import { useAuth } from '@/lib/auth';
 
 const navigation = [
     { name: 'Inicio', href: '/usuario', icon: LayoutDashboard },
@@ -21,6 +22,7 @@ export default function DashboardLayout({
     children: React.ReactNode;
 }) {
     const pathname = usePathname();
+    const { logout } = useAuth();
 
     return (
         <div className="min-h-screen">
@@ -45,7 +47,7 @@ export default function DashboardLayout({
                                 <span className="absolute top-1 right-1 w-2 h-2 bg-primary-500 rounded-full" />
                             </button>
                             <button
-                                onClick={() => window.location.href = '/'}
+                                onClick={() => logout()}
                                 className="p-2 rounded-lg hover:bg-danger-500/20 text-slate-400 hover:text-danger-400 transition-colors"
                             >
                                 <LogOut className="w-5 h-5" />

@@ -161,6 +161,12 @@ def resource_path(relative_path: str) -> str:
         result = api_root / relative_path
         if result.exists():
             return str(result)
+
+        # Monorepo layout: check repo root (IronHub/) for shared assets
+        repo_root = api_root.parent.parent
+        result2 = repo_root / relative_path
+        if result2.exists():
+            return str(result2)
     except Exception:
         pass
     

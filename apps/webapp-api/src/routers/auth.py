@@ -1,6 +1,6 @@
 from pathlib import Path
 import logging
-from fastapi import APIRouter, Request, Depends, status, Form
+from fastapi import APIRouter, Request, Depends, status, Form, Query
 from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
@@ -372,6 +372,45 @@ async def api_auth_logout(request: Request):
     return JSONResponse({"ok": True})
 
 
+@router.post("/api/auth/logout_user")
+async def api_auth_logout_user(request: Request):
+    try:
+        for k in (
+            "user_id",
+            "usuario_nombre",
+            "usuario_jwt",
+            "checkin_auth",
+            "checkin_user_id",
+        ):
+            try:
+                request.session.pop(k, None)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return JSONResponse({"ok": True})
+
+
+@router.post("/api/auth/logout_gestion")
+async def api_auth_logout_gestion(request: Request):
+    try:
+        for k in (
+            "logged_in",
+            "role",
+            "tenant",
+            "gestion_profesor_user_id",
+            "gestion_profesor_id",
+            "gestion_sesion_trabajo_id",
+        ):
+            try:
+                request.session.pop(k, None)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return JSONResponse({"ok": True})
+
+
 @router.post("/api/auth/login")
 async def api_auth_login(
     request: Request,
@@ -464,7 +503,7 @@ async def api_auth_login(
 
 
 @router.get("/api/auth/session")
-async def api_auth_session(request: Request):
+async def api_auth_session(request: Request, context: str = Query("auto")):
     """
     JSON API endpoint to check current session status.
     Returns authenticated status and user info if logged in.
@@ -473,9 +512,14 @@ async def api_auth_session(request: Request):
     role = request.session.get("role")
     logged_in = request.session.get("logged_in", False)
     gestion_prof_user_id = request.session.get("gestion_profesor_user_id")
+
+    try:
+        ctx = str(context or "auto").strip().lower()
+    except Exception:
+        ctx = "auto"
     
     # 1) Member / generic session
-    if user_id:
+    if user_id and ctx in ("auto", "usuario", "user"):
         nombre = request.session.get("usuario_nombre", "")
         try:
             rol_out = str(role or "user").strip().lower() or "user"
@@ -495,7 +539,7 @@ async def api_auth_session(request: Request):
         })
 
     # 2) Gestion profesor session (created via /gestion/auth)
-    if gestion_prof_user_id is not None:
+    if gestion_prof_user_id is not None and ctx in ("auto", "gestion"):
         return JSONResponse({
             "authenticated": True,
             "user": {
@@ -511,7 +555,7 @@ async def api_auth_session(request: Request):
         role_norm = str(role or "").strip().lower()
     except Exception:
         role_norm = ""
-    if logged_in and role_norm in ("owner", "dueño", "dueno"):
+    if logged_in and role_norm in ("owner", "dueño", "dueno") and ctx in ("auto", "gestion"):
         return JSONResponse({
             "authenticated": True,
             "user": {
