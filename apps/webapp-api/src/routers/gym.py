@@ -80,6 +80,22 @@ def _sanitize_download_filename(filename: Optional[str], default_name: str, ext:
     return base
 
 
+def _get_public_base_url(request: Request) -> str:
+    try:
+        xf_proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
+        xf_host = (request.headers.get("x-forwarded-host") or "").split(",")[0].strip()
+        host = xf_host or (request.headers.get("host") or "").split(",")[0].strip()
+        proto = xf_proto or (request.url.scheme if hasattr(request, "url") else "")
+        if host and proto:
+            return f"{proto}://{host}".rstrip('/')
+    except Exception:
+        pass
+    try:
+        return str(request.base_url).rstrip('/')
+    except Exception:
+        return os.environ.get('API_BASE_URL', 'https://api.ironhub.motiona.xyz').rstrip('/')
+
+
 def _normalize_rutina_export_params(weeks: int, qr_mode: str, sheet: Optional[str]) -> tuple[int, str, Optional[str]]:
     try:
         weeks_n = int(weeks)
@@ -1289,6 +1305,10 @@ async def api_ejercicios_create(
         new_id = svc.crear_ejercicio({
             'nombre': nombre,
             'grupo_muscular': (payload.get("grupo_muscular") or "").strip(),
+            'objetivo': (payload.get("objetivo") or "general"),
+            'equipamiento': (payload.get("equipamiento") or "").strip() or None,
+            'variantes': (payload.get("variantes") or "").strip() or None,
+            'descripcion': (payload.get("descripcion") or "").strip() or None,
             'video_url': payload.get("video_url"),
             'video_mime': payload.get("video_mime")
         })
@@ -1751,11 +1771,7 @@ async def api_rutina_excel_view_url(
         ts = int(time.time())
         sig = _sign_excel_view(rutina_id, weeks, base_name, ts, qr_mode=qr_mode, sheet=sheet_norm)
         
-        # Build base URL from request
-        try:
-            base_url = str(request.base_url).rstrip('/')
-        except Exception:
-            base_url = os.environ.get('API_BASE_URL', 'https://api.ironhub.motiona.xyz')
+        base_url = _get_public_base_url(request)
         
         # Build signed URL with .xlsx extension for Office compatibility
         params = {
@@ -1919,8 +1935,7 @@ async def sign_draft_url(
         to_sign = f"draft:{b64_data}:{ts}:{filename}:{secret}"
         sig = hmac.new(secret.encode(), to_sign.encode(), hashlib.sha256).hexdigest()
         
-        # Construct URL
-        base_url = str(request.base_url).rstrip('/')
+        base_url = _get_public_base_url(request)
         url = f"{base_url}/api/public/rutinas/render_draft.xlsx?ts={ts}&data={b64_data}&sig={sig}&filename={filename}"
         
         return JSONResponse({"url": url})

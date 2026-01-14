@@ -84,6 +84,8 @@ class TrainingService(BaseService):
                         'descripcion': getattr(e, 'descripcion', None),
                         'grupo_muscular': getattr(e, 'grupo_muscular', None),
                         'objetivo': getattr(e, 'objetivo', None),
+                        'equipamiento': getattr(e, 'equipamiento', None),
+                        'variantes': getattr(e, 'variantes', None),
                         'video_url': v,
                     }
                 )
@@ -148,6 +150,8 @@ class TrainingService(BaseService):
                         'descripcion': getattr(e, 'descripcion', None),
                         'grupo_muscular': getattr(e, 'grupo_muscular', None),
                         'objetivo': getattr(e, 'objetivo', None),
+                        'equipamiento': getattr(e, 'equipamiento', None),
+                        'variantes': getattr(e, 'variantes', None),
                         'video_url': v,
                         'video_mime': getattr(e, 'video_mime', None),
                     }
@@ -164,6 +168,9 @@ class TrainingService(BaseService):
             ejercicio = Ejercicio(
                 nombre=data.get('nombre', ''),
                 grupo_muscular=data.get('grupo_muscular'),
+                objetivo=data.get('objetivo') or 'general',
+                equipamiento=data.get('equipamiento'),
+                variantes=data.get('variantes'),
                 video_url=data.get('video_url'),
                 video_mime=data.get('video_mime')
             )
@@ -192,6 +199,9 @@ class TrainingService(BaseService):
 
             if 'nombre' in data: ejercicio.nombre = data['nombre']
             if 'grupo_muscular' in data: ejercicio.grupo_muscular = data['grupo_muscular']
+            if 'objetivo' in data and hasattr(ejercicio, 'objetivo'): ejercicio.objetivo = data['objetivo']
+            if 'equipamiento' in data and hasattr(ejercicio, 'equipamiento'): ejercicio.equipamiento = data['equipamiento']
+            if 'variantes' in data and hasattr(ejercicio, 'variantes'): ejercicio.variantes = data['variantes']
             if 'video_url' in data: ejercicio.video_url = data['video_url']
             if 'video_mime' in data: ejercicio.video_mime = data['video_mime']
             if 'descripcion' in data and hasattr(ejercicio, 'descripcion'): 
@@ -222,6 +232,24 @@ class TrainingService(BaseService):
             ejercicio = self.db.get(Ejercicio, ejercicio_id)
             if not ejercicio:
                 return False
+
+            # Defensive cleanup of references (in case DB FKs are not configured with ON DELETE CASCADE)
+            try:
+                self.db.query(RutinaEjercicio).filter(RutinaEjercicio.ejercicio_id == int(ejercicio_id)).delete()
+            except Exception:
+                pass
+            try:
+                from src.database.orm_models import ClaseEjercicio, ClaseBloqueItem
+                try:
+                    self.db.query(ClaseEjercicio).filter(ClaseEjercicio.ejercicio_id == int(ejercicio_id)).delete()
+                except Exception:
+                    pass
+                try:
+                    self.db.query(ClaseBloqueItem).filter(ClaseBloqueItem.ejercicio_id == int(ejercicio_id)).delete()
+                except Exception:
+                    pass
+            except Exception:
+                pass
 
             old_video_url = getattr(ejercicio, 'video_url', None)
             self.db.delete(ejercicio)
@@ -257,7 +285,7 @@ class TrainingService(BaseService):
     ) -> List[Dict[str, Any]]:
         """Get routines, optionally filtered by user."""
         try:
-            stmt = select(Rutina)
+            stmt = select(Rutina).options(joinedload(Rutina.usuario))
             if usuario_id is not None:
                 stmt = stmt.where(Rutina.usuario_id == usuario_id)
 
@@ -299,27 +327,88 @@ class TrainingService(BaseService):
                                 'id': re.id,
                                 'ejercicio_id': re.ejercicio_id,
                                 'nombre_ejercicio': re.ejercicio.nombre if re.ejercicio else None,
+                                'ejercicio_nombre': re.ejercicio.nombre if re.ejercicio else None,
                                 'dia_semana': re.dia_semana,
                                 'series': re.series,
                                 'repeticiones': re.repeticiones,
                                 'orden': re.orden,
+                                'video_url': (get_file_url(re.ejercicio.video_url) if (re.ejercicio and getattr(re.ejercicio, 'video_url', None)) else None),
                             }
                         )
 
+            def _build_days(dias_semana_val: Any, ejercicios_flat: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                try:
+                    dcount = int(dias_semana_val or 1)
+                except Exception:
+                    dcount = 1
+                dcount = max(1, min(dcount, 5))
+                dias_list: List[Dict[str, Any]] = [
+                    {'numero': d, 'nombre': f"Día {d}", 'ejercicios': []}
+                    for d in range(1, dcount + 1)
+                ]
+                if not ejercicios_flat:
+                    return dias_list
+                by_num = {int(d['numero']): d for d in dias_list}
+                for ex in (ejercicios_flat or []):
+                    try:
+                        dnum = int(ex.get('dia_semana') or ex.get('dia') or 1)
+                    except Exception:
+                        dnum = 1
+                    dnum = max(1, min(dnum, dcount))
+                    day_obj = by_num.get(dnum)
+                    if not day_obj:
+                        continue
+                    day_obj['ejercicios'].append(
+                        {
+                            'id': ex.get('id'),
+                            'ejercicio_id': ex.get('ejercicio_id'),
+                            'ejercicio_nombre': ex.get('ejercicio_nombre') or ex.get('nombre_ejercicio') or ex.get('nombre'),
+                            'series': ex.get('series'),
+                            'repeticiones': ex.get('repeticiones'),
+                            'descanso': ex.get('descanso'),
+                            'notas': ex.get('notas'),
+                            'orden': ex.get('orden'),
+                            'dia': dnum,
+                            'video_url': ex.get('video_url'),
+                        }
+                    )
+                return dias_list
+
             for r in rutinas:
+                usuario_nombre = None
+                try:
+                    if getattr(r, 'usuario', None) is not None:
+                        usuario_nombre = getattr(r.usuario, 'nombre', None)
+                except Exception:
+                    usuario_nombre = None
+
+                try:
+                    fc = getattr(r, 'fecha_creacion', None)
+                    fecha_creacion = fc.isoformat() if fc is not None else None
+                except Exception:
+                    fecha_creacion = None
+
                 rout_dict = {
                     'id': r.id,
                     'nombre_rutina': r.nombre_rutina,
+                    'nombre': r.nombre_rutina,
                     'descripcion': r.descripcion,
                     'usuario_id': r.usuario_id,
+                    'usuario_nombre': usuario_nombre,
                     'dias_semana': r.dias_semana,
                     'categoria': r.categoria,
                     'activa': r.activa,
-                    'uuid_rutina': getattr(r, 'uuid_rutina', None)
+                    'uuid_rutina': getattr(r, 'uuid_rutina', None),
+                    'es_plantilla': (r.usuario_id is None),
+                    'fecha_creacion': fecha_creacion,
                 }
                 
                 if include_exercises:
-                    rout_dict['ejercicios'] = ejercicios_by_rutina.get(int(r.id), [])
+                    exs_flat = ejercicios_by_rutina.get(int(r.id), [])
+                    rout_dict['ejercicios'] = exs_flat
+                    rout_dict['dias'] = _build_days(getattr(r, 'dias_semana', None), exs_flat)
+                else:
+                    rout_dict['dias'] = _build_days(getattr(r, 'dias_semana', None), [])
                 
                 results.append(rout_dict)
             return results
@@ -423,6 +512,7 @@ class TrainingService(BaseService):
                     'ejercicio_id': re.ejercicio_id,
                     'nombre': re.ejercicio.nombre if re.ejercicio else None,
                     'nombre_ejercicio': getattr(re, 'nombre_ejercicio', None) or (re.ejercicio.nombre if re.ejercicio else None),
+                    'ejercicio_nombre': getattr(re, 'nombre_ejercicio', None) or (re.ejercicio.nombre if re.ejercicio else None),
                     'grupo_muscular': re.ejercicio.grupo_muscular if re.ejercicio else None,
                     'series': re.series,
                     'repeticiones': re.repeticiones,
@@ -432,9 +522,52 @@ class TrainingService(BaseService):
                 }
             )
 
+        def _build_days_detail(dias_semana_val: Any, ejercicios_flat: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            try:
+                dcount = int(dias_semana_val or 1)
+            except Exception:
+                dcount = 1
+            dcount = max(1, min(dcount, 5))
+            dias_list: List[Dict[str, Any]] = [
+                {'numero': d, 'nombre': f"Día {d}", 'ejercicios': []}
+                for d in range(1, dcount + 1)
+            ]
+            by_num = {int(d['numero']): d for d in dias_list}
+            for ex in (ejercicios_flat or []):
+                try:
+                    dnum = int(ex.get('dia_semana') or ex.get('dia') or 1)
+                except Exception:
+                    dnum = 1
+                dnum = max(1, min(dnum, dcount))
+                day_obj = by_num.get(dnum)
+                if not day_obj:
+                    continue
+                day_obj['ejercicios'].append(
+                    {
+                        'id': ex.get('id'),
+                        'ejercicio_id': ex.get('ejercicio_id'),
+                        'ejercicio_nombre': ex.get('ejercicio_nombre') or ex.get('nombre_ejercicio') or ex.get('nombre'),
+                        'series': ex.get('series'),
+                        'repeticiones': ex.get('repeticiones'),
+                        'descanso': ex.get('descanso'),
+                        'notas': ex.get('notas'),
+                        'orden': ex.get('orden'),
+                        'dia': dnum,
+                        'video_url': ex.get('video_url'),
+                    }
+                )
+            return dias_list
+
+        try:
+            fc = getattr(rutina, 'fecha_creacion', None)
+            fecha_creacion = fc.isoformat() if fc is not None else None
+        except Exception:
+            fecha_creacion = None
+
         return {
             'id': rutina.id,
             'nombre_rutina': rutina.nombre_rutina,
+            'nombre': rutina.nombre_rutina,
             'descripcion': rutina.descripcion,
             'usuario_id': rutina.usuario_id,
             'usuario_nombre': usuario_nombre,
@@ -442,7 +575,10 @@ class TrainingService(BaseService):
             'dias_semana': rutina.dias_semana,
             'activa': rutina.activa,
             'uuid_rutina': getattr(rutina, 'uuid_rutina', None),
-            'ejercicios': ejercicios_out
+            'es_plantilla': (rutina.usuario_id is None),
+            'fecha_creacion': fecha_creacion,
+            'ejercicios': ejercicios_out,
+            'dias': _build_days_detail(getattr(rutina, 'dias_semana', None), ejercicios_out),
         }
 
     def actualizar_rutina(self, rutina_id: int, data: Dict[str, Any]) -> bool:
