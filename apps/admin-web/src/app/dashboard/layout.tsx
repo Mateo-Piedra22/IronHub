@@ -1,7 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { api } from '@/lib/api';
 import {
     Dumbbell, LayoutDashboard, Building2, Users, CreditCard,
     MessageSquare, Settings, LogOut, ChevronRight
@@ -22,6 +24,38 @@ export default function DashboardLayout({
     children: React.ReactNode;
 }) {
     const pathname = usePathname();
+    const router = useRouter();
+    const [sessionChecked, setSessionChecked] = useState(false);
+
+    useEffect(() => {
+        let mounted = true;
+        (async () => {
+            try {
+                const res = await api.checkSession();
+                const ok = Boolean(res.ok && res.data?.ok);
+                if (!ok) {
+                    router.replace('/');
+                    return;
+                }
+            } catch {
+                router.replace('/');
+                return;
+            } finally {
+                if (mounted) setSessionChecked(true);
+            }
+        })();
+        return () => {
+            mounted = false;
+        };
+    }, [router]);
+
+    if (!sessionChecked) {
+        return (
+            <div className="min-h-screen flex items-center justify-center text-slate-400">
+                Cargando...
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen">
@@ -45,7 +79,7 @@ export default function DashboardLayout({
                 </div>
 
                 {/* Navigation */}
-                <nav className="flex-1 p-4 space-y-1">
+                <nav className="flex-1 min-h-0 p-4 space-y-1 overflow-y-auto overflow-x-auto">
                     {navigation.map((item) => {
                         // For /dashboard (parent), only exact match to prevent multi-selection
                         // For child routes, also match sub-paths
@@ -69,9 +103,14 @@ export default function DashboardLayout({
                 {/* Footer */}
                 <div className="p-4 border-t border-slate-800/50 space-y-3">
                     <button
-                        onClick={() => {
-                            // TODO: Implement logout
-                            window.location.href = '/';
+                        onClick={async () => {
+                            try {
+                                await api.logout();
+                            } catch {
+                                // Ignore
+                            } finally {
+                                window.location.href = '/';
+                            }
                         }}
                         className="sidebar-item w-full text-danger-400 hover:bg-danger-500/10 hover:text-danger-300"
                     >

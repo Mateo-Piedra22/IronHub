@@ -8,6 +8,8 @@ import hashlib
 import logging
 from typing import Optional, Tuple
 from pathlib import Path
+import re
+import urllib.parse
 
 try:
     import boto3
@@ -27,6 +29,8 @@ B2_ENDPOINT_URL = os.getenv("B2_ENDPOINT_URL", "s3.us-east-005.backblazeb2.com")
 B2_MEDIA_PREFIX = os.getenv("B2_MEDIA_PREFIX", "assets")
 B2_PUBLIC_BASE_URL = os.getenv("B2_PUBLIC_BASE_URL", "https://f005.backblazeb2.com")
 CDN_CUSTOM_DOMAIN = os.getenv("CDN_CUSTOM_DOMAIN", "")
+
+MAX_B2_UPLOAD_BYTES = int(os.getenv("MAX_B2_UPLOAD_BYTES", str(60 * 1024 * 1024)))
 
 
 def get_s3_client():
@@ -69,10 +73,36 @@ def get_cdn_url(file_path: str) -> str:
     Returns:
         Full URL to access the file
     """
+    try:
+        p = str(file_path or "").lstrip("/")
+        if not p or ".." in p:
+            return ""
+    except Exception:
+        return ""
+
     if CDN_CUSTOM_DOMAIN:
-        return f"https://{CDN_CUSTOM_DOMAIN}/{file_path}"
+        return f"https://{CDN_CUSTOM_DOMAIN}/{p}"
     else:
-        return f"{B2_PUBLIC_BASE_URL}/file/{B2_BUCKET_NAME}/{file_path}"
+        return f"{B2_PUBLIC_BASE_URL}/file/{B2_BUCKET_NAME}/{p}"
+
+
+def _sanitize_tenant(tenant: str) -> str:
+    try:
+        t = re.sub(r"[^a-z0-9-]", "-", str(tenant or "common").strip().lower())[:63]
+        return t or "common"
+    except Exception:
+        return "common"
+
+
+def _sanitize_folder(folder: str) -> str:
+    try:
+        f = re.sub(r"[^a-z0-9/_-]", "", str(folder or "uploads").strip().lower())
+        f = f.strip("/")
+        if ".." in f:
+            return "uploads"
+        return f or "uploads"
+    except Exception:
+        return "uploads"
 
 
 def upload_file(
@@ -98,14 +128,31 @@ def upload_file(
     client = get_s3_client()
     if not client:
         return False, "B2 client not available", None
+
+    try:
+        if file_content is None or len(file_content) <= 0:
+            return False, "Empty file", None
+        if MAX_B2_UPLOAD_BYTES and len(file_content) > MAX_B2_UPLOAD_BYTES:
+            return False, "File too large", None
+    except Exception:
+        return False, "Invalid file", None
     
     # Generate unique filename with hash to avoid collisions
     file_hash = hashlib.md5(file_content).hexdigest()[:8]
-    safe_filename = filename.replace(" ", "_").lower()
-    ext = Path(filename).suffix.lower()
+    tenant_safe = _sanitize_tenant(tenant)
+    folder_safe = _sanitize_folder(folder)
+
+    raw_name = os.path.basename(str(filename or "file"))
+    raw_name = raw_name.replace(" ", "_")
+    raw_name = re.sub(r"[^A-Za-z0-9._-]", "_", raw_name)
+    # Keep extension but avoid extremely long names
+    ext = Path(raw_name).suffix.lower()
+    stem = Path(raw_name).stem
+    stem = stem[:80] if stem else "file"
+    safe_filename = f"{stem}{ext}".lower()
     
     # Build the full path: assets/{tenant}/{folder}/{hash}_{filename}
-    file_key = f"{B2_MEDIA_PREFIX}/{tenant}/{folder}/{file_hash}_{safe_filename}"
+    file_key = f"{B2_MEDIA_PREFIX}/{tenant_safe}/{folder_safe}/{file_hash}_{safe_filename}"
     
     try:
         client.put_object(
@@ -145,9 +192,18 @@ def delete_file(file_key: str) -> Tuple[bool, str]:
     client = get_s3_client()
     if not client:
         return False, "B2 client not available"
+
+    try:
+        key = str(file_key or "").lstrip("/")
+        if not key or ".." in key:
+            return False, "Invalid key"
+        if not key.startswith(f"{B2_MEDIA_PREFIX}/"):
+            return False, "Invalid key"
+    except Exception:
+        return False, "Invalid key"
     
     try:
-        client.delete_object(Bucket=B2_BUCKET_NAME, Key=file_key)
+        client.delete_object(Bucket=B2_BUCKET_NAME, Key=key)
         logger.info(f"Deleted file from B2: {file_key}")
         return True, "File deleted successfully"
     except ClientError as e:
@@ -175,20 +231,33 @@ def list_tenant_files(tenant: str, folder: str = "") -> list:
     if not client:
         return []
     
-    prefix = f"{B2_MEDIA_PREFIX}/{tenant}/"
+    tenant_safe = _sanitize_tenant(tenant)
+    prefix = f"{B2_MEDIA_PREFIX}/{tenant_safe}/"
     if folder:
-        prefix += f"{folder}/"
+        folder_safe = _sanitize_folder(folder)
+        prefix += f"{folder_safe}/"
     
     try:
-        response = client.list_objects_v2(Bucket=B2_BUCKET_NAME, Prefix=prefix)
         files = []
-        for obj in response.get('Contents', []):
-            files.append({
-                'key': obj['Key'],
-                'size': obj['Size'],
-                'last_modified': obj['LastModified'].isoformat(),
-                'url': get_cdn_url(obj['Key'])
-            })
+        token = None
+        while True:
+            if token:
+                response = client.list_objects_v2(Bucket=B2_BUCKET_NAME, Prefix=prefix, ContinuationToken=token)
+            else:
+                response = client.list_objects_v2(Bucket=B2_BUCKET_NAME, Prefix=prefix)
+            for obj in response.get('Contents', []):
+                files.append({
+                    'key': obj['Key'],
+                    'size': obj['Size'],
+                    'last_modified': obj['LastModified'].isoformat(),
+                    'url': get_cdn_url(obj['Key'])
+                })
+            if response.get('IsTruncated'):
+                token = response.get('NextContinuationToken')
+                if not token:
+                    break
+            else:
+                break
         return files
     except Exception as e:
         logger.error(f"Error listing B2 files: {e}")
@@ -295,4 +364,51 @@ def get_file_url(file_path: str) -> str:
         return file_path
     
     return get_cdn_url(file_path)
+
+
+def extract_file_key(file_url_or_key: str) -> Optional[str]:
+    """Best-effort extraction of B2 object key from a stored URL or key.
+
+    Returns a key only if it looks like an object under the configured
+    `B2_MEDIA_PREFIX` (default: "assets"). This prevents accidental deletion
+    of external URLs.
+    """
+    try:
+        s = str(file_url_or_key or "").strip()
+        if not s:
+            return None
+
+        # Local/static or absolute paths are not B2 keys
+        if s.startswith("/"):
+            return None
+
+        prefix = f"{B2_MEDIA_PREFIX}/"
+
+        # If already looks like a key
+        if not s.startswith("http://") and not s.startswith("https://"):
+            return s if s.startswith(prefix) and ".." not in s else None
+
+        parsed = urllib.parse.urlparse(s)
+        path = parsed.path or ""
+        netloc = (parsed.netloc or "").lower()
+
+        # Case 1: Direct B2 URL pattern
+        # https://<host>/file/<bucket>/<key>
+        marker = f"/file/{B2_BUCKET_NAME}/"
+        if marker in path:
+            key = path.split(marker, 1)[1].lstrip("/")
+            return key if key.startswith(prefix) and ".." not in key else None
+
+        # Case 2: Custom CDN domain that maps directly to keys
+        if CDN_CUSTOM_DOMAIN and netloc == CDN_CUSTOM_DOMAIN.strip().lower():
+            key = path.lstrip("/")
+            # Some setups keep /file/<bucket>/<key> on the CDN
+            if key.startswith(f"file/{B2_BUCKET_NAME}/"):
+                key = key.split(f"file/{B2_BUCKET_NAME}/", 1)[1]
+            return key if key.startswith(prefix) and ".." not in key else None
+
+        # Unknown URL
+        return None
+    except Exception:
+        return None
 

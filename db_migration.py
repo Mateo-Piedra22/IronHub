@@ -43,6 +43,65 @@ def migrate():
         print(f"  - Error in create_all: {e}")
 
     with engine.connect() as conn:
+        # 1.5 Ensure critical constraints exist (create_all does not alter existing tables)
+        try:
+            conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint WHERE conname = 'idx_pagos_usuario_mes_año'
+                    ) THEN
+                        EXECUTE format(
+                            'ALTER TABLE pagos ADD CONSTRAINT %I UNIQUE (usuario_id, mes, %I)',
+                            'idx_pagos_usuario_mes_año',
+                            'año'
+                        );
+                    END IF;
+
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint WHERE conname = 'asistencias_usuario_id_fecha_key'
+                    ) THEN
+                        EXECUTE 'ALTER TABLE asistencias ADD CONSTRAINT asistencias_usuario_id_fecha_key UNIQUE (usuario_id, fecha)';
+                    END IF;
+                END $$;
+            """))
+            print("Ensured critical unique constraints (pagos/asistencias).")
+        except Exception as e:
+            print(f"  - Warning: could not ensure constraints: {e}")
+
+        try:
+            conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'ejercicios' AND column_name = 'variantes'
+                    ) THEN
+                        NULL;
+                    ELSE
+                        EXECUTE 'ALTER TABLE ejercicios ADD COLUMN variantes TEXT';
+                    END IF;
+
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'usuarios' AND column_name = 'pin'
+                    ) THEN
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.columns
+                            WHERE table_name = 'usuarios' AND column_name = 'pin'
+                            AND data_type = 'character varying'
+                            AND (character_maximum_length IS NULL OR character_maximum_length < 100)
+                        ) THEN
+                            EXECUTE 'ALTER TABLE usuarios ALTER COLUMN pin TYPE VARCHAR(100)';
+                        END IF;
+                        EXECUTE 'ALTER TABLE usuarios ALTER COLUMN pin SET DEFAULT ''123456''';
+                    END IF;
+                END $$;
+            """))
+            print("Ensured schema alignment for usuarios.pin and ejercicios.variantes.")
+        except Exception as e:
+            print(f"  - Warning: could not ensure schema alignment: {e}")
+
         # 2. Add 'equipamiento' to 'ejercicios' (ALTER TABLE for existing tables)
         print("Checking 'ejercicios' for 'equipamiento' column...")
         try:

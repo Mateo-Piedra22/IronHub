@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 from src.database.raw_manager import RawPostgresManager
 from src.services.admin_service import AdminService
 from src.routers.payments import router as payments_router
+from src.secure_config import SecureConfig
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -36,10 +37,12 @@ app.include_router(payments_router)
 
 # CORS
 origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
+_origins = [o.strip() for o in (origins or []) if o and o.strip()]
+_allow_all = (len(_origins) == 0)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins if origins[0] else ["*"],
-    allow_credentials=True,
+    allow_origins=_origins if not _allow_all else ["*"],
+    allow_credentials=(not _allow_all),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -231,12 +234,41 @@ async def list_gyms_with_summary(
     return result
 
 
+@app.post("/gyms/batch/maintenance/clear")
+async def batch_clear_maintenance(request: Request):
+    """Disable maintenance mode for multiple gyms. Expects JSON {ids}."""
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    ids = data.get("ids") or []
+    try:
+        ids = [int(x) for x in ids]
+    except Exception:
+        ids = []
+    result = adm.batch_clear_maintenance(ids)
+    try:
+        adm.log_action("owner", "batch_clear_maintenance", None, f"count={len(ids)}")
+    except Exception:
+        pass
+    return result
+
+
 @app.post("/gyms")
 async def create_gym(
     request: Request,
     nombre: str = Form(...),
     subdominio: str = Form(None),
     owner_phone: str = Form(None),
+    whatsapp_phone_id: str = Form(None),
+    whatsapp_access_token: str = Form(None),
+    whatsapp_business_account_id: str = Form(None),
+    whatsapp_verify_token: str = Form(None),
+    whatsapp_app_secret: str = Form(None),
+    whatsapp_nonblocking: bool = Form(False),
+    whatsapp_send_timeout_seconds: str = Form(None),
 ):
     """Create a new gym with database provisioning."""
     require_admin(request)
@@ -246,7 +278,23 @@ async def create_gym(
     if not sub:
         sub = adm.sugerir_subdominio_unico(nombre)
     
-    result = adm.crear_gimnasio(nombre, sub, owner_phone=owner_phone)
+    try:
+        wa_timeout = float(whatsapp_send_timeout_seconds) if whatsapp_send_timeout_seconds not in (None, "") else None
+    except Exception:
+        wa_timeout = None
+
+    result = adm.crear_gimnasio(
+        nombre,
+        sub,
+        whatsapp_phone_id=whatsapp_phone_id,
+        whatsapp_access_token=whatsapp_access_token,
+        owner_phone=owner_phone,
+        whatsapp_business_account_id=whatsapp_business_account_id,
+        whatsapp_verify_token=whatsapp_verify_token,
+        whatsapp_app_secret=whatsapp_app_secret,
+        whatsapp_nonblocking=bool(whatsapp_nonblocking),
+        whatsapp_send_timeout_seconds=wa_timeout,
+    )
     
     if "error" in result:
         return JSONResponse(result, status_code=400)
@@ -264,8 +312,32 @@ async def get_gym(request: Request, gym_id: int):
     gym = adm.obtener_gimnasio(gym_id)
     if not gym:
         raise HTTPException(status_code=404, detail="Gym not found")
-    
+
+    try:
+        gym["wa_configured"] = bool((gym.get("whatsapp_phone_id") or "").strip()) and bool((gym.get("whatsapp_access_token") or "").strip())
+    except Exception:
+        pass
+
+    try:
+        at_raw = gym.get("whatsapp_access_token")
+        vt_raw = gym.get("whatsapp_verify_token")
+        as_raw = gym.get("whatsapp_app_secret")
+        if at_raw:
+            gym["whatsapp_access_token"] = SecureConfig.decrypt_waba_secret(str(at_raw))
+        if vt_raw:
+            gym["whatsapp_verify_token"] = SecureConfig.decrypt_waba_secret(str(vt_raw))
+        if as_raw:
+            gym["whatsapp_app_secret"] = SecureConfig.decrypt_waba_secret(str(as_raw))
+    except Exception:
+        pass
+
     return gym
+
+
+@app.get("/gyms/{gym_id}/details")
+async def get_gym_details(request: Request, gym_id: int):
+    """Alias for getting gym details (backwards compatible with admin-web)."""
+    return await get_gym(request, gym_id)
 
 
 @app.put("/gyms/{gym_id}")
@@ -366,6 +438,38 @@ async def get_expirations(request: Request, days: int = Query(30, ge=1, le=365))
     adm = get_admin_service()
     
     expirations = adm.listar_proximos_vencimientos(days)
+    # Normalize response fields for admin-web
+    try:
+        from datetime import date
+        today = date.today()
+        normalized = []
+        for e in expirations:
+            next_due = e.get("next_due_date")
+            # psycopg2 may return date, datetime, or string
+            if next_due is None:
+                valid_until = None
+                days_remaining = None
+            else:
+                try:
+                    due_date = next_due.date() if hasattr(next_due, "date") else next_due
+                    if isinstance(due_date, str):
+                        from datetime import datetime
+                        due_date = datetime.fromisoformat(due_date[:10]).date()
+                    valid_until = str(due_date)
+                    days_remaining = (due_date - today).days
+                except Exception:
+                    valid_until = str(next_due)
+                    days_remaining = None
+            normalized.append({
+                "gym_id": e.get("gym_id"),
+                "nombre": e.get("nombre"),
+                "subdominio": e.get("subdominio"),
+                "valid_until": valid_until,
+                "days_remaining": days_remaining,
+            })
+        expirations = normalized
+    except Exception:
+        pass
     return {"expirations": expirations}
 
 
@@ -432,6 +536,189 @@ async def get_gym_audit(request: Request, gym_id: int, limit: int = Query(50, ge
     
     audit = adm.obtener_auditoria_gym(gym_id, limit)
     return {"audit": audit}
+
+
+# ========== BATCH OPERATIONS (used by admin-web) ==========
+
+
+@app.post("/gyms/batch/provision")
+async def batch_provision(request: Request):
+    """Provision (or re-provision) multiple gyms. Expects JSON {ids: number[]}."""
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    ids = data.get("ids") or []
+    try:
+        ids = [int(x) for x in ids]
+    except Exception:
+        ids = []
+    result = adm.batch_provision(ids)
+    try:
+        adm.log_action("owner", "batch_provision", None, f"count={len(ids)}")
+    except Exception:
+        pass
+    return result
+
+
+@app.post("/gyms/batch/suspend")
+async def batch_suspend(request: Request):
+    """Suspend multiple gyms. Expects JSON {ids, reason?, until?, hard?}."""
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    ids = data.get("ids") or []
+    reason = data.get("reason")
+    until = data.get("until")
+    hard = bool(data.get("hard") or False)
+    try:
+        ids = [int(x) for x in ids]
+    except Exception:
+        ids = []
+    result = adm.batch_suspend(ids, reason=reason, until=until, hard=hard)
+    try:
+        adm.log_action("owner", "batch_suspend", None, f"count={len(ids)}")
+    except Exception:
+        pass
+    return result
+
+
+@app.post("/gyms/batch/reactivate")
+async def batch_reactivate(request: Request):
+    """Reactivate multiple gyms. Expects JSON {ids}."""
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    ids = data.get("ids") or []
+    try:
+        ids = [int(x) for x in ids]
+    except Exception:
+        ids = []
+    result = adm.batch_reactivate(ids)
+    try:
+        adm.log_action("owner", "batch_reactivate", None, f"count={len(ids)}")
+    except Exception:
+        pass
+    return result
+
+
+@app.post("/gyms/batch/remind")
+async def batch_remind(request: Request):
+    """Send reminder message to multiple gym owners. Expects JSON {ids, message}."""
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    ids = data.get("ids") or []
+    message = str(data.get("message") or "").strip()
+    try:
+        ids = [int(x) for x in ids]
+    except Exception:
+        ids = []
+    if not message:
+        return JSONResponse({"ok": False, "error": "message_required"}, status_code=400)
+    result = adm.batch_send_owner_message(ids, message)
+    try:
+        adm.log_action("owner", "batch_remind", None, f"count={len(ids)}")
+    except Exception:
+        pass
+    return result
+
+
+@app.post("/gyms/batch/maintenance")
+async def batch_maintenance(request: Request):
+    """Enable maintenance mode for multiple gyms. Expects JSON {ids, message, until?}."""
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    ids = data.get("ids") or []
+    message = str(data.get("message") or "").strip() or None
+    until = data.get("until")
+    try:
+        ids = [int(x) for x in ids]
+    except Exception:
+        ids = []
+    if until:
+        result = adm.batch_schedule_maintenance(ids, until, message)
+    else:
+        result = adm.batch_set_maintenance(ids, message)
+    try:
+        adm.log_action("owner", "batch_maintenance", None, f"count={len(ids)}")
+    except Exception:
+        pass
+    return result
+
+
+# ========== WHATSAPP CONFIG ROUTES (used by admin-web) ==========
+
+
+@app.post("/gyms/{gym_id}/whatsapp")
+async def update_gym_whatsapp(request: Request, gym_id: int):
+    """Update WhatsApp configuration for a gym (admin-web expects this endpoint)."""
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    ok = adm.set_gym_whatsapp_config(
+        gym_id,
+        data.get("phone_id"),
+        data.get("access_token"),
+        data.get("business_account_id"),
+        data.get("verify_token"),
+        data.get("app_secret"),
+        data.get("nonblocking"),
+        data.get("send_timeout_seconds"),
+    )
+    if ok:
+        try:
+            adm.log_action("owner", "update_gym_whatsapp", gym_id, None)
+        except Exception:
+            pass
+    return {"ok": bool(ok)}
+
+
+# ========== GYM REMINDER MESSAGE (used by admin-web) ==========
+
+
+@app.get("/gyms/{gym_id}/reminder")
+async def get_gym_reminder_message(request: Request, gym_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    msg = adm.get_gym_reminder_message(gym_id)
+    return {"message": msg or ""}
+
+
+@app.post("/gyms/{gym_id}/reminder")
+async def set_gym_reminder_message(request: Request, gym_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    message = (data.get("message") or "").strip()
+    result = adm.set_gym_reminder_message(gym_id, message)
+    if result.get("ok"):
+        try:
+            adm.log_action("owner", "set_gym_reminder_message", gym_id, None)
+        except Exception:
+            pass
+    return result
 
 
 # ========== BRANDING ROUTES ==========

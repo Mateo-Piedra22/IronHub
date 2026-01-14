@@ -172,6 +172,11 @@ class ClaseService(BaseService):
     def crear_clase_bloque(self, clase_id: int, nombre: str, items: List[Dict[str, Any]]) -> Optional[int]:
         """Create a new schedule block with items."""
         try:
+            # Ensure class exists before creating child records
+            clase = self.db.get(Clase, clase_id)
+            if not clase:
+                return None
+
             bloque = ClaseBloque(
                 clase_id=clase_id,
                 nombre=nombre
@@ -247,9 +252,14 @@ class ClaseService(BaseService):
             self.db.rollback()
             return False
 
-    def obtener_bloque_items(self, clase_id: int, bloque_id: int) -> List[Dict[str, Any]]:
+    def obtener_bloque_items(self, clase_id: int, bloque_id: int) -> Optional[List[Dict[str, Any]]]:
         """Get items in a block (Alias for router compatibility)."""
-        # ignoring clase_id as bloque_id is unique
+        try:
+            bloque = self.db.get(ClaseBloque, bloque_id)
+            if not bloque or int(getattr(bloque, 'clase_id', 0) or 0) != int(clase_id):
+                return None
+        except Exception:
+            return None
         return self.obtener_items_bloque(bloque_id)
 
     def obtener_items_bloque(self, bloque_id: int) -> List[Dict[str, Any]]:

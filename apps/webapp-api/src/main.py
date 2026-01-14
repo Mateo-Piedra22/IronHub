@@ -7,6 +7,7 @@ Multi-tenant API for gym member features
 import os
 import re
 import logging
+import json
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,6 +16,7 @@ from fastapi import FastAPI, Request, HTTPException, Form, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from fastapi.staticfiles import StaticFiles
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -60,7 +62,8 @@ try:
     from src.database.tenant_connection import (
         get_tenant_session_factory,
         set_current_tenant,
-        get_current_tenant
+        get_current_tenant,
+        validate_tenant_name
     )
     from src.database import DatabaseManager
     from src.models import Usuario, Pago, Rutina
@@ -76,6 +79,20 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+# Serve local assets (logo fallback, etc.)
+try:
+    from src.utils import _resolve_existing_dir
+
+    _assets_dir = _resolve_existing_dir("assets")
+    try:
+        _assets_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
+    app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
+except Exception as e:
+    logger.warning(f"Could not mount /assets: {e}")
 
 # CORS for wildcard subdomains and base domain
 base_domain = os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz")
@@ -148,67 +165,121 @@ async def tenant_context_middleware(request: Request, call_next):
     tenant = None
     host = request.headers.get("host", "")
     base = os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz")
+    debug_tenant = os.getenv("DEBUG_TENANT", "false").lower() in ("1", "true", "yes")
     
     # Remove port if present
     host_clean = host.split(":")[0]
     
+    try:
+        set_current_tenant(None)
+    except Exception:
+        pass
+
     # Enhanced logging for debugging tenant extraction
     x_tenant = request.headers.get("x-tenant")
     origin = request.headers.get("origin") or request.headers.get("referer") or ""
-    
-    # Log all sources for API routes (to diagnose issues)
-    if request.url.path.startswith("/api/"):
+
+    if debug_tenant and request.url.path.startswith("/api/"):
         logger.info(f"TENANT DEBUG - Path: {request.url.path}")
-        logger.info(f"TENANT DEBUG - Host: {host}, X-Tenant: {x_tenant}, Origin: {origin}")
-    
-    # 1. Try to extract from subdomain
+        logger.info(f"TENANT DEBUG - Host: {host_clean}, has_x_tenant: {bool(x_tenant)}, has_origin: {bool(origin)}")
+
+    reserved = ("www", "api", "admin", "admin-api")
+    host_is_reserved = (host_clean in reserved) or host_clean.endswith(f".{base}") and host_clean.replace(f".{base}", "") in reserved
+
+    # 1. Prefer tenant from host subdomain when host is not reserved
     if host_clean.endswith(f".{base}"):
         subdomain = host_clean.replace(f".{base}", "")
-        # Skip reserved subdomains
-        if subdomain and subdomain not in ("www", "api", "admin", "admin-api"):
+        if subdomain and subdomain not in reserved:
             tenant = subdomain
-    
-    # 2. Fallback to X-Tenant header (MOST IMPORTANT for cross-origin API calls)
-    if not tenant and x_tenant:
-        tenant = x_tenant.strip().lower()
-        if request.url.path.startswith("/api/"):
-            logger.info(f"TENANT DEBUG - Using X-Tenant header: {tenant}")
-    
-    # 3. Try to get from session (for gestion routes)
-    if not tenant:
+
+    # 2. If host is reserved (e.g. api.<base>), use session tenant if present
+    if not tenant and host_is_reserved:
         try:
-            # Session middleware runs before this, so session should be available
             session_tenant = request.session.get("tenant")
             if session_tenant:
-                tenant = session_tenant
-                if request.url.path.startswith("/api/"):
-                    logger.info(f"TENANT DEBUG - Using session tenant: {tenant}")
+                tenant = str(session_tenant).strip().lower()
         except Exception:
             pass
-    
-    # 4. Try to extract from Origin/Referer header (for cross-origin API calls)
+
+    # 3. Fallback to X-Tenant header
+    if not tenant and x_tenant:
+        tenant = x_tenant.strip().lower()
+
+    # 4. Last resort: extract from Origin/Referer
     if not tenant and origin:
-        import re
         match = re.search(rf"https?://([a-z0-9-]+)\.{re.escape(base)}", origin.lower())
         if match:
             candidate = match.group(1)
-            if candidate not in ("www", "api", "admin", "admin-api"):
+            if candidate not in reserved:
                 tenant = candidate
-                if request.url.path.startswith("/api/"):
-                    logger.info(f"TENANT DEBUG - Using Origin extraction: {tenant}")
-    
-    # Set tenant context if found
+
+    # Validate tenant name before setting context
     if tenant:
-        set_current_tenant(tenant.strip().lower())
-        if request.url.path.startswith("/api/"):
-            logger.info(f"TENANT CONTEXT SET: {tenant} for {request.url.path}")
-    else:
-        # For API routes, log warning if no tenant found
-        if request.url.path.startswith("/api/"):
-            logger.warning(f"NO TENANT CONTEXT for API route: {request.url.path}")
-    
-    response = await call_next(request)
-    return response
+        try:
+            ok, err = validate_tenant_name(str(tenant))
+            if ok:
+                set_current_tenant(str(tenant).strip().lower())
+                if debug_tenant and request.url.path.startswith("/api/"):
+                    logger.info(f"TENANT CONTEXT SET: {tenant} for {request.url.path}")
+            else:
+                tenant = None
+                if request.url.path.startswith("/api/"):
+                    logger.warning(f"Invalid tenant ignored: {err}")
+        except Exception:
+            tenant = None
+
+    if not tenant and request.url.path.startswith("/api/") and debug_tenant:
+        logger.warning(f"NO TENANT CONTEXT for API route: {request.url.path}")
+
+    try:
+        response = await call_next(request)
+
+        try:
+            content_type = (response.headers.get("content-type") or "").lower()
+            body = getattr(response, "body", None)
+            if body and isinstance(body, (bytes, bytearray)) and "application/json" in content_type:
+                try:
+                    payload = json.loads(body.decode("utf-8"))
+                except Exception:
+                    payload = None
+
+                if isinstance(payload, dict):
+                    if str(request.url.path).startswith("/api/"):
+                        ok_val = response.status_code < 400
+
+                        if "ok" not in payload:
+                            payload["ok"] = bool(payload.get("success")) if "success" in payload else ok_val
+                        if "success" not in payload:
+                            payload["success"] = bool(payload.get("ok"))
+
+                        if "mensaje" not in payload:
+                            if "message" in payload:
+                                payload["mensaje"] = payload.get("message")
+                            elif "detail" in payload:
+                                payload["mensaje"] = payload.get("detail")
+                            elif "error" in payload:
+                                payload["mensaje"] = payload.get("error")
+                            else:
+                                payload["mensaje"] = "OK" if bool(payload.get("ok")) else "Error"
+
+                        if "message" not in payload:
+                            payload["message"] = payload.get("mensaje")
+
+                        new_body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                        try:
+                            response.body = new_body
+                            response.headers["content-length"] = str(len(new_body))
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        return response
+    finally:
+        try:
+            set_current_tenant(None)
+        except Exception:
+            pass
 
 
 def extract_tenant_from_request(request: Request) -> str:
@@ -233,9 +304,22 @@ def require_tenant(request: Request) -> str:
     tenant = extract_tenant_from_request(request)
     if not tenant:
         raise HTTPException(status_code=400, detail="Tenant not specified")
-    
-    set_current_tenant(tenant)
-    return tenant
+
+    try:
+        t = str(tenant).strip().lower()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Tenant not specified")
+
+    try:
+        ok, _err = validate_tenant_name(t)
+    except Exception:
+        ok = False
+
+    if not ok:
+        raise HTTPException(status_code=400, detail="Tenant not specified")
+
+    set_current_tenant(t)
+    return t
 
 
 def get_user_from_session(request: Request) -> dict | None:

@@ -117,6 +117,13 @@ export default function GymsPage() {
                 nombre: formData.nombre,
                 subdominio: formData.subdominio || undefined,
                 owner_phone: formData.owner_phone || undefined,
+                whatsapp_phone_id: formData.whatsapp_phone_id || undefined,
+                whatsapp_access_token: formData.whatsapp_access_token || undefined,
+                whatsapp_business_account_id: formData.whatsapp_business_account_id || undefined,
+                whatsapp_verify_token: formData.whatsapp_verify_token || undefined,
+                whatsapp_app_secret: formData.whatsapp_app_secret || undefined,
+                whatsapp_nonblocking: formData.whatsapp_nonblocking,
+                whatsapp_send_timeout_seconds: formData.whatsapp_send_timeout_seconds || undefined,
             });
             if (res.ok) {
                 setCreateOpen(false);

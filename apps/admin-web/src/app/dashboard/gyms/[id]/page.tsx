@@ -41,6 +41,19 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     const [maintMessage, setMaintMessage] = useState('');
     const [maintUntil, setMaintUntil] = useState('');
 
+    // Reminder
+    const [reminderMessage, setReminderMessage] = useState('');
+    const [webappReminderMessage, setWebappReminderMessage] = useState('');
+
+    // WhatsApp test
+    const [waTestPhone, setWaTestPhone] = useState('');
+    const [waTestMessage, setWaTestMessage] = useState('Mensaje de prueba');
+
+    // Payment form
+    const [paymentAmount, setPaymentAmount] = useState('');
+    const [paymentPlan, setPaymentPlan] = useState('');
+    const [paymentValidUntil, setPaymentValidUntil] = useState('');
+
     // Payments
     const [payments, setPayments] = useState<Payment[]>([]);
 
@@ -64,10 +77,28 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                 const res = await api.getGym(gymId);
                 if (res.ok && res.data) {
                     setGym(res.data);
+                    const g: any = res.data;
+                    setWaConfig({
+                        phone_id: g.whatsapp_phone_id || '',
+                        access_token: g.whatsapp_access_token || '',
+                        business_account_id: g.whatsapp_business_account_id || '',
+                        verify_token: g.whatsapp_verify_token || '',
+                        app_secret: g.whatsapp_app_secret || '',
+                        nonblocking: Boolean(g.whatsapp_nonblocking || false),
+                        send_timeout_seconds: g.whatsapp_send_timeout_seconds ? Number(g.whatsapp_send_timeout_seconds) : 25,
+                    });
+                    if (g.status === 'maintenance') {
+                        setMaintMessage(String(g.suspended_reason || ''));
+                        setMaintUntil(g.suspended_until ? String(g.suspended_until).slice(0, 16) : '');
+                    }
                 }
                 const payRes = await api.getGymPayments(gymId);
                 if (payRes.ok && payRes.data) {
                     setPayments(payRes.data.payments || []);
+                }
+                const reminderRes = await api.getGymReminderMessage(gymId);
+                if (reminderRes.ok && reminderRes.data) {
+                    setWebappReminderMessage(reminderRes.data.message || '');
                 }
                 // Load branding
                 const brandRes = await api.getGymBranding(gymId);
@@ -85,6 +116,40 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         }
         load();
     }, [gymId]);
+
+    const refresh = async () => {
+        setLoading(true);
+        try {
+            const res = await api.getGym(gymId);
+            if (res.ok && res.data) {
+                setGym(res.data);
+            }
+            const payRes = await api.getGymPayments(gymId);
+            if (payRes.ok && payRes.data) {
+                setPayments(payRes.data.payments || []);
+            }
+        } catch {
+            // Ignore
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleSaveWebappReminder = async () => {
+        setSaving(true);
+        try {
+            const res = await api.setGymReminderMessage(gymId, webappReminderMessage);
+            if (res.ok) {
+                showMessage('Recordatorio guardado');
+            } else {
+                showMessage(res.error || 'Error');
+            }
+        } catch {
+            showMessage('Error');
+        } finally {
+            setSaving(false);
+        }
+    };
 
     const showMessage = (msg: string) => {
         setMessage(msg);
@@ -165,8 +230,88 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     const handleActivateMaintenance = async () => {
         setSaving(true);
         try {
-            await api.sendMaintenanceNotice([gymId], maintMessage);
+            if (maintUntil) {
+                await api.sendMaintenanceNoticeUntil([gymId], maintMessage, maintUntil);
+            } else {
+                await api.sendMaintenanceNotice([gymId], maintMessage);
+            }
             showMessage('Mantenimiento activado');
+            await refresh();
+        } catch {
+            showMessage('Error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleDeactivateMaintenance = async () => {
+        setSaving(true);
+        try {
+            await api.clearMaintenance([gymId]);
+            showMessage('Mantenimiento desactivado');
+            setMaintMessage('');
+            setMaintUntil('');
+            await refresh();
+        } catch {
+            showMessage('Error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleSendReminder = async () => {
+        if (!reminderMessage.trim()) return;
+        setSaving(true);
+        try {
+            const res = await api.sendReminder([gymId], reminderMessage.trim());
+            if (res.ok) {
+                showMessage('Recordatorio enviado');
+                setReminderMessage('');
+            } else {
+                showMessage(res.error || 'Error');
+            }
+        } catch {
+            showMessage('Error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleRegisterPayment = async () => {
+        if (!paymentAmount) return;
+        setSaving(true);
+        try {
+            const res = await api.registerPayment(gymId, {
+                amount: Number(paymentAmount),
+                plan: paymentPlan || undefined,
+                valid_until: paymentValidUntil || undefined,
+            });
+            if (res.ok) {
+                showMessage('Pago registrado');
+                setPaymentAmount('');
+                setPaymentPlan('');
+                setPaymentValidUntil('');
+                await refresh();
+            } else {
+                showMessage(res.error || 'Error');
+            }
+        } catch {
+            showMessage('Error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleSendWhatsAppTest = async () => {
+        if (!waTestPhone.trim()) return;
+        setSaving(true);
+        try {
+            const res = await api.sendWhatsAppTest(gymId, waTestPhone.trim(), waTestMessage);
+            if (res.ok && res.data?.ok) {
+                showMessage(res.data.message || 'Mensaje enviado');
+            } else {
+                showMessage(res.data?.error || res.error || 'Error');
+            }
         } catch {
             showMessage('Error');
         } finally {
@@ -269,8 +414,14 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                         <div className="pt-4 border-t border-slate-800">
                             <h3 className="font-medium text-white mb-3">Enviar recordatorio</h3>
                             <div className="flex gap-3">
-                                <input type="text" className="input flex-1" placeholder="Mensaje de recordatorio" />
-                                <button className="btn-primary flex items-center gap-2">
+                                <input
+                                    type="text"
+                                    className="input flex-1"
+                                    placeholder="Mensaje de recordatorio"
+                                    value={reminderMessage}
+                                    onChange={(e) => setReminderMessage(e.target.value)}
+                                />
+                                <button onClick={handleSendReminder} disabled={saving || !reminderMessage.trim()} className="btn-primary flex items-center gap-2">
                                     <Send className="w-4 h-4" />
                                     Enviar
                                 </button>
@@ -311,10 +462,10 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                         <div className="pt-4 border-t border-slate-800">
                             <h3 className="font-medium text-white mb-3">Registrar pago</h3>
                             <form className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                <input type="number" className="input" placeholder="Monto" />
-                                <input type="text" className="input" placeholder="Plan" />
-                                <input type="date" className="input" />
-                                <button type="button" className="btn-primary">Registrar</button>
+                                <input type="number" className="input" placeholder="Monto" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
+                                <input type="text" className="input" placeholder="Plan" value={paymentPlan} onChange={(e) => setPaymentPlan(e.target.value)} />
+                                <input type="date" className="input" value={paymentValidUntil} onChange={(e) => setPaymentValidUntil(e.target.value)} />
+                                <button type="button" onClick={handleRegisterPayment} disabled={saving || !paymentAmount} className="btn-primary">Registrar</button>
                             </form>
                         </div>
                     </div>
@@ -396,9 +547,9 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                         <div className="pt-4 border-t border-slate-800">
                             <h3 className="font-medium text-white mb-3">Prueba de WhatsApp</h3>
                             <div className="flex gap-3">
-                                <input type="text" className="input w-48" placeholder="+5493411234567" />
-                                <input type="text" className="input flex-1" defaultValue="Mensaje de prueba" />
-                                <button className="btn-secondary flex items-center gap-2">
+                                <input type="text" className="input w-48" placeholder="+5493411234567" value={waTestPhone} onChange={(e) => setWaTestPhone(e.target.value)} />
+                                <input type="text" className="input flex-1" value={waTestMessage} onChange={(e) => setWaTestMessage(e.target.value)} />
+                                <button onClick={handleSendWhatsAppTest} disabled={saving || !waTestPhone.trim()} className="btn-secondary flex items-center gap-2">
                                     <Send className="w-4 h-4" />
                                     Enviar test
                                 </button>
@@ -434,14 +585,20 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                     {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wrench className="w-4 h-4" />}
                                     Activar mantenimiento
                                 </button>
-                                <button className="btn-secondary">Desactivar</button>
+                                <button onClick={handleDeactivateMaintenance} disabled={saving} className="btn-secondary">Desactivar</button>
                             </div>
                         </div>
                         <div className="pt-4 border-t border-slate-800">
                             <h3 className="font-medium text-white mb-3">Recordatorio en WebApp</h3>
                             <div className="flex gap-3">
-                                <input type="text" className="input flex-1" placeholder="Mensaje de recordatorio" />
-                                <button className="btn-primary">Guardar recordatorio</button>
+                                <input
+                                    type="text"
+                                    className="input flex-1"
+                                    placeholder="Mensaje de recordatorio"
+                                    value={webappReminderMessage}
+                                    onChange={(e) => setWebappReminderMessage(e.target.value)}
+                                />
+                                <button onClick={handleSaveWebappReminder} disabled={saving} className="btn-primary">Guardar recordatorio</button>
                             </div>
                         </div>
                     </div>
@@ -618,7 +775,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                 </div>
                             </div>
                         </div>
-                        <button className="btn-secondary">Actualizar estado</button>
+                        <button onClick={refresh} disabled={loading} className="btn-secondary">Actualizar estado</button>
                     </div>
                 )}
 

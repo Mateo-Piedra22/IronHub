@@ -3,6 +3,12 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime, date, timedelta, timezone, time
 from calendar import monthrange
 import logging
+import os
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text, select, or_, and_, func, update, delete
@@ -30,6 +36,53 @@ class ProfesorService(BaseService):
 
     def __init__(self, db: Session):
         super().__init__(db)
+
+    def _get_app_timezone(self):
+        tz_name = (
+            os.getenv("APP_TIMEZONE")
+            or os.getenv("TIMEZONE")
+            or os.getenv("TZ")
+            or "America/Argentina/Buenos_Aires"
+        )
+        if ZoneInfo is not None:
+            try:
+                return ZoneInfo(tz_name)
+            except Exception:
+                pass
+        return timezone(timedelta(hours=-3))
+
+    def _now_utc_naive(self) -> datetime:
+        return datetime.now(timezone.utc).replace(tzinfo=None)
+
+    def _now_local(self) -> datetime:
+        tz = self._get_app_timezone()
+        return datetime.now(timezone.utc).astimezone(tz)
+
+    def _today_local_date(self) -> date:
+        return self._now_local().date()
+
+    def _as_utc_naive(self, dt: Optional[datetime]) -> Optional[datetime]:
+        if dt is None:
+            return None
+        if getattr(dt, "tzinfo", None) is None:
+            return dt
+        try:
+            return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        except Exception:
+            return dt.replace(tzinfo=None)
+
+    def _local_naive_iso(self, dt: Optional[datetime]) -> Optional[str]:
+        if dt is None:
+            return None
+        tz = self._get_app_timezone()
+        utc_naive = self._as_utc_naive(dt)
+        if utc_naive is None:
+            return None
+        try:
+            local_dt = utc_naive.replace(tzinfo=timezone.utc).astimezone(tz).replace(tzinfo=None)
+            return local_dt.isoformat(timespec='seconds')
+        except Exception:
+            return utc_naive.isoformat(timespec='seconds')
 
     # ========== CRUD ==========
 
@@ -81,7 +134,7 @@ class ProfesorService(BaseService):
             # 2. Create Profesor
             profesor = Profesor(
                 usuario_id=usuario.id,
-                fecha_contratacion=date.today()
+                fecha_contratacion=self._today_local_date()
             )
             self.db.add(profesor)
             self.db.commit()
@@ -110,7 +163,7 @@ class ProfesorService(BaseService):
             tarifa_por_hora=data.get('tarifa_por_hora', 0.0),
             biografia=data.get('biografia'),
             telefono_emergencia=data.get('telefono_emergencia'),
-            fecha_contratacion=date.today()
+            fecha_contratacion=self._today_local_date()
         )
         self.db.add(profesor)
         self.db.commit()
@@ -198,9 +251,9 @@ class ProfesorService(BaseService):
         """
         Complex query replacement for TeacherRepository.obtener_detalle_profesores.
         """
-        now = datetime.now()
-        mes_actual = now.month
-        anio_actual = now.year
+        hoy = self._today_local_date()
+        mes_actual = hoy.month
+        anio_actual = hoy.year
         
         sql = text("""
             WITH sesiones AS (
@@ -264,6 +317,34 @@ class ProfesorService(BaseService):
             # Calculate projected hours from schedule
             horarios_json = row.horarios
             horas_semana = 0.0
+
+            def _parse_time_any(v: Any) -> Optional[time]:
+                try:
+                    if v is None:
+                        return None
+                    if isinstance(v, time):
+                        return v
+                    s = str(v).strip()
+                    if not s:
+                        return None
+                    fmt = "%H:%M:%S" if len(s) > 5 else "%H:%M"
+                    try:
+                        return datetime.strptime(s, fmt).time()
+                    except ValueError:
+                        alt = "%H:%M" if fmt == "%H:%M:%S" else "%H:%M:%S"
+                        return datetime.strptime(s, alt).time()
+                except Exception:
+                    return None
+
+            def _duration_hours(start_t: time, end_t: time) -> float:
+                try:
+                    start_sec = start_t.hour * 3600 + start_t.minute * 60 + start_t.second
+                    end_sec = end_t.hour * 3600 + end_t.minute * 60 + end_t.second
+                    if end_sec < start_sec:
+                        end_sec += 24 * 3600
+                    return max(0.0, (end_sec - start_sec) / 3600.0)
+                except Exception:
+                    return 0.0
             
             if horarios_json and isinstance(horarios_json, list):
                 for h in horarios_json:
@@ -271,20 +352,10 @@ class ProfesorService(BaseService):
                         # h is a dict like {'dia': 'Lunes', 'inicio': '10:00:00', 'fin': '11:00:00'}
                         # Note: SQL JSON_BUILD_OBJECT might return strings for times
                         if h.get('inicio') and h.get('fin'):
-                             # Handle time string parsing
-                             fmt = "%H:%M:%S" if len(str(h['inicio'])) > 5 else "%H:%M"
-                             try:
-                                 start = datetime.strptime(str(h['inicio']), fmt)
-                                 end = datetime.strptime(str(h['fin']), fmt)
-                                 diff = (end - start).seconds / 3600.0
-                                 horas_semana += diff
-                             except ValueError:
-                                 # Try alternate format if first failed
-                                 alt_fmt = "%H:%M" if fmt == "%H:%M:%S" else "%H:%M:%S"
-                                 start = datetime.strptime(str(h['inicio']), alt_fmt)
-                                 end = datetime.strptime(str(h['fin']), alt_fmt)
-                                 diff = (end - start).seconds / 3600.0
-                                 horas_semana += diff
+                             start_t = _parse_time_any(h.get('inicio'))
+                             end_t = _parse_time_any(h.get('fin'))
+                             if start_t and end_t:
+                                 horas_semana += _duration_hours(start_t, end_t)
                     except Exception:
                         pass # Ignore malformed times
             
@@ -324,8 +395,8 @@ class ProfesorService(BaseService):
                 {
                     'id': s.id,
                     'profesor_id': s.profesor_id,
-                    'inicio': s.hora_inicio.isoformat() if s.hora_inicio else None,
-                    'fin': s.hora_fin.isoformat() if s.hora_fin else None,
+                    'inicio': self._local_naive_iso(s.hora_inicio),
+                    'fin': self._local_naive_iso(s.hora_fin),
                     'duracion_minutos': s.minutos_totales,
                     'notas': s.notas,
                     'fecha': s.fecha.isoformat()
@@ -342,11 +413,12 @@ class ProfesorService(BaseService):
             if active:
                 return {'error': 'Ya hay una sesión activa'}
 
-            now = datetime.now()
+            now_utc = self._now_utc_naive()
+            fecha_local = self._today_local_date()
             sesion = ProfesorHoraTrabajada(
                 profesor_id=profesor_id,
-                fecha=now.date(),
-                hora_inicio=now,
+                fecha=fecha_local,
+                hora_inicio=now_utc,
                 hora_fin=None
             )
             self.db.add(sesion)
@@ -355,7 +427,7 @@ class ProfesorService(BaseService):
             return {
                 'id': sesion.id, 
                 'profesor_id': sesion.profesor_id, 
-                'inicio': sesion.hora_inicio.isoformat(), 
+                'inicio': self._local_naive_iso(sesion.hora_inicio),
                 'fin': None
             }
         except Exception as e:
@@ -369,8 +441,8 @@ class ProfesorService(BaseService):
             if not sesion or sesion.profesor_id != profesor_id or sesion.hora_fin is not None:
                 return {'error': 'Sesión no encontrada o ya finalizada'}
             
-            now = datetime.now()
-            sesion.hora_fin = now
+            now_utc = self._now_utc_naive()
+            sesion.hora_fin = now_utc
             
             diff = sesion.hora_fin - sesion.hora_inicio
             sesion.minutos_totales = int(diff.total_seconds() / 60)
@@ -381,8 +453,8 @@ class ProfesorService(BaseService):
             return {
                 'id': sesion.id,
                 'profesor_id': sesion.profesor_id,
-                'inicio': sesion.hora_inicio.isoformat(),
-                'fin': sesion.hora_fin.isoformat(),
+                'inicio': self._local_naive_iso(sesion.hora_inicio),
+                'fin': self._local_naive_iso(sesion.hora_fin),
                 'duracion_minutos': sesion.minutos_totales
             }
         except Exception as e:

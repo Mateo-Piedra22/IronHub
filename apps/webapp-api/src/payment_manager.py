@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 
 import logging
@@ -97,6 +97,7 @@ class PaymentManager:
             # Usar transacción atómica para garantizar consistencia de pago y actualización de usuario
             with self.db_manager.atomic_transaction(isolation_level="REPEATABLE READ") as conn:
                 cursor = conn.cursor()
+                now_utc_naive = datetime.now(timezone.utc).replace(tzinfo=None)
                 # Crear o actualizar pago idempotentemente por (usuario_id, mes, año)
                 cursor.execute(
                     """
@@ -105,10 +106,10 @@ class PaymentManager:
                     ON CONFLICT (usuario_id, mes, año) DO UPDATE
                     SET monto = EXCLUDED.monto,
                         metodo_pago_id = COALESCE(EXCLUDED.metodo_pago_id, pagos.metodo_pago_id),
-                        fecha_pago = CURRENT_TIMESTAMP
+                        fecha_pago = %s
                     RETURNING id
                     """,
-                    (usuario_id, monto, mes, año, metodo_pago_id)
+                    (usuario_id, monto, mes, año, metodo_pago_id, now_utc_naive)
                 )
                 result = cursor.fetchone()
                 if not result:

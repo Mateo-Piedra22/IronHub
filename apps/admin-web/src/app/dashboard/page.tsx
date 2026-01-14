@@ -88,7 +88,7 @@ export default function DashboardPage() {
                 setExpirations(
                     (expRes.data.expirations || []).slice(0, 5).map((e: any) => ({
                         gym: e.gym_name || e.nombre || 'Gym',
-                        days: e.days_until || 0,
+                        days: e.days_remaining ?? e.days_until ?? 0,
                         type: 'subscription'
                     }))
                 );

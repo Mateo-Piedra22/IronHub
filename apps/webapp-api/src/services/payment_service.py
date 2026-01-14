@@ -5,9 +5,15 @@ Replaces legacy PaymentManager raw SQL with proper SQLAlchemy ORM.
 All business logic preserved, only database access modernized.
 """
 
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from typing import List, Optional, Dict, Any
 import logging
+import os
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select, update, delete, func, text
@@ -18,7 +24,7 @@ from src.database.repositories.payment_repository import PaymentRepository
 from src.database.repositories.user_repository import UserRepository
 from src.database.orm_models import (
     Pago, Usuario, MetodoPago, ConceptoPago, PagoDetalle, TipoCuota,
-    NumeracionComprobante, ComprobantePago
+    NumeracionComprobante, ComprobantePago, WhatsappConfig, WhatsappMessage, Configuracion
 )
 
 logger = logging.getLogger(__name__)
@@ -41,6 +47,198 @@ class PaymentService(BaseService):
         # WhatsApp integration (optional)
         self.whatsapp_manager = None
         self.whatsapp_enabled = False
+
+    def _is_exempt_role(self, rol: Optional[str]) -> bool:
+        try:
+            r = str(rol or '').strip().lower()
+        except Exception:
+            r = ''
+        return r in ('profesor', 'dueño', 'dueno', 'owner')
+
+    # =========================================================================
+    # WHATSAPP CONFIG/STATE (used by routers/whatsapp.py)
+    # =========================================================================
+
+    def _get_whatsapp_config_row(self) -> Optional[WhatsappConfig]:
+        try:
+            return (
+                self.db.execute(
+                    select(WhatsappConfig)
+                    .where(WhatsappConfig.active == True)
+                    .order_by(WhatsappConfig.created_at.desc())
+                    .limit(1)
+                )
+                .scalars()
+                .first()
+            )
+        except Exception:
+            return None
+
+    def _get_configuracion_value(self, clave: str) -> Optional[str]:
+        try:
+            row = (
+                self.db.execute(
+                    select(Configuracion.valor)
+                    .where(Configuracion.clave == clave)
+                    .limit(1)
+                )
+                .first()
+            )
+            return row[0] if row else None
+        except Exception:
+            return None
+
+    def obtener_config_whatsapp(self) -> Dict[str, Any]:
+        """Return WhatsApp config for UI. Note: token redaction is handled by router."""
+        cfg_row = self._get_whatsapp_config_row()
+        config: Dict[str, Any] = {
+            'phone_number_id': getattr(cfg_row, 'phone_id', '') if cfg_row else '',
+            'whatsapp_business_account_id': getattr(cfg_row, 'waba_id', '') if cfg_row else '',
+            'access_token': getattr(cfg_row, 'access_token', '') if cfg_row else '',
+            'allowlist_numbers': self._get_configuracion_value('allowlist_numbers') or '',
+            'allowlist_enabled': self._get_configuracion_value('allowlist_enabled'),
+            'enable_webhook': self._get_configuracion_value('enable_webhook'),
+            'max_retries': self._get_configuracion_value('max_retries'),
+            'retry_delay_seconds': self._get_configuracion_value('retry_delay_seconds'),
+        }
+        return config
+
+    def configurar_whatsapp(self, configuracion: Dict[str, Any]) -> bool:
+        """Persist WhatsApp config. Returns whether configuration is considered valid."""
+        if not isinstance(configuracion, dict):
+            return False
+
+        try:
+            phone_id = None
+            waba_id = None
+            access_token = None
+
+            if 'phone_number_id' in configuracion:
+                phone_id = str(configuracion.get('phone_number_id') or '').strip() or None
+            if 'whatsapp_business_account_id' in configuracion:
+                waba_id = str(configuracion.get('whatsapp_business_account_id') or '').strip() or None
+            if 'access_token' in configuracion:
+                access_token = str(configuracion.get('access_token') or '').strip() or None
+
+            row = self._get_whatsapp_config_row()
+            if row is None:
+                if phone_id is None:
+                    phone_id = ''
+                if waba_id is None:
+                    waba_id = ''
+                row = WhatsappConfig(phone_id=phone_id, waba_id=waba_id, access_token=access_token, active=True)
+                self.db.add(row)
+            else:
+                if phone_id is not None:
+                    row.phone_id = phone_id
+                if waba_id is not None:
+                    row.waba_id = waba_id
+                if access_token is not None:
+                    row.access_token = access_token
+
+            # Store preferences in Configuracion
+            for k in ('allowlist_numbers', 'allowlist_enabled', 'enable_webhook', 'max_retries', 'retry_delay_seconds'):
+                if k in configuracion:
+                    try:
+                        val_str = str(configuracion.get(k) if configuracion.get(k) is not None else '')
+                    except Exception:
+                        val_str = ''
+                    stmt = insert(Configuracion).values(clave=k, valor=val_str).on_conflict_do_update(
+                        index_elements=['clave'],
+                        set_={'valor': val_str}
+                    )
+                    self.db.execute(stmt)
+
+            self.db.commit()
+
+            # Consider "valid" if required IDs and token exist
+            cfg_row = self._get_whatsapp_config_row()
+            self.whatsapp_enabled = bool(
+                cfg_row
+                and (getattr(cfg_row, 'phone_id', '') or '').strip()
+                and (getattr(cfg_row, 'waba_id', '') or '').strip()
+                and (getattr(cfg_row, 'access_token', '') or '').strip()
+            )
+            return self.whatsapp_enabled
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Error al configurar WhatsApp (PaymentService): {e}")
+            return False
+
+    def obtener_estado_whatsapp(self) -> Dict[str, Any]:
+        cfg = self.obtener_config_whatsapp()
+        # Determine validity based on required fields
+        valid = bool(
+            str(cfg.get('phone_number_id') or '').strip()
+            and str(cfg.get('whatsapp_business_account_id') or '').strip()
+            and str(cfg.get('access_token') or '').strip()
+        )
+        # This API implementation doesn't embed a webhook server
+        return {
+            'disponible': True,
+            'habilitado': bool(valid),
+            'servidor_activo': False,
+            'configuracion_valida': bool(valid),
+            'config': cfg,
+        }
+
+    def obtener_estadisticas_whatsapp(self) -> Dict[str, Any]:
+        """Basic WhatsApp message statistics computed from whatsapp_messages."""
+        try:
+            total = self.db.execute(select(func.count(WhatsappMessage.id))).scalar() or 0
+            since_30 = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+            ultimo_mes = (
+                self.db.execute(
+                    select(func.count(WhatsappMessage.id)).where(WhatsappMessage.sent_at >= since_30)
+                ).scalar()
+                or 0
+            )
+            by_type = dict(
+                self.db.execute(
+                    select(WhatsappMessage.message_type, func.count(WhatsappMessage.id)).group_by(WhatsappMessage.message_type)
+                ).all()
+            )
+            by_status = dict(
+                self.db.execute(
+                    select(WhatsappMessage.status, func.count(WhatsappMessage.id)).group_by(WhatsappMessage.status)
+                ).all()
+            )
+            return {
+                'total_mensajes': int(total),
+                'mensajes_ultimo_mes': int(ultimo_mes),
+                'mensajes_por_tipo': {str(k): int(v) for k, v in (by_type or {}).items() if k is not None},
+                'mensajes_por_estado': {str(k): int(v) for k, v in (by_status or {}).items() if k is not None},
+            }
+        except Exception as e:
+            logger.error(f"Error stats whatsapp (PaymentService): {e}")
+            return {'error': str(e)}
+
+    def iniciar_servidor_whatsapp(self) -> bool:
+        return False
+
+    def detener_servidor_whatsapp(self) -> bool:
+        return False
+
+    def _get_app_timezone(self):
+        tz_name = (
+            os.getenv("APP_TIMEZONE")
+            or os.getenv("TIMEZONE")
+            or os.getenv("TZ")
+            or "America/Argentina/Buenos_Aires"
+        )
+        if ZoneInfo is not None:
+            try:
+                return ZoneInfo(tz_name)
+            except Exception:
+                pass
+        return timezone(timedelta(hours=-3))
+
+    def _now_local_naive(self) -> datetime:
+        tz = self._get_app_timezone()
+        return datetime.now(timezone.utc).astimezone(tz).replace(tzinfo=None)
+
+    def _today_local_date(self) -> date:
+        return self._now_local_naive().date()
 
     # =========================================================================
     # CORE PAYMENT OPERATIONS
@@ -119,7 +317,7 @@ class PaymentService(BaseService):
             total = subtotal + comision
 
             # Update payment
-            now = fecha_pago or datetime.now()
+            now = fecha_pago or self._now_local_naive()
             pago.usuario_id = usuario_id
             pago.monto = total
             pago.mes = now.month
@@ -248,7 +446,7 @@ class PaymentService(BaseService):
             raise ValueError("Se requiere al menos un concepto de pago")
 
         try:
-            now = fecha_pago or datetime.now()
+            now = fecha_pago or self._now_local_naive()
             
             # Determine quota period (Effective Month/Year)
             # Use overrides if provided (for back-payments), otherwise use transaction date
@@ -277,11 +475,10 @@ class PaymentService(BaseService):
 
             if pago:
                 # MERGE into existing payment
-                # Update total amount (add new batch total to existing total)
-                pago.monto = float(pago.monto) + total_batch
+                pago.monto = total_batch
                 pago.metodo_pago_id = metodo_pago_id # Update method to latest used
                 pago.fecha_pago = now # Update effective date to latest transaction
-                logger.info(f"Fusionando pago para usuario {usuario_id} (Mes {mes_eff}/{año_eff}): {total_batch} añadido.")
+                logger.info(f"Actualizando pago para usuario {usuario_id} (Mes {mes_eff}/{año_eff}): {total_batch}.")
             else:
                 # CREATE new payment
                 pago = Pago(
@@ -296,7 +493,12 @@ class PaymentService(BaseService):
             
             self.db.flush() # Ensure we have pago.id
 
-            # Create payment details (Always append new details)
+            if pago and pago.id:
+                self.db.execute(
+                    delete(PagoDetalle).where(PagoDetalle.pago_id == pago.id)
+                )
+
+            # Create payment details
             for c in conceptos:
                 cantidad = float(c.get('cantidad', 1))
                 precio = float(c.get('precio_unitario', 0))
@@ -514,51 +716,54 @@ class PaymentService(BaseService):
             .limit(1)
         ).scalar_one_or_none()
 
-        hoy = date.today()
+        hoy = self._today_local_date()
         cuotas_previas = usuario.cuotas_vencidas or 0
 
+        if duracion_dias <= 0:
+            duracion_dias = 30
+
+        exento = self._is_exempt_role(getattr(usuario, 'rol', None))
+
+        base_date: date
+        ultimo_pago_date: Optional[date] = None
         if ultimo_pago and ultimo_pago.fecha_pago:
             fecha_ref = ultimo_pago.fecha_pago
             if isinstance(fecha_ref, datetime):
                 fecha_ref = fecha_ref.date()
-            
+            ultimo_pago_date = fecha_ref
+            base_date = fecha_ref
             usuario.ultimo_pago = fecha_ref
-            proximo = fecha_ref + timedelta(days=duracion_dias)
-            usuario.fecha_proximo_vencimiento = proximo
-
-            # Calculate overdue quotas
-            if hoy > proximo:
-                dias_vencido = (hoy - proximo).days
-                cuotas_vencidas = dias_vencido // duracion_dias + 1
-            else:
-                cuotas_vencidas = 0
         else:
-            # No payments - use registration date
             fecha_registro = usuario.fecha_registro or hoy
             if isinstance(fecha_registro, datetime):
                 fecha_registro = fecha_registro.date()
-            
-            proximo = fecha_registro + timedelta(days=duracion_dias)
-            usuario.fecha_proximo_vencimiento = proximo
-            
-            if hoy > proximo:
-                dias_vencido = (hoy - proximo).days
-                cuotas_vencidas = dias_vencido // duracion_dias + 1
-            else:
-                cuotas_vencidas = 0
+            base_date = fecha_registro
+
+        primer_vencimiento = base_date + timedelta(days=duracion_dias)
+        if hoy <= primer_vencimiento:
+            proximo_vencimiento = primer_vencimiento
+            cuotas_vencidas_calc = 0
+        else:
+            dias_desde_primer_venc = (hoy - primer_vencimiento).days
+            ciclos_vencidos = (dias_desde_primer_venc + duracion_dias - 1) // duracion_dias
+            if ciclos_vencidos < 1:
+                ciclos_vencidos = 1
+            cuotas_vencidas_calc = ciclos_vencidos
+            proximo_vencimiento = primer_vencimiento + timedelta(days=duracion_dias * ciclos_vencidos)
+
+        usuario.fecha_proximo_vencimiento = proximo_vencimiento
+
+        if exento:
+            cuotas_vencidas = 0
+        else:
+            cuotas_vencidas = int(cuotas_vencidas_calc)
 
         usuario.cuotas_vencidas = cuotas_vencidas
 
-        # Check for deactivation threshold
-        rol = (usuario.rol or '').lower()
-        exento = rol in ('profesor', 'dueño', 'owner')
-
-        if not exento and cuotas_vencidas >= 3:
+        if (not exento) and cuotas_vencidas >= 3:
             if usuario.activo:
                 usuario.activo = False
-                logger.warning(
-                    f"Usuario {usuario_id} desactivado por {cuotas_vencidas} cuotas vencidas"
-                )
+                logger.warning(f"Usuario {usuario_id} desactivado por {cuotas_vencidas} cuotas vencidas")
 
         self.db.commit()
 
@@ -645,9 +850,8 @@ class PaymentService(BaseService):
         if not usuario:
             return False
 
-        rol = (usuario.rol or '').lower()
-        if rol in ('profesor', 'dueño', 'owner'):
-            logger.info(f"Usuario {usuario_id} exento de desactivación (rol: {rol})")
+        if self._is_exempt_role(getattr(usuario, 'rol', None)):
+            logger.info(f"Usuario {usuario_id} exento de desactivación (rol: {(getattr(usuario, 'rol', None) or '')})")
             return False
 
         usuario.activo = False
@@ -706,7 +910,7 @@ class PaymentService(BaseService):
         - Increment overdue quotas
         - Deactivate those with 3+ overdue
         """
-        hoy = date.today()
+        hoy = self._today_local_date()
         
         # Get all active members with overdue payments
         stmt = select(Usuario).where(
@@ -751,7 +955,7 @@ class PaymentService(BaseService):
         Returns:
             Dict with processed, deactivated, reminders_sent counts
         """
-        hoy = date.today()
+        hoy = self._today_local_date()
         
         # Get all active members with overdue payments
         stmt = select(Usuario).where(
@@ -816,7 +1020,7 @@ class PaymentService(BaseService):
         Returns:
             Dict with count of reminders sent
         """
-        hoy = date.today()
+        hoy = self._today_local_date()
         fecha_limite = hoy + timedelta(days=dias_antes)
         
         # Get users with payments due in the next N days
@@ -867,7 +1071,7 @@ class PaymentService(BaseService):
 
     def obtener_usuarios_morosos(self) -> List[Dict[str, Any]]:
         """Get list of delinquent users."""
-        hoy = date.today()
+        hoy = self._today_local_date()
         
         stmt = select(Usuario).where(
             Usuario.activo == True,
@@ -895,7 +1099,7 @@ class PaymentService(BaseService):
 
     def obtener_estadisticas_pagos(self, año: Optional[int] = None) -> Dict[str, Any]:
         """Get payment statistics for a year."""
-        año = año or date.today().year
+        año = año or self._today_local_date().year
         
         # Total payments and amount
         stmt = select(
@@ -1274,7 +1478,7 @@ class PaymentService(BaseService):
                 numero_comprobante=numero,
                 emitido_por=emitido_por,
                 estado='emitido',
-                fecha_creacion=datetime.now()
+                fecha_creacion=self._now_local_naive()
             )
             
             self.db.add(nuevo_comprobante)

@@ -1,5 +1,6 @@
 """Admin Service - SQLAlchemy ORM for admin operations."""
 from typing import Optional, Dict, Any, List
+from datetime import datetime, timezone
 import logging
 import bcrypt
 
@@ -156,8 +157,17 @@ class AdminService(BaseService):
     def establecer_reminder(self, message: str, active: bool = True) -> bool:
         """Set system reminder."""
         try:
-            self.db.execute(text("CREATE TABLE IF NOT EXISTS configuracion (id SERIAL PRIMARY KEY, clave VARCHAR(100) UNIQUE, valor TEXT, activo BOOLEAN DEFAULT TRUE, updated_at TIMESTAMP DEFAULT NOW())"))
-            self.db.execute(text("INSERT INTO configuracion (clave, valor, activo) VALUES ('system_reminder', :msg, :act) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor, activo = EXCLUDED.activo, updated_at = NOW()"), {'msg': message, 'act': active})
+            updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            self.db.execute(text("CREATE TABLE IF NOT EXISTS configuracion (id SERIAL PRIMARY KEY, clave VARCHAR(100) UNIQUE, valor TEXT, activo BOOLEAN DEFAULT TRUE, updated_at TIMESTAMP)"))
+            self.db.execute(
+                text(
+                    "INSERT INTO configuracion (clave, valor, activo, updated_at) "
+                    "VALUES ('system_reminder', :msg, :act, :updated_at) "
+                    "ON CONFLICT (clave) DO UPDATE "
+                    "SET valor = EXCLUDED.valor, activo = EXCLUDED.activo, updated_at = EXCLUDED.updated_at"
+                ),
+                {'msg': message, 'act': active, 'updated_at': updated_at}
+            )
             self.db.commit()
             return True
         except Exception as e:

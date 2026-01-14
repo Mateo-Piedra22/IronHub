@@ -19,7 +19,8 @@ from src.database.tenant_connection import (
     get_tenant_session_factory,
     set_current_tenant,
     get_current_tenant,
-    CURRENT_TENANT
+    CURRENT_TENANT,
+    validate_tenant_name
 )
 
 # Import local services
@@ -58,8 +59,19 @@ async def ensure_tenant_context(request: Request) -> Optional[str]:
                  tenant = candidate
 
     if tenant:
-        set_current_tenant(tenant)
-        return tenant
+        try:
+            t = str(tenant).strip().lower()
+        except Exception:
+            t = ""
+
+        try:
+            ok, _err = validate_tenant_name(t)
+        except Exception:
+            ok = False
+
+        if ok:
+            set_current_tenant(t)
+            return t
     return None
 
 
@@ -228,10 +240,6 @@ async def require_gestion_access(request: Request):
 
 async def require_owner(request: Request):
     """Require owner/admin access."""
-    # DEBUG LOGGING
-    logger.info(f"AUTH DEBUG [{request.url.path}] - Headers: {request.headers.get('cookie', 'NO COOKIE HEADER')}")
-    logger.info(f"AUTH DEBUG [{request.url.path}] - Session: {request.session}")
-    
     if not request.session.get("logged_in"):
         logger.warning(f"AUTH FAILED: Not logged in. Session keys: {list(request.session.keys())}")
         if request.url.path.startswith("/api/"):

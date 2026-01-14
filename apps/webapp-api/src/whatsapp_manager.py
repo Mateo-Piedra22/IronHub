@@ -11,7 +11,7 @@ import asyncio
 import threading
 import psycopg2.extras
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
 from pywa import WhatsApp
 from pywa.types import Message
@@ -20,6 +20,10 @@ from .database import DatabaseManager
 from .template_processor import TemplateProcessor
 from .message_logger import MessageLogger
 from typing import Any, Dict, List, Optional
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 try:
     import requests  # type: ignore
 except Exception:
@@ -81,6 +85,24 @@ class WhatsAppManager:
         # No inicializar cliente inmediatamente si está diferido; esto evita bloqueos en arranque
         if not self._init_deferred:
             self._initialize_client()
+
+    def _get_app_timezone(self):
+        tz_name = (
+            os.getenv("APP_TIMEZONE")
+            or os.getenv("TIMEZONE")
+            or os.getenv("TZ")
+            or "America/Argentina/Buenos_Aires"
+        )
+        if ZoneInfo is not None:
+            try:
+                return ZoneInfo(tz_name)
+            except Exception:
+                pass
+        return timezone(timedelta(hours=-3))
+
+    def _now_local_naive(self) -> datetime:
+        tz = self._get_app_timezone()
+        return datetime.now(timezone.utc).astimezone(tz).replace(tzinfo=None)
 
     def reinicializar_configuracion(self) -> None:
         """Recarga configuración desde DB y aplica preferencias sin bloquear UI."""
@@ -543,7 +565,7 @@ class WhatsAppManager:
                         BodyText.params(
                             usuario.nombre,
                             f"{pago_info.get('monto', 0):,.0f}",
-                            pago_info.get('fecha', datetime.now().strftime('%d/%m/%Y'))
+                            pago_info.get('fecha', self._now_local_naive().strftime('%d/%m/%Y'))
                         )
                     ]
                 )
@@ -608,8 +630,7 @@ class WhatsAppManager:
                 return False
             
             # Obtener información de cuota vencida
-            from datetime import datetime
-            now = datetime.now()
+            now = self._now_local_naive()
             pago_actual = self.db.obtener_pago_actual(usuario_id, now.month, now.year)
             if not pago_actual:
                 logging.warning(f"No se encontró información de pago para usuario {usuario_id}")
@@ -894,7 +915,7 @@ class WhatsAppManager:
                 return False
 
             template_name = "aviso_de_desactivacion_por_falta_de_pago_para_usuario_especifico_en_sistema_de_management_de_gimnasios_profesional"
-            fecha = fecha_desactivacion or datetime.now().strftime('%d/%m/%Y')
+            fecha = fecha_desactivacion or self._now_local_naive().strftime('%d/%m/%Y')
 
             try:
                 response = self.wa_client.send_template(

@@ -54,6 +54,9 @@ class RawPostgresManager:
                 except Exception:
                     pass
 
+    def get_connection(self) -> Generator[Any, None, None]:
+        return self.get_connection_context()
+
     def inicializar_base_datos(self):
         """
         Método de compatibilidad/placeholder si se requiere inicialización específica.

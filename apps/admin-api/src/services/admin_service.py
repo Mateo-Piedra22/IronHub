@@ -306,11 +306,16 @@ class AdminService:
             with self.db.get_connection_context() as conn:
                 cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                 cur.execute(
-                    f"SELECT id, nombre, subdominio, db_name, owner_phone, status, hard_suspend, suspended_until, b2_bucket_name, b2_bucket_id, created_at FROM gyms{where_sql} ORDER BY {ob} {od} LIMIT %s OFFSET %s",
+                    f"SELECT id, nombre, subdominio, db_name, owner_phone, status, hard_suspend, suspended_until, b2_bucket_name, b2_bucket_id, whatsapp_phone_id, whatsapp_access_token, created_at FROM gyms{where_sql} ORDER BY {ob} {od} LIMIT %s OFFSET %s",
                     params + [ps, (p - 1) * ps]
                 )
                 rows = cur.fetchall()
-            return {"items": [dict(r) for r in rows], "total": total, "page": p, "page_size": ps}
+            items: List[Dict[str, Any]] = []
+            for r in rows:
+                dct = dict(r)
+                dct["wa_configured"] = bool((dct.get("whatsapp_phone_id") or "").strip()) and bool((dct.get("whatsapp_access_token") or "").strip())
+                items.append(dct)
+            return {"items": items, "total": total, "page": p, "page_size": ps}
         except Exception as e:
             logger.error(f"Error listing gyms advanced: {e}")
             return {"items": [], "total": 0, "page": 1, "page_size": int(page_size or 20)}
@@ -349,6 +354,7 @@ class AdminService:
                 cur.execute(
                     f"""
                     SELECT g.id, g.nombre, g.subdominio, g.db_name, g.owner_phone, g.status, g.hard_suspend, g.suspended_until,
+                           g.whatsapp_phone_id, g.whatsapp_access_token,
                            g.b2_bucket_name, g.b2_bucket_id, g.created_at,
                            gs.next_due_date, gs.status AS sub_status,
                            (SELECT amount FROM gym_payments WHERE gym_id = g.id ORDER BY paid_at DESC LIMIT 1) AS last_payment_amount,
@@ -363,7 +369,12 @@ class AdminService:
                     params + [ps, (p - 1) * ps]
                 )
                 rows = cur.fetchall()
-            return {"items": [dict(r) for r in rows], "total": total, "page": p, "page_size": ps}
+            items: List[Dict[str, Any]] = []
+            for r in rows:
+                dct = dict(r)
+                dct["wa_configured"] = bool((dct.get("whatsapp_phone_id") or "").strip()) and bool((dct.get("whatsapp_access_token") or "").strip())
+                items.append(dct)
+            return {"items": items, "total": total, "page": p, "page_size": ps}
         except Exception as e:
             logger.error(f"Error listing gyms summary: {e}")
             return {"items": [], "total": 0, "page": 1, "page_size": int(page_size or 20)}
@@ -673,6 +684,122 @@ class AdminService:
         except Exception:
             return None
 
+    def batch_set_maintenance(self, ids: List[int], message: Optional[str]) -> Dict[str, Any]:
+        """Set maintenance mode for many gyms."""
+        ok_count = 0
+        fail_count = 0
+        for gym_id in (ids or []):
+            try:
+                if self.set_mantenimiento(int(gym_id), message):
+                    ok_count += 1
+                else:
+                    fail_count += 1
+            except Exception:
+                fail_count += 1
+        return {"ok": True, "updated": ok_count, "failed": fail_count}
+
+    def batch_schedule_maintenance(self, ids: List[int], until: Optional[str], message: Optional[str]) -> Dict[str, Any]:
+        """Schedule maintenance mode for many gyms until a given datetime/date string."""
+        ok_count = 0
+        fail_count = 0
+        for gym_id in (ids or []):
+            try:
+                if self.schedule_mantenimiento(int(gym_id), until, message):
+                    ok_count += 1
+                else:
+                    fail_count += 1
+            except Exception:
+                fail_count += 1
+        return {"ok": True, "updated": ok_count, "failed": fail_count}
+
+    def batch_clear_maintenance(self, ids: List[int]) -> Dict[str, Any]:
+        """Clear maintenance mode for many gyms."""
+        ok_count = 0
+        fail_count = 0
+        for gym_id in (ids or []):
+            try:
+                if self.clear_mantenimiento(int(gym_id)):
+                    ok_count += 1
+                else:
+                    fail_count += 1
+            except Exception:
+                fail_count += 1
+        return {"ok": True, "updated": ok_count, "failed": fail_count}
+
+    def batch_send_owner_message(self, ids: List[int], message: str) -> Dict[str, Any]:
+        """Send a WhatsApp message to gym owners for many gyms."""
+        sent = 0
+        failed = 0
+        msg = str(message or "").strip()
+        if not msg:
+            return {"ok": False, "error": "message_required", "sent": 0}
+        for gym_id in (ids or []):
+            try:
+                if self._enviar_whatsapp_a_owner(int(gym_id), msg):
+                    sent += 1
+                else:
+                    failed += 1
+            except Exception:
+                failed += 1
+        return {"ok": True, "sent": sent, "failed": failed}
+
+    def batch_suspend(self, ids: List[int], reason: Optional[str] = None, until: Optional[str] = None, hard: bool = False) -> Dict[str, Any]:
+        """Suspend many gyms by setting status='suspended'."""
+        updated = 0
+        failed = 0
+        for gym_id in (ids or []):
+            try:
+                if self.set_estado_gimnasio(int(gym_id), "suspended", bool(hard), until, reason):
+                    updated += 1
+                else:
+                    failed += 1
+            except Exception:
+                failed += 1
+        return {"ok": True, "updated": updated, "failed": failed}
+
+    def batch_reactivate(self, ids: List[int]) -> Dict[str, Any]:
+        """Reactivate many gyms by setting status='active' and clearing suspension fields."""
+        updated = 0
+        failed = 0
+        for gym_id in (ids or []):
+            try:
+                if self.set_estado_gimnasio(int(gym_id), "active", False, None, None):
+                    updated += 1
+                else:
+                    failed += 1
+            except Exception:
+                failed += 1
+        return {"ok": True, "updated": updated, "failed": failed}
+
+    def batch_provision(self, ids: List[int]) -> Dict[str, Any]:
+        """Re-provision tenant DB schema and push WhatsApp config for many gyms."""
+        updated = 0
+        failed = 0
+        for gym_id in (ids or []):
+            try:
+                gym = self.obtener_gimnasio(int(gym_id))
+                if not gym:
+                    failed += 1
+                    continue
+                db_name = str(gym.get("db_name") or "").strip()
+                if not db_name:
+                    failed += 1
+                    continue
+                params = self.resolve_admin_db_params()
+                params["database"] = db_name
+                ok = self._bootstrap_tenant_db(params, owner_data={"phone": gym.get("owner_phone"), "gym_name": gym.get("nombre")})
+                try:
+                    self._push_whatsapp_to_gym_db(int(gym_id))
+                except Exception:
+                    pass
+                if ok:
+                    updated += 1
+                else:
+                    failed += 1
+            except Exception:
+                failed += 1
+        return {"ok": True, "provisioned": updated, "failed": failed}
+
     # --- Infrastructure & B2 Methods ---
 
     def _bootstrap_tenant_db(self, connection_params: Dict[str, Any], owner_data: Optional[Dict[str, Any]] = None) -> bool:
@@ -707,6 +834,62 @@ class AdminService:
                     logger.error(f"CRITICAL: No tables created for {dbname} despite create_all execution.")
             except Exception as e:
                 logger.error(f"Error verifying tables in {dbname}: {e}")
+
+            # 1.5 Ensure critical constraints exist (create_all does not alter existing tables)
+            try:
+                with engine.connect() as conn:
+                    conn.execute(text("""
+                        DO $$
+                        BEGIN
+                            IF NOT EXISTS (
+                                SELECT 1 FROM pg_constraint WHERE conname = 'idx_pagos_usuario_mes_año'
+                            ) THEN
+                                EXECUTE format(
+                                    'ALTER TABLE pagos ADD CONSTRAINT %I UNIQUE (usuario_id, mes, %I)',
+                                    'idx_pagos_usuario_mes_año',
+                                    'año'
+                                );
+                            END IF;
+
+                            IF NOT EXISTS (
+                                SELECT 1 FROM pg_constraint WHERE conname = 'asistencias_usuario_id_fecha_key'
+                            ) THEN
+                                EXECUTE 'ALTER TABLE asistencias ADD CONSTRAINT asistencias_usuario_id_fecha_key UNIQUE (usuario_id, fecha)';
+                            END IF;
+                        END $$;
+                    """))
+
+                    conn.execute(text("""
+                        DO $$
+                        BEGIN
+                            IF EXISTS (
+                                SELECT 1 FROM information_schema.columns
+                                WHERE table_name = 'ejercicios' AND column_name = 'variantes'
+                            ) THEN
+                                NULL;
+                            ELSE
+                                EXECUTE 'ALTER TABLE ejercicios ADD COLUMN variantes TEXT';
+                            END IF;
+
+                            IF EXISTS (
+                                SELECT 1 FROM information_schema.columns
+                                WHERE table_name = 'usuarios' AND column_name = 'pin'
+                            ) THEN
+                                IF EXISTS (
+                                    SELECT 1 FROM information_schema.columns
+                                    WHERE table_name = 'usuarios' AND column_name = 'pin'
+                                    AND data_type = 'character varying'
+                                    AND (character_maximum_length IS NULL OR character_maximum_length < 100)
+                                ) THEN
+                                    EXECUTE 'ALTER TABLE usuarios ALTER COLUMN pin TYPE VARCHAR(100)';
+                                END IF;
+                                EXECUTE 'ALTER TABLE usuarios ALTER COLUMN pin SET DEFAULT ''123456''';
+                            END IF;
+                        END $$;
+                    """))
+                    conn.commit()
+            except Exception as e:
+                logger.warning(f"Could not ensure constraints in {dbname}: {e}")
 
             # 2. Create Owner User if provided
             if owner_data:
@@ -1335,6 +1518,58 @@ class AdminService:
         except Exception as e:
             logger.error(f"Error getting branding for gym {gym_id}: {e}")
             return {}
+
+    def get_gym_reminder_message(self, gym_id: int) -> Optional[str]:
+        try:
+            gym = self.obtener_gimnasio(gym_id)
+            if not gym:
+                return None
+            db_name = gym.get("db_name")
+            if not db_name:
+                return None
+            engine = self._get_tenant_engine(db_name)
+            if not engine:
+                return None
+            Session = sessionmaker(bind=engine)
+            session = Session()
+            try:
+                row = session.query(Configuracion).filter_by(clave="reminder_message").first()
+                if not row:
+                    return None
+                return str(row.valor or "")
+            finally:
+                session.close()
+                engine.dispose()
+        except Exception:
+            return None
+
+    def set_gym_reminder_message(self, gym_id: int, message: Optional[str]) -> Dict[str, Any]:
+        try:
+            gym = self.obtener_gimnasio(gym_id)
+            if not gym:
+                return {"ok": False, "error": "gym_not_found"}
+            db_name = gym.get("db_name")
+            if not db_name:
+                return {"ok": False, "error": "no_tenant_db"}
+            engine = self._get_tenant_engine(db_name)
+            if not engine:
+                return {"ok": False, "error": "could_not_connect_tenant"}
+            Session = sessionmaker(bind=engine)
+            session = Session()
+            try:
+                msg = str(message or "")
+                existing = session.query(Configuracion).filter_by(clave="reminder_message").first()
+                if existing:
+                    existing.valor = msg
+                else:
+                    session.add(Configuracion(clave="reminder_message", valor=msg))
+                session.commit()
+                return {"ok": True}
+            finally:
+                session.close()
+                engine.dispose()
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     def _get_tenant_engine(self, db_name: str):
         """Get SQLAlchemy engine for a tenant database."""

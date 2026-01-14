@@ -407,7 +407,7 @@ function ExcelPreviewPanel({ rutinaId, isVisible, draftData, weeks }: ExcelPrevi
     const [isLoading, setIsLoading] = useState(false);
 
     // Export Options
-    const [qrMode, setQrMode] = useState<'inline' | 'sheet' | 'none'>('inline');
+    const [qrMode, setQrMode] = useState<'inline' | 'sheet' | 'none'>('sheet');
     const [sheetName, setSheetName] = useState('');
     const [userOverride, setUserOverride] = useState('');
 

@@ -1,11 +1,38 @@
 from typing import List, Optional, Dict, Any, Tuple
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
+import os
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 from sqlalchemy import select, update, delete, func, text, desc
 from sqlalchemy.orm import Session
 from .base import BaseRepository
 from ..orm_models import Pago, TipoCuota, MetodoPago, ConceptoPago, Usuario, Configuracion
 
 class PaymentRepository(BaseRepository):
+
+    def _get_app_timezone(self):
+        tz_name = (
+            os.getenv("APP_TIMEZONE")
+            or os.getenv("TIMEZONE")
+            or os.getenv("TZ")
+            or "America/Argentina/Buenos_Aires"
+        )
+        if ZoneInfo is not None:
+            try:
+                return ZoneInfo(tz_name)
+            except Exception:
+                pass
+        return timezone(timedelta(hours=-3))
+
+    def _now_local_naive(self) -> datetime:
+        tz = self._get_app_timezone()
+        return datetime.now(timezone.utc).astimezone(tz).replace(tzinfo=None)
+
+    def _today_local_date(self) -> date:
+        return self._now_local_naive().date()
     
     def obtener_ultimos_pagos(self, usuario_id: int, limit: int = 10) -> List[Dict]:
         stmt = select(Pago).where(Pago.usuario_id == usuario_id).order_by(Pago.fecha_pago.desc()).limit(limit)
@@ -66,16 +93,17 @@ class PaymentRepository(BaseRepository):
             try:
                 uid = int(item.get('usuario_id'))
                 monto = float(item.get('monto'))
-                mes = int(item.get('mes') or item.get('mes_pagado') or datetime.now().month)
-                año = int(item.get('año') or item.get('año_pagado') or datetime.now().year)
+                now_local = self._now_local_naive()
+                mes = int(item.get('mes') or item.get('mes_pagado') or now_local.month)
+                año = int(item.get('año') or item.get('año_pagado') or now_local.year)
                 
                 # Resolver fecha
-                fecha_pago = item.get('fecha_pago') or datetime.now()
+                fecha_pago = item.get('fecha_pago') or now_local
                 if isinstance(fecha_pago, str):
                     try:
                         fecha_pago = datetime.fromisoformat(fecha_pago)
                     except:
-                        fecha_pago = datetime.now()
+                        fecha_pago = now_local
                 
                 # Resolver metodo
                 metodo_id = item.get('metodo_pago_id')
@@ -133,7 +161,7 @@ class PaymentRepository(BaseRepository):
 
     def actualizar_fecha_proximo_vencimiento(self, usuario_id: int, fecha_pago: date = None) -> bool:
         if fecha_pago is None:
-            fecha_pago = date.today()
+            fecha_pago = self._today_local_date()
             
         user = self.db.get(Usuario, usuario_id)
         if not user:
@@ -149,6 +177,10 @@ class PaymentRepository(BaseRepository):
         user.fecha_proximo_vencimiento = fecha_pago + timedelta(days=duracion)
         user.cuotas_vencidas = 0
         user.ultimo_pago = fecha_pago
+        try:
+            user.activo = True
+        except Exception:
+            pass
         
         self.db.commit()
         self._invalidate_cache('usuarios', usuario_id)
@@ -159,7 +191,8 @@ class PaymentRepository(BaseRepository):
         if not user:
             return False
             
-        if user.rol in ('profesor', 'dueño', 'owner'):
+        rol = str(getattr(user, 'rol', '') or '').strip().lower()
+        if rol in ('profesor', 'dueño', 'dueno', 'owner'):
             return True
             
         user.cuotas_vencidas = (user.cuotas_vencidas or 0) + 1
@@ -198,7 +231,7 @@ class PaymentRepository(BaseRepository):
             existing.duracion_dias = tipo_cuota.duracion_dias
             existing.activo = tipo_cuota.activo
             existing.icono_path = tipo_cuota.icono_path
-            existing.fecha_modificacion = datetime.now()
+            existing.fecha_modificacion = self._now_local_naive()
             self.db.commit()
             return True
         return False
@@ -240,7 +273,7 @@ class PaymentRepository(BaseRepository):
 
     def obtener_estadisticas_pagos(self, año: int = None) -> dict:
         if año is None:
-            año = datetime.now().year
+            año = self._today_local_date().year
             
         stmt = select(
             func.count(Pago.id),

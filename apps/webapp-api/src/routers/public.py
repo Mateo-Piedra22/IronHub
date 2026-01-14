@@ -223,27 +223,26 @@ async def api_rutina_qr_scan(uuid_rutina: str, request: Request):
     """Valida UUID y retorna JSON con la rutina completa y ejercicios."""
     uid = str(uuid_rutina or "").strip()
     if not uid or len(uid) < 8:
-        return JSONResponse({"ok": False, "error": "UUID inválido"}, status_code=400)
+        msg = "UUID inválido"
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=400)
+
+    dev_mode = os.getenv("DEVELOPMENT_MODE", "").lower() in ("1", "true", "yes") or os.getenv("ENV", "").lower() in ("dev", "development")
+    allow_public = os.getenv("ALLOW_PUBLIC_ROUTINE_QR", "").lower() in ("1", "true", "yes")
+    if not (dev_mode or allow_public):
+        sess_uid = request.session.get("user_id") or request.session.get("checkin_user_id")
+        if not sess_uid:
+            msg = "Unauthorized"
+            return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=401)
 
     rutina = None
     try:
         from src.database.connection import SessionLocal
-        from src.services.gym_service import GymService
-        from sqlalchemy import text
-        
+        from src.services.training_service import TrainingService
+
         session = SessionLocal()
         try:
-            # First get rutina_id by UUID
-            result = session.execute(
-                text("SELECT id FROM rutinas WHERE uuid_rutina = :uuid AND activa = TRUE"),
-                {"uuid": uid}
-            )
-            row = result.fetchone()
-            if row:
-                rutina_id = row[0]
-                # Use gym_service to get full routine with exercises
-                svc = GymService(session)
-                rutina = svc.obtener_rutina_completa(rutina_id)
+            svc = TrainingService(session)
+            rutina = svc.obtener_rutina_por_uuid(uid)
         finally:
             session.close()
     except Exception as e:
@@ -259,9 +258,11 @@ async def api_rutina_qr_scan(uuid_rutina: str, request: Request):
             rutina = None
     
     if not rutina:
-        return JSONResponse({"ok": False, "error": "Rutina no encontrada"}, status_code=404)
+        msg = "Rutina no encontrada"
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=404)
     
     if not bool(rutina.get("activa", True)):
-        return JSONResponse({"ok": False, "error": "Rutina inactiva"}, status_code=403)
+        msg = "Rutina inactiva"
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=403)
     
     return JSONResponse({"ok": True, "rutina": rutina})

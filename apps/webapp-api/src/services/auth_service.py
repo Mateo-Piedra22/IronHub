@@ -6,7 +6,13 @@ Replaces raw SQL usage in auth.py with proper ORM queries.
 """
 
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+import os
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 import logging
 
 from sqlalchemy.orm import Session
@@ -23,6 +29,23 @@ class AuthService(BaseService):
 
     def __init__(self, db: Session):
         super().__init__(db)
+
+    def _get_app_timezone(self):
+        tz_name = (
+            os.getenv("APP_TIMEZONE")
+            or os.getenv("TIMEZONE")
+            or os.getenv("TZ")
+            or "America/Argentina/Buenos_Aires"
+        )
+        if ZoneInfo is not None:
+            try:
+                return ZoneInfo(tz_name)
+            except Exception:
+                pass
+        return timezone(timedelta(hours=-3))
+
+    def _now_utc_naive(self) -> datetime:
+        return datetime.now(timezone.utc).replace(tzinfo=None)
 
     # ========== User Lookup ==========
 
@@ -60,7 +83,16 @@ class AuthService(BaseService):
             return {'valid': False, 'activo': False, 'usuario': None}
 
         stored_pin = str(user.pin or '').strip()
-        is_valid = stored_pin == pin
+        is_valid = False
+        if stored_pin and pin is not None:
+            try:
+                if stored_pin.startswith('$2'):
+                    import bcrypt
+                    is_valid = bool(bcrypt.checkpw(str(pin).encode('utf-8'), stored_pin.encode('utf-8')))
+                else:
+                    is_valid = (stored_pin == str(pin))
+            except Exception:
+                is_valid = False
         
         return {
             'valid': is_valid,
@@ -74,7 +106,17 @@ class AuthService(BaseService):
             user = self.db.get(Usuario, usuario_id)
             if not user:
                 return False
-            user.pin = new_pin
+            pin_str = str(new_pin or '').strip()
+            if pin_str and pin_str.startswith('$2'):
+                user.pin = pin_str
+            elif pin_str:
+                try:
+                    import bcrypt
+                    user.pin = bcrypt.hashpw(pin_str.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                except Exception:
+                    user.pin = pin_str
+            else:
+                user.pin = pin_str
             self.db.commit()
             return True
         except Exception as e:
@@ -168,7 +210,16 @@ class AuthService(BaseService):
                 return {'valid': False, 'profesor': None, 'usuario': None}
 
             stored_pin = str(row[3] or '').strip()
-            is_valid = stored_pin == pin
+            is_valid = False
+            if stored_pin and pin is not None:
+                try:
+                    if stored_pin.startswith('$2'):
+                        import bcrypt
+                        is_valid = bool(bcrypt.checkpw(str(pin).encode('utf-8'), stored_pin.encode('utf-8')))
+                    else:
+                        is_valid = (stored_pin == str(pin))
+                except Exception:
+                    is_valid = False
             is_active = bool(row[4])
 
             if not is_active:
@@ -281,14 +332,15 @@ class AuthService(BaseService):
     def registrar_inicio_sesion_profesor(self, profesor_id: int, usuario_id: int) -> Optional[int]:
         """Register professor work session start."""
         try:
+            inicio = self._now_utc_naive()
             result = self.db.execute(
                 text("""
                     INSERT INTO sesiones_trabajo_profesor 
                     (profesor_id, usuario_id, inicio, activa)
-                    VALUES (:prof_id, :user_id, NOW(), true)
+                    VALUES (:prof_id, :user_id, :inicio, true)
                     RETURNING id
                 """),
-                {'prof_id': profesor_id, 'user_id': usuario_id}
+                {'prof_id': profesor_id, 'user_id': usuario_id, 'inicio': inicio}
             )
             row = result.fetchone()
             self.db.commit()
@@ -301,13 +353,14 @@ class AuthService(BaseService):
     def finalizar_sesion_profesor(self, sesion_id: int) -> bool:
         """End professor work session."""
         try:
+            fin = self._now_utc_naive()
             self.db.execute(
                 text("""
                     UPDATE sesiones_trabajo_profesor 
-                    SET fin = NOW(), activa = false
+                    SET fin = :fin, activa = false
                     WHERE id = :id AND activa = true
                 """),
-                {'id': sesion_id}
+                {'id': sesion_id, 'fin': fin}
             )
             self.db.commit()
             return True

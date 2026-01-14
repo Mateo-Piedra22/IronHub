@@ -10,8 +10,11 @@ import zlib
 import uuid
 import threading
 import urllib.parse
+import tempfile
 from datetime import datetime, timezone, date
 from typing import Optional, List, Dict, Any
+
+from starlette.background import BackgroundTask
 
 from fastapi import APIRouter, Request, Depends, HTTPException, Body, UploadFile, File, status, Query
 from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
@@ -47,6 +50,84 @@ from src.services.b2_storage import simple_upload as b2_upload
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+
+_MAX_PREVIEW_JSON_BYTES = int(os.environ.get("PREVIEW_MAX_JSON_BYTES", "300000"))  # ~300KB
+_MAX_PREVIEW_B64_CHARS = int(os.environ.get("PREVIEW_MAX_B64_CHARS", "400000"))   # ~400KB chars
+_MAX_PREVIEW_DECOMPRESSED_BYTES = int(os.environ.get("PREVIEW_MAX_DECOMPRESSED_BYTES", "1200000"))  # ~1.2MB
+
+
+def _cleanup_file(path: str) -> None:
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        pass
+
+
+def _cleanup_files(*paths: str) -> None:
+    for p in paths:
+        try:
+            _cleanup_file(p)
+        except Exception:
+            pass
+
+
+def _sanitize_download_filename(filename: Optional[str], default_name: str, ext: str) -> str:
+    base = os.path.basename(filename) if filename else default_name
+    if not base.lower().endswith(ext.lower()):
+        base = f"{base}{ext}"
+    base = base[:150].replace('\\', '_').replace('/', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+    return base
+
+
+def _normalize_rutina_export_params(weeks: int, qr_mode: str, sheet: Optional[str]) -> tuple[int, str, Optional[str]]:
+    try:
+        weeks_n = int(weeks)
+    except Exception:
+        weeks_n = 1
+    weeks_n = max(1, min(weeks_n, 4))
+
+    qr = str(qr_mode or "inline").strip().lower()
+    if qr == "auto":
+        qr = "sheet"
+    if qr not in ("inline", "sheet", "none"):
+        qr = "sheet"
+
+    sh = None
+    try:
+        sh = (str(sheet).strip()[:64]) if sheet else None
+    except Exception:
+        sh = None
+    return weeks_n, qr, sh
+
+
+def _safe_decompress_url_payload(b64_data: str) -> str:
+    if not isinstance(b64_data, str):
+        raise ValueError("Invalid data")
+    if len(b64_data) > _MAX_PREVIEW_B64_CHARS:
+        raise ValueError("Payload too large")
+
+    compressed = base64.urlsafe_b64decode(b64_data)
+    dobj = zlib.decompressobj()
+    out_parts: list[bytes] = []
+    out_len = 0
+    chunk_size = 64 * 1024
+    for i in range(0, len(compressed), chunk_size):
+        part = dobj.decompress(compressed[i:i + chunk_size], max_length=max(0, _MAX_PREVIEW_DECOMPRESSED_BYTES - out_len))
+        if part:
+            out_parts.append(part)
+            out_len += len(part)
+            if out_len > _MAX_PREVIEW_DECOMPRESSED_BYTES:
+                raise ValueError("Decompressed payload too large")
+    tail = dobj.flush()
+    if tail:
+        out_len += len(tail)
+        if out_len > _MAX_PREVIEW_DECOMPRESSED_BYTES:
+            raise ValueError("Decompressed payload too large")
+        out_parts.append(tail)
+
+    return b"".join(out_parts).decode("utf-8")
+
 # --- Excel Preview Signing ---
 # Used to create signed URLs for Office Online Viewer (stateless, no storage needed)
 
@@ -61,14 +142,16 @@ def _get_preview_secret() -> str:
     # Fallback - in production should use proper secret
     return "preview-secret-key-change-in-production"
 
-def _sign_excel_view(rutina_id: int, weeks: int, filename: str, ts: int, qr_mode: str = "inline", sheet: str | None = None) -> str:
+def _sign_excel_view(rutina_id: int, weeks: int, filename: str, ts: int, qr_mode: str = "sheet", sheet: str | None = None) -> str:
     """Generate HMAC signature for Excel view URL."""
     try:
         qr = str(qr_mode or "inline").strip().lower()
+        if qr == "auto":
+            qr = "sheet"
         if qr not in ("inline", "sheet", "none"):
-            qr = "inline"
+            qr = "sheet"
     except Exception:
-        qr = "inline"
+        qr = "sheet"
     try:
         sh = (str(sheet).strip()[:64]) if (sheet is not None and str(sheet).strip()) else ""
     except Exception:
@@ -250,11 +333,11 @@ def _sign_excel_view(rutina_id: int, weeks: int, filename: str, ts: int, qr_mode
     try:
         qr = str(qr_mode or "inline").strip().lower()
         if qr in ("auto", "real", "preview"):
-            qr = "inline"
+            qr = "sheet"
         if qr not in ("inline", "sheet", "none"):
-            qr = "inline"
+            qr = "sheet"
     except Exception:
-        qr = "inline"
+        qr = "sheet"
     try:
         sh = (str(sheet).strip()[:64]) if (sheet is not None and str(sheet).strip()) else ""
     except Exception:
@@ -274,11 +357,11 @@ def _sign_excel_view_draft(payload_id: str, weeks: int, filename: str, ts: int, 
     try:
         qr = str(qr_mode or "inline").strip().lower()
         if qr in ("auto", "real", "preview"):
-            qr = "inline"
+            qr = "sheet"
         if qr not in ("inline", "sheet", "none"):
-            qr = "inline"
+            qr = "sheet"
     except Exception:
-        qr = "inline"
+        qr = "sheet"
     try:
         sh = (str(sheet).strip()[:64]) if (sheet is not None and str(sheet).strip()) else ""
     except Exception:
@@ -298,11 +381,11 @@ def _sign_excel_view_draft_data(data: str, weeks: int, filename: str, ts: int, q
     try:
         qr = str(qr_mode or "inline").strip().lower()
         if qr in ("auto", "real", "preview"):
-            qr = "inline"
+            qr = "sheet"
         if qr not in ("inline", "sheet", "none"):
-            qr = "inline"
+            qr = "sheet"
     except Exception:
-        qr = "inline"
+        qr = "sheet"
     try:
         sh = (str(sheet).strip()[:64]) if (sheet is not None and str(sheet).strip()) else ""
     except Exception:
@@ -846,14 +929,32 @@ async def api_gym_logo_legacy(
     """Legacy gym logo upload endpoint using SQLAlchemy."""
     try:
         assets_dir = _resolve_existing_dir("assets")
-        if not assets_dir.exists():
+        try:
+            assets_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
             os.makedirs(assets_dir, exist_ok=True)
-        
-        ext = os.path.splitext(file.filename)[1] if file.filename else ".png"
+
+        ctype = str(getattr(file, 'content_type', '') or '').lower()
+        allowed = {
+            "image/png": ".png",
+            "image/jpeg": ".jpg",
+            "image/jpg": ".jpg",
+            "image/svg+xml": ".svg",
+        }
+        if ctype not in allowed:
+            return JSONResponse({"ok": False, "error": "Formato no soportado. Use PNG, JPG o SVG"}, status_code=400)
+
+        content = await file.read()
+        if not content:
+            return JSONResponse({"ok": False, "error": "Archivo vacío"}, status_code=400)
+        max_bytes = int(os.environ.get("MAX_LOGO_BYTES", "5000000"))
+        if len(content) > max_bytes:
+            return JSONResponse({"ok": False, "error": "Logo demasiado grande"}, status_code=400)
+
+        ext = allowed.get(ctype, ".png")
         filename = f"gym_logo_{int(time.time())}{ext}"
         filepath = assets_dir / filename
-        
-        content = await file.read()
+
         with open(filepath, "wb") as f:
             f.write(content)
             
@@ -904,7 +1005,8 @@ async def api_clases_create(
         
         if new_id:
             return {"ok": True, "id": int(new_id)}
-        return JSONResponse({"error": "No se pudo crear"}, status_code=400)
+        msg = "No se pudo crear"
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
     except HTTPException:
         raise
     except Exception as e:
@@ -958,7 +1060,7 @@ async def api_clase_update(
 @router.delete("/api/clases/{clase_id}")
 async def api_clase_delete(
     clase_id: int,
-    _=Depends(require_owner),
+    _=Depends(require_gestion_access),
 
     svc: ClaseService = Depends(get_clase_service)
 ):
@@ -1031,22 +1133,27 @@ async def api_clase_bloque_create(
             items = []
         
         # Convert items format
-        formatted_items = [
-            {
-                'ejercicio_id': int(it.get("ejercicio_id") or it.get("id") or 0),
+        formatted_items = []
+        for idx, it in enumerate(items):
+            try:
+                eid = int(it.get("ejercicio_id") or it.get("id") or 0)
+            except Exception:
+                eid = 0
+            if eid <= 0:
+                continue
+            formatted_items.append({
+                'ejercicio_id': eid,
                 'orden': int(it.get("orden") or idx),
                 'series': int(it.get("series") or 0),
                 'repeticiones': str(it.get("repeticiones") or ""),
                 'descanso_segundos': int(it.get("descanso_segundos") or 0),
                 'notas': str(it.get("notas") or "")
-            }
-            for idx, it in enumerate(items)
-        ]
+            })
         
         bloque_id = svc.crear_clase_bloque(clase_id, nombre, formatted_items)
         if bloque_id:
             return {"ok": True, "id": bloque_id}
-        raise HTTPException(status_code=500, detail="No se pudo crear bloque")
+        raise HTTPException(status_code=404, detail="Clase no encontrada")
     except HTTPException:
         raise
     except Exception as e:
@@ -1077,17 +1184,22 @@ async def api_clase_bloque_update(
             raise HTTPException(status_code=404, detail="Bloque no encontrado")
         
         # Convert items format
-        formatted_items = [
-            {
-                'ejercicio_id': int(it.get("ejercicio_id") or it.get("id") or 0),
+        formatted_items = []
+        for idx, it in enumerate(items):
+            try:
+                eid = int(it.get("ejercicio_id") or it.get("id") or 0)
+            except Exception:
+                eid = 0
+            if eid <= 0:
+                continue
+            formatted_items.append({
+                'ejercicio_id': eid,
                 'orden': int(it.get("orden") or idx),
                 'series': int(it.get("series") or 0),
                 'repeticiones': str(it.get("repeticiones") or ""),
                 'descanso_segundos': int(it.get("descanso_segundos") or 0),
                 'notas': str(it.get("notas") or "")
-            }
-            for idx, it in enumerate(items)
-        ]
+            })
         
         if svc.actualizar_clase_bloque(bloque_id, nombre, formatted_items):
             return {"ok": True}
@@ -1136,10 +1248,29 @@ async def api_ejercicios_list(
         search = request.query_params.get("search")
         grupo = request.query_params.get("grupo")
         objetivo = request.query_params.get("objetivo")
+
+        limit_q = request.query_params.get("limit")
+        offset_q = request.query_params.get("offset")
+        if limit_q is not None or offset_q is not None:
+            try:
+                limit_n = int(limit_q) if limit_q is not None else 50
+            except Exception:
+                limit_n = 50
+            try:
+                offset_n = int(offset_q) if offset_q is not None else 0
+            except Exception:
+                offset_n = 0
+            limit_n = max(1, min(limit_n, 500))
+            offset_n = max(0, offset_n)
+
+            out = svc.obtener_ejercicios_paginados(search=str(search or ""), grupo=grupo, objetivo=objetivo, limit=limit_n, offset=offset_n)
+            return {"ejercicios": list(out.get('items') or []), "total": int(out.get('total') or 0), "limit": limit_n, "offset": offset_n}
+
         return {"ejercicios": svc.obtener_ejercicios(search=search, grupo=grupo, objetivo=objetivo)}
     except Exception as e:
         logger.error(f"Error listing ejercicios: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.post("/api/ejercicios")
 async def api_ejercicios_create(
@@ -1164,12 +1295,14 @@ async def api_ejercicios_create(
         
         if new_id:
             return {"ok": True, "id": int(new_id)}
-        return JSONResponse({"error": "No se pudo crear"}, status_code=500)
+        msg = "No se pudo crear"
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error creating ejercicio: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.put("/api/ejercicios/{ejercicio_id}")
 async def api_ejercicios_update(
@@ -1184,10 +1317,12 @@ async def api_ejercicios_update(
         payload = await request.json()
         if svc.actualizar_ejercicio(ejercicio_id, payload):
             return {"ok": True}
-        return JSONResponse({"error": "No se pudo actualizar"}, status_code=500)
+        msg = "No se pudo actualizar"
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
     except Exception as e:
         logger.error(f"Error updating ejercicio: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.delete("/api/ejercicios/{ejercicio_id}")
 async def api_ejercicios_delete(
@@ -1200,10 +1335,12 @@ async def api_ejercicios_delete(
     try:
         if svc.eliminar_ejercicio(ejercicio_id):
             return {"ok": True}
-        return JSONResponse({"error": "No se pudo eliminar"}, status_code=500)
+        msg = "No se pudo eliminar"
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
     except Exception as e:
         logger.error(f"Error deleting ejercicio: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 # --- API Rutinas ---
 
@@ -1220,24 +1357,18 @@ async def api_rutinas_list(
 ):
     """Get routines using SQLAlchemy. Includes exercises when filtering by user."""
     try:
-        rutinas = svc.obtener_rutinas(usuario_id, include_exercises=include_exercises)
-        
-        # Filter by search
-        if search:
-            s = search.lower()
-            rutinas = [r for r in rutinas if s in (r.get('nombre_rutina') or '').lower()]
-        
         is_template_req = plantillas if plantillas is not None else es_plantilla
-        if is_template_req is not None:
-            if is_template_req:
-                rutinas = [r for r in rutinas if r.get('usuario_id') is None]
-            else:
-                rutinas = [r for r in rutinas if r.get('usuario_id') is not None]
-
+        rutinas = svc.obtener_rutinas(
+            usuario_id,
+            include_exercises=include_exercises,
+            search=search,
+            solo_plantillas=is_template_req,
+        )
         return {"rutinas": rutinas}
     except Exception as e:
         logger.error(f"Error listing rutinas: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.post("/api/rutinas")
 async def api_rutinas_create(
@@ -1266,6 +1397,7 @@ async def api_rutinas_create(
             # Handle exercises 
             # 1. Try from 'dias' (UnifiedRutinaEditor format)
             dias = payload.get("dias")
+            ok_assign = True
             if dias and isinstance(dias, list):
                 exercises_flat = []
                 for dia in dias:
@@ -1275,18 +1407,31 @@ async def api_rutinas_create(
                         ex_copy["dia_semana"] = d_num
                         exercises_flat.append(ex_copy)
                 if exercises_flat:
-                    svc.asignar_ejercicios_rutina(new_id, exercises_flat)
+                    ok_assign = bool(svc.asignar_ejercicios_rutina(new_id, exercises_flat))
             # 2. Try from 'ejercicios' (Duplicate format or flat API usage)
             elif payload.get("ejercicios") and isinstance(payload.get("ejercicios"), list):
-                svc.asignar_ejercicios_rutina(new_id, payload.get("ejercicios"))
+                ok_assign = bool(svc.asignar_ejercicios_rutina(new_id, payload.get("ejercicios")))
+
+            if not ok_assign:
+                try:
+                    svc.eliminar_rutina(int(new_id))
+                except Exception:
+                    pass
+                msg = "Ejercicios inválidos"
+                return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=400)
             
             return {"ok": True, "id": int(new_id)}
-        return JSONResponse({"error": "No se pudo crear"}, status_code=500)
+        msg = "No se pudo crear"
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
     except HTTPException:
         raise
+    except PermissionError as e:
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=403)
     except Exception as e:
         logger.error(f"Error creating rutina: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.get("/api/rutinas/{rutina_id}/export/pdf")
 async def api_rutina_export_pdf(rutina_id: int, weeks: int = 1, filename: Optional[str] = None, qr_mode: str = "auto", sheet: Optional[str] = None, _=Depends(require_gestion_access), svc: TrainingService = Depends(get_training_service)):
@@ -1295,6 +1440,7 @@ async def api_rutina_export_pdf(rutina_id: int, weeks: int = 1, filename: Option
     if rm is None:
         raise HTTPException(status_code=503, detail="RoutineTemplateManager no disponible")
     try:
+        weeks_n, qr_norm, sheet_norm = _normalize_rutina_export_params(weeks, qr_mode, sheet)
         rutina_data = svc.obtener_rutina_completa(rutina_id)
         if not rutina_data:
             raise HTTPException(status_code=404, detail="Rutina no encontrada")
@@ -1313,10 +1459,36 @@ async def api_rutina_export_pdf(rutina_id: int, weeks: int = 1, filename: Option
         usuario = Usuario(nombre=rutina_data.get('usuario_nombre') or 'Usuario')
         
         ejercicios_por_dia = _build_exercises_by_day(rutina_data)
-        
-        xlsx_path = rm.generate_routine_excel(rutina, usuario, ejercicios_por_dia, weeks=weeks, qr_mode=qr_mode, sheet=sheet)
-        pdf_path = rm.convert_excel_to_pdf(xlsx_path)
-        return FileResponse(pdf_path, media_type="application/pdf", filename=filename or f"rutina_{rutina_id}.pdf")
+
+        tmp_xlsx_fd, tmp_xlsx = tempfile.mkstemp(prefix=f"rutina_{rutina_id}_", suffix=".xlsx")
+        try:
+            os.close(tmp_xlsx_fd)
+        except Exception:
+            pass
+        tmp_pdf_fd, tmp_pdf = tempfile.mkstemp(prefix=f"rutina_{rutina_id}_", suffix=".pdf")
+        try:
+            os.close(tmp_pdf_fd)
+        except Exception:
+            pass
+
+        xlsx_path = rm.generate_routine_excel(
+            rutina,
+            usuario,
+            ejercicios_por_dia,
+            output_path=tmp_xlsx,
+            weeks=weeks_n,
+            qr_mode=qr_norm,
+            sheet=sheet_norm,
+        )
+        pdf_path = rm.convert_excel_to_pdf(xlsx_path, pdf_path=tmp_pdf)
+
+        pdf_filename = _sanitize_download_filename(filename, f"rutina_{rutina_id}", ".pdf")
+        return FileResponse(
+            pdf_path,
+            media_type="application/pdf",
+            filename=pdf_filename,
+            background=BackgroundTask(_cleanup_files, str(pdf_path), str(xlsx_path))
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -1335,12 +1507,16 @@ async def api_rutina_get(rutina_id: int, _=Depends(require_gestion_access), svc:
         raise
     except Exception as e:
         logger.error(f"Error getting rutina: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.put("/api/rutinas/{rutina_id}")
 async def api_rutina_update(rutina_id: int, request: Request, _=Depends(require_gestion_access), svc: TrainingService = Depends(get_training_service)):
     """Update a routine."""
     try:
+        if not svc.obtener_rutina_completa(rutina_id):
+            raise HTTPException(status_code=404, detail="Rutina no encontrada")
+
         payload = await request.json()
         
         # Transform dias to exercises list if present
@@ -1357,10 +1533,15 @@ async def api_rutina_update(rutina_id: int, request: Request, _=Depends(require_
         success = svc.actualizar_rutina(rutina_id, payload)
         if success:
             return {"ok": True}
-        return JSONResponse({"error": "No se pudo actualizar"}, status_code=500)
+        if "ejercicios" in (payload or {}):
+            msg = "Ejercicios inválidos"
+            return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=400)
+        msg = "No se pudo actualizar"
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
     except Exception as e:
         logger.error(f"Error updating rutina: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.delete("/api/rutinas/{rutina_id}")
 async def api_rutina_delete(rutina_id: int, _=Depends(require_gestion_access), svc: TrainingService = Depends(get_training_service)):
@@ -1368,10 +1549,12 @@ async def api_rutina_delete(rutina_id: int, _=Depends(require_gestion_access), s
     try:
         if svc.eliminar_rutina(rutina_id):
             return {"ok": True}
-        return JSONResponse({"error": "No se pudo eliminar"}, status_code=500)
+        msg = "No se pudo eliminar"
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
     except Exception as e:
         logger.error(f"Error deleting rutina: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 @router.put("/api/rutinas/{rutina_id}/toggle-activa")
 async def api_rutina_toggle_activa(rutina_id: int, _=Depends(require_gestion_access), svc: TrainingService = Depends(get_training_service)):
     """Toggle activa status of a routine. If activating, deactivates other rutinas for the same user."""
@@ -1389,12 +1572,14 @@ async def api_rutina_toggle_activa(rutina_id: int, _=Depends(require_gestion_acc
         success = svc.actualizar_rutina(rutina_id, {'activa': new_status})
         if success:
             return {"ok": True, "activa": new_status}
-        return JSONResponse({"error": "No se pudo actualizar"}, status_code=500)
+        msg = "No se pudo actualizar"
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error toggling rutina activa: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.post("/api/rutinas/{rutina_id}/assign")
 async def api_rutina_assign(
@@ -1425,21 +1610,33 @@ async def api_rutina_assign(
         if new_id:
             # Clone exercises
             exs = rutina_origen.get('ejercicios', [])
-            svc.asignar_ejercicios_rutina(new_id, exs)
+            ok_assign = bool(svc.asignar_ejercicios_rutina(new_id, exs))
+            if not ok_assign:
+                try:
+                    svc.eliminar_rutina(int(new_id))
+                except Exception:
+                    pass
+                msg = "Ejercicios inválidos"
+                return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=400)
             return {"ok": True, "id": new_id}
             
-        return JSONResponse({"error": "No se pudo asignar"}, status_code=500)
+        msg = "No se pudo asignar"
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
     except HTTPException:
         raise
+    except PermissionError as e:
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=403)
     except Exception as e:
         logger.error(f"Error assigning rutina: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.get("/api/rutinas/{rutina_id}/export/excel")
 async def api_rutina_export_excel(
     rutina_id: int,
     weeks: int = 1,
-    qr_mode: str = "inline",
+    qr_mode: str = "sheet",
     sheet: Optional[str] = None,
     user_override: Optional[str] = None,
     filename: Optional[str] = None,
@@ -1449,6 +1646,10 @@ async def api_rutina_export_excel(
 ):
     """Export a routine as Excel."""
     try:
+        if rm is None:
+            raise HTTPException(status_code=503, detail="RoutineTemplateManager no disponible")
+
+        weeks_n, qr_norm, sheet_norm = _normalize_rutina_export_params(weeks, qr_mode, sheet)
         rutina_data = svc.obtener_rutina_completa(rutina_id)
         if not rutina_data:
             raise HTTPException(status_code=404, detail="Rutina no encontrada")
@@ -1467,10 +1668,28 @@ async def api_rutina_export_excel(
         usuario = Usuario(nombre=user_name)
         
         ejercicios_por_dia = _build_exercises_by_day(rutina_data)
-        
-        xlsx_path = rm.generate_routine_excel(rutina, usuario, ejercicios_por_dia, weeks=weeks, qr_mode=qr_mode, sheet=sheet)
-        excel_filename = filename or f"rutina_{rutina_id}.xlsx"
-        return FileResponse(xlsx_path, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", filename=excel_filename)
+
+        tmp_xlsx_fd, tmp_xlsx = tempfile.mkstemp(prefix=f"rutina_{rutina_id}_", suffix=".xlsx")
+        try:
+            os.close(tmp_xlsx_fd)
+        except Exception:
+            pass
+        xlsx_path = rm.generate_routine_excel(
+            rutina,
+            usuario,
+            ejercicios_por_dia,
+            output_path=tmp_xlsx,
+            weeks=weeks_n,
+            qr_mode=qr_norm,
+            sheet=sheet_norm,
+        )
+        excel_filename = _sanitize_download_filename(filename, f"rutina_{rutina_id}", ".xlsx")
+        return FileResponse(
+            xlsx_path,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=excel_filename,
+            background=BackgroundTask(_cleanup_file, str(xlsx_path))
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -1486,7 +1705,7 @@ async def api_rutina_excel_view_url(
     request: Request,
     weeks: int = 1,
     filename: Optional[str] = None,
-    qr_mode: str = "inline",
+    qr_mode: str = "sheet",
     sheet: Optional[str] = None,
     _=Depends(require_gestion_access),
     svc: TrainingService = Depends(get_training_service),
@@ -1521,9 +1740,11 @@ async def api_rutina_excel_view_url(
         
         # Normalize params
         weeks = max(1, min(int(weeks), 4))
-        qr_mode = str(qr_mode or "inline").strip().lower()
+        qr_mode = str(qr_mode or "sheet").strip().lower()
+        if qr_mode == "auto":
+            qr_mode = "sheet"
         if qr_mode not in ("inline", "sheet", "none"):
-            qr_mode = "inline"
+            qr_mode = "sheet"
         sheet_norm = (str(sheet).strip()[:64]) if sheet else None
         
         # Generate signature
@@ -1560,7 +1781,7 @@ async def api_rutina_excel_view(
     rutina_id: int,
     weeks: int = 1,
     filename: Optional[str] = None,
-    qr_mode: str = "inline",
+    qr_mode: str = "sheet",
     sheet: Optional[str] = None,
     ts: int = 0,
     sig: Optional[str] = None,
@@ -1580,9 +1801,11 @@ async def api_rutina_excel_view(
     
     # Normalize params
     weeks = max(1, min(int(weeks), 4))
-    qr_mode = str(qr_mode or "inline").strip().lower()
+    qr_mode = str(qr_mode or "sheet").strip().lower()
+    if qr_mode == "auto":
+        qr_mode = "sheet"
     if qr_mode not in ("inline", "sheet", "none"):
-        qr_mode = "inline"
+        qr_mode = "sheet"
     sheet_norm = (str(sheet).strip()[:64]) if sheet else None
     
     # Sanitize filename
@@ -1631,12 +1854,29 @@ async def api_rutina_excel_view(
             usuario = Usuario(nombre=user_name)
         
         ejercicios_por_dia = _build_exercises_by_day(rutina_data)
-        xlsx_path = rm.generate_routine_excel(rutina, usuario, ejercicios_por_dia, weeks=weeks, qr_mode=qr_mode, sheet=sheet_norm)
+
+        # Generate into a temp file to avoid accumulating previews on disk
+        tmp_fd, tmp_path = tempfile.mkstemp(prefix=f"rutina_view_{rutina_id}_", suffix=".xlsx")
+        try:
+            os.close(tmp_fd)
+        except Exception:
+            pass
+
+        xlsx_path = rm.generate_routine_excel(
+            rutina,
+            usuario,
+            ejercicios_por_dia,
+            output_path=tmp_path,
+            weeks=weeks,
+            qr_mode=qr_mode,
+            sheet=sheet_norm,
+        )
         
         response = FileResponse(
             xlsx_path,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            filename=base_name
+            filename=base_name,
+            background=BackgroundTask(_cleanup_file, str(xlsx_path))
         )
         # Use inline disposition for Office Viewer compatibility
         response.headers["Content-Disposition"] = f'inline; filename="{base_name}"'
@@ -1651,7 +1891,7 @@ async def api_rutina_excel_view(
 @router.post("/api/rutinas/export/draft_url")
 async def sign_draft_url(
     request: Request,
-
+    _=Depends(require_gestion_access),
     svc: GymConfigService = Depends(get_gym_config_service)
 ):
     """
@@ -1663,8 +1903,12 @@ async def sign_draft_url(
         
         # Compress and encode
         json_str = json.dumps(data)
+        if len(json_str.encode('utf-8')) > _MAX_PREVIEW_JSON_BYTES:
+            raise HTTPException(status_code=413, detail="Payload demasiado grande")
         compressed = zlib.compress(json_str.encode('utf-8'))
         b64_data = base64.urlsafe_b64encode(compressed).decode('utf-8')
+        if len(b64_data) > _MAX_PREVIEW_B64_CHARS:
+            raise HTTPException(status_code=413, detail="Payload demasiado grande")
         
         ts = int(time.time())
         rnd = secrets.token_hex(4)
@@ -1712,18 +1956,24 @@ async def render_draft_excel(
         if not hmac.compare_digest(expected, sig):
              raise HTTPException(status_code=403, detail="Invalid signature")
              
-        # Decode
+        # Decode (with size limits)
         try:
-            compressed = base64.urlsafe_b64decode(data)
-            json_str = zlib.decompress(compressed).decode('utf-8')
+            json_str = _safe_decompress_url_payload(data)
+            if len(json_str.encode('utf-8')) > _MAX_PREVIEW_DECOMPRESSED_BYTES:
+                raise HTTPException(status_code=413, detail="Payload demasiado grande")
             payload = json.loads(json_str)
         except Exception:
              raise HTTPException(status_code=400, detail="Corrupt data")
+
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Payload inválido")
              
         # Build Objects
         rutina_info = payload.get('rutina', {})
         usuario_info = payload.get('usuario', {})
         ejercicios_list = payload.get('ejercicios', [])
+        if not isinstance(ejercicios_list, list):
+            ejercicios_list = []
         
         rutina = Rutina(
             nombre_rutina=rutina_info.get('nombre', 'Borrador'),
@@ -1737,11 +1987,15 @@ async def render_draft_excel(
             nombre=usuario_info.get('nombre', 'Usuario')
         )
         
-        exercises_by_day = {}
-        for ej in ejercicios_list:
+        exercises_by_day: Dict[int, List[RutinaEjercicio]] = {}
+        # Cap to prevent abuse; generator itself clamps, but we avoid building huge objects
+        for ej in ejercicios_list[:200]:
             dia = int(ej.get('dia', 1))
             if dia not in exercises_by_day:
                 exercises_by_day[dia] = []
+
+            if len(exercises_by_day[dia]) >= 20:
+                continue
             
             # Create Ejercicio obj
             ej_base = Ejercicio(
@@ -1762,21 +2016,49 @@ async def render_draft_excel(
             exercises_by_day[dia].append(re)
             
         # Extract config from payload
-        qr_mode = payload.get('qr_mode', 'inline')
-        sheet_name = payload.get('sheet_name', None)
-        weeks = int(payload.get('weeks', 1))
+        qr_mode = str(payload.get('qr_mode', 'inline') or 'inline').strip().lower()
+        if qr_mode not in ('inline', 'sheet', 'none'):
+            qr_mode = 'inline'
+        sheet_name = payload.get('sheet') or payload.get('sheet_name') or None
+        try:
+            sheet_name = (str(sheet_name).strip()[:64]) if sheet_name else None
+        except Exception:
+            sheet_name = None
+        try:
+            weeks = int(payload.get('weeks', 1))
+        except Exception:
+            weeks = 1
+        weeks = max(1, min(weeks, 4))
 
-        # Generate
-        xlsx_path = rm.generate_routine_excel(rutina, usuario, exercises_by_day, weeks=weeks, qr_mode=qr_mode, sheet=sheet_name)
+        # Generate to temp
+        tmp_fd, tmp_path = tempfile.mkstemp(prefix=f"draft_{ts}_", suffix=".xlsx")
+        try:
+            os.close(tmp_fd)
+        except Exception:
+            pass
+
+        xlsx_path = rm.generate_routine_excel(
+            rutina,
+            usuario,
+            exercises_by_day,
+            output_path=tmp_path,
+            weeks=weeks,
+            qr_mode=qr_mode,
+            sheet=sheet_name,
+        )
         
-        fname_final = filename or f"draft_{ts}.xlsx"
+        base_name = os.path.basename(filename) if filename else f"draft_{ts}.xlsx"
+        if not base_name.lower().endswith('.xlsx'):
+            base_name = f"{base_name}.xlsx"
+        base_name = base_name[:150].replace('\\', '_').replace('/', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
         
         res = FileResponse(
              xlsx_path,
              media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-             filename=fname_final
+             filename=base_name,
+             background=BackgroundTask(_cleanup_file, str(xlsx_path))
         )
-        res.headers["Content-Disposition"] = f'inline; filename="{fname_final}"'
+        res.headers["Content-Disposition"] = f'inline; filename="{base_name}"'
         return res
         
     except HTTPException:
@@ -1797,6 +2079,7 @@ async def api_suspension_status():
 
 @router.post("/api/rutinas/verify_qr")
 async def api_verify_routine_qr(
+    request: Request,
     payload: Dict[str, str],
     svc: TrainingService = Depends(get_training_service)
 ):
@@ -1804,14 +2087,65 @@ async def api_verify_routine_qr(
     Validate a Routine QR code UUID and return the full routine details.
     This grants ephemeral access to the routine content.
     """
-    uuid_val = payload.get("uuid")
+    import os
+    from sqlalchemy import select
+
+    dev_mode = os.getenv("DEVELOPMENT_MODE", "").lower() in ("1", "true", "yes") or os.getenv("ENV", "").lower() in ("dev", "development")
+    allow_public = os.getenv("ALLOW_PUBLIC_ROUTINE_QR", "").lower() in ("1", "true", "yes")
+    if not (dev_mode or allow_public):
+        uid = request.session.get("user_id") or request.session.get("checkin_user_id")
+        if not uid:
+            msg = "Unauthorized"
+            return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=401)
+
+    uuid_val = (payload.get("uuid") or "").strip()
     if not uuid_val:
-        raise HTTPException(status_code=400, detail="UUID requerido")
-    
+        msg = "UUID requerido"
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=400)
+
     rutina = svc.obtener_rutina_por_uuid(uuid_val)
     if not rutina:
-        raise HTTPException(status_code=404, detail="Rutina no encontrada o inválida")
-    
+        msg = "Rutina no encontrada"
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=404)
+
+    if not bool(rutina.get("activa", True)):
+        msg = "Rutina inactiva"
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=403)
+
+    rid = int(rutina.get("id") or 0)
+    usuario_id_rut = rutina.get("usuario_id")
+    try:
+        usuario_id_rut = int(usuario_id_rut) if usuario_id_rut is not None else None
+    except Exception:
+        usuario_id_rut = None
+
+    if usuario_id_rut is not None and rid:
+        try:
+            from src.models.orm_models import Rutina as RutinaModel
+            active_ids = list(svc.db.scalars(select(RutinaModel.id).where(RutinaModel.usuario_id == int(usuario_id_rut), RutinaModel.activa.is_(True))).all())
+            active_ids = [int(x) for x in (active_ids or []) if x is not None]
+            if len(active_ids) != 1 or int(active_ids[0]) != int(rid):
+                msg = "QR no corresponde a la rutina activa"
+                return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=403)
+        except Exception:
+            msg = "Validación de rutina falló"
+            return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=403)
+
+    sess_uid = request.session.get("user_id") or request.session.get("checkin_user_id")
+    if sess_uid is not None and usuario_id_rut is not None:
+        try:
+            if int(sess_uid) != int(usuario_id_rut):
+                msg = "QR no corresponde a tu rutina"
+                return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=403)
+        except Exception:
+            pass
+
+    try:
+        request.session["qr_access_rutina_id"] = rid
+        request.session["qr_access_until"] = int(time.time()) + 24 * 60 * 60
+    except Exception:
+        pass
+
     return {
         "ok": True,
         "rutina": rutina,

@@ -72,11 +72,12 @@
     /* Sidebar */
     .sidebar {
         @apply fixed left-0 top-0 bottom-0 w-[280px] bg-slate-900 border-r border-slate-800;
-        @apply flex flex-col;
+        @apply flex flex-col min-h-0;
     }
 
     .sidebar-item {
         @apply flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400;
+        @apply whitespace-nowrap min-w-max;
         @apply transition-colors duration-200;
         @apply hover:bg-slate-800 hover:text-white;
     }

@@ -27,6 +27,7 @@ import {
     UserMinus,
     Loader2,
     FileDown,
+    RefreshCw,
 } from 'lucide-react';
 import { Button, Modal, ConfirmModal, Input, useToast } from '@/components/ui';
 import { api, type Usuario, type Etiqueta, type Estado, type Pago, type EstadoTemplate, type Asistencia } from '@/lib/api';
@@ -44,7 +45,7 @@ interface UserSidebarProps {
     onCreateRutina?: (usuario: Usuario) => void;
 }
 
-type TabType = 'notas' | 'etiquetas' | 'estados';
+type TabType = 'resumen' | 'notas' | 'etiquetas' | 'estados';
 
 export default function UserSidebar({
     usuario,
@@ -80,6 +81,9 @@ export default function UserSidebar({
 
     // Historial pagos
     const [pagos, setPagos] = useState<Pago[]>([]);
+
+    // Asistencias list
+    const [asistencias, setAsistencias] = useState<Asistencia[]>([]);
 
     // Asistencia state
     const [asistencias30d, setAsistencias30d] = useState<number>(0);
@@ -160,6 +164,7 @@ export default function UserSidebar({
             // Load recent 30d attendance count
             const recentRes = await api.getUserAsistencias(usuario.id, 200);
             if (recentRes.ok && recentRes.data) {
+                setAsistencias(recentRes.data.asistencias || []);
                 const thirtyDaysAgo = new Date();
                 thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
                 const recent = recentRes.data.asistencias.filter((a: Asistencia) => {
@@ -171,6 +176,23 @@ export default function UserSidebar({
         } catch (e) {
             // Silently fail
         }
+    };
+
+    const handleCopy = async (value: string | number | null | undefined, label: string) => {
+        if (value === null || value === undefined || String(value).trim() === '') {
+            error(`${label} no disponible`);
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(String(value));
+            success(`${label} copiado`);
+        } catch {
+            error(`No se pudo copiar ${label}`);
+        }
+    };
+
+    const goTo = (path: string) => {
+        window.location.href = path;
     };
 
     const loadSuggestions = async () => {
@@ -489,9 +511,97 @@ export default function UserSidebar({
                             <Edit className="w-3 h-3 mr-1" />
                             Editar
                         </Button>
+                        <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => {
+                                onRefresh();
+                                loadAsistenciaStatus();
+                                loadPagos();
+                            }}
+                        >
+                            <RefreshCw className="w-3 h-3 mr-1" />
+                            Actualizar
+                        </Button>
+                        <Button size="sm" variant="secondary" onClick={() => goTo(`/gestion/pagos?usuario_id=${usuario.id}`)}>
+                            <DollarSign className="w-3 h-3 mr-1" />
+                            Ver pagos
+                        </Button>
+                        <Button size="sm" variant="secondary" onClick={() => goTo(`/gestion/asistencias?usuario_id=${usuario.id}`)}>
+                            <Clock className="w-3 h-3 mr-1" />
+                            Ver asistencias
+                        </Button>
+                        <Button size="sm" variant="secondary" onClick={() => goTo(`/gestion/rutinas?usuario_id=${usuario.id}`)}>
+                            <Dumbbell className="w-3 h-3 mr-1" />
+                            Ver rutinas
+                        </Button>
                         <Button size="sm" variant="secondary" onClick={() => onToggleActivo(usuario)}>
                             {usuario.activo ? <XCircle className="w-3 h-3 mr-1" /> : <CheckCircle2 className="w-3 h-3 mr-1" />}
                             {usuario.activo ? 'Desactivar' : 'Activar'}
+                        </Button>
+                        <Button size="sm" variant="secondary" onClick={() => handleCopy(usuario.id, 'ID')}
+                        >
+                            <User className="w-3 h-3 mr-1" />
+                            Copiar ID
+                        </Button>
+                        <Button size="sm" variant="secondary" onClick={() => handleCopy(usuario.nombre, 'Nombre')}
+                        >
+                            <User className="w-3 h-3 mr-1" />
+                            Copiar nombre
+                        </Button>
+                        <Button size="sm" variant="secondary" onClick={() => handleCopy(usuario.dni || '', 'DNI')}
+                        >
+                            <FileText className="w-3 h-3 mr-1" />
+                            Copiar DNI
+                        </Button>
+                        <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => handleCopy(usuario.email || '', 'Email')}
+                        >
+                            <Mail className="w-3 h-3 mr-1" />
+                            Copiar email
+                        </Button>
+                        <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => handleCopy(usuario.tipo_cuota_nombre || '', 'Tipo de cuota')}
+                        >
+                            <DollarSign className="w-3 h-3 mr-1" />
+                            Copiar cuota
+                        </Button>
+                        <Button size="sm" variant="secondary" onClick={() => handleCopy(usuario.telefono || '', 'Teléfono')}
+                        >
+                            <Phone className="w-3 h-3 mr-1" />
+                            Copiar tel.
+                        </Button>
+                        <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => {
+                                if (!usuario.telefono) {
+                                    error('Teléfono no disponible');
+                                    return;
+                                }
+                                window.open(getWhatsAppLink(usuario.telefono), '_blank');
+                            }}
+                        >
+                            <MessageSquare className="w-3 h-3 mr-1" />
+                            WhatsApp
+                        </Button>
+                        <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => {
+                                if (!usuario.email) {
+                                    error('Email no disponible');
+                                    return;
+                                }
+                                window.location.href = `mailto:${usuario.email}`;
+                            }}
+                        >
+                            <Mail className="w-3 h-3 mr-1" />
+                            Email
                         </Button>
                         <Button size="sm" variant="secondary" onClick={handleGenerateQR} isLoading={qrLoading}>
                             <QrCode className="w-3 h-3 mr-1" />
@@ -518,6 +628,16 @@ export default function UserSidebar({
                                 Crear rutina
                             </Button>
                         )}
+                        {rutinaActiva && (
+                            <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => window.open(api.getRutinaExcelUrl(rutinaActiva.id), '_blank')}
+                            >
+                                <FileDown className="w-3 h-3 mr-1" />
+                                Rutina Excel
+                            </Button>
+                        )}
                         <Button size="sm" variant="danger" onClick={() => onDelete(usuario)}>
                             <Trash2 className="w-3 h-3 mr-1" />
                             Eliminar
@@ -532,6 +652,7 @@ export default function UserSidebar({
                 {/* Tabs */}
                 <div className="flex border-b border-slate-800 px-4">
                     {[
+                        { id: 'resumen', label: 'Resumen', icon: History },
                         { id: 'notas', label: 'Notas', icon: FileText },
                         { id: 'etiquetas', label: 'Etiquetas', icon: Tag },
                         { id: 'estados', label: 'Estados', icon: Flag },
@@ -554,6 +675,40 @@ export default function UserSidebar({
 
                 {/* Tab Content */}
                 <div className="flex-1 overflow-y-auto p-4">
+                    {activeTab === 'resumen' && (
+                        <div className="space-y-4">
+                            <div>
+                                <h4 className="text-xs font-medium text-slate-500 mb-2">Pagos recientes</h4>
+                                <div className="space-y-2">
+                                    {pagos.slice(0, 8).map((p) => (
+                                        <div key={p.id} className="flex items-center justify-between rounded-lg bg-slate-800 border border-slate-700 px-3 py-2">
+                                            <div className="text-sm text-white">{formatDate(p.fecha)}</div>
+                                            <div className="text-sm text-slate-300">{formatCurrency(p.monto)}</div>
+                                        </div>
+                                    ))}
+                                    {pagos.length === 0 && (
+                                        <p className="text-sm text-slate-500">Sin pagos registrados</p>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div>
+                                <h4 className="text-xs font-medium text-slate-500 mb-2">Asistencias recientes</h4>
+                                <div className="space-y-2">
+                                    {asistencias.slice(0, 8).map((a) => (
+                                        <div key={a.id} className="flex items-center justify-between rounded-lg bg-slate-800 border border-slate-700 px-3 py-2">
+                                            <div className="text-sm text-white">{formatDate(a.fecha)}</div>
+                                            <div className="text-xs text-slate-400">{a.hora || a.hora_entrada || '—'}</div>
+                                        </div>
+                                    ))}
+                                    {asistencias.length === 0 && (
+                                        <p className="text-sm text-slate-500">Sin asistencias registradas</p>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {activeTab === 'notas' && (
                         <div className="space-y-3">
                             <textarea

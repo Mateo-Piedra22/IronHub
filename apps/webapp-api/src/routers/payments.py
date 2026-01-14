@@ -1,8 +1,13 @@
 import logging
 import os
 import json
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from typing import Optional, List, Dict, Any
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 
 from fastapi import APIRouter, Request, Depends, HTTPException, status
 from fastapi.responses import JSONResponse, FileResponse
@@ -12,13 +17,28 @@ from src.dependencies import (
     get_db_session, 
     get_payment_service, 
     require_gestion_access, 
-    require_owner
 )
 from src.services.payment_service import PaymentService
 from src.models import MetodoPago, Pago
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _now_local_naive() -> datetime:
+    tz_name = (
+        os.getenv("APP_TIMEZONE")
+        or os.getenv("TIMEZONE")
+        or os.getenv("TZ")
+        or "America/Argentina/Buenos_Aires"
+    )
+    if ZoneInfo is not None:
+        try:
+            tz = ZoneInfo(tz_name)
+            return datetime.now(timezone.utc).astimezone(tz).replace(tzinfo=None)
+        except Exception:
+            pass
+    return datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=-3))).replace(tzinfo=None)
 
 # --- Config Endpoints (for webapp-web frontend compatibility) ---
 
@@ -750,7 +770,6 @@ async def api_pago_preview(
         body = await request.json()
         
         from types import SimpleNamespace
-        from datetime import datetime
         
         # Mock objects for PDFGenerator
         u_data = body.get("usuario", {})
@@ -767,13 +786,14 @@ async def api_pago_preview(
         )
         
         p_data = body.get("pago", {})
+        now_local = _now_local_naive()
         pago = SimpleNamespace(
             id=0,
             usuario_id=usuario.id,
             monto=float(p_data.get("monto", 0)),
-            fecha_pago=datetime.now(),
-            mes=int(p_data.get("mes", datetime.now().month)),
-            año=int(p_data.get("anio", datetime.now().year)),
+            fecha_pago=now_local,
+            mes=int(p_data.get("mes", now_local.month)),
+            año=int(p_data.get("anio", now_local.year)),
             metodo_pago_id=p_data.get("metodo_pago_id"),
             metodo_pago_nombre=p_data.get("metodo_pago_nombre"),
         )
@@ -1264,9 +1284,9 @@ async def api_pagos_update(
                     if existing and getattr(existing, 'fecha_pago', None):
                         fecha_dt = existing.fecha_pago if not isinstance(existing.fecha_pago, str) else datetime.fromisoformat(existing.fecha_pago)
                     else:
-                        fecha_dt = datetime.now()
+                        fecha_dt = _now_local_naive()
                 except Exception:
-                    fecha_dt = datetime.now()
+                    fecha_dt = _now_local_naive()
 
         if mes_raw is not None and año_raw is not None:
             try:
@@ -1362,7 +1382,7 @@ async def api_pagos_delete(
 @router.get("/api/usuario_pagos")
 async def api_usuario_pagos(
     request: Request, 
-    _=Depends(require_owner),
+    _=Depends(require_gestion_access),
     svc: PaymentService = Depends(get_payment_service)
 ):
     """Get user payments list with search and pagination using SQLAlchemy."""

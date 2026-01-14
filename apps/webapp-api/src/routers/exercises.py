@@ -20,56 +20,73 @@ async def api_upload_exercise_video(request: Request, file: UploadFile = File(..
     """Upload exercise video to cloud storage."""
     try:
         ctype = str(getattr(file, 'content_type', '') or '').lower()
-        if not ctype.startswith("video/"):
-            return JSONResponse({"ok": False, "error": "El archivo debe ser un video"}, status_code=400)
+        allowed = {
+            "video/mp4": ".mp4",
+            "video/webm": ".webm",
+            "video/quicktime": ".mov",
+        }
+        if ctype not in allowed:
+            msg = "Formato de video no soportado. Use MP4, WEBM o MOV"
+            return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=400)
         
         data = await file.read()
         if not data:
-            return JSONResponse({"ok": False, "error": "Archivo vacío"}, status_code=400)
+            msg = "Archivo vacío"
+            return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=400)
         
-        if len(data) > 50 * 1024 * 1024:
-            return JSONResponse({"ok": False, "error": "El video es demasiado grande (max 50MB)"}, status_code=400)
+        max_bytes = int(os.environ.get("MAX_EXERCISE_VIDEO_BYTES", str(50 * 1024 * 1024)))
+        if len(data) > max_bytes:
+            msg = "El video es demasiado grande"
+            return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=400)
         
         tenant = _get_tenant_from_request(request) or "common"
-        ext = os.path.splitext(file.filename)[1] if file.filename else ".mp4"
+        ext = allowed.get(ctype, ".mp4")
         filename = f"exercise_{int(time.time())}_{os.urandom(4).hex()}{ext}"
         
         public_url = b2_upload(data, filename, ctype, subfolder=f"exercises/{tenant}")
         if not public_url:
-            return JSONResponse({"ok": False, "error": "Error subiendo el video"}, status_code=500)
+            msg = "Error subiendo el video"
+            return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
         
         return JSONResponse({"ok": True, "url": public_url, "mime": ctype})
     except Exception as e:
         logger.error(f"Error uploading exercise video: {e}")
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 
 @router.get("/api/exercises")
 async def api_list_exercises(
     request: Request, q: str = "", page: int = 1, page_size: int = 20,
+    grupo: str = "", objetivo: str = "",
     _=Depends(require_gestion_access), svc: TrainingService = Depends(get_training_service)
 ):
     """List exercises with pagination and search."""
     try:
-        exercises = svc.obtener_ejercicios()
-        search = q.strip().lower()
-        
-        if search:
-            exercises = [e for e in exercises if search in (e.get('nombre', '') or '').lower() or search in (e.get('grupo_muscular', '') or '').lower()]
-        
-        total = len(exercises)
-        offset = (max(1, page) - 1) * page_size
-        items = exercises[offset:offset + page_size]
+        page_n = max(1, int(page or 1))
+        page_size_n = max(1, int(page_size or 20))
+        offset = (page_n - 1) * page_size_n
+
+        out = svc.obtener_ejercicios_paginados(
+            search=str(q or ""),
+            grupo=(str(grupo).strip() if str(grupo or "").strip() else None),
+            objetivo=(str(objetivo).strip() if str(objetivo or "").strip() else None),
+            limit=page_size_n,
+            offset=offset,
+        )
+        items = list(out.get('items') or [])
+        total = int(out.get('total') or 0)
         
         # Ensure full CDN URLs
         for item in items:
             if item.get("video_url"):
                 item["video_url"] = get_file_url(item["video_url"])
         
-        return {"items": items, "total": total, "page": page}
+        return {"items": items, "total": total, "page": page_n}
     except Exception as e:
         logger.error(f"Error listing exercises: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 
 @router.post("/api/exercises")
@@ -79,7 +96,8 @@ async def api_create_exercise(request: Request, _=Depends(require_gestion_access
         data = await request.json()
         nombre = str(data.get("nombre") or "").strip()
         if not nombre:
-            return JSONResponse({"ok": False, "error": "Nombre requerido"}, status_code=400)
+            msg = "Nombre requerido"
+            return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=400)
         
         new_id = svc.crear_ejercicio({
             'nombre': nombre,
@@ -87,9 +105,13 @@ async def api_create_exercise(request: Request, _=Depends(require_gestion_access
             'video_url': data.get("video_url"),
             'video_mime': data.get("video_mime")
         })
-        return {"ok": True, "id": new_id}
+        if not new_id:
+            msg = "No se pudo crear"
+            return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
+        return {"ok": True, "id": int(new_id)}
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 
 @router.put("/api/exercises/{eid}")
@@ -97,17 +119,25 @@ async def api_update_exercise(eid: int, request: Request, _=Depends(require_gest
     """Update an exercise."""
     try:
         data = await request.json()
-        svc.actualizar_ejercicio(eid, data)
+        ok = bool(svc.actualizar_ejercicio(eid, data))
+        if not ok:
+            msg = "Ejercicio no encontrado"
+            return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=404)
         return {"ok": True}
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 
 @router.delete("/api/exercises/{eid}")
 async def api_delete_exercise(eid: int, _=Depends(require_gestion_access), svc: TrainingService = Depends(get_training_service)):
     """Delete an exercise."""
     try:
-        svc.eliminar_ejercicio(eid)
+        ok = bool(svc.eliminar_ejercicio(eid))
+        if not ok:
+            msg = "Ejercicio no encontrado"
+            return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=404)
         return {"ok": True}
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)

@@ -1,6 +1,6 @@
 """WhatsApp Service - SQLAlchemy ORM for whatsapp message database operations."""
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import logging
 
 from sqlalchemy.orm import Session
@@ -17,11 +17,15 @@ class WhatsAppService(BaseService):
     def __init__(self, db: Session):
         super().__init__(db)
 
+    def _now_utc_naive(self) -> datetime:
+        return datetime.now(timezone.utc).replace(tzinfo=None)
+
     # ========== Pendings/Failed Messages ==========
 
     def obtener_mensajes_fallidos(self, dias: int = 30, limite: int = 200) -> List[Dict[str, Any]]:
         """Get failed WhatsApp messages."""
         try:
+            since = self._now_utc_naive() - timedelta(days=int(dias or 0))
             result = self.db.execute(
                 text("""
                     SELECT DISTINCT ON (wm.phone_number) wm.id, wm.user_id,
@@ -29,10 +33,10 @@ class WhatsAppService(BaseService):
                            wm.phone_number, wm.message_type, wm.template_name, wm.message_content,
                            wm.status, wm.message_id, wm.sent_at AS fecha_envio
                     FROM whatsapp_messages wm LEFT JOIN usuarios u ON u.id = wm.user_id
-                    WHERE wm.status = 'failed' AND wm.sent_at >= CURRENT_TIMESTAMP - (:dias || ' days')::interval
+                    WHERE wm.status = 'failed' AND wm.sent_at >= :since
                     ORDER BY wm.phone_number, wm.sent_at DESC LIMIT :limite
                 """),
-                {'dias': dias, 'limite': limite}
+                {'since': since, 'limite': limite}
             )
             return [
                 {'id': r[0], 'user_id': r[1], 'usuario_nombre': r[2], 'usuario_telefono': r[3],
@@ -67,29 +71,29 @@ class WhatsAppService(BaseService):
     def limpiar_fallidos(self, telefono: Optional[str] = None, dias: int = 30) -> Dict[str, Any]:
         """Clear failed messages. Returns count deleted and phones affected."""
         try:
-            interval = f"{dias} days"
+            since = self._now_utc_naive() - timedelta(days=int(dias or 0))
             deleted = 0
             phones = []
             
             if telefono:
                 result = self.db.execute(text("""
                     DELETE FROM whatsapp_messages WHERE phone_number = :tel AND status = 'failed'
-                    AND sent_at >= CURRENT_TIMESTAMP - (:interval)::interval
-                """), {'tel': telefono, 'interval': interval})
+                    AND sent_at >= :since
+                """), {'tel': telefono, 'since': since})
                 deleted = result.rowcount or 0
                 phones = [telefono]
             else:
                 ph_result = self.db.execute(text("""
                     SELECT DISTINCT phone_number FROM whatsapp_messages
-                    WHERE status = 'failed' AND sent_at >= CURRENT_TIMESTAMP - (:interval)::interval
-                """), {'interval': interval})
+                    WHERE status = 'failed' AND sent_at >= :since
+                """), {'since': since})
                 phones = [r[0] for r in ph_result.fetchall() if r[0]]
                 
                 for ph in phones:
                     r = self.db.execute(text("""
                         DELETE FROM whatsapp_messages WHERE phone_number = :tel AND status = 'failed'
-                        AND sent_at >= CURRENT_TIMESTAMP - (:interval)::interval
-                    """), {'tel': ph, 'interval': interval})
+                        AND sent_at >= :since
+                    """), {'tel': ph, 'since': since})
                     deleted += r.rowcount or 0
             
             self.db.commit()
@@ -208,10 +212,11 @@ class WhatsAppService(BaseService):
     def registrar_mensaje_entrante(self, user_id: Optional[int], phone_number: str, message_content: str, message_id: str) -> bool:
         """Register incoming message from webhook."""
         try:
+            sent_at = self._now_utc_naive()
             self.db.execute(text("""
                 INSERT INTO whatsapp_messages (user_id, message_type, template_name, phone_number, message_content, status, message_id, sent_at)
-                VALUES (:uid, 'welcome', 'incoming', :phone, :content, 'received', :mid, NOW())
-            """), {'uid': user_id, 'phone': phone_number, 'content': message_content, 'mid': message_id})
+                VALUES (:uid, 'welcome', 'incoming', :phone, :content, 'received', :mid, :sent_at)
+            """), {'uid': user_id, 'phone': phone_number, 'content': message_content, 'mid': message_id, 'sent_at': sent_at})
             self.db.commit()
             return True
         except Exception as e:

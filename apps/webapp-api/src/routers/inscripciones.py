@@ -4,6 +4,7 @@ Uses InscripcionesService for all database operations.
 """
 import logging
 from typing import Optional
+from fastapi import status
 
 from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -13,6 +14,19 @@ from src.services.inscripciones_service import InscripcionesService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _assert_profesor_horario_access(request: Request, svc: InscripcionesService, horario_id: int) -> None:
+    """If logged as profesor, ensure the horario belongs to that profesor."""
+    role = str(request.session.get("role") or "").lower()
+    if role != "profesor":
+        return
+    pid = request.session.get("gestion_profesor_id")
+    if pid is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    hid_prof = svc._get_horario_profesor_id(int(horario_id))
+    if hid_prof is None or int(hid_prof) != int(pid):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
 # === Clase Tipos ===
@@ -70,11 +84,19 @@ async def api_clase_tipo_delete(
 @router.get("/api/clases/{clase_id}/horarios")
 async def api_clase_horarios_list(
     clase_id: int,
+    request: Request,
     _=Depends(require_gestion_access),
     svc: InscripcionesService = Depends(get_inscripciones_service)
 ):
     """List schedules for a class."""
-    return {"horarios": svc.obtener_horarios(clase_id)}
+    horarios = svc.obtener_horarios(clase_id)
+    role = str(request.session.get("role") or "").lower()
+    if role == "profesor":
+        pid = request.session.get("gestion_profesor_id")
+        if pid is None:
+            return {"horarios": []}
+        horarios = [h for h in (horarios or []) if int(h.get('profesor_id') or 0) == int(pid)]
+    return {"horarios": horarios}
 
 
 @router.post("/api/clases/{clase_id}/horarios")
@@ -96,8 +118,17 @@ async def api_clase_horario_create(
         if not dia or not hora_inicio or not hora_fin:
             raise HTTPException(status_code=400, detail="dia, hora_inicio y hora_fin son requeridos")
         
+        role = str(request.session.get("role") or "").lower()
+        if role == "profesor":
+            pid = request.session.get("gestion_profesor_id")
+            if pid is None:
+                raise HTTPException(status_code=403, detail="Forbidden")
+            profesor_id = int(pid)
+
         result = svc.crear_horario(clase_id, dia, hora_inicio, hora_fin, profesor_id, int(cupo))
-        return result if result else {"ok": True}
+        if not result:
+            raise HTTPException(status_code=404, detail="Clase no encontrada")
+        return result
     except HTTPException:
         raise
     except Exception as e:
@@ -115,9 +146,14 @@ async def api_clase_horario_update(
 ):
     """Update a class schedule."""
     try:
+        _assert_profesor_horario_access(request, svc, horario_id)
         payload = await request.json()
         result = svc.actualizar_horario(horario_id, clase_id, payload)
-        return result if result else {"ok": True}
+        if result is None:
+            raise HTTPException(status_code=404, detail="Horario no encontrado")
+        return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating schedule: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -127,13 +163,19 @@ async def api_clase_horario_update(
 async def api_clase_horario_delete(
     clase_id: int,
     horario_id: int,
+    request: Request,
     _=Depends(require_gestion_access),
     svc: InscripcionesService = Depends(get_inscripciones_service)
 ):
     """Delete a class schedule."""
     try:
-        svc.eliminar_horario(horario_id, clase_id)
+        _assert_profesor_horario_access(request, svc, horario_id)
+        ok = svc.eliminar_horario(horario_id, clase_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Horario no encontrado")
         return {"ok": True}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error deleting schedule: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -144,10 +186,12 @@ async def api_clase_horario_delete(
 @router.get("/api/horarios/{horario_id}/inscripciones")
 async def api_inscripciones_list(
     horario_id: int,
+    request: Request,
     _=Depends(require_gestion_access),
     svc: InscripcionesService = Depends(get_inscripciones_service)
 ):
     """List enrolled users for a schedule."""
+    _assert_profesor_horario_access(request, svc, horario_id)
     return {"inscripciones": svc.obtener_inscripciones(horario_id)}
 
 
@@ -160,6 +204,7 @@ async def api_inscripcion_create(
 ):
     """Enroll a user in a class schedule."""
     try:
+        _assert_profesor_horario_access(request, svc, horario_id)
         payload = await request.json()
         usuario_id = payload.get("usuario_id")
         
@@ -185,11 +230,13 @@ async def api_inscripcion_create(
 async def api_inscripcion_delete(
     horario_id: int,
     usuario_id: int,
+    request: Request,
     _=Depends(require_gestion_access),
     svc: InscripcionesService = Depends(get_inscripciones_service)
 ):
     """Remove user from class schedule."""
     try:
+        _assert_profesor_horario_access(request, svc, horario_id)
         svc.eliminar_inscripcion(horario_id, usuario_id)
         return {"ok": True}
     except Exception as e:
@@ -202,10 +249,12 @@ async def api_inscripcion_delete(
 @router.get("/api/horarios/{horario_id}/lista-espera")
 async def api_lista_espera_list(
     horario_id: int,
+    request: Request,
     _=Depends(require_gestion_access),
     svc: InscripcionesService = Depends(get_inscripciones_service)
 ):
     """Get waitlist for a schedule."""
+    _assert_profesor_horario_access(request, svc, horario_id)
     return {"lista": svc.obtener_lista_espera(horario_id)}
 
 
@@ -218,6 +267,7 @@ async def api_lista_espera_add(
 ):
     """Add user to waitlist."""
     try:
+        _assert_profesor_horario_access(request, svc, horario_id)
         payload = await request.json()
         usuario_id = payload.get("usuario_id")
         
@@ -241,11 +291,13 @@ async def api_lista_espera_add(
 async def api_lista_espera_remove(
     horario_id: int,
     usuario_id: int,
+    request: Request,
     _=Depends(require_gestion_access),
     svc: InscripcionesService = Depends(get_inscripciones_service)
 ):
     """Remove user from waitlist."""
     try:
+        _assert_profesor_horario_access(request, svc, horario_id)
         svc.eliminar_lista_espera(horario_id, usuario_id)
         return {"ok": True}
     except Exception as e:
@@ -256,11 +308,13 @@ async def api_lista_espera_remove(
 @router.post("/api/horarios/{horario_id}/lista-espera/notify")
 async def api_lista_espera_notify(
     horario_id: int,
+    request: Request,
     _=Depends(require_gestion_access),
     svc: InscripcionesService = Depends(get_inscripciones_service)
 ):
     """Notify next person in waitlist via WhatsApp."""
     try:
+        _assert_profesor_horario_access(request, svc, horario_id)
         first = svc.obtener_primero_lista_espera(horario_id)
         
         if not first:

@@ -1,10 +1,18 @@
 from typing import List, Optional, Dict, Any
 from datetime import date, datetime, timedelta
+from datetime import timezone
+import os
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 from sqlalchemy.orm import Session
 from src.services.base import BaseService
 from src.database.repositories.user_repository import UserRepository
 from src.database.repositories.payment_repository import PaymentRepository
 from src.database.repositories.gym_repository import GymRepository
+from src.database.repositories.attendance_repository import AttendanceRepository
 
 from src.database.orm_models import Usuario
 
@@ -14,6 +22,28 @@ class UserService(BaseService):
         self.user_repo = UserRepository(self.db, None, None) # Logger and Cache can be None for now or injected
         self.payment_repo = PaymentRepository(self.db, None, None)
         self.gym_repo = GymRepository(self.db, None, None)
+        self.attendance_repo = AttendanceRepository(self.db, None, None)
+
+    def _get_app_timezone(self):
+        tz_name = (
+            os.getenv("APP_TIMEZONE")
+            or os.getenv("TIMEZONE")
+            or os.getenv("TZ")
+            or "America/Argentina/Buenos_Aires"
+        )
+        if ZoneInfo is not None:
+            try:
+                return ZoneInfo(tz_name)
+            except Exception:
+                pass
+        return timezone(timedelta(hours=-3))
+
+    def _today_local_date(self) -> date:
+        try:
+            tz = self._get_app_timezone()
+            return datetime.now(timezone.utc).astimezone(tz).date()
+        except Exception:
+            return date.today()
 
     def get_user(self, user_id: int) -> Optional[Usuario]:
         return self.user_repo.obtener_usuario(user_id)
@@ -22,13 +52,66 @@ class UserService(BaseService):
         return self.user_repo.obtener_usuario_por_dni(dni)
 
     def list_users(self, q: Optional[str] = None, limit: int = 50, offset: int = 0) -> List[Dict]:
-        return self.user_repo.listar_usuarios_paginados(q, limit, offset)
+        items = self.user_repo.listar_usuarios_paginados(q, limit, offset)
 
-    def create_user(self, data: Dict[str, Any]) -> int:
+        # Enriquecer con tipo_cuota_id / tipo_cuota_nombre (frontend contract)
+        # En DB se persiste Usuario.tipo_cuota como string (nombre).
+        try:
+            tipos = self.payment_repo.obtener_tipos_cuota_activos()
+            map_nombre_a_id = {str(t.nombre): int(t.id) for t in tipos if getattr(t, 'nombre', None) is not None}
+        except Exception:
+            map_nombre_a_id = {}
+
+        for it in items:
+            nombre = it.get('tipo_cuota')
+            if 'tipo_cuota_nombre' not in it:
+                it['tipo_cuota_nombre'] = nombre
+            if 'tipo_cuota_id' not in it:
+                it['tipo_cuota_id'] = map_nombre_a_id.get(nombre)
+
+        return items
+
+    def list_users_paged(self, q: Optional[str] = None, *, activo: Optional[bool] = None, limit: int = 50, offset: int = 0) -> Dict[str, Any]:
+        items = self.user_repo.listar_usuarios_paginados(q, limit, offset, activo=activo)
+        total = self.user_repo.contar_usuarios(q, activo=activo)
+
+        # Enriquecer con tipo_cuota_id / tipo_cuota_nombre (frontend contract)
+        try:
+            tipos = self.payment_repo.obtener_tipos_cuota_activos()
+            map_nombre_a_id = {str(t.nombre): int(t.id) for t in tipos if getattr(t, 'nombre', None) is not None}
+        except Exception:
+            map_nombre_a_id = {}
+
+        for it in items:
+            nombre = it.get('tipo_cuota')
+            if 'tipo_cuota_nombre' not in it:
+                it['tipo_cuota_nombre'] = nombre
+            if 'tipo_cuota_id' not in it:
+                it['tipo_cuota_id'] = map_nombre_a_id.get(nombre)
+
+        return {'items': items, 'total': int(total or 0)}
+
+    def _is_privileged_role(self, role: Optional[str]) -> bool:
+        r = str(role or '').strip().lower()
+        return r in ("dueño", "dueno", "owner", "admin", "administrador")
+
+    def create_user(self, data: Dict[str, Any], is_owner: bool = False) -> int:
         # Validation logic moved from router
         dni = data.get("dni")
         if self.user_repo.obtener_usuario_por_dni(dni):
             raise ValueError("DNI ya existe")
+
+        if self._is_privileged_role(data.get("rol")) and not bool(is_owner):
+            raise PermissionError("Solo el dueño puede asignar roles privilegiados")
+
+        # Handle tipo_cuota_id (frontend sends ID, DB stores name)
+        if "tipo_cuota_id" in data and data["tipo_cuota_id"] is not None:
+            try:
+                tc = self.payment_repo.obtener_tipo_cuota_por_id(int(data["tipo_cuota_id"]))
+                if tc:
+                    data["tipo_cuota"] = tc.nombre
+            except Exception:
+                pass
         
         # Create object
         usuario = Usuario(**data)
@@ -39,10 +122,22 @@ class UserService(BaseService):
         current_user = self.user_repo.obtener_usuario(user_id)
         if not current_user:
             raise ValueError("Usuario no encontrado")
+
+        if self._is_privileged_role(getattr(current_user, 'rol', None)) and not bool(is_owner):
+            raise PermissionError("Solo el dueño puede modificar un usuario privilegiado")
+
+        if "rol" in data and self._is_privileged_role(data.get("rol")) and not bool(is_owner):
+            raise PermissionError("Solo el dueño puede asignar roles privilegiados")
             
-        # Handle PIN logic (preserve if not provided)
+        # Handle PIN logic (preserve if not provided or blank)
         if "pin" not in data or data["pin"] is None:
-             data["pin"] = current_user.pin
+            data["pin"] = current_user.pin
+        else:
+            try:
+                if str(data.get("pin") or "").strip() == "":
+                    data["pin"] = current_user.pin
+            except Exception:
+                data["pin"] = current_user.pin
 
         # Handle tipo_cuota_id (legacy compatibility: store name)
         if "tipo_cuota_id" in data and data["tipo_cuota_id"] is not None:
@@ -69,6 +164,20 @@ class UserService(BaseService):
             
         return True
 
+    def set_user_pin(self, user_id: int, new_pin: str, *, is_owner: bool = False) -> bool:
+        user = self.user_repo.obtener_usuario(int(user_id))
+        if not user:
+            raise ValueError("Usuario no encontrado")
+
+        if self._is_privileged_role(getattr(user, 'rol', None)) and not bool(is_owner):
+            raise PermissionError("Solo el dueño puede modificar un usuario privilegiado")
+
+        pin_str = str(new_pin or "").strip()
+        if len(pin_str) < 4:
+            raise ValueError("El PIN nuevo debe tener al menos 4 caracteres")
+
+        return bool(self.user_repo.cambiar_pin(int(user_id), pin_str))
+
     def delete_user(self, user_id: int):
         self.user_repo.eliminar_usuario(user_id)
 
@@ -81,7 +190,7 @@ class UserService(BaseService):
         dias_restantes = None
         fpv = u.fecha_proximo_vencimiento
         if fpv:
-             delta = (fpv - date.today()).days
+             delta = (fpv - self._today_local_date()).days
              dias_restantes = delta
 
         # Get last payments
@@ -119,11 +228,15 @@ class UserService(BaseService):
 
     # --- Fixed: Using ORM instead of raw SQL ---
     
-    def toggle_activo(self, user_id: int) -> Dict[str, Any]:
+    def toggle_activo(self, user_id: int, is_owner: bool = False) -> Dict[str, Any]:
         """Toggle user active status using ORM."""
         user = self.user_repo.obtener_usuario(user_id)
         if not user:
             return {'error': 'not_found'}
+
+        if self._is_privileged_role(getattr(user, 'rol', None)) and not bool(is_owner):
+            raise PermissionError("Solo el dueño puede modificar un usuario privilegiado")
+
         new_status = self.user_repo.alternar_estado_activo(user_id)
         return {'id': user_id, 'activo': new_status, 'nombre': user.nombre}
 
@@ -139,22 +252,18 @@ class UserService(BaseService):
     def generate_qr_token(self, user_id: int) -> Dict[str, str]:
         """Generate QR check-in token for user."""
         import secrets
-        import time
-        from src.database.orm_models import CheckinPending
-        
-        token = f"checkin_{user_id}_{int(time.time())}_{secrets.token_hex(8)}"
-        
-        # Use ORM model instead of raw CREATE TABLE
-        expires_at = datetime.now() + timedelta(hours=24)
-        checkin_pending = CheckinPending(
-            usuario_id=user_id,
-            token=token,
-            expires_at=expires_at
-        )
-        self.db.add(checkin_pending)
-        self.db.commit()
-        
-        return {'qr_url': f"/api/checkin?token={token}", 'token': token}
+
+        token = secrets.token_urlsafe(24)[:64]
+        self.attendance_repo.crear_checkin_token(int(user_id), token, expires_minutes=5)
+        cp = self.attendance_repo.obtener_checkin_por_token(token) or {}
+        expires_at = cp.get('expires_at')
+
+        try:
+            expires_iso = expires_at.isoformat() if hasattr(expires_at, 'isoformat') else (str(expires_at) if expires_at else None)
+        except Exception:
+            expires_iso = None
+
+        return {'qr_url': f"/api/checkin?token={token}", 'token': token, 'expires_at': expires_iso}
 
     def get_tag_suggestions(self) -> List[str]:
         """Get common tag suggestions using ORM."""

@@ -574,14 +574,39 @@ async def api_usuario_login(
         dni = str(data.get("dni") or "").strip()
         pin = str(data.get("pin") or "").strip()
     except Exception:
-        return JSONResponse({"success": False, "message": "Datos inválidos"}, status_code=400)
+        return JSONResponse(
+            {"ok": False, "mensaje": "Datos inválidos", "success": False, "message": "Datos inválidos"},
+            status_code=400,
+        )
+
+    import os
+    dev_mode = os.getenv("DEVELOPMENT_MODE", "").lower() in ("1", "true", "yes") or os.getenv("ENV", "").lower() in ("dev", "development")
+    rp_raw = os.getenv("USUARIO_REQUIRE_PIN")
+    if rp_raw is None or str(rp_raw).strip() == "":
+        require_pin = (not dev_mode)
+    else:
+        require_pin = str(rp_raw).lower() in ("true", "1", "yes")
     
     if not dni:
-        return JSONResponse({"success": False, "message": "DNI requerido"})
+        return JSONResponse({"ok": False, "mensaje": "DNI requerido", "success": False, "message": "DNI requerido"})
+
+    if require_pin and not pin:
+        return JSONResponse(
+            {"ok": False, "mensaje": "PIN requerido", "success": False, "message": "PIN requerido"},
+            status_code=400,
+        )
     
     # Rate limiting check
     if is_rate_limited_login(request, dni):
-        return JSONResponse({"success": False, "message": "Demasiados intentos. Intente más tarde"}, status_code=429)
+        return JSONResponse(
+            {
+                "ok": False,
+                "mensaje": "Demasiados intentos. Intente más tarde",
+                "success": False,
+                "message": "Demasiados intentos. Intente más tarde",
+            },
+            status_code=429,
+        )
     
     # Register attempt before verification
     register_login_attempt(request, dni)
@@ -589,21 +614,36 @@ async def api_usuario_login(
     # Get user by DNI using SQLAlchemy
     user = svc.obtener_usuario_por_dni(dni)
     if not user:
-        return JSONResponse({"success": False, "message": "DNI no encontrado o incorrecto"})
+        return JSONResponse(
+            {
+                "ok": False,
+                "mensaje": "DNI no encontrado o incorrecto",
+                "success": False,
+                "message": "DNI no encontrado o incorrecto",
+            }
+        )
     
-    # PIN OPTIONAL as per simplified flow
-    # Only verify PIN if explicitly provided and non-empty
+    # Verify PIN
     if pin:
         pin_result = svc.verificar_pin(user.id, pin)
         if not pin_result['valid']:
-            return JSONResponse({"success": False, "message": "PIN incorrecto"})
+            return JSONResponse({"ok": False, "mensaje": "PIN incorrecto", "success": False, "message": "PIN incorrecto"})
+    elif require_pin:
+        return JSONResponse(
+            {"ok": False, "mensaje": "PIN requerido", "success": False, "message": "PIN requerido"},
+            status_code=400,
+        )
     
     if not user.activo:
-        return JSONResponse({
-            "success": False, 
-            "message": "Usuario inactivo or membresía vencida",
-            "activo": False
-        })
+        return JSONResponse(
+            {
+                "ok": False,
+                "mensaje": "Usuario inactivo or membresía vencida",
+                "success": False,
+                "message": "Usuario inactivo or membresía vencida",
+                "activo": False,
+            }
+        )
     
     # Success: clear rate limits
     clear_login_attempts(request, dni)
@@ -630,26 +670,32 @@ async def api_usuario_login(
     # Calculate days remaining if applicable
     dias_restantes = None
     if user.fecha_proximo_vencimiento:
-        from datetime import datetime, date
+        from datetime import datetime, date, timezone
         try:
             venc = user.fecha_proximo_vencimiento
             if isinstance(venc, datetime):
                 venc = venc.date()
-            dias_restantes = (venc - date.today()).days
+            local_today = datetime.now(timezone.utc).astimezone(svc._get_app_timezone()).date()
+            dias_restantes = (venc - local_today).days
         except Exception:
             pass
     
-    return JSONResponse({
-        "success": True,
-        "user_id": user.id,
-        "nombre": nombre,
-        "activo": True,
-        "exento": bool(getattr(user, 'exento', False)),
-        "cuotas_vencidas": getattr(user, 'cuotas_vencidas', 0) or 0,
-        "dias_restantes": dias_restantes,
-        "fecha_proximo_vencimiento": str(user.fecha_proximo_vencimiento or ""),
-        "token": jwt_token  # JWT for client-side use
-    })
+    return JSONResponse(
+        {
+            "ok": True,
+            "mensaje": "OK",
+            "success": True,
+            "message": "OK",
+            "user_id": user.id,
+            "nombre": nombre,
+            "activo": True,
+            "exento": bool(getattr(user, 'exento', False)),
+            "cuotas_vencidas": getattr(user, 'cuotas_vencidas', 0) or 0,
+            "dias_restantes": dias_restantes,
+            "fecha_proximo_vencimiento": str(user.fecha_proximo_vencimiento or ""),
+            "token": jwt_token,  # JWT for client-side use
+        }
+    )
 
 
 @router.post("/api/checkin/auth")
@@ -665,42 +711,84 @@ async def api_checkin_auth(
         data = await request.json()
         dni = str(data.get("dni") or "").strip()
         telefono = str(data.get("telefono") or "").strip()  # Optional now
+        pin = str(data.get("pin") or "").strip()
     except Exception:
-        return JSONResponse({"success": False, "message": "Datos inválidos"}, status_code=400)
+        return JSONResponse(
+            {"ok": False, "mensaje": "Datos inválidos", "success": False, "message": "Datos inválidos"},
+            status_code=400,
+        )
+
+    import os
+    dev_mode = os.getenv("DEVELOPMENT_MODE", "").lower() in ("1", "true", "yes") or os.getenv("ENV", "").lower() in ("dev", "development")
+    rp_raw = os.getenv("CHECKIN_REQUIRE_PIN")
+    if rp_raw is None or str(rp_raw).strip() == "":
+        require_pin = (not dev_mode)
+    else:
+        require_pin = str(rp_raw).lower() in ("true", "1", "yes")
     
     if not dni:
-        return JSONResponse({"success": False, "message": "DNI requerido"})
+        return JSONResponse({"ok": False, "mensaje": "DNI requerido", "success": False, "message": "DNI requerido"})
+
+    if require_pin and not pin:
+        return JSONResponse(
+            {
+                "ok": False,
+                "mensaje": "PIN requerido",
+                "success": False,
+                "message": "PIN requerido",
+                "require_pin": True,
+            },
+            status_code=400,
+        )
     
-    # First try with phone if provided
-    if telefono:
-        result = svc.verificar_checkin(dni, telefono)
+    user = svc.obtener_usuario_por_dni(dni)
+    if not user:
+        result = {'valid': False, 'error': 'Usuario no encontrado'}
+    elif not user.activo:
+        result = {'valid': False, 'error': 'Usuario inactivo', 'activo': False}
     else:
-        # DNI-only verification: just find user and check active status
-        user = svc.obtener_usuario_por_dni(dni)
-        if not user:
-            result = {'valid': False, 'error': 'Usuario no encontrado'}
-        elif not user.activo:
-            result = {'valid': False, 'error': 'Usuario inactivo', 'activo': False}
-        else:
-            # Build user info dict for response
-            result = {
-                'valid': True,
-                'usuario': {
-                    'id': user.id,
-                    'nombre': user.nombre,
-                    'exento': getattr(user, 'exento', False),
-                    'cuotas_vencidas': getattr(user, 'cuotas_vencidas', 0),
-                    'fecha_vencimiento': getattr(user, 'fecha_proximo_vencimiento', None)
+        if require_pin:
+            pin_result = svc.verificar_pin(user.id, pin)
+            if not pin_result.get('valid'):
+                result = {'valid': False, 'error': 'PIN incorrecto', 'activo': True}
+            else:
+                result = {
+                    'valid': True,
+                    'usuario': {
+                        'id': user.id,
+                        'nombre': user.nombre,
+                        'exento': getattr(user, 'exento', False),
+                        'cuotas_vencidas': getattr(user, 'cuotas_vencidas', 0),
+                        'fecha_vencimiento': getattr(user, 'fecha_proximo_vencimiento', None)
+                    }
                 }
-            }
+        else:
+            # First try with phone if provided
+            if telefono:
+                result = svc.verificar_checkin(dni, telefono)
+            else:
+                result = {
+                    'valid': True,
+                    'usuario': {
+                        'id': user.id,
+                        'nombre': user.nombre,
+                        'exento': getattr(user, 'exento', False),
+                        'cuotas_vencidas': getattr(user, 'cuotas_vencidas', 0),
+                        'fecha_vencimiento': getattr(user, 'fecha_proximo_vencimiento', None)
+                    }
+                }
     
     if not result['valid']:
         error_msg = result.get('error', 'Verificación fallida')
-        return JSONResponse({
-            "success": False, 
-            "message": error_msg,
-            "activo": result.get('activo', False)
-        })
+        return JSONResponse(
+            {
+                "ok": False,
+                "mensaje": error_msg,
+                "success": False,
+                "message": error_msg,
+                "activo": result.get('activo', False),
+            }
+        )
     
     user_data = result.get('usuario', {})
     user_id = user_data.get('id')
@@ -726,7 +814,7 @@ async def api_checkin_auth(
     dias_restantes = None
     fecha_vencimiento = user_data.get('fecha_vencimiento')
     if fecha_vencimiento:
-        from datetime import datetime, date
+        from datetime import datetime, date, timezone
         try:
             if isinstance(fecha_vencimiento, str):
                 venc = datetime.fromisoformat(fecha_vencimiento).date()
@@ -734,59 +822,25 @@ async def api_checkin_auth(
                 venc = fecha_vencimiento.date()
             else:
                 venc = fecha_vencimiento
-            dias_restantes = (venc - date.today()).days
+            local_today = datetime.now(timezone.utc).astimezone(svc._get_app_timezone()).date()
+            dias_restantes = (venc - local_today).days
         except Exception:
             pass
     
-    return JSONResponse({
-        "success": True,
-        "usuario_id": user_id,
-        "activo": True,
-        "exento": bool(user_data.get('exento', False)),
-        "cuotas_vencidas": user_data.get('cuotas_vencidas', 0) or 0,
-        "dias_restantes": dias_restantes,
-        "fecha_proximo_vencimiento": str(fecha_vencimiento or ""),
-        "token": jwt_token
-    })
+    return JSONResponse(
+        {
+            "ok": True,
+            "mensaje": "OK",
+            "success": True,
+            "message": "OK",
+            "usuario_id": user_id,
+            "activo": True,
+            "exento": bool(user_data.get('exento', False)),
+            "cuotas_vencidas": user_data.get('cuotas_vencidas', 0) or 0,
+            "dias_restantes": dias_restantes,
+            "fecha_proximo_vencimiento": str(fecha_vencimiento or ""),
+            "token": jwt_token,
+        }
+    )
 
-
-@router.post("/api/checkin/qr")
-async def api_checkin_qr(
-    request: Request,
-    svc: AttendanceService = Depends(get_attendance_service)
-):
-    """
-    Validate station QR scan and register attendance.
-    Requires authenticated user via session/cookie.
-    """
-    try:
-        # Check session
-        user_id = request.session.get("user_id")
-        if not user_id:
-            return JSONResponse({"ok": False, "mensaje": "Sesión no válida. Ingrese DNI nuevamente."}, status_code=401)
-
-        data = await request.json()
-        token = str(data.get("token") or "").strip()
-        
-        if not token:
-             return JSONResponse({"ok": False, "mensaje": "Token QR requerido"}, status_code=400)
-             
-        # Validate and Check-in
-        success, message, user_data = svc.validar_station_scan(token, user_id)
-        
-        if success:
-             return JSONResponse({
-                 "ok": True, 
-                 "mensaje": message, 
-                 "usuario": {
-                     "nombre": user_data.get("nombre"),
-                     "dni": user_data.get("dni")
-                 }
-             })
-        else:
-             return JSONResponse({"ok": False, "mensaje": message}, status_code=400)
-             
-    except Exception:
-        logger.exception("Error en checkin QR")
-        return JSONResponse({"ok": False, "mensaje": "Error de servidor"}, status_code=500)
 

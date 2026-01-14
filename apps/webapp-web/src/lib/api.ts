@@ -876,7 +876,7 @@ class ApiClient {
         const p = new URLSearchParams();
         if (params?.weeks) p.set('weeks', String(params.weeks));
         if (params?.qr_mode) p.set('qr_mode', params.qr_mode);
-        if (params?.sheet_name) p.set('sheet_name', params.sheet_name);
+        if (params?.sheet_name) p.set('sheet', params.sheet_name);
         if (params?.user_override) p.set('user_override', params.user_override);
 
         const query = p.toString();

@@ -83,8 +83,8 @@ export default function DashboardLayout({
             </nav>
 
             {/* Desktop sidebar */}
-            <aside className="hidden md:block fixed left-0 top-16 bottom-0 w-64 bg-slate-900 border-r border-slate-800/50 p-4">
-                <nav className="space-y-1">
+            <aside className="hidden md:block fixed left-0 top-16 bottom-0 w-64 bg-slate-900 border-r border-slate-800/50 p-4 flex flex-col min-h-0">
+                <nav className="space-y-1 flex-1 min-h-0 overflow-y-auto overflow-x-auto">
                     {navigation.map((item) => {
                         const isActive = pathname === item.href || pathname?.startsWith(item.href + '/');
                         return (

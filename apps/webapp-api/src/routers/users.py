@@ -67,17 +67,70 @@ async def usuario_panel(
 
 @router.get("/api/usuarios")
 async def api_usuarios_list(
-    q: Optional[str] = None, 
-    limit: int = 50, 
-    offset: int = 0, 
+    q: Optional[str] = None,
+    search: Optional[str] = None,
+    activo: Optional[bool] = None,
+    page: Optional[int] = None,
+    limit: int = 50,
+    offset: int = 0,
     user_service: UserService = Depends(get_user_service),
     _=Depends(require_gestion_access)
 ):
     try:
-        items = user_service.list_users(q, limit, offset)
-        return {"usuarios": items, "total": len(items)}
+        q_effective = (search if (search is not None and str(search).strip() != "") else q)
+        limit_effective = max(1, int(limit or 50))
+        offset_effective = int(offset or 0)
+        if offset_effective <= 0 and page is not None:
+            try:
+                page_int = int(page)
+                if page_int > 0:
+                    offset_effective = (page_int - 1) * limit_effective
+            except Exception:
+                pass
+
+        out = user_service.list_users_paged(q_effective, activo=activo, limit=limit_effective, offset=offset_effective)
+        return {"usuarios": out.get('items', []), "total": int(out.get('total') or 0)}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
+
+
+@router.put("/api/usuarios/{usuario_id}/pin")
+async def api_usuario_pin_set(
+    usuario_id: int,
+    request: Request,
+    user_service: UserService = Depends(get_user_service),
+    _=Depends(require_gestion_access)
+):
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    try:
+        is_owner = bool(request.session.get("logged_in")) and str(request.session.get("role") or "").strip().lower() in ("dueño", "dueno", "owner")
+
+        reset = bool(payload.get("reset"))
+        new_pin = payload.get("pin") or payload.get("new_pin")
+
+        if reset:
+            import secrets
+            new_pin = "".join([str(secrets.randbelow(10)) for _ in range(6)])
+
+        if new_pin is None:
+            raise HTTPException(status_code=400, detail="pin es requerido")
+
+        user_service.set_user_pin(int(usuario_id), str(new_pin), is_owner=is_owner)
+        return {"ok": True, "pin": str(new_pin) if reset else None}
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.get("/api/usuarios/{usuario_id}")
 async def api_usuario_get(
@@ -91,21 +144,7 @@ async def api_usuario_get(
         if not u:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
             
-        # Aplicar visibilidad de PIN: 
-        # 1. DUEÑO/ADMIN: NUNCA mostrar el PIN/HASH (Seguridad Estricta)
-        user_role = str(getattr(u, "rol", "")).strip().lower()
-        if user_role in ("dueño", "dueno", "owner", "admin", "administrador"):
-            pin_value = None # Ocultar totalmente el hash del dueño
-            
-        # 2. PROFESORES: Un profesor no debe ver el PIN de otro profesor
-        elif user_role == "profesor":
-            try:
-                prof_uid = request.session.get("gestion_profesor_user_id")
-                # Si soy un profesor viendo a otro (y no a mi mismo), ocultar
-                if prof_uid and int(usuario_id) != int(prof_uid):
-                     pin_value = None
-            except Exception:
-                pass
+        pin_value = None
             
         return {
             "id": u.id,
@@ -116,6 +155,10 @@ async def api_usuario_get(
             "rol": u.rol,
             "activo": bool(u.activo),
             "tipo_cuota": u.tipo_cuota,
+            "tipo_cuota_nombre": u.tipo_cuota,
+            "tipo_cuota_id": (user_service.payment_repo.obtener_tipo_cuota_por_nombre(u.tipo_cuota).id
+                              if getattr(u, 'tipo_cuota', None) and user_service.payment_repo.obtener_tipo_cuota_por_nombre(u.tipo_cuota)
+                              else None),
             "notas": u.notas,
             "fecha_registro": u.fecha_registro,
             "fecha_proximo_vencimiento": u.fecha_proximo_vencimiento,
@@ -125,7 +168,8 @@ async def api_usuario_get(
     except HTTPException:
         raise
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.post("/api/usuarios")
 async def api_usuario_create(
@@ -135,17 +179,20 @@ async def api_usuario_create(
 ):
     payload = await request.json()
     try:
+        is_owner = bool(request.session.get("logged_in")) and str(request.session.get("role") or "").strip().lower() in ("dueño", "dueno", "owner")
+
         # Prepare data
         data = {
             "nombre": ((payload.get("nombre") or "").strip()).upper(),
             "dni": str(payload.get("dni") or "").strip(),
-            "telefono": str(payload.get("telefono") or "").strip() or None,
+            "telefono": str(payload.get("telefono") or "").strip(),
             "pin": payload.get("pin") if isinstance(payload, dict) else None,
             "rol": (payload.get("rol") or "socio").strip().lower(),
             "activo": bool(payload.get("activo", True)),
             "tipo_cuota": payload.get("tipo_cuota"),
+            "tipo_cuota_id": payload.get("tipo_cuota_id"),
             "notas": payload.get("notas"),
-            "fecha_registro": datetime.now(timezone.utc).isoformat(),
+            "fecha_registro": datetime.now(timezone.utc).replace(tzinfo=None),
             "cuotas_vencidas": 0,
             "ultimo_pago": None
         }
@@ -153,14 +200,17 @@ async def api_usuario_create(
         if not data["nombre"] or not data["dni"]:
             raise HTTPException(status_code=400, detail="'nombre' y 'dni' son obligatorios")
             
-        new_id = user_service.create_user(data)
+        new_id = user_service.create_user(data, is_owner=is_owner)
         return {"id": new_id}
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.put("/api/usuarios/{usuario_id}")
 async def api_usuario_update(
@@ -171,7 +221,7 @@ async def api_usuario_update(
 ):
     payload = await request.json()
     try:
-        is_owner = bool(request.session.get("logged_in")) and str(request.session.get("role") or "").strip().lower() == "dueño"
+        is_owner = bool(request.session.get("logged_in")) and str(request.session.get("role") or "").strip().lower() in ("dueño", "dueno", "owner")
         
         # Clean payload
         data = payload.copy()
@@ -200,7 +250,8 @@ async def api_usuario_update(
     except HTTPException:
         raise
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.delete("/api/usuarios/{usuario_id}")
 async def api_usuario_delete(
@@ -214,25 +265,31 @@ async def api_usuario_delete(
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 
 @router.post("/api/usuarios/{usuario_id}/toggle-activo")
 async def api_usuario_toggle_activo(
     usuario_id: int,
+    request: Request,
     user_service: UserService = Depends(get_user_service),
     _=Depends(require_gestion_access)
 ):
     """Toggle user active status"""
     try:
-        result = user_service.toggle_activo(usuario_id)
+        is_owner = bool(request.session.get("logged_in")) and str(request.session.get("role") or "").strip().lower() in ("dueño", "dueno", "owner")
+        result = user_service.toggle_activo(usuario_id, is_owner=is_owner)
         if result.get('error') == 'not_found':
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
         return result
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except HTTPException:
         raise
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 
 @router.put("/api/usuarios/{usuario_id}/notas")
@@ -249,7 +306,8 @@ async def api_usuario_notas_update(
         user_service.update_notas(usuario_id, notas)
         return {"ok": True}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 
 @router.get("/api/usuarios/{usuario_id}/qr")
@@ -262,7 +320,22 @@ async def api_usuario_qr(
     try:
         return user_service.generate_qr_token(usuario_id)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
+
+
+@router.post("/api/usuarios/{usuario_id}/qr")
+async def api_usuario_qr_post(
+    usuario_id: int,
+    user_service: UserService = Depends(get_user_service),
+    _=Depends(require_gestion_access)
+):
+    """Generate QR code URL and token for user check-in (POST alias)."""
+    try:
+        return user_service.generate_qr_token(usuario_id)
+    except Exception as e:
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 
 @router.get("/api/etiquetas/suggestions")
@@ -289,7 +362,8 @@ async def api_usuario_etiquetas_get(
         items = user_service.get_user_tags(usuario_id)
         return {"etiquetas": items}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.post("/api/usuarios/{usuario_id}/etiquetas")
 async def api_usuario_etiquetas_add(
@@ -306,7 +380,8 @@ async def api_usuario_etiquetas_add(
     except ValueError as e:
          raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.delete("/api/usuarios/{usuario_id}/etiquetas/{etiqueta_id}")
 async def api_usuario_etiquetas_remove(
@@ -319,7 +394,8 @@ async def api_usuario_etiquetas_remove(
         ok = user_service.remove_user_tag(usuario_id, etiqueta_id)
         return {"ok": ok}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 # --- API Estados de usuario ---
 
@@ -338,7 +414,8 @@ async def api_usuario_estados_get(
     except HTTPException:
         raise
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.get("/api/usuarios_morosidad_ids")
 async def api_usuarios_morosidad_ids(
@@ -349,7 +426,8 @@ async def api_usuarios_morosidad_ids(
     try:
         return user_service.get_morose_user_ids()
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.post("/api/usuarios/{usuario_id}/estados")
 async def api_usuario_estados_add(
@@ -369,7 +447,8 @@ async def api_usuario_estados_add(
     except HTTPException:
         raise
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.put("/api/usuarios/{usuario_id}/estados/{estado_id}")
 async def api_usuario_estados_update(
@@ -389,7 +468,8 @@ async def api_usuario_estados_update(
     except HTTPException:
         raise
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.delete("/api/usuarios/{usuario_id}/estados/{estado_id}")
 async def api_usuario_estados_delete(
@@ -407,7 +487,8 @@ async def api_usuario_estados_delete(
     except HTTPException:
         raise
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.get("/api/estados/plantillas")
 async def api_estados_plantillas(
@@ -419,7 +500,8 @@ async def api_estados_plantillas(
         items = user_service.get_state_templates()
         return {"items": items}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 
 @router.get("/api/estados/templates")
@@ -432,7 +514,8 @@ async def api_estados_templates(
         items = user_service.get_state_templates()
         return {"templates": items}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 # --- API Profesores ---
 
@@ -445,7 +528,7 @@ async def api_profesores_basico(
     except Exception:
         return []
 
-@router.get("/api/profesores_detalle")
+@router.get("/api/legacy/profesores_detalle")
 async def api_profesores_detalle(
     request: Request, 
     profesor_service: ProfesorService = Depends(get_profesor_service),
@@ -466,7 +549,7 @@ async def api_profesores_detalle(
         
     return profesor_service.get_teacher_details_list(start_date, end_date)
 
-@router.get("/api/profesores/{profesor_id}")
+@router.get("/api/legacy/profesores/{profesor_id}")
 async def api_profesor_get(
     profesor_id: int, 
     profesor_service: ProfesorService = Depends(get_profesor_service),
@@ -475,12 +558,14 @@ async def api_profesor_get(
     try:
         data = profesor_service.obtener_profesor(profesor_id)
         if not data:
-            return JSONResponse({"error": "not_found"}, status_code=404)
+            msg = "not_found"
+            return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=404)
         return data
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
-@router.put("/api/profesores/{profesor_id}")
+@router.put("/api/legacy/profesores/{profesor_id}")
 async def api_profesor_update(
     profesor_id: int, 
     request: Request, 
@@ -494,11 +579,12 @@ async def api_profesor_update(
         
     try:
         profesor_service.actualizar_profesor(profesor_id, payload)
-        return {"success": True, "updated": 1}
+        return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", "updated": 1}
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        msg = str(e)
+        return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
-@router.get("/api/profesor_sesiones")
+@router.get("/api/legacy/profesor_sesiones")
 async def api_profesor_sesiones(
     request: Request, 
     profesor_service: ProfesorService = Depends(get_profesor_service),

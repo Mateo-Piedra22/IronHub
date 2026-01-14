@@ -18,7 +18,6 @@ import {
     ChevronRight,
     Home,
     MessageSquare,
-    LayoutDashboard,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ToastContainer } from '@/components/ui';
@@ -27,7 +26,6 @@ import { api } from '@/lib/api';
 
 // Navigation items
 const navigation = [
-    { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, description: 'Estadísticas y KPIs' },
     { name: 'Usuarios', href: '/gestion/usuarios', icon: Users, description: 'Gestionar socios' },
     { name: 'Pagos', href: '/gestion/pagos', icon: CreditCard, description: 'Registro de pagos' },
     { name: 'Profesores', href: '/gestion/profesores', icon: GraduationCap, description: 'Staff y sesiones' },
@@ -86,7 +84,7 @@ export default function AdminLayout({
                         </button>
 
                         {/* Logo */}
-                        <Link href="/dashboard" className="flex items-center gap-3">
+                        <Link href="/gestion/usuarios" className="flex items-center gap-3">
                             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center shadow-sm">
                                 <Dumbbell className="w-4 h-4 text-white" />
                             </div>
@@ -151,7 +149,7 @@ export default function AdminLayout({
                             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
                             className="fixed top-0 left-0 bottom-0 z-50 w-72 bg-slate-900 border-r border-slate-800 lg:hidden"
                         >
-                            <div className="h-full flex flex-col">
+                            <div className="h-full flex flex-col min-h-0">
                                 {/* Header */}
                                 <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800">
                                     <div className="flex items-center gap-3">
@@ -171,19 +169,16 @@ export default function AdminLayout({
                                 </div>
 
                                 {/* Nav */}
-                                <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+                                <nav className="flex-1 min-h-0 p-4 space-y-1 overflow-y-auto overflow-x-auto">
                                     {navigation.map((item) => {
-                                        // For dashboard parent, only exact match to prevent multi-selection
-                                        const isActive = item.href === '/dashboard'
-                                            ? pathname === item.href
-                                            : pathname === item.href || pathname?.startsWith(item.href + '/');
+                                        const isActive = pathname === item.href || pathname?.startsWith(item.href + '/');
                                         return (
                                             <Link
                                                 key={item.name}
                                                 href={item.href}
                                                 onClick={() => setMobileMenuOpen(false)}
                                                 className={cn(
-                                                    'flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200',
+                                                    'flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 whitespace-nowrap min-w-max',
                                                     isActive
                                                         ? 'bg-primary-500/20 text-primary-300'
                                                         : 'text-slate-400 hover:bg-slate-800/50 hover:text-white'
@@ -206,18 +201,15 @@ export default function AdminLayout({
 
             {/* Desktop sidebar */}
             <aside className="hidden lg:block fixed top-16 left-0 bottom-0 w-64 border-r border-slate-800/50 bg-slate-900/50 backdrop-blur-lg">
-                <nav className="p-4 space-y-1 overflow-y-auto h-full">
+                <nav className="p-4 space-y-1 overflow-y-auto overflow-x-auto h-full">
                     {navigation.map((item) => {
-                        // For dashboard parent, only exact match to prevent multi-selection
-                        const isActive = item.href === '/dashboard'
-                            ? pathname === item.href
-                            : pathname === item.href || pathname?.startsWith(item.href + '/');
+                        const isActive = pathname === item.href || pathname?.startsWith(item.href + '/');
                         return (
                             <Link
                                 key={item.name}
                                 href={item.href}
                                 className={cn(
-                                    'group flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200',
+                                    'group flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 whitespace-nowrap min-w-max',
                                     isActive
                                         ? 'bg-primary-500/20 text-primary-300 shadow-sm'
                                         : 'text-slate-400 hover:bg-slate-800/50 hover:text-white'

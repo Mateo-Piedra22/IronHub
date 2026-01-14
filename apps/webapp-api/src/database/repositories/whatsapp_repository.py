@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from sqlalchemy import select, update, delete, func, text, or_, and_
 from .base import BaseRepository
@@ -10,12 +10,15 @@ from ..orm_models import (
 
 class WhatsappRepository(BaseRepository):
 
+    def _now_utc_naive(self) -> datetime:
+        return datetime.now(timezone.utc).replace(tzinfo=None)
+
     def marcar_notificacion_leida(self, notificacion_id: int) -> bool:
         """Marca una notificación de profesor como leída"""
         notif = self.db.get(ProfesorNotificacion, notificacion_id)
         if notif:
             notif.leida = True
-            notif.fecha_lectura = datetime.now()
+            notif.fecha_lectura = self._now_utc_naive()
             self.db.commit()
             return True
         return False
@@ -50,7 +53,7 @@ class WhatsappRepository(BaseRepository):
         notif = self.db.get(NotificacionCupo, notificacion_id)
         if notif:
             notif.leida = True
-            notif.fecha_lectura = datetime.now()
+            notif.fecha_lectura = self._now_utc_naive()
             self.db.commit()
             return True
         return False
@@ -112,11 +115,12 @@ class WhatsappRepository(BaseRepository):
     def verificar_mensaje_enviado_reciente(self, user_id: int, message_type: str, 
                                          horas_limite: int = 24) -> bool:
         """Verifica si ya se envió un mensaje del mismo tipo recientemente"""
+        cutoff = self._now_utc_naive() - timedelta(hours=horas_limite)
         count = self.db.scalar(
             select(func.count(WhatsappMessage.id)).where(
                 WhatsappMessage.user_id == user_id,
                 WhatsappMessage.message_type == message_type,
-                WhatsappMessage.sent_at > datetime.now() - timedelta(hours=horas_limite),
+                WhatsappMessage.sent_at > cutoff,
                 WhatsappMessage.status != 'failed'
             )
         )
@@ -175,7 +179,7 @@ class WhatsappRepository(BaseRepository):
     def obtener_estadisticas_whatsapp(self) -> Dict:
         try:
             total = self.db.scalar(select(func.count(WhatsappMessage.id))) or 0
-            ultimo_mes = self.db.scalar(select(func.count(WhatsappMessage.id)).where(WhatsappMessage.sent_at > datetime.now() - timedelta(days=30))) or 0
+            ultimo_mes = self.db.scalar(select(func.count(WhatsappMessage.id)).where(WhatsappMessage.sent_at > self._now_utc_naive() - timedelta(days=30))) or 0
             
             stmt_type = select(WhatsappMessage.message_type, func.count(WhatsappMessage.id)).group_by(WhatsappMessage.message_type)
             by_type = {r[0]: r[1] for r in self.db.execute(stmt_type).all()}
@@ -194,7 +198,7 @@ class WhatsappRepository(BaseRepository):
             return {}
 
     def limpiar_mensajes_antiguos_whatsapp(self, dias_antiguedad: int = 90) -> int:
-        stmt = delete(WhatsappMessage).where(WhatsappMessage.sent_at < datetime.now() - timedelta(days=dias_antiguedad))
+        stmt = delete(WhatsappMessage).where(WhatsappMessage.sent_at < self._now_utc_naive() - timedelta(days=dias_antiguedad))
         result = self.db.execute(stmt)
         self.db.commit()
         return result.rowcount
@@ -207,7 +211,7 @@ class WhatsappRepository(BaseRepository):
         # Compatibilidad params
         if fecha_desde and not start_time: start_time = fecha_desde
         if fecha_hasta and not end_time: end_time = fecha_hasta
-        if not end_time: end_time = datetime.now()
+        if not end_time: end_time = self._now_utc_naive()
         
         # TODO: logic for user_id from phone (would need another query if user_id missing)
         

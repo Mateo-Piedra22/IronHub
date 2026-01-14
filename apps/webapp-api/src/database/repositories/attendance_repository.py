@@ -1,14 +1,50 @@
 from typing import List, Optional, Dict, Any, Tuple, Set
-from datetime import datetime, date, timedelta, time
+from datetime import datetime, date, timedelta, time, timezone
+import os
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 from sqlalchemy import select, update, insert, delete, func, text, desc, and_
 from .base import BaseRepository
 from ..orm_models import Asistencia, Usuario, CheckinPending, Pago, ClaseAsistenciaHistorial, ClaseHorario, Clase
 
 class AttendanceRepository(BaseRepository):
+
+    def _get_app_timezone(self):
+        tz_name = (
+            os.getenv("APP_TIMEZONE")
+            or os.getenv("TIMEZONE")
+            or os.getenv("TZ")
+            or "America/Argentina/Buenos_Aires"
+        )
+        if ZoneInfo is not None:
+            try:
+                return ZoneInfo(tz_name)
+            except Exception:
+                pass
+        return timezone(timedelta(hours=-3))
+
+    def _now_utc_naive(self) -> datetime:
+        return datetime.now(timezone.utc).replace(tzinfo=None)
+
+    def _now_local(self) -> datetime:
+        tz = self._get_app_timezone()
+        return datetime.now(timezone.utc).astimezone(tz)
+
+    def _today_local_date(self) -> date:
+        return self._now_local().date()
     
     def registrar_asistencia_comun(self, usuario_id: int, fecha: date) -> int:
         user = self.db.get(Usuario, usuario_id)
-        if not user or not user.activo:
+        if not user:
+            raise PermissionError("El usuario está inactivo: no se puede registrar asistencia")
+
+        rol = str(getattr(user, 'rol', '') or '').strip().lower()
+        exento = rol in ('profesor', 'dueño', 'dueno', 'owner')
+        activo = bool(user.activo) if getattr(user, 'activo', None) is not None else True
+        if (not exento) and (not activo):
             raise PermissionError("El usuario está inactivo: no se puede registrar asistencia")
             
         existing = self.db.scalar(
@@ -17,7 +53,7 @@ class AttendanceRepository(BaseRepository):
         if existing:
             raise ValueError(f"Ya existe una asistencia registrada para este usuario en la fecha {fecha}")
             
-        asistencia = Asistencia(usuario_id=usuario_id, fecha=fecha, hora_registro=datetime.now())
+        asistencia = Asistencia(usuario_id=usuario_id, fecha=fecha, hora_registro=self._now_utc_naive())
         self.db.add(asistencia)
         self.db.commit()
         self.db.refresh(asistencia)
@@ -25,7 +61,7 @@ class AttendanceRepository(BaseRepository):
         return asistencia.id
 
     def obtener_ids_asistencia_hoy(self) -> Set[int]:
-        hoy = date.today()
+        hoy = self._today_local_date()
         stmt = select(Asistencia.usuario_id).where(Asistencia.fecha == hoy)
         return set(self.db.scalars(stmt).all())
 
@@ -49,18 +85,18 @@ class AttendanceRepository(BaseRepository):
 
     def registrar_asistencia(self, usuario_id: int, fecha: date = None) -> int:
         if fecha is None:
-            fecha = date.today()
+            fecha = self._today_local_date()
         return self.registrar_asistencia_comun(usuario_id, fecha)
 
     def registrar_asistencias_batch(self, asistencias: List[Dict[str, Any]]) -> Dict[str, Any]:
         result = {'insertados': [], 'omitidos': [], 'count': 0}
-        now = datetime.now()
+        now = self._now_utc_naive()
         
         for item in asistencias:
             try:
                 uid = int(item.get('usuario_id'))
                 f = item.get('fecha')
-                if not f: f = date.today()
+                if not f: f = self._today_local_date()
                 elif isinstance(f, str): f = datetime.fromisoformat(f).date()
                 
                 user = self.db.get(Usuario, uid)
@@ -88,10 +124,16 @@ class AttendanceRepository(BaseRepository):
 
     def crear_checkin_token(self, usuario_id: int, token: str, expires_minutes: int = 5) -> int:
         user = self.db.get(Usuario, usuario_id)
-        if not user or not user.activo:
+        if not user:
+             raise PermissionError("El usuario está inactivo")
+
+        rol = str(getattr(user, 'rol', '') or '').strip().lower()
+        exento = rol in ('profesor', 'dueño', 'dueno', 'owner')
+        activo = bool(user.activo) if getattr(user, 'activo', None) is not None else True
+        if (not exento) and (not activo):
              raise PermissionError("El usuario está inactivo")
              
-        expires_at = datetime.utcnow() + timedelta(minutes=expires_minutes)
+        expires_at = self._now_utc_naive() + timedelta(minutes=expires_minutes)
         cp = CheckinPending(usuario_id=usuario_id, token=token, expires_at=expires_at)
         self.db.add(cp)
         self.db.commit()
@@ -112,7 +154,7 @@ class AttendanceRepository(BaseRepository):
             self.db.commit()
 
     def validar_token_y_registrar_asistencia(self, token: str, socio_id: int) -> Tuple[bool, str]:
-        now = datetime.utcnow()
+        now = self._now_utc_naive()
         cp = self.db.scalar(select(CheckinPending).where(CheckinPending.token == token))
         
         if not cp:
@@ -125,7 +167,7 @@ class AttendanceRepository(BaseRepository):
             return (False, "El token no corresponde al socio autenticado")
             
         try:
-            self.registrar_asistencia(socio_id, date.today())
+            self.registrar_asistencia(socio_id, self._today_local_date())
             cp.used = True
             self.db.commit()
             return (True, "Asistencia registrada")
@@ -163,7 +205,7 @@ class AttendanceRepository(BaseRepository):
         return stats
 
     def obtener_asistencias_por_dia(self, dias: int = 30):
-        fecha_limite = date.today() - timedelta(days=dias)
+        fecha_limite = self._today_local_date() - timedelta(days=dias)
         stmt = select(Asistencia.fecha, func.count(Asistencia.id)).where(Asistencia.fecha >= fecha_limite).group_by(Asistencia.fecha).order_by(Asistencia.fecha)
         return list(self.db.execute(stmt).all())
 
@@ -171,7 +213,7 @@ class AttendanceRepository(BaseRepository):
 
     def registrar_asistencia_clase(self, clase_horario_id: int, usuario_id: int, fecha_clase: date = None, estado: str = 'presente', observaciones: str = None, registrado_por: int = None) -> int:
         if not fecha_clase:
-            fecha_clase = date.today()
+            fecha_clase = self._today_local_date()
             
         existing = self.db.scalar(select(ClaseAsistenciaHistorial).where(
             ClaseAsistenciaHistorial.clase_horario_id == clase_horario_id,
@@ -182,7 +224,8 @@ class AttendanceRepository(BaseRepository):
         if existing:
             existing.estado_asistencia = estado
             existing.observaciones = observaciones
-            existing.hora_llegada = datetime.now().time()
+            existing.hora_llegada = self._now_local().time().replace(microsecond=0)
+            existing.fecha_registro = self._now_utc_naive()
             self.db.commit()
             return existing.id
             
@@ -193,7 +236,8 @@ class AttendanceRepository(BaseRepository):
             estado_asistencia=estado,
             observaciones=observaciones,
             registrado_por=registrado_por,
-            hora_llegada=datetime.now().time()
+            hora_llegada=self._now_local().time().replace(microsecond=0),
+            fecha_registro=self._now_utc_naive()
         )
         self.db.add(hist)
         self.db.commit()

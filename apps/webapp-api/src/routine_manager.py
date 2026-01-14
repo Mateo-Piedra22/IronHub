@@ -25,6 +25,8 @@ import os
 import tempfile
 import zipfile
 import logging
+import threading
+import time
 from datetime import datetime, date
 from typing import Dict, List, Any, Optional, Tuple
 import json
@@ -32,6 +34,7 @@ from pathlib import Path
 import re
 import math
 import subprocess
+import urllib.request
 
 # Importaciones para Excel y PDF
 from xlsxtpl.writerx import BookWriter
@@ -56,6 +59,10 @@ from openpyxl.utils import get_column_letter, column_index_from_string
 from .models import Rutina, RutinaEjercicio, Usuario, Ejercicio
 from .database import DatabaseManager
 from .utils import resource_path, get_webapp_base_url
+
+
+_logo_cache_lock = threading.RLock()
+_logo_cache: Dict[str, Dict[str, Any]] = {}
 
 
 class RoutineTemplateManager:
@@ -110,7 +117,7 @@ class RoutineTemplateManager:
         self.custom_template_path = Path(template_path) if template_path else None
         
         self.logger.info("RoutineTemplateManager inicializado correctamente")
-    
+
     def validate_routine_data(self, rutina: Rutina, usuario: Usuario, 
                             exercises_by_day: Dict[int, List[RutinaEjercicio]]) -> Tuple[bool, List[str]]:
         """
@@ -171,6 +178,107 @@ class RoutineTemplateManager:
             self.logger.error(f"Error durante validación: {e}")
             errors.append(f"Error de validación: {str(e)}")
             return False, errors
+
+    def _get_logo_file_for_current_tenant(self) -> Optional[str]:
+        try:
+            tenant = None
+            try:
+                from src.database.tenant_connection import get_current_tenant
+                tenant = get_current_tenant()
+            except Exception:
+                tenant = None
+            tkey = str(tenant or "default").strip().lower() or "default"
+
+            now = int(time.time())
+            with _logo_cache_lock:
+                entry = _logo_cache.get(tkey)
+                if entry:
+                    ts = int(entry.get("ts") or 0)
+                    path = str(entry.get("path") or "")
+                    if path and (now - ts) < 600 and os.path.exists(path):
+                        return path
+
+            logo_url = ""
+            session = None
+            try:
+                try:
+                    from src.database.tenant_connection import get_tenant_session_factory
+                    from src.database.connection import SessionLocal
+                    from src.services.gym_config_service import GymConfigService
+
+                    factory = None
+                    try:
+                        if tenant:
+                            factory = get_tenant_session_factory(str(tenant))
+                    except Exception:
+                        factory = None
+
+                    session = factory() if factory else SessionLocal()
+                    cfg = GymConfigService(session).obtener_configuracion_gimnasio() or {}
+                    logo_url = str(cfg.get("logo_url") or cfg.get("gym_logo_url") or "").strip()
+                except Exception:
+                    logo_url = ""
+            finally:
+                try:
+                    if session is not None:
+                        session.close()
+                except Exception:
+                    pass
+
+            if not logo_url:
+                try:
+                    fallback = resource_path(os.path.join('assets', 'gym_logo.png'))
+                    if os.path.exists(fallback):
+                        return fallback
+                except Exception:
+                    pass
+                return None
+
+            try:
+                if str(logo_url).startswith("/"):
+                    rel = str(logo_url).lstrip("/")
+                    p = resource_path(rel)
+                    if os.path.exists(p):
+                        with _logo_cache_lock:
+                            _logo_cache[tkey] = {"ts": now, "path": p}
+                        return p
+            except Exception:
+                pass
+
+            try:
+                url = str(logo_url)
+                ext = ".png"
+                low = url.lower()
+                if low.endswith(".jpg") or low.endswith(".jpeg"):
+                    ext = ".jpg"
+                elif low.endswith(".png"):
+                    ext = ".png"
+                elif low.endswith(".svg"):
+                    return None
+
+                cache_dir = Path(tempfile.gettempdir()) / "ironhub_logo_cache" / tkey
+                try:
+                    cache_dir.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
+                out_path = str(cache_dir / f"gym_logo{ext}")
+
+                req = urllib.request.Request(url, headers={"User-Agent": "IronHub"})
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    data = resp.read()
+                if not data:
+                    return None
+                with open(out_path, "wb") as f:
+                    f.write(data)
+                if os.path.exists(out_path):
+                    with _logo_cache_lock:
+                        _logo_cache[tkey] = {"ts": now, "path": out_path}
+                    return out_path
+            except Exception:
+                return None
+
+        except Exception:
+            return None
 
     def convert_excel_to_pdf(self, xlsx_path: str | Path, pdf_path: Optional[str | Path] = None) -> str:
         try:
@@ -739,7 +847,7 @@ class RoutineTemplateManager:
     def generate_routine_excel(self, rutina: Rutina, usuario: Usuario,
                              exercises_by_day: Dict[int, List[RutinaEjercicio]], 
                              output_path: str = None, weeks: int = 1,
-                             qr_mode: str = "inline", sheet: Optional[str] = None) -> str:
+                             qr_mode: str = "sheet", sheet: Optional[str] = None) -> str:
         """
         Genera un archivo Excel de rutina usando xlsxtpl.
         
@@ -905,7 +1013,7 @@ class RoutineTemplateManager:
                         pass
                     # Insertar imágenes de logo donde corresponda
                     try:
-                        logo_path = resource_path(os.path.join('assets', 'gym_logo.png'))
+                        logo_path = self._get_logo_file_for_current_tenant() or resource_path(os.path.join('assets', 'gym_logo.png'))
                         if os.path.exists(logo_path):
                             SENTINEL = '__GYM_LOGO__'
                             for ws in wb.worksheets:
@@ -914,7 +1022,7 @@ class RoutineTemplateManager:
                                         if isinstance(cell, MergedCell):
                                             continue
                                         v = cell.value
-                                        if isinstance(v, str) and (SENTINEL in v or ('{{' in v and '}}' in v and (('logo' in v.lower()) and ('gimnasio' in v.lower())))):
+                                        if isinstance(v, str) and (SENTINEL in v or ("{{" in v and "}}" in v and ("logo" in v.lower()) and ("gimnasio" in v.lower()))):
                                             try:
                                                 cell.value = ''
                                             except Exception:
@@ -994,15 +1102,14 @@ class RoutineTemplateManager:
                 try:
                     mode = (qr_mode or "").strip().lower()
                     qr_link_val = template_data.get('qr_link')
-                    if mode in ("inline", "none"):
+                    if mode in ("sheet", "none"):
                         try:
                             self._remove_qr_footer_band(str(output_path))
                         except Exception:
                             pass
                     if qr_link_val and mode in ("inline", "sheet"):
-                        if mode == "inline":
+                        if mode == "sheet":
                             try:
-                                # Siempre insertar en una segunda hoja llamada "QR"
                                 self._add_qr_sheet(str(output_path), qr_link_val, "QR", template_data.get('uuid_rutina'))
                             except Exception:
                                 pass
@@ -1105,7 +1212,7 @@ class RoutineTemplateManager:
             return False
 
     def _generate_excel_fallback(self, template_path: Path, template_data: Dict[str, Any], 
-                               output_path: Path, qr_mode: str = "inline", sheet: Optional[str] = None) -> str:
+                              output_path: Path, qr_mode: str = "sheet", sheet: Optional[str] = None) -> str:
         """
         Método fallback para generar Excel usando openpyxl directamente.
         
@@ -1137,7 +1244,7 @@ class RoutineTemplateManager:
                 pass
             # Insertar imágenes de logo donde corresponda
             try:
-                logo_path = resource_path(os.path.join('assets', 'gym_logo.png'))
+                logo_path = self._get_logo_file_for_current_tenant() or resource_path(os.path.join('assets', 'gym_logo.png'))
                 if os.path.exists(logo_path):
                     SENTINEL = '__GYM_LOGO__'
                     for ws in workbook.worksheets:
@@ -1243,15 +1350,14 @@ class RoutineTemplateManager:
             try:
                 mode = (qr_mode or "").strip().lower()
                 qr_link_val = template_data.get('qr_link')
-                if mode in ("inline", "none"):
+                if mode in ("sheet", "none"):
                     try:
                         self._remove_qr_footer_band(str(output_path))
                     except Exception:
                         pass
                 if qr_link_val and mode in ("inline", "sheet"):
-                    if mode == "inline":
+                    if mode == "sheet":
                         try:
-                            # Siempre insertar en una segunda hoja llamada "QR"
                             self._add_qr_sheet(str(output_path), qr_link_val, "QR", template_data.get('uuid_rutina'))
                         except Exception:
                             pass
@@ -1260,7 +1366,6 @@ class RoutineTemplateManager:
                             self._add_qr_footer_band(str(output_path), qr_link_val, template_data.get('uuid_rutina'))
                         except Exception:
                             pass
-                # Ajustar hoja activa solo si se pasó un nombre de hoja válido por parámetro
                 if isinstance(sheet, str) and sheet.strip():
                     try:
                         wbset = openpyxl.load_workbook(str(output_path))
@@ -1739,7 +1844,7 @@ class RoutineTemplateManager:
             if qr_png_path and os.path.exists(qr_png_path):
                 from PIL import Image, ImageOps  # type: ignore
                 qr_img = Image.open(qr_png_path).convert('RGBA')
-                logo_path = resource_path(os.path.join('assets', 'gym_logo.png'))
+                logo_path = self._get_logo_file_for_current_tenant() or resource_path(os.path.join('assets', 'gym_logo.png'))
                 if not os.path.exists(logo_path):
                     alt_logo = resource_path(os.path.join('assets', 'gym_logo.ico'))
                     logo_path = alt_logo if os.path.exists(alt_logo) else logo_path
@@ -1866,7 +1971,7 @@ class RoutineTemplateManager:
             if qr_png_path and os.path.exists(qr_png_path):
                 from PIL import Image, ImageOps  # type: ignore
                 qr_img = Image.open(qr_png_path).convert('RGBA')
-                logo_path = resource_path(os.path.join('assets', 'gym_logo.png'))
+                logo_path = self._get_logo_file_for_current_tenant() or resource_path(os.path.join('assets', 'gym_logo.png'))
                 if not os.path.exists(logo_path):
                     # Fallback de nombre alternativo
                     alt_logo = resource_path(os.path.join('assets', 'gym_logo.ico'))

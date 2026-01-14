@@ -11,10 +11,60 @@ from ..orm_models import (
 )
 
 class UserRepository(BaseRepository):
+
+    def _today_local_date(self) -> date:
+        try:
+            import os
+            from datetime import timezone
+            try:
+                from zoneinfo import ZoneInfo
+            except Exception:
+                ZoneInfo = None
+
+            tz_name = (
+                os.getenv("APP_TIMEZONE")
+                or os.getenv("TIMEZONE")
+                or os.getenv("TZ")
+                or "America/Argentina/Buenos_Aires"
+            )
+            if ZoneInfo is not None:
+                try:
+                    tz = ZoneInfo(tz_name)
+                    return datetime.now(timezone.utc).astimezone(tz).date()
+                except Exception:
+                    pass
+            return datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=-3))).date()
+        except Exception:
+            try:
+                from datetime import timezone as _timezone
+                return datetime.now(_timezone.utc).astimezone(_timezone(timedelta(hours=-3))).date()
+            except Exception:
+                return datetime.utcnow().date()
+
+    def _normalize_pin_for_storage(self, pin_value: Any) -> Any:
+        try:
+            if pin_value is None:
+                return None
+            pin_str = str(pin_value).strip()
+        except Exception:
+            return pin_value
+
+        if not pin_str:
+            return pin_str
+        if pin_str.startswith('$2'):
+            return pin_str
+
+        try:
+            import bcrypt
+            return bcrypt.hashpw(pin_str.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        except Exception as e:
+            try:
+                self.logger.warning(f"Could not bcrypt-hash PIN, storing as-is: {e}")
+            except Exception:
+                pass
+            return pin_str
     
-    def listar_usuarios_paginados(self, q: Optional[str] = None, limit: int = 50, offset: int = 0) -> List[Dict]:
-        stmt = select(Usuario)
-        
+    def _apply_user_list_filters(self, stmt, q: Optional[str] = None, activo: Optional[bool] = None):
         if q:
             stmt = stmt.where(
                 or_(
@@ -23,9 +73,23 @@ class UserRepository(BaseRepository):
                     Usuario.telefono.ilike(f"%{q}%")
                 )
             )
-            
+        if activo is not None:
+            stmt = stmt.where(Usuario.activo == bool(activo))
+        return stmt
+
+    def contar_usuarios(self, q: Optional[str] = None, activo: Optional[bool] = None) -> int:
+        stmt = select(func.count()).select_from(Usuario)
+        stmt = self._apply_user_list_filters(stmt, q=q, activo=activo)
+        try:
+            return int(self.db.scalar(stmt) or 0)
+        except Exception:
+            return 0
+
+    def listar_usuarios_paginados(self, q: Optional[str] = None, limit: int = 50, offset: int = 0, activo: Optional[bool] = None) -> List[Dict]:
+        stmt = select(Usuario)
+        stmt = self._apply_user_list_filters(stmt, q=q, activo=activo)
         stmt = stmt.order_by(Usuario.nombre.asc()).limit(limit).offset(offset)
-        
+
         users = self.db.scalars(stmt).all()
         return [
             {
@@ -92,12 +156,18 @@ class UserRepository(BaseRepository):
         if not isinstance(usuario, Usuario):
             data = {k: getattr(usuario, k) for k in ['nombre', 'dni', 'telefono', 'pin', 'rol', 'activo', 'tipo_cuota', 'notas'] if hasattr(usuario, k)}
             usuario = Usuario(**data)
+
+        try:
+            if hasattr(usuario, 'pin'):
+                usuario.pin = self._normalize_pin_for_storage(usuario.pin)
+        except Exception:
+            pass
         
         self.db.add(usuario)
         self.db.flush()
         
         if usuario.rol == 'socio':
-            usuario.fecha_proximo_vencimiento = date.today() + timedelta(days=30)
+            usuario.fecha_proximo_vencimiento = self._today_local_date() + timedelta(days=30)
         
         if usuario.rol == 'profesor':
             self._crear_profesor_default(usuario.id)
@@ -114,7 +184,7 @@ class UserRepository(BaseRepository):
             certificaciones='',
             experiencia_años=0,
             tarifa_por_hora=0.0,
-            fecha_contratacion=date.today(),
+            fecha_contratacion=self._today_local_date(),
             biografia='',
             telefono_emergencia=''
         )
@@ -130,7 +200,7 @@ class UserRepository(BaseRepository):
         existing.nombre = usuario.nombre
         existing.dni = usuario.dni
         existing.telefono = usuario.telefono
-        existing.pin = usuario.pin
+        existing.pin = self._normalize_pin_for_storage(usuario.pin)
         existing.rol = usuario.rol
         existing.activo = usuario.activo
         existing.tipo_cuota = usuario.tipo_cuota
@@ -147,8 +217,10 @@ class UserRepository(BaseRepository):
 
     def eliminar_usuario(self, usuario_id: int):
         user = self.db.get(Usuario, usuario_id)
-        if user and user.rol == 'dueño':
-            raise PermissionError(f"El usuario con ID {usuario_id} es dueño y no puede ser eliminado.")
+        if user:
+            rol = str(getattr(user, 'rol', '') or '').strip().lower()
+            if rol in ("dueño", "dueno", "owner", "admin", "administrador"):
+                raise PermissionError(f"El usuario con ID {usuario_id} es dueño y no puede ser eliminado.")
             
         if user:
             # Eliminar referencias manuales si necesario (aunque cascade debería manejarlo)
@@ -190,7 +262,7 @@ class UserRepository(BaseRepository):
     def cambiar_pin(self, usuario_id: int, nuevo_pin: str) -> bool:
         user = self.db.get(Usuario, usuario_id)
         if user:
-            user.pin = nuevo_pin
+            user.pin = self._normalize_pin_for_storage(nuevo_pin)
             self.db.commit()
             return True
         return False
@@ -303,7 +375,7 @@ class UserRepository(BaseRepository):
             usuario_id=usuario_id,
             estado=estado,
             descripcion=descripcion,
-            fecha_inicio=fecha_inicio or date.today(),
+            fecha_inicio=fecha_inicio or self._today_local_date(),
             fecha_vencimiento=fecha_vencimiento,
             activo=True,
             creado_por=creado_por
@@ -363,7 +435,7 @@ class UserRepository(BaseRepository):
         return self.db.scalar(select(func.count(Usuario.id)).where(Usuario.id == usuario_id)) > 0
 
     def desactivar_usuarios_por_falta_de_pago(self) -> List[Dict]:
-        fecha_limite = date.today() - timedelta(days=90)
+        fecha_limite = self._today_local_date() - timedelta(days=90)
         subq = select(Pago.usuario_id).where(
             func.make_date(Pago.año, Pago.mes, 1) > fecha_limite
         ).distinct()
@@ -413,7 +485,7 @@ class UserRepository(BaseRepository):
         }
 
     def obtener_usuarios_con_cuotas_por_vencer(self, dias_anticipacion: int = 3) -> List[Dict[str, Any]]:
-        fecha_actual = date.today()
+        fecha_actual = self._today_local_date()
         fecha_limite = fecha_actual + timedelta(days=dias_anticipacion)
         
         # Simplified logic using stored fields
@@ -436,7 +508,7 @@ class UserRepository(BaseRepository):
         return data
 
     def obtener_usuarios_morosos(self) -> List[Dict[str, Any]]:
-        fecha_actual = date.today()
+        fecha_actual = self._today_local_date()
         stmt = select(Usuario).where(
             Usuario.activo == True,
             Usuario.rol == 'socio',
@@ -483,7 +555,7 @@ class UserRepository(BaseRepository):
                     self.db.flush()
                     
                     if new_user.rol == 'socio':
-                         new_user.fecha_proximo_vencimiento = date.today() + timedelta(days=30)
+                         new_user.fecha_proximo_vencimiento = self._today_local_date() + timedelta(days=30)
                     if new_user.rol == 'profesor':
                         self._crear_profesor_default(new_user.id)
                         

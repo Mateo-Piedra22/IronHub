@@ -29,21 +29,33 @@ async def api_checkin_validate(
         logger.info(f"/api/checkin/validate: token=***{token[-4:] if token else ''} socio_id={socio_id} rid={rid}")
         
         if not socio_id:
-            return JSONResponse({"success": False, "message": "Sesión de socio no encontrada"}, status_code=401)
+            return JSONResponse(
+                {"success": False, "message": "Sesión de socio no encontrada", "ok": False, "mensaje": "Sesión de socio no encontrada"},
+                status_code=401,
+            )
         
         # Verify user is active
         is_active, reason = svc.verificar_usuario_activo(int(socio_id))
         if not is_active:
-            return JSONResponse({"success": False, "message": reason}, status_code=403)
+            return JSONResponse(
+                {"success": False, "message": reason, "ok": False, "mensaje": reason},
+                status_code=403,
+            )
         
         # Validate token and register attendance
         ok, msg = svc.validar_token_y_registrar(token, int(socio_id))
         
         logger.info(f"/api/checkin/validate: resultado ok={ok} msg='{msg}' rid={rid}")
-        return JSONResponse({"success": ok, "message": msg}, status_code=200 if ok else 400)
+        return JSONResponse(
+            {"success": ok, "message": msg, "ok": ok, "mensaje": msg},
+            status_code=200 if ok else 400,
+        )
     except Exception as e:
         logger.exception(f"Error en /api/checkin/validate rid={rid}")
-        return JSONResponse({"success": False, "message": str(e)}, status_code=500)
+        return JSONResponse(
+            {"success": False, "message": str(e), "ok": False, "mensaje": str(e)},
+            status_code=500,
+        )
 
 
 # Alias endpoint for frontend compatibility (frontend calls /api/checkin instead of /api/checkin/validate)
@@ -59,19 +71,62 @@ async def api_checkin(
         token = str(data.get("token", "")).strip()
         
         if not token:
-            return JSONResponse({"ok": False, "mensaje": "Token requerido"}, status_code=400)
-        
-        # Validate token and register attendance
-        ok, msg = svc.validar_token_y_registrar_sin_sesion(token)
-        
+            return JSONResponse(
+                {"ok": False, "mensaje": "Token requerido", "success": False, "message": "Token requerido"},
+                status_code=400,
+            )
+
+        socio_id = request.session.get("checkin_user_id") or request.session.get("user_id")
+        if not socio_id:
+            return JSONResponse(
+                {"ok": False, "mensaje": "Debes iniciar sesión primero", "success": False, "message": "Debes iniciar sesión primero"},
+                status_code=401,
+            )
+
+        is_active, reason = svc.verificar_usuario_activo(int(socio_id))
+        if not is_active:
+            return JSONResponse(
+                {"ok": False, "mensaje": reason, "success": False, "message": reason},
+                status_code=403,
+            )
+
+        ok, msg = svc.validar_token_y_registrar(token, int(socio_id))
+
         return JSONResponse({
             "ok": ok,
-            "usuario_nombre": msg if ok else None,
-            "mensaje": msg if not ok else "Asistencia registrada"
+            "mensaje": msg,
+            "success": ok,
+            "message": msg,
         }, status_code=200 if ok else 400)
     except Exception as e:
         logger.exception(f"Error en /api/checkin rid={rid}")
-        return JSONResponse({"ok": False, "mensaje": str(e)}, status_code=500)
+        return JSONResponse(
+            {"ok": False, "mensaje": str(e), "success": False, "message": str(e)},
+            status_code=500,
+        )
+
+
+@router.get("/api/checkin/verify")
+async def api_checkin_verify(
+    request: Request,
+    svc: AttendanceService = Depends(get_attendance_service)
+):
+    token = str(request.query_params.get("token", "")).strip()
+    if not token:
+        return JSONResponse({"verified": False, "success": False, "expired": True, "exists": False}, status_code=400)
+
+    try:
+        status_info = svc.obtener_estado_token(token)
+        verified = bool(status_info.get("used"))
+        return {
+            "verified": verified,
+            "success": verified,
+            "expired": bool(status_info.get("expired")),
+            "exists": bool(status_info.get("exists")),
+        }
+    except Exception as e:
+        logger.exception("Error en /api/checkin/verify")
+        return JSONResponse({"verified": False, "success": False, "expired": True, "exists": False, "error": str(e)}, status_code=200)
 
 
 @router.post("/api/checkin/dni")
@@ -88,9 +143,13 @@ async def api_checkin_by_dni(
     """
     import os
     rid = getattr(getattr(request, 'state', object()), 'request_id', '-')
-    
-    # Configuration switch for PIN requirement
-    require_pin = os.getenv("CHECKIN_REQUIRE_PIN", "false").lower() in ("true", "1", "yes")
+
+    dev_mode = os.getenv("DEVELOPMENT_MODE", "").lower() in ("1", "true", "yes") or os.getenv("ENV", "").lower() in ("dev", "development")
+    rp_raw = os.getenv("CHECKIN_REQUIRE_PIN")
+    if rp_raw is None or str(rp_raw).strip() == "":
+        require_pin = (not dev_mode)
+    else:
+        require_pin = str(rp_raw).lower() in ("true", "1", "yes")
     
     try:
         data = await request.json()
@@ -124,7 +183,12 @@ async def api_checkin_by_dni(
 async def api_checkin_config():
     """Returns check-in configuration for the frontend."""
     import os
-    require_pin = os.getenv("CHECKIN_REQUIRE_PIN", "false").lower() in ("true", "1", "yes")
+    dev_mode = os.getenv("DEVELOPMENT_MODE", "").lower() in ("1", "true", "yes") or os.getenv("ENV", "").lower() in ("dev", "development")
+    rp_raw = os.getenv("CHECKIN_REQUIRE_PIN")
+    if rp_raw is None or str(rp_raw).strip() == "":
+        require_pin = (not dev_mode)
+    else:
+        require_pin = str(rp_raw).lower() in ("true", "1", "yes")
     return {"require_pin": require_pin}
 
 
@@ -173,7 +237,17 @@ async def api_checkin_create_token(
     try:
         token = svc.crear_checkin_token(usuario_id, expires_minutes)
         logger.info(f"/api/checkin/create_token: usuario_id={usuario_id} token=***{token[-4:]} expires={expires_minutes}m rid={rid}")
-        return JSONResponse({"success": True, "token": token, "expires_minutes": expires_minutes}, status_code=200)
+        return JSONResponse(
+            {
+                "ok": True,
+                "mensaje": "OK",
+                "success": True,
+                "message": "OK",
+                "token": token,
+                "expires_minutes": expires_minutes,
+            },
+            status_code=200,
+        )
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
@@ -267,12 +341,29 @@ async def api_asistencias_registrar(
     try:
         asistencia_id = svc.registrar_asistencia(usuario_id, fecha)
         logger.info(f"/api/asistencias/registrar: usuario_id={usuario_id} fecha={fecha} rid={rid}")
-        return JSONResponse({"success": True, "asistencia_id": asistencia_id}, status_code=200)
+        return JSONResponse(
+            {
+                "ok": True,
+                "mensaje": "OK",
+                "success": True,
+                "message": "OK",
+                "asistencia_id": asistencia_id,
+            },
+            status_code=200,
+        )
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         logger.info(f"/api/asistencias/registrar: ya existía asistencia usuario_id={usuario_id} rid={rid}")
-        return JSONResponse({"success": True, "message": str(e)}, status_code=200)
+        return JSONResponse(
+            {
+                "ok": True,
+                "mensaje": str(e),
+                "success": True,
+                "message": str(e),
+            },
+            status_code=200,
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -299,14 +390,17 @@ async def api_asistencias_eliminar(
             if len(parts) == 3:
                 fecha = date(int(parts[0]), int(parts[1]), int(parts[2]))
         except Exception:
-            fecha = date.today()
+            fecha = None
     else:
-        fecha = date.today()
+        fecha = None
     
     try:
         svc.eliminar_asistencia(usuario_id, fecha)
         logger.info(f"/api/asistencias/eliminar: usuario_id={usuario_id} fecha={fecha} rid={rid}")
-        return JSONResponse({"success": True}, status_code=200)
+        return JSONResponse(
+            {"ok": True, "mensaje": "OK", "success": True, "message": "OK"},
+            status_code=200,
+        )
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
@@ -334,7 +428,7 @@ async def api_asistencia_30d(
             series[str(d)] = int(c)
         
         # Fill in missing dates
-        hoy = date.today()
+        hoy = svc._today_local_date()
         base: Dict[str, int] = {}
         for i in range(29, -1, -1):
             dia = hoy - timedelta(days=i)
@@ -412,8 +506,17 @@ async def api_station_info(
     Used by the station display page to validate key and get gym info.
     """
     try:
+        expected_gym_id = None
+        try:
+            from src.database.tenant_connection import get_current_tenant_gym_id
+            expected_gym_id = get_current_tenant_gym_id()
+        except Exception:
+            expected_gym_id = None
         gym_id = svc.validar_station_key(station_key)
         if not gym_id:
+            return JSONResponse({"valid": False, "error": "Station key inválida"}, status_code=404)
+
+        if expected_gym_id and int(expected_gym_id) != int(gym_id):
             return JSONResponse({"valid": False, "error": "Station key inválida"}, status_code=404)
         
         # Get gym name from admin DB gyms table
@@ -456,8 +559,17 @@ async def api_station_token(
     Used by station display to show QR code.
     """
     try:
+        expected_gym_id = None
+        try:
+            from src.database.tenant_connection import get_current_tenant_gym_id
+            expected_gym_id = get_current_tenant_gym_id()
+        except Exception:
+            expected_gym_id = None
         gym_id = svc.validar_station_key(station_key)
         if not gym_id:
+            return JSONResponse({"error": "Station key inválida"}, status_code=404)
+
+        if expected_gym_id and int(expected_gym_id) != int(gym_id):
             return JSONResponse({"error": "Station key inválida"}, status_code=404)
         
         token_data = svc.obtener_station_token_activo(gym_id)
@@ -474,8 +586,17 @@ async def api_station_regenerate(
 ):
     """Force regenerate station token (public - used after each check-in)."""
     try:
+        expected_gym_id = None
+        try:
+            from src.database.tenant_connection import get_current_tenant_gym_id
+            expected_gym_id = get_current_tenant_gym_id()
+        except Exception:
+            expected_gym_id = None
         gym_id = svc.validar_station_key(station_key)
         if not gym_id:
+            return JSONResponse({"error": "Station key inválida"}, status_code=404)
+
+        if expected_gym_id and int(expected_gym_id) != int(gym_id):
             return JSONResponse({"error": "Station key inválida"}, status_code=404)
         
         token_data = svc.crear_station_token(gym_id)
@@ -494,8 +615,17 @@ async def api_station_recent(
     Get recent check-ins for station display (public - no auth required).
     """
     try:
+        expected_gym_id = None
+        try:
+            from src.database.tenant_connection import get_current_tenant_gym_id
+            expected_gym_id = get_current_tenant_gym_id()
+        except Exception:
+            expected_gym_id = None
         gym_id = svc.validar_station_key(station_key)
         if not gym_id:
+            return JSONResponse({"error": "Station key inválida"}, status_code=404)
+
+        if expected_gym_id and int(expected_gym_id) != int(gym_id):
             return JSONResponse({"error": "Station key inválida"}, status_code=404)
         
         recent = svc.obtener_station_checkins_recientes(gym_id, limit=5)
@@ -542,6 +672,15 @@ async def api_station_scan(
     except Exception as e:
         logger.error(f"Error in station scan: {e}")
         return JSONResponse({"ok": False, "mensaje": str(e)}, status_code=500)
+
+
+@router.post("/api/checkin/qr")
+async def api_checkin_qr_alias(
+    request: Request,
+    svc: AttendanceService = Depends(get_attendance_service)
+):
+    """Backwards-compatible alias for station QR scan (legacy endpoint)."""
+    return await api_station_scan(request, svc)
 
 
 # Admin endpoint to generate/get station key

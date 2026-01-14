@@ -22,6 +22,13 @@ export interface GymCreateInput {
     nombre: string;
     subdominio?: string;
     owner_phone?: string;
+    whatsapp_phone_id?: string;
+    whatsapp_access_token?: string;
+    whatsapp_business_account_id?: string;
+    whatsapp_verify_token?: string;
+    whatsapp_app_secret?: string;
+    whatsapp_nonblocking?: boolean;
+    whatsapp_send_timeout_seconds?: string;
 }
 
 export interface Metrics {
@@ -38,7 +45,7 @@ export interface Payment {
     amount: number;
     currency: string;
     status: string;
-    created_at: string;
+    created_at?: string;
     valid_until?: string;
     notes?: string;
 }
@@ -197,7 +204,13 @@ export const api = {
 
     logout: () => request('/logout', { method: 'POST' }),
 
-    checkSession: () => request<{ ok: boolean }>('/session'),
+    checkSession: async () => {
+        const res = await request<{ logged_in: boolean }>('/session');
+        if (!res.ok || !res.data) {
+            return { ok: false, error: res.error || 'Request failed' };
+        }
+        return { ok: true, data: { ok: Boolean(res.data.logged_in) } };
+    },
 
     changeAdminPassword: (currentPassword: string, newPassword: string) =>
         request<{ ok: boolean }>('/admin/password', {
@@ -220,16 +233,26 @@ export const api = {
 
     getGym: (id: number) => request<Gym>(`/gyms/${id}`),
 
-    createGym: (data: GymCreateInput) =>
-        request<Gym>('/gyms', {
+    createGym: (data: GymCreateInput) => {
+        const params = new URLSearchParams();
+        Object.entries(data).forEach(([k, v]) => {
+            if (v === undefined || v === null) return;
+            if (typeof v === 'boolean') {
+                params.set(k, String(v));
+                return;
+            }
+            params.set(k, String(v));
+        });
+        return request<Gym>('/gyms', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams(data as unknown as Record<string, string>),
-        }),
+            body: params,
+        });
+    },
 
     updateGym: (id: number, data: Partial<GymCreateInput>) =>
         request<Gym>(`/gyms/${id}`, {
-            method: 'PATCH',
+            method: 'PUT',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams(data as unknown as Record<string, string>),
         }),
@@ -237,11 +260,16 @@ export const api = {
     deleteGym: (id: number) =>
         request<{ ok: boolean }>(`/gyms/${id}`, { method: 'DELETE' }),
 
-    setGymStatus: (id: number, status: string, reason?: string) =>
+    setGymStatus: (id: number, status: string, reason?: string, suspended_until?: string, hard_suspend?: boolean) =>
         request<Gym>(`/gyms/${id}/status`, {
-            method: 'POST',
+            method: 'PUT',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ status, ...(reason && { reason }) }),
+            body: new URLSearchParams({
+                status,
+                ...(reason ? { reason } : {}),
+                ...(suspended_until ? { suspended_until } : {}),
+                ...(hard_suspend !== undefined ? { hard_suspend: String(hard_suspend) } : {}),
+            }),
         }),
 
     setGymOwnerPassword: (gymId: number, newPassword: string) =>
@@ -252,7 +280,25 @@ export const api = {
         }),
 
     // Metrics
-    getMetrics: () => request<Metrics>('/metrics'),
+    getMetrics: async () => {
+        const res = await request<any>('/metrics');
+        if (!res.ok || !res.data) return res as ApiResponse<Metrics>;
+        const d = res.data as any;
+
+        // admin-api returns nested metrics; admin-web expects a flat shape
+        const gyms = d.gyms || {};
+        const payments = d.payments || {};
+
+        const mapped: Metrics = {
+            total_gyms: Number(gyms.total ?? d.total_gyms ?? 0),
+            active_gyms: Number(gyms.active ?? d.active_gyms ?? 0),
+            suspended_gyms: Number(gyms.suspended ?? d.suspended_gyms ?? 0),
+            total_members: d.total_members ?? undefined,
+            total_revenue: Number(payments.last_30_sum ?? d.total_revenue ?? 0) || undefined,
+        };
+
+        return { ok: true, data: mapped };
+    },
 
     getWarnings: () => request<{ warnings: any[] }>('/metrics/warnings'),
 
@@ -260,18 +306,41 @@ export const api = {
         request<{ expirations: any[] }>(`/metrics/expirations?days=${days}`),
 
     // Payments
-    getGymPayments: (gymId: number) =>
-        request<{ payments: Payment[] }>(`/gyms/${gymId}/payments`),
+    getGymPayments: async (gymId: number) => {
+        const res = await request<{ payments: any[] }>(`/gyms/${gymId}/payments`);
+        if (!res.ok || !res.data) return res as ApiResponse<{ payments: Payment[] }>;
+        const payments = (res.data.payments || []).map((p: any) => ({
+            ...p,
+            created_at: p.created_at || p.paid_at,
+        }));
+        return { ok: true, data: { payments } };
+    },
 
-    registerPayment: (gymId: number, data: { amount: number; plan?: string; valid_until?: string }) =>
-        request<Payment>(`/gyms/${gymId}/payments`, {
+    registerPayment: async (
+        gymId: number,
+        data: { amount: number; plan?: string; valid_until?: string; notes?: string; currency?: string; status?: string }
+    ) => {
+        const res = await request<{ ok: boolean; error?: string }>(`/gyms/${gymId}/payments`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams(data as unknown as Record<string, string>),
-        }),
+        });
+        if (!res.ok) return res;
+        if (res.data && (res.data as any).ok === false) {
+            return { ok: false, error: (res.data as any).error || 'Payment failed' };
+        }
+        return res;
+    },
 
-    getRecentPayments: (limit = 10) =>
-        request<{ payments: Payment[] }>(`/payments/recent?limit=${limit}`),
+    getRecentPayments: async (limit = 10) => {
+        const res = await request<{ payments: any[] }>(`/payments/recent?limit=${limit}`);
+        if (!res.ok || !res.data) return res as ApiResponse<{ payments: Payment[] }>;
+        const payments = (res.data.payments || []).map((p: any) => ({
+            ...p,
+            created_at: p.created_at || p.paid_at,
+        }));
+        return { ok: true, data: { payments } };
+    },
 
     // Branding
     getGymBranding: (gymId: number) =>
@@ -354,14 +423,14 @@ export const api = {
         request<{ available: boolean }>(`/subdomain/check?subdomain=${subdomain}`),
 
     suggestSubdomain: (name: string) =>
-        request<{ suggestion: string }>(`/subdomain/suggest?name=${name}`),
+        request<{ suggested: string }>(`/subdomain/suggest?name=${name}`),
 
     // Audit
     getAuditSummary: (days = 7) =>
-        request<{ summary: any }>(`/audit/summary?days=${days}`),
+        request<any>(`/audit?days=${days}`),
 
     getGymAudit: (gymId: number, limit = 50) =>
-        request<{ logs: any[] }>(`/gyms/${gymId}/audit?limit=${limit}`),
+        request<{ audit: any[] }>(`/gyms/${gymId}/audit?limit=${limit}`),
 
     // Batch Operations
     batchProvision: (ids: number[]) =>
@@ -399,9 +468,33 @@ export const api = {
             body: JSON.stringify({ ids, message }),
         }),
 
+    sendMaintenanceNoticeUntil: (ids: number[], message: string, until: string) =>
+        request<{ ok: boolean }>('/gyms/batch/maintenance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids, message, until }),
+        }),
+
+    clearMaintenance: (ids: number[]) =>
+        request<{ ok: boolean }>('/gyms/batch/maintenance/clear', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids }),
+        }),
+
     // Gym Details
     getGymDetails: (id: number) =>
         request<GymDetails>(`/gyms/${id}/details`),
+
+    getGymReminderMessage: (id: number) =>
+        request<{ message: string }>(`/gyms/${id}/reminder`),
+
+    setGymReminderMessage: (id: number, message: string) =>
+        request<{ ok: boolean }>(`/gyms/${id}/reminder`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message }),
+        }),
 
     updateGymWhatsApp: (id: number, config: WhatsAppConfig) =>
         request<{ ok: boolean }>(`/gyms/${id}/whatsapp`, {

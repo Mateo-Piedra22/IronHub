@@ -6,7 +6,13 @@ Replaces raw SQL usage in inscripciones.py with proper ORM queries.
 """
 
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+import os
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 import logging
 
 from sqlalchemy.orm import Session
@@ -24,6 +30,56 @@ class InscripcionesService(BaseService):
         super().__init__(db)
         self.ensure_tables()
 
+    def _get_app_timezone(self):
+        tz_name = (
+            os.getenv("APP_TIMEZONE")
+            or os.getenv("TIMEZONE")
+            or os.getenv("TZ")
+            or "America/Argentina/Buenos_Aires"
+        )
+        if ZoneInfo is not None:
+            try:
+                return ZoneInfo(tz_name)
+            except Exception:
+                pass
+        return timezone(timedelta(hours=-3))
+
+    def _now_utc_naive(self) -> datetime:
+        return datetime.now(timezone.utc).replace(tzinfo=None)
+
+    def _clase_exists(self, clase_id: int) -> bool:
+        try:
+            row = self.db.execute(text("SELECT 1 FROM clases WHERE id = :id LIMIT 1"), {'id': int(clase_id)}).fetchone()
+            return bool(row)
+        except Exception:
+            return False
+
+    def _get_horario_profesor_id(self, horario_id: int) -> Optional[int]:
+        try:
+            row = self.db.execute(text("SELECT profesor_id FROM clase_horarios WHERE id = :id LIMIT 1"), {'id': int(horario_id)}).fetchone()
+            if row and row[0] is not None:
+                return int(row[0])
+        except Exception:
+            pass
+        return None
+
+    def _horario_exists(self, horario_id: int) -> bool:
+        try:
+            row = self.db.execute(text("SELECT 1 FROM clase_horarios WHERE id = :id LIMIT 1"), {'id': int(horario_id)}).fetchone()
+            return bool(row)
+        except Exception:
+            return False
+
+    def _horario_belongs_to_clase(self, horario_id: int, clase_id: int) -> bool:
+        try:
+            row = self.db.execute(
+                text("SELECT 1 FROM clase_horarios WHERE id = :id AND clase_id = :clase_id LIMIT 1"),
+                {'id': int(horario_id), 'clase_id': int(clase_id)}
+            ).fetchone()
+            return bool(row)
+        except Exception:
+            return False
+
     def ensure_tables(self) -> None:
         """Ensure all inscripciones-related tables exist."""
         try:
@@ -36,7 +92,7 @@ class InscripcionesService(BaseService):
                     hora_fin TIME NOT NULL,
                     profesor_id INTEGER,
                     cupo INTEGER DEFAULT 20,
-                    created_at TIMESTAMP DEFAULT NOW()
+                    created_at TIMESTAMP
                 )
             """))
             self.db.execute(text("""
@@ -48,7 +104,7 @@ class InscripcionesService(BaseService):
                     nombre VARCHAR(100) NOT NULL,
                     color VARCHAR(20),
                     activo BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT NOW()
+                    created_at TIMESTAMP
                 )
             """))
             self.db.execute(text("""
@@ -56,7 +112,7 @@ class InscripcionesService(BaseService):
                     id SERIAL PRIMARY KEY,
                     horario_id INTEGER NOT NULL,
                     usuario_id INTEGER NOT NULL,
-                    fecha_inscripcion TIMESTAMP DEFAULT NOW(),
+                    fecha_inscripcion TIMESTAMP,
                     UNIQUE(horario_id, usuario_id)
                 )
             """))
@@ -69,7 +125,7 @@ class InscripcionesService(BaseService):
                     horario_id INTEGER NOT NULL,
                     usuario_id INTEGER NOT NULL,
                     posicion INTEGER NOT NULL DEFAULT 1,
-                    fecha_registro TIMESTAMP DEFAULT NOW(),
+                    fecha_registro TIMESTAMP,
                     UNIQUE(horario_id, usuario_id)
                 )
             """))
@@ -129,10 +185,11 @@ class InscripcionesService(BaseService):
                            TO_CHAR(ch.hora_inicio, 'HH24:MI') as hora_inicio,
                            TO_CHAR(ch.hora_fin, 'HH24:MI') as hora_fin,
                            ch.profesor_id, ch.cupo,
-                           p.nombre as profesor_nombre,
+                           COALESCE(u.nombre,'') as profesor_nombre,
                            (SELECT COUNT(*) FROM inscripciones i WHERE i.horario_id = ch.id) as inscriptos_count
                     FROM clase_horarios ch
                     LEFT JOIN profesores p ON ch.profesor_id = p.id
+                    LEFT JOIN usuarios u ON u.id = p.usuario_id
                     WHERE ch.clase_id = :clase_id
                     ORDER BY 
                         CASE ch.dia 
@@ -155,6 +212,8 @@ class InscripcionesService(BaseService):
                       profesor_id: Optional[int] = None, cupo: int = 20) -> Optional[Dict[str, Any]]:
         """Create a class schedule."""
         try:
+            if not self._clase_exists(int(clase_id)):
+                return None
             result = self.db.execute(
                 text("""
                     INSERT INTO clase_horarios (clase_id, dia, hora_inicio, hora_fin, profesor_id, cupo)
@@ -177,6 +236,10 @@ class InscripcionesService(BaseService):
     def actualizar_horario(self, horario_id: int, clase_id: int, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Update a class schedule."""
         try:
+            # Ensure horario exists for that clase
+            if not self._horario_belongs_to_clase(int(horario_id), int(clase_id)):
+                return None
+
             sets = []
             params = {'id': horario_id, 'clase_id': clase_id}
             if 'dia' in updates:
@@ -196,6 +259,7 @@ class InscripcionesService(BaseService):
                 params['cupo'] = int(updates['cupo']) if updates['cupo'] else 20
             
             if not sets:
+                # No updates requested but horario exists
                 return {'ok': True}
             
             result = self.db.execute(
@@ -209,8 +273,17 @@ class InscripcionesService(BaseService):
             )
             row = result.fetchone()
             self.db.commit()
-            return {'id': row[0], 'clase_id': row[1], 'dia': row[2], 'hora_inicio': row[3],
-                    'hora_fin': row[4], 'profesor_id': row[5], 'cupo': row[6]} if row else {'ok': True}
+            if not row:
+                return None
+            return {
+                'id': row[0],
+                'clase_id': row[1],
+                'dia': row[2],
+                'hora_inicio': row[3],
+                'hora_fin': row[4],
+                'profesor_id': row[5],
+                'cupo': row[6]
+            }
         except Exception as e:
             logger.error(f"Error updating schedule: {e}")
             self.db.rollback()
@@ -219,12 +292,20 @@ class InscripcionesService(BaseService):
     def eliminar_horario(self, horario_id: int, clase_id: int) -> bool:
         """Delete a class schedule and its enrollments."""
         try:
-            self.db.execute(text("DELETE FROM inscripciones WHERE horario_id = :id"), {'id': horario_id})
-            self.db.execute(text("DELETE FROM lista_espera WHERE horario_id = :id"), {'id': horario_id})
-            self.db.execute(text("DELETE FROM clase_horarios WHERE id = :id AND clase_id = :clase_id"),
-                          {'id': horario_id, 'clase_id': clase_id})
+            if not self._horario_belongs_to_clase(int(horario_id), int(clase_id)):
+                return False
+
+            self.db.execute(text("DELETE FROM inscripciones WHERE horario_id = :id"), {'id': int(horario_id)})
+            self.db.execute(text("DELETE FROM lista_espera WHERE horario_id = :id"), {'id': int(horario_id)})
+            res = self.db.execute(
+                text("DELETE FROM clase_horarios WHERE id = :id AND clase_id = :clase_id"),
+                {'id': int(horario_id), 'clase_id': int(clase_id)}
+            )
             self.db.commit()
-            return True
+            try:
+                return (getattr(res, 'rowcount', 0) or 0) > 0
+            except Exception:
+                return True
         except Exception as e:
             logger.error(f"Error deleting schedule: {e}")
             self.db.rollback()
@@ -258,12 +339,16 @@ class InscripcionesService(BaseService):
     def crear_inscripcion(self, horario_id: int, usuario_id: int) -> Dict[str, Any]:
         """Enroll a user in a schedule."""
         try:
+            fecha_inscripcion = self._now_utc_naive()
             # Check capacity
             cap = self.db.execute(
                 text("""SELECT cupo, (SELECT COUNT(*) FROM inscripciones WHERE horario_id = :id) as inscriptos
                         FROM clase_horarios WHERE id = :id"""),
                 {'id': horario_id}
             ).fetchone()
+
+            if not cap:
+                return {'error': 'Horario no encontrado'}
             
             if cap:
                 cupo = cap[0] or 20
@@ -272,9 +357,9 @@ class InscripcionesService(BaseService):
                     return {'error': 'Cupo lleno', 'full': True}
             
             result = self.db.execute(
-                text("""INSERT INTO inscripciones (horario_id, usuario_id) VALUES (:horario_id, :usuario_id)
+                text("""INSERT INTO inscripciones (horario_id, usuario_id, fecha_inscripcion) VALUES (:horario_id, :usuario_id, :fecha_inscripcion)
                         ON CONFLICT (horario_id, usuario_id) DO NOTHING RETURNING id, horario_id, usuario_id, fecha_inscripcion"""),
-                {'horario_id': horario_id, 'usuario_id': usuario_id}
+                {'horario_id': horario_id, 'usuario_id': usuario_id, 'fecha_inscripcion': fecha_inscripcion}
             )
             row = result.fetchone()
             self.db.commit()
@@ -326,6 +411,9 @@ class InscripcionesService(BaseService):
     def agregar_lista_espera(self, horario_id: int, usuario_id: int) -> Dict[str, Any]:
         """Add user to waitlist."""
         try:
+            if not self._horario_exists(int(horario_id)):
+                return {'error': 'Horario no encontrado'}
+            fecha_registro = self._now_utc_naive()
             pos = self.db.execute(
                 text("SELECT COALESCE(MAX(posicion), 0) + 1 FROM lista_espera WHERE horario_id = :id"),
                 {'id': horario_id}
@@ -333,10 +421,10 @@ class InscripcionesService(BaseService):
             next_pos = pos[0] if pos else 1
             
             result = self.db.execute(
-                text("""INSERT INTO lista_espera (horario_id, usuario_id, posicion) VALUES (:hid, :uid, :pos)
+                text("""INSERT INTO lista_espera (horario_id, usuario_id, posicion, fecha_registro) VALUES (:hid, :uid, :pos, :fecha_registro)
                         ON CONFLICT (horario_id, usuario_id) DO NOTHING 
                         RETURNING id, horario_id, usuario_id, posicion, fecha_registro"""),
-                {'hid': horario_id, 'uid': usuario_id, 'pos': next_pos}
+                {'hid': horario_id, 'uid': usuario_id, 'pos': next_pos, 'fecha_registro': fecha_registro}
             )
             row = result.fetchone()
             self.db.commit()
