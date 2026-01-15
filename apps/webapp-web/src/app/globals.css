@@ -192,3 +192,50 @@
         @apply w-full h-full !important;
     }
 }
+
+@page {
+    margin: 12mm;
+}
+
+@media print {
+    :root {
+        color-scheme: light;
+    }
+
+    body {
+        background: #ffffff !important;
+        color: #000000 !important;
+    }
+
+    body * {
+        visibility: hidden !important;
+        overflow: visible !important;
+        max-height: none !important;
+        height: auto !important;
+        transform: none !important;
+    }
+
+    #recibo-preview,
+    #recibo-preview * {
+        visibility: visible !important;
+    }
+
+    #recibo-preview {
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #ffffff !important;
+        color: #000000 !important;
+    }
+
+    #recibo-preview table {
+        page-break-inside: auto;
+    }
+
+    #recibo-preview tr {
+        page-break-inside: avoid;
+    }
+}

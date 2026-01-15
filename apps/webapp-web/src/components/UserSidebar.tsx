@@ -6,6 +6,7 @@ import {
     X,
     User,
     Calendar,
+    Copy,
     Phone,
     Mail,
     Edit,
@@ -65,6 +66,7 @@ export default function UserSidebar({
     const [notas, setNotas] = useState('');
     const [notasSaving, setNotasSaving] = useState(false);
     const notasTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const copyMenuRef = useRef<HTMLDetailsElement | null>(null);
 
     // Etiquetas
     const [etiquetas, setEtiquetas] = useState<Etiqueta[]>([]);
@@ -506,142 +508,211 @@ export default function UserSidebar({
                 {/* Quick Actions */}
                 <div className="px-4 pb-4">
                     <h4 className="text-xs font-medium text-slate-500 mb-2">Acciones rápidas</h4>
-                    <div className="flex flex-wrap gap-2">
-                        <Button size="sm" variant="secondary" onClick={() => onEdit(usuario)}>
-                            <Edit className="w-3 h-3 mr-1" />
-                            Editar
-                        </Button>
-                        <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => {
-                                onRefresh();
-                                loadAsistenciaStatus();
-                                loadPagos();
-                            }}
-                        >
-                            <RefreshCw className="w-3 h-3 mr-1" />
-                            Actualizar
-                        </Button>
-                        <Button size="sm" variant="secondary" onClick={() => goTo(`/gestion/pagos?usuario_id=${usuario.id}`)}>
-                            <DollarSign className="w-3 h-3 mr-1" />
-                            Ver pagos
-                        </Button>
-                        <Button size="sm" variant="secondary" onClick={() => goTo(`/gestion/asistencias?usuario_id=${usuario.id}`)}>
-                            <Clock className="w-3 h-3 mr-1" />
-                            Ver asistencias
-                        </Button>
-                        <Button size="sm" variant="secondary" onClick={() => goTo(`/gestion/rutinas?usuario_id=${usuario.id}`)}>
-                            <Dumbbell className="w-3 h-3 mr-1" />
-                            Ver rutinas
-                        </Button>
-                        <Button size="sm" variant="secondary" onClick={() => onToggleActivo(usuario)}>
-                            {usuario.activo ? <XCircle className="w-3 h-3 mr-1" /> : <CheckCircle2 className="w-3 h-3 mr-1" />}
-                            {usuario.activo ? 'Desactivar' : 'Activar'}
-                        </Button>
-                        <Button size="sm" variant="secondary" onClick={() => handleCopy(usuario.id, 'ID')}
-                        >
-                            <User className="w-3 h-3 mr-1" />
-                            Copiar ID
-                        </Button>
-                        <Button size="sm" variant="secondary" onClick={() => handleCopy(usuario.nombre, 'Nombre')}
-                        >
-                            <User className="w-3 h-3 mr-1" />
-                            Copiar nombre
-                        </Button>
-                        <Button size="sm" variant="secondary" onClick={() => handleCopy(usuario.dni || '', 'DNI')}
-                        >
-                            <FileText className="w-3 h-3 mr-1" />
-                            Copiar DNI
-                        </Button>
-                        <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => handleCopy(usuario.email || '', 'Email')}
-                        >
-                            <Mail className="w-3 h-3 mr-1" />
-                            Copiar email
-                        </Button>
-                        <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => handleCopy(usuario.tipo_cuota_nombre || '', 'Tipo de cuota')}
-                        >
-                            <DollarSign className="w-3 h-3 mr-1" />
-                            Copiar cuota
-                        </Button>
-                        <Button size="sm" variant="secondary" onClick={() => handleCopy(usuario.telefono || '', 'Teléfono')}
-                        >
-                            <Phone className="w-3 h-3 mr-1" />
-                            Copiar tel.
-                        </Button>
-                        <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => {
-                                if (!usuario.telefono) {
-                                    error('Teléfono no disponible');
-                                    return;
-                                }
-                                window.open(getWhatsAppLink(usuario.telefono), '_blank');
-                            }}
-                        >
-                            <MessageSquare className="w-3 h-3 mr-1" />
-                            WhatsApp
-                        </Button>
-                        <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => {
-                                if (!usuario.email) {
-                                    error('Email no disponible');
-                                    return;
-                                }
-                                window.location.href = `mailto:${usuario.email}`;
-                            }}
-                        >
-                            <Mail className="w-3 h-3 mr-1" />
-                            Email
-                        </Button>
-                        <Button size="sm" variant="secondary" onClick={handleGenerateQR} isLoading={qrLoading}>
-                            <QrCode className="w-3 h-3 mr-1" />
-                            Emitir QR
-                        </Button>
-                        <Button
-                            size="sm"
-                            variant={hasAsistenciaHoy ? 'danger' : 'primary'}
-                            onClick={handleToggleAsistencia}
-                            isLoading={asistenciaLoading}
-                        >
-                            {hasAsistenciaHoy ? <UserMinus className="w-3 h-3 mr-1" /> : <UserCheck className="w-3 h-3 mr-1" />}
-                            {hasAsistenciaHoy ? 'Quitar asistencia' : 'Registrar asistencia'}
-                        </Button>
-                        {onOpenPagoModal && (
-                            <Button size="sm" variant="secondary" onClick={() => onOpenPagoModal(usuario)}>
-                                <DollarSign className="w-3 h-3 mr-1" />
-                                Registrar pago
-                            </Button>
+                    <div className="space-y-3">
+                        <div>
+                            <div className="text-[11px] font-medium text-slate-500 uppercase tracking-wide mb-2">Gestión</div>
+                            <div className="flex flex-wrap gap-2">
+                                <Button size="sm" variant="secondary" onClick={() => onEdit(usuario)}>
+                                    <Edit className="w-3 h-3 mr-1" />
+                                    Editar
+                                </Button>
+                                <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() => {
+                                        onRefresh();
+                                        loadAsistenciaStatus();
+                                        loadPagos();
+                                    }}
+                                >
+                                    <RefreshCw className="w-3 h-3 mr-1" />
+                                    Actualizar
+                                </Button>
+                                <Button size="sm" variant="secondary" onClick={() => goTo(`/gestion/pagos?usuario_id=${usuario.id}`)}>
+                                    <DollarSign className="w-3 h-3 mr-1" />
+                                    Ver pagos
+                                </Button>
+                                <Button size="sm" variant="secondary" onClick={() => goTo(`/gestion/asistencias?usuario_id=${usuario.id}`)}>
+                                    <Clock className="w-3 h-3 mr-1" />
+                                    Ver asistencias
+                                </Button>
+                                <Button size="sm" variant="secondary" onClick={() => goTo(`/gestion/rutinas?usuario_id=${usuario.id}`)}>
+                                    <Dumbbell className="w-3 h-3 mr-1" />
+                                    Ver rutinas
+                                </Button>
+                                <Button size="sm" variant="secondary" onClick={() => onToggleActivo(usuario)}>
+                                    {usuario.activo ? <XCircle className="w-3 h-3 mr-1" /> : <CheckCircle2 className="w-3 h-3 mr-1" />}
+                                    {usuario.activo ? 'Desactivar' : 'Activar'}
+                                </Button>
+                                <Button size="sm" variant="danger" onClick={() => onDelete(usuario)}>
+                                    <Trash2 className="w-3 h-3 mr-1" />
+                                    Eliminar
+                                </Button>
+                            </div>
+                        </div>
+
+                        {(onOpenPagoModal || onCreateRutina || rutinaActiva) && (
+                            <div>
+                                <div className="text-[11px] font-medium text-slate-500 uppercase tracking-wide mb-2">Acciones</div>
+                                <div className="flex flex-wrap gap-2">
+                                    {onOpenPagoModal && (
+                                        <Button size="sm" variant="secondary" onClick={() => onOpenPagoModal(usuario)}>
+                                            <DollarSign className="w-3 h-3 mr-1" />
+                                            Registrar pago
+                                        </Button>
+                                    )}
+                                    {onCreateRutina && (
+                                        <Button size="sm" variant="secondary" onClick={() => onCreateRutina(usuario)}>
+                                            <Dumbbell className="w-3 h-3 mr-1" />
+                                            Crear rutina
+                                        </Button>
+                                    )}
+                                    {rutinaActiva && (
+                                        <Button
+                                            size="sm"
+                                            variant="secondary"
+                                            onClick={() => window.open(api.getRutinaExcelUrl(rutinaActiva.id), '_blank')}
+                                        >
+                                            <FileDown className="w-3 h-3 mr-1" />
+                                            Rutina Excel
+                                        </Button>
+                                    )}
+                                </div>
+                            </div>
                         )}
-                        {onCreateRutina && (
-                            <Button size="sm" variant="secondary" onClick={() => onCreateRutina(usuario)}>
-                                <Dumbbell className="w-3 h-3 mr-1" />
-                                Crear rutina
-                            </Button>
-                        )}
-                        {rutinaActiva && (
-                            <Button
-                                size="sm"
-                                variant="secondary"
-                                onClick={() => window.open(api.getRutinaExcelUrl(rutinaActiva.id), '_blank')}
-                            >
-                                <FileDown className="w-3 h-3 mr-1" />
-                                Rutina Excel
-                            </Button>
-                        )}
-                        <Button size="sm" variant="danger" onClick={() => onDelete(usuario)}>
-                            <Trash2 className="w-3 h-3 mr-1" />
-                            Eliminar
-                        </Button>
+
+                        <div>
+                            <div className="text-[11px] font-medium text-slate-500 uppercase tracking-wide mb-2">Comunicación</div>
+                            <div className="flex flex-wrap gap-2">
+                                <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() => {
+                                        if (!usuario.telefono) {
+                                            error('Teléfono no disponible');
+                                            return;
+                                        }
+                                        window.open(getWhatsAppLink(usuario.telefono), '_blank');
+                                    }}
+                                >
+                                    <MessageSquare className="w-3 h-3 mr-1" />
+                                    WhatsApp
+                                </Button>
+                                <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() => {
+                                        if (!usuario.email) {
+                                            error('Email no disponible');
+                                            return;
+                                        }
+                                        window.location.href = `mailto:${usuario.email}`;
+                                    }}
+                                >
+                                    <Mail className="w-3 h-3 mr-1" />
+                                    Email
+                                </Button>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div className="text-[11px] font-medium text-slate-500 uppercase tracking-wide mb-2">Asistencia</div>
+                            <div className="flex flex-wrap gap-2">
+                                <Button size="sm" variant="secondary" onClick={handleGenerateQR} isLoading={qrLoading}>
+                                    <QrCode className="w-3 h-3 mr-1" />
+                                    Emitir QR
+                                </Button>
+                                <Button
+                                    size="sm"
+                                    variant={hasAsistenciaHoy ? 'danger' : 'primary'}
+                                    onClick={handleToggleAsistencia}
+                                    isLoading={asistenciaLoading}
+                                >
+                                    {hasAsistenciaHoy ? <UserMinus className="w-3 h-3 mr-1" /> : <UserCheck className="w-3 h-3 mr-1" />}
+                                    {hasAsistenciaHoy ? 'Quitar asistencia' : 'Registrar asistencia'}
+                                </Button>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div className="text-[11px] font-medium text-slate-500 uppercase tracking-wide mb-2">Copiar</div>
+                            <details ref={copyMenuRef} className="relative inline-block">
+                                <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                                    <div className="inline-flex items-center justify-center px-3 py-2 text-sm rounded-lg gap-2 bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700 hover:border-slate-600 transition-colors active:scale-[0.98]">
+                                        <Copy className="w-3.5 h-3.5" />
+                                        Copiar datos
+                                    </div>
+                                </summary>
+                                <div className="absolute left-0 mt-2 w-56 rounded-xl border border-slate-700 bg-slate-900 shadow-elevated p-1 z-50">
+                                    <button
+                                        type="button"
+                                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-slate-800"
+                                        onClick={() => {
+                                            handleCopy(usuario.id, 'ID');
+                                            if (copyMenuRef.current) copyMenuRef.current.open = false;
+                                        }}
+                                    >
+                                        <User className="w-3.5 h-3.5 text-slate-400" />
+                                        Copiar ID
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-slate-800"
+                                        onClick={() => {
+                                            handleCopy(usuario.nombre, 'Nombre');
+                                            if (copyMenuRef.current) copyMenuRef.current.open = false;
+                                        }}
+                                    >
+                                        <User className="w-3.5 h-3.5 text-slate-400" />
+                                        Copiar nombre
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-slate-800"
+                                        onClick={() => {
+                                            handleCopy(usuario.dni || '', 'DNI');
+                                            if (copyMenuRef.current) copyMenuRef.current.open = false;
+                                        }}
+                                    >
+                                        <FileText className="w-3.5 h-3.5 text-slate-400" />
+                                        Copiar DNI
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-slate-800"
+                                        onClick={() => {
+                                            handleCopy(usuario.email || '', 'Email');
+                                            if (copyMenuRef.current) copyMenuRef.current.open = false;
+                                        }}
+                                    >
+                                        <Mail className="w-3.5 h-3.5 text-slate-400" />
+                                        Copiar email
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-slate-800"
+                                        onClick={() => {
+                                            handleCopy(usuario.tipo_cuota_nombre || '', 'Tipo de cuota');
+                                            if (copyMenuRef.current) copyMenuRef.current.open = false;
+                                        }}
+                                    >
+                                        <DollarSign className="w-3.5 h-3.5 text-slate-400" />
+                                        Copiar cuota
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-slate-800"
+                                        onClick={() => {
+                                            handleCopy(usuario.telefono || '', 'Teléfono');
+                                            if (copyMenuRef.current) copyMenuRef.current.open = false;
+                                        }}
+                                    >
+                                        <Phone className="w-3.5 h-3.5 text-slate-400" />
+                                        Copiar tel.
+                                    </button>
+                                </div>
+                            </details>
+                        </div>
                     </div>
                     {/* Attendance stat */}
                     <div className="mt-2 text-xs text-slate-500">
