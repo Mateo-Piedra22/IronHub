@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
     Users,
     CreditCard,
@@ -46,6 +46,19 @@ export default function AdminLayout({
     const router = useRouter();
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [loggingOut, setLoggingOut] = useState(false);
+    const [gymLogoUrl, setGymLogoUrl] = useState<string>('');
+
+    useEffect(() => {
+        const loadBranding = async () => {
+            try {
+                const res = await api.getPublicGymData();
+                if (res.ok && res.data?.logo_url) setGymLogoUrl(res.data.logo_url);
+            } catch {
+                // ignore
+            }
+        };
+        loadBranding();
+    }, []);
 
     // Logout handler
     const handleLogout = async () => {
@@ -86,7 +99,11 @@ export default function AdminLayout({
                         {/* Logo */}
                         <Link href="/gestion/usuarios" className="flex items-center gap-3">
                             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center shadow-sm">
-                                <Dumbbell className="w-4 h-4 text-white" />
+                                {gymLogoUrl ? (
+                                    <img src={gymLogoUrl} alt="Logo" className="w-6 h-6 object-contain bg-white/90 rounded-md p-1" />
+                                ) : (
+                                    <Dumbbell className="w-4 h-4 text-white" />
+                                )}
                             </div>
                             <div className="hidden sm:block">
                                 <h1 className="text-base font-display font-bold text-white leading-none">
@@ -154,7 +171,11 @@ export default function AdminLayout({
                                 <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800">
                                     <div className="flex items-center gap-3">
                                         <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center">
-                                            <Dumbbell className="w-4 h-4 text-white" />
+                                            {gymLogoUrl ? (
+                                                <img src={gymLogoUrl} alt="Logo" className="w-6 h-6 object-contain bg-white/90 rounded-md p-1" />
+                                            ) : (
+                                                <Dumbbell className="w-4 h-4 text-white" />
+                                            )}
                                         </div>
                                         <span className="text-base font-display font-bold text-white">
                                             Gestión

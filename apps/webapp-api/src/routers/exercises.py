@@ -2,6 +2,7 @@
 import logging
 import time
 import os
+import re
 
 from fastapi import APIRouter, Request, Depends, UploadFile, File
 from fastapi.responses import JSONResponse
@@ -16,7 +17,12 @@ logger = logging.getLogger(__name__)
 
 
 @router.post("/api/exercises/video")
-async def api_upload_exercise_video(request: Request, file: UploadFile = File(...), _=Depends(require_gestion_access)):
+async def api_upload_exercise_video(
+    request: Request,
+    file: UploadFile = File(...),
+    name: str = "",
+    _=Depends(require_gestion_access)
+):
     """Upload exercise video to cloud storage."""
     try:
         ctype = str(getattr(file, 'content_type', '') or '').lower()
@@ -41,7 +47,24 @@ async def api_upload_exercise_video(request: Request, file: UploadFile = File(..
         
         tenant = _get_tenant_from_request(request) or "common"
         ext = allowed.get(ctype, ".mp4")
-        filename = f"exercise_{int(time.time())}_{os.urandom(4).hex()}{ext}"
+
+        hint = str(name or '').strip()
+        if hint:
+            hint = hint.replace(" ", "_")
+            hint = re.sub(r"[^A-Za-z0-9._-]", "_", hint)
+            hint = hint.strip("_")[:80] or f"ejercicio_{int(time.time())}"
+            filename = f"{hint}{ext}"
+        else:
+            orig = str(getattr(file, 'filename', '') or '').strip()
+            orig_base = os.path.basename(orig) if orig else ''
+            if orig_base:
+                stem = os.path.splitext(orig_base)[0] or f"ejercicio_{int(time.time())}"
+                stem = stem.replace(" ", "_")
+                stem = re.sub(r"[^A-Za-z0-9._-]", "_", stem)
+                stem = stem.strip("_")[:80] or f"ejercicio_{int(time.time())}"
+                filename = f"{stem}{ext}"
+            else:
+                filename = f"ejercicio_{int(time.time())}{ext}"
         
         public_url = b2_upload(data, filename, ctype, subfolder=f"exercises/{tenant}")
         if not public_url:

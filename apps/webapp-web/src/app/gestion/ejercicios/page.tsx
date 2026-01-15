@@ -189,7 +189,7 @@ function EjercicioFormModal({ isOpen, onClose, ejercicio, onSuccess }: Ejercicio
                     <VideoDropzone
                         value={formData.video_url}
                         onUpload={async (file) => {
-                            const res = await api.uploadExerciseVideo(file);
+                            const res = await api.uploadExerciseVideo(file, formData.nombre);
                             if (res.ok && res.data) {
                                 setFormData(prev => ({ ...prev, video_url: res.data!.url }));
                                 return res.data.url;
@@ -499,7 +499,7 @@ export default function EjerciciosPage() {
                         initial={{ opacity: 0, x: 300 }}
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: 300 }}
-                        className="fixed right-0 top-0 h-full w-[420px] max-w-full bg-slate-900 border-l border-slate-800 z-50 flex flex-col overflow-hidden"
+                        className="fixed right-0 top-0 h-full w-[420px] max-w-full bg-slate-900 border-l border-slate-800 z-50 flex flex-col overflow-y-auto"
                     >
                         {/* Header */}
                         <div className="p-4 border-b border-slate-800 flex items-center justify-between">

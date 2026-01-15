@@ -137,22 +137,55 @@ async def api_usuario_get(
     usuario_id: int, 
     request: Request, 
     user_service: UserService = Depends(get_user_service),
-    _=Depends(require_gestion_access)
 ):
     try:
+        # AuthZ:
+        # - Gestion sessions can access any user.
+        # - Member sessions can only access their own record.
+        try:
+            role = str(request.session.get("role") or "").strip().lower()
+        except Exception:
+            role = ""
+        is_gestion = bool(request.session.get("logged_in")) or bool(request.session.get("gestion_profesor_user_id")) or role in (
+            "dueño", "dueno", "owner", "admin", "administrador", "profesor"
+        )
+        session_user_id = request.session.get("user_id")
+        if (not is_gestion) and (session_user_id is None):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        if (not is_gestion) and (session_user_id is not None) and int(session_user_id) != int(usuario_id):
+            raise HTTPException(status_code=403, detail="Forbidden")
+
         u = user_service.get_user(usuario_id)
         if not u:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
             
         pin_value = None
+
+        dias_restantes = None
+        try:
+            fpv = getattr(u, 'fecha_proximo_vencimiento', None)
+            if fpv:
+                # Prefer service helper if present
+                try:
+                    today = user_service._today_local_date()  # type: ignore
+                except Exception:
+                    today = datetime.now(timezone.utc).replace(tzinfo=None).date()
+                try:
+                    fpv_d = fpv.date() if hasattr(fpv, 'date') else fpv
+                except Exception:
+                    fpv_d = fpv
+                dias_restantes = (fpv_d - today).days
+        except Exception:
+            dias_restantes = None
             
         return {
             "id": u.id,
             "nombre": u.nombre,
             "dni": u.dni,
             "telefono": u.telefono,
+            "email": getattr(u, 'email', None),
             "pin": pin_value,
-            "rol": u.rol,
+            "rol": ("user" if str(getattr(u, 'rol', '') or '').strip().lower() in ("socio", "usuario") else getattr(u, 'rol', None)),
             "activo": bool(u.activo),
             "tipo_cuota": u.tipo_cuota,
             "tipo_cuota_nombre": u.tipo_cuota,
@@ -162,7 +195,9 @@ async def api_usuario_get(
             "notas": u.notas,
             "fecha_registro": u.fecha_registro,
             "fecha_proximo_vencimiento": u.fecha_proximo_vencimiento,
+            "dias_restantes": dias_restantes,
             "cuotas_vencidas": u.cuotas_vencidas,
+            "exento": bool(getattr(u, 'exento', False)),
             "ultimo_pago": u.ultimo_pago,
         }
     except HTTPException:

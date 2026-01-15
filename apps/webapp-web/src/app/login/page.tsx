@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Dumbbell, Eye, EyeOff, Loader2, AlertCircle, Lock } from 'lucide-react';
@@ -12,6 +12,19 @@ export default function OwnerLoginPage() {
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [gymLogoUrl, setGymLogoUrl] = useState<string>('');
+
+    useEffect(() => {
+        const loadBranding = async () => {
+            try {
+                const res = await api.getPublicGymData();
+                if (res.ok && res.data?.logo_url) setGymLogoUrl(res.data.logo_url);
+            } catch {
+                // ignore
+            }
+        };
+        loadBranding();
+    }, []);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -56,7 +69,11 @@ export default function OwnerLoginPage() {
                     {/* Logo */}
                     <div className="flex flex-col items-center mb-8">
                         <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center mb-4 shadow-md">
-                            <Dumbbell className="w-8 h-8 text-white" />
+                            {gymLogoUrl ? (
+                                <img src={gymLogoUrl} alt="Logo" className="w-10 h-10 object-contain bg-white/90 rounded-xl p-2" />
+                            ) : (
+                                <Dumbbell className="w-8 h-8 text-white" />
+                            )}
                         </div>
                         <h1 className="text-2xl font-display font-bold text-white">
                             Panel de Control

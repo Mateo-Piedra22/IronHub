@@ -46,6 +46,13 @@ async def index(request: Request):
         "message": "IronHub Gym API"
     })
 
+@router.get("/gym/data")
+async def gym_data_public(request: Request):
+    return JSONResponse({
+        "gym_name": get_gym_name("Gimnasio"),
+        "logo_url": _resolve_logo_url(),
+    })
+
 @router.get("/checkin")
 async def checkin_page(request: Request):
     """Check-in page - returns JSON. Frontend handles the UI."""
@@ -203,6 +210,10 @@ async def api_maintenance_status(request: Request):
     except Exception:
         return JSONResponse({"active": False})
 
+@router.get("/maintenance_status")
+async def api_maintenance_status_alias(request: Request):
+    return await api_maintenance_status(request)
+
 @router.get("/api/suspension_status")
 async def api_suspension_status(request: Request):
     try:
@@ -217,6 +228,10 @@ async def api_suspension_status(request: Request):
         return JSONResponse(payload)
     except Exception:
         return JSONResponse({"suspended": False})
+
+@router.get("/suspension_status")
+async def api_suspension_status_alias(request: Request):
+    return await api_suspension_status(request)
 
 @router.get("/api/rutinas/qr_scan/{uuid_rutina}")
 async def api_rutina_qr_scan(uuid_rutina: str, request: Request):

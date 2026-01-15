@@ -69,6 +69,17 @@ class UserService(BaseService):
             if 'tipo_cuota_id' not in it:
                 it['tipo_cuota_id'] = map_nombre_a_id.get(nombre)
 
+            try:
+                fpv = it.get('fecha_proximo_vencimiento')
+                if fpv:
+                    if isinstance(fpv, datetime):
+                        fpv_d = fpv.date()
+                    else:
+                        fpv_d = fpv
+                    it['dias_restantes'] = (fpv_d - self._today_local_date()).days
+            except Exception:
+                pass
+
         return items
 
     def list_users_paged(self, q: Optional[str] = None, *, activo: Optional[bool] = None, limit: int = 50, offset: int = 0) -> Dict[str, Any]:
@@ -88,6 +99,17 @@ class UserService(BaseService):
                 it['tipo_cuota_nombre'] = nombre
             if 'tipo_cuota_id' not in it:
                 it['tipo_cuota_id'] = map_nombre_a_id.get(nombre)
+
+            try:
+                fpv = it.get('fecha_proximo_vencimiento')
+                if fpv:
+                    if isinstance(fpv, datetime):
+                        fpv_d = fpv.date()
+                    else:
+                        fpv_d = fpv
+                    it['dias_restantes'] = (fpv_d - self._today_local_date()).days
+            except Exception:
+                pass
 
         return {'items': items, 'total': int(total or 0)}
 

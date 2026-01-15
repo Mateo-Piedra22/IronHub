@@ -37,7 +37,11 @@ async def public_login_page(request: Request, error: str = ""):
     }, status_code=401)
 
 @router.post("/login")
-async def public_login_post(request: Request):
+async def public_login_post(
+    request: Request,
+    svc: AuthService = Depends(get_auth_service),
+    _tenant: Optional[str] = Depends(ensure_tenant_context),
+):
     """Public login - supports both form and JSON requests."""
     content_type = request.headers.get("content-type", "")
     accept_header = request.headers.get("accept", "")
@@ -66,7 +70,7 @@ async def public_login_post(request: Request):
     if not password:
         return error_response("Contraseña requerida")
         
-    if _verify_owner_password(password):
+    if svc.verificar_owner_password(password):
         request.session.clear()
         request.session["logged_in"] = True
         request.session["role"] = "dueño"

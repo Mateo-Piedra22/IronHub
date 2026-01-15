@@ -27,6 +27,41 @@ export function formatNumber(value: number): string {
     return new Intl.NumberFormat('es-AR').format(value);
 }
 
+function parseDateInput(date: string | Date | null | undefined): Date | null {
+    if (!date) return null;
+    if (date instanceof Date) {
+        return isNaN(date.getTime()) ? null : date;
+    }
+    const s = String(date).trim();
+    if (!s) return null;
+
+    // Handle ISO date-only (YYYY-MM-DD) reliably across browsers
+    const m1 = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if (m1) {
+        const y = Number(m1[1]);
+        const mo = Number(m1[2]);
+        const d = Number(m1[3]);
+        const out = new Date(y, mo - 1, d);
+        return isNaN(out.getTime()) ? null : out;
+    }
+
+    // Handle common "YYYY-MM-DD HH:mm:ss" server format
+    const m2 = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/.exec(s);
+    if (m2) {
+        const y = Number(m2[1]);
+        const mo = Number(m2[2]);
+        const d = Number(m2[3]);
+        const hh = Number(m2[4]);
+        const mm = Number(m2[5]);
+        const ss = Number(m2[6] || '0');
+        const out = new Date(y, mo - 1, d, hh, mm, ss);
+        return isNaN(out.getTime()) ? null : out;
+    }
+
+    const out = new Date(s);
+    return isNaN(out.getTime()) ? null : out;
+}
+
 /**
  * Format date to DD/MM/YYYY
  */
@@ -35,8 +70,8 @@ export function formatNumber(value: number): string {
  */
 export function formatDate(date: string | Date | null | undefined): string {
     if (!date) return '-';
-    const d = typeof date === 'string' ? new Date(date) : date;
-    if (!(d instanceof Date) || isNaN(d.getTime())) return '-';
+    const d = parseDateInput(date);
+    if (!d) return '-';
     return d.toLocaleDateString('es-AR', {
         day: '2-digit',
         month: '2-digit',
@@ -49,8 +84,8 @@ export function formatDate(date: string | Date | null | undefined): string {
  */
 export function formatDateLong(date: string | Date | null | undefined): string {
     if (!date) return '-';
-    const d = typeof date === 'string' ? new Date(date) : date;
-    if (!(d instanceof Date) || isNaN(d.getTime())) return '-';
+    const d = parseDateInput(date);
+    if (!d) return '-';
     return d.toLocaleDateString('es-AR', {
         day: 'numeric',
         month: 'long',
@@ -63,8 +98,8 @@ export function formatDateLong(date: string | Date | null | undefined): string {
  */
 export function formatDateRelative(date: string | Date | null | undefined): string {
     if (!date) return '-';
-    const d = typeof date === 'string' ? new Date(date) : date;
-    if (!(d instanceof Date) || isNaN(d.getTime())) return '-';
+    const d = parseDateInput(date);
+    if (!d) return '-';
 
     const now = new Date();
     const diffMs = d.getTime() - now.getTime();

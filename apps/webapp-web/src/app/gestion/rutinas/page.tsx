@@ -584,7 +584,9 @@ export default function RutinasPage() {
             header: 'Ejercicios',
             align: 'center' as const,
             render: (row) => {
-                const count = row.dias?.reduce((acc, d) => acc + (d.ejercicios?.length || 0), 0) || 0;
+                const explicit = (row as any).ejercicios_count;
+                const reduced = row.dias?.reduce((acc, d) => acc + (d.ejercicios?.length || 0), 0);
+                const count = (typeof explicit === 'number') ? explicit : (reduced || 0);
                 return <span className="text-slate-400">{count}</span>;
             },
         },

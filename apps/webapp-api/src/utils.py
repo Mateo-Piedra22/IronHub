@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 import logging
 import threading
 import contextvars
@@ -289,34 +290,50 @@ def _normalize_public_url(url: str) -> str:
         # Let's look for B2 bucket context.
         # If we have a CDN_CUSTOM_DOMAIN env var, we can construct the URL.
         
-        cdn = os.getenv("CDN_CUSTOM_DOMAIN", "").strip()
         bucket = os.getenv("B2_BUCKET_NAME", "").strip()
-        
-        if cdn and bucket and url and not url.startswith("http") and not url.startswith("/"):
-            # Assume it's a B2 key if it doesn't look like a local path
-            # But "assets/logo.png" could be local.
-            # Usually B2 keys for gyms might be "subdomain-assets/logo.png"
-            # Let's be conservative. If it contains "assets/" and NOT "/assets/", it might be B2?
-            # Or if we have a way to know it came from B2.
-            # For now, let's just normalize existing full URLs or leave as is.
-            pass
+        media_prefix = os.getenv("B2_MEDIA_PREFIX", "assets").strip().strip("/") or "assets"
 
-        # If it IS a B2 URL (e.g. f005.backblazeb2.com...), replace with CDN
-        if cdn and "backblazeb2.com" in url:
-            # Replace B2 domain with CDN domain
-            # Pattern: https://f005.backblazeb2.com/file/<bucket>/<key>
-            # Target: https://<cdn>/file/<bucket>/<key>
-            # Or if using custom domain mapping directly to bucket: https://<cdn>/<key>
-            # Based on user instruction: https://cdn.gymms-motiona.xyz/file/motiona-assets/<key>
-            
-            # Simple replacement of hostname if structure matches
+        base = os.getenv("B2_PUBLIC_BASE_URL", "https://f005.backblazeb2.com").strip().rstrip("/")
+        if base and not (base.startswith("http://") or base.startswith("https://")):
+            base = f"https://{base.lstrip('/')}"
+        if base.endswith("/file"):
+            base = base[:-5]
+        # Never use a custom domain here (old CDN). Force Backblaze host.
+        if base and "backblazeb2.com" not in base.lower():
+            ep = (os.getenv("B2_ENDPOINT_URL", "") or "").strip().lower()
+            ep = ep.replace("https://", "").replace("http://", "")
+            m = re.search(r"-(\d{3})\.backblazeb2\.com", ep)
+            if m:
+                base = f"https://f{m.group(1)}.backblazeb2.com"
+            else:
+                base = "https://f000.backblazeb2.com"
+
+        # Local/static
+        if url.startswith("/"):
+            return url
+
+        # Full URL
+        if url.startswith("http://") or url.startswith("https://"):
             try:
                 parsed = urllib.parse.urlparse(url)
-                if "backblazeb2.com" in parsed.netloc:
-                    return url.replace(parsed.netloc, cdn)
+                path = parsed.path or ""
+                marker = f"/file/{bucket}/" if bucket else "/file/"
+                if bucket and marker in path:
+                    key = path.split(marker, 1)[1].lstrip("/")
+                    if key and ".." not in key:
+                        return f"{base}/file/{bucket}/{key}"
             except Exception:
                 pass
-                
+            return url
+
+        # Key stored in DB
+        try:
+            p = str(url).lstrip("/")
+            if bucket and p and ".." not in p and p.startswith(f"{media_prefix}/"):
+                return f"{base}/file/{bucket}/{p}"
+        except Exception:
+            pass
+
         return url
     except Exception:
         return url

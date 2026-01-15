@@ -1,6 +1,8 @@
 import os
 import tempfile
 from datetime import datetime
+import time
+import urllib.parse
 from .models import Pago, Usuario, Rutina, PagoDetalle
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
@@ -37,6 +39,11 @@ class PDFGenerator:
         # Usar logo del sistema de branding si está disponible
         self.branding_config = branding_config or {}
         self.logo_path = self.branding_config.get('main_logo_path') or os.path.join("assets", "gym_logo.png")
+        self.logo_url = (
+            self.branding_config.get('logo_url')
+            or self.branding_config.get('main_logo_url')
+            or None
+        )
         # Usar gym_name del branding si está, sino cargarlo del sistema, con fallback a "Gimnasio"
         self.gym_name = self.branding_config.get('gym_name') or get_gym_name('Gimnasio')
         self.gym_address = self.branding_config.get('gym_address', 'Saavedra 2343, Santa Fe')
@@ -88,10 +95,37 @@ class PDFGenerator:
         right_info_para = Paragraph(f"Comprobante N°: {recibo_numero}<br/>Fecha: {fecha_str_disp}", right_info_style)
 
         header_data = [['', header_text, right_info_para]]
-        if mostrar_logo is not False and os.path.exists(self.logo_path):
+        if mostrar_logo is not False:
             from reportlab.platypus import Image
-            logo = Image(self.logo_path, width=1*inch, height=1*inch)
-            header_data[0][0] = logo
+            tmp_logo_path = None
+            try:
+                if self.logo_url:
+                    try:
+                        import requests
+                        r = requests.get(str(self.logo_url), timeout=8)
+                        if r.status_code == 200 and r.content:
+                            ext = ".png"
+                            try:
+                                low = str(self.logo_url).lower()
+                                if low.endswith(".jpg") or low.endswith(".jpeg"):
+                                    ext = ".jpg"
+                                elif low.endswith(".png"):
+                                    ext = ".png"
+                            except Exception:
+                                ext = ".png"
+                            tmp_logo_path = os.path.join(tempfile.gettempdir(), f"ironhub_logo_{int(time.time())}{ext}")
+                            with open(tmp_logo_path, "wb") as f:
+                                f.write(r.content)
+                    except Exception:
+                        tmp_logo_path = None
+                if tmp_logo_path and os.path.exists(tmp_logo_path):
+                    logo = Image(tmp_logo_path, width=1*inch, height=1*inch)
+                    header_data[0][0] = logo
+                elif self.logo_path and os.path.exists(self.logo_path):
+                    logo = Image(self.logo_path, width=1*inch, height=1*inch)
+                    header_data[0][0] = logo
+            except Exception:
+                pass
 
         header_table = Table(header_data, colWidths=[1.7*inch, 4.3*inch, 1.5*inch])
         header_table.setStyle(TableStyle([

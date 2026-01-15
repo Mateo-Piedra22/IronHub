@@ -25,6 +25,22 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
+def _get_public_base_url(request: Request) -> str:
+    try:
+        xf_proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
+        xf_host = (request.headers.get("x-forwarded-host") or "").split(",")[0].strip()
+        host = xf_host or (request.headers.get("host") or "").split(",")[0].strip()
+        proto = xf_proto or (request.url.scheme if hasattr(request, "url") else "")
+        if host and proto:
+            return f"{proto}://{host}".rstrip('/')
+    except Exception:
+        pass
+    try:
+        return str(request.base_url).rstrip('/')
+    except Exception:
+        return os.environ.get('API_BASE_URL', 'https://api.ironhub.motiona.xyz').rstrip('/')
+
+
 def _now_local_naive() -> datetime:
     tz_name = (
         os.getenv("APP_TIMEZONE")
@@ -656,11 +672,24 @@ async def api_tipos_cuota_delete(
 @router.get("/api/pagos")
 async def api_pagos_list(
     request: Request,
-    _=Depends(require_gestion_access),
     svc: PaymentService = Depends(get_payment_service)
 ):
     """List payments with optional filters. Returns {pagos: [], total}."""
     try:
+        # AuthZ:
+        # - Gestion sessions can query arbitrary users via usuario_id.
+        # - Member sessions can only query their own payments.
+        try:
+            role = str(request.session.get("role") or "").strip().lower()
+        except Exception:
+            role = ""
+        is_gestion = bool(request.session.get("logged_in")) or bool(request.session.get("gestion_profesor_user_id")) or role in (
+            "dueño", "dueno", "owner", "admin", "administrador", "profesor"
+        )
+        session_user_id = request.session.get("user_id")
+        if (not is_gestion) and (session_user_id is None):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
         desde = request.query_params.get("desde")
         hasta = request.query_params.get("hasta")
         usuario_id = request.query_params.get("usuario_id")
@@ -681,7 +710,9 @@ async def api_pagos_list(
         # Map desde/hasta to start/end for service
         rows = svc.obtener_pagos_por_fecha(desde, hasta)
         
-        # Filter by usuario_id if provided
+        # Filter by usuario_id
+        if not is_gestion:
+            usuario_id = str(int(session_user_id))
         if usuario_id and str(usuario_id).isdigit():
             uid = int(usuario_id)
             rows = [r for r in rows if r.get("usuario_id") == uid]
@@ -863,6 +894,202 @@ async def api_pago_preview(
         logger.error(f"Error previewing receipt: {e}")
         import traceback
         traceback.print_exc()
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/api/pagos/{pago_id}/recibo/preview")
+async def api_pago_recibo_preview(
+    pago_id: int,
+    request: Request,
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    try:
+        pago = svc.obtener_pago(int(pago_id))
+        if not pago:
+            raise HTTPException(status_code=404, detail="Pago no encontrado")
+        usuario = svc.obtener_usuario_por_id(int(pago.usuario_id))
+        if not usuario:
+            raise HTTPException(status_code=404, detail="Usuario del pago no encontrado")
+
+        try:
+            detalles = svc.obtener_detalles_pago(int(pago_id))
+        except Exception:
+            detalles = []
+
+        subtotal = 0.0
+        try:
+            subtotal = sum(float(d.subtotal or 0.0) for d in (detalles or [])) if detalles else float(pago.monto or 0.0)
+        except Exception:
+            subtotal = float(pago.monto or 0.0)
+
+        try:
+            totales = svc.calcular_total_con_comision(subtotal, pago.metodo_pago_id)
+        except Exception:
+            totales = {"subtotal": subtotal, "comision": 0.0, "total": subtotal}
+
+        metodo_nombre = None
+        try:
+            if pago.metodo_pago_id:
+                m = svc.obtener_metodo_pago(int(pago.metodo_pago_id))
+                metodo_nombre = getattr(m, 'nombre', None) if m else None
+        except Exception:
+            metodo_nombre = None
+
+        qp = request.query_params
+        def _qp_bool(val, default: bool) -> bool:
+            try:
+                if val is None:
+                    return default
+                s = str(val).strip().lower()
+            except Exception:
+                return default
+            if s in ("1", "true", "yes", "on"):
+                return True
+            if s in ("0", "false", "no", "off"):
+                return False
+            return default
+
+        mostrar_logo = _qp_bool(qp.get("mostrar_logo"), True)
+        mostrar_metodo = _qp_bool(qp.get("mostrar_metodo"), True)
+        mostrar_dni = _qp_bool(qp.get("mostrar_dni"), True)
+
+        gym_nombre = None
+        gym_direccion = None
+        gym_logo_url = None
+        try:
+            from src.services.gym_config_service import GymConfigService
+            cfg = GymConfigService(svc.db).obtener_configuracion_gimnasio() or {}
+            gym_nombre = cfg.get('gym_name') or cfg.get('nombre')
+            gym_direccion = cfg.get('gym_address') or cfg.get('direccion')
+            gym_logo_url = cfg.get('logo_url') or cfg.get('gym_logo_url')
+        except Exception:
+            gym_nombre = None
+            gym_direccion = None
+            gym_logo_url = None
+
+        try:
+            if gym_logo_url and not str(gym_logo_url).startswith("http") and not str(gym_logo_url).startswith("/"):
+                from src.services.b2_storage import get_file_url
+                gym_logo_url = get_file_url(str(gym_logo_url))
+        except Exception:
+            pass
+
+        if not gym_logo_url:
+            try:
+                from src.utils import _resolve_logo_url
+                gym_logo_url = _resolve_logo_url()
+            except Exception:
+                gym_logo_url = None
+
+        if not gym_nombre:
+            try:
+                from src.utils import get_gym_name
+                gym_nombre = get_gym_name("Gimnasio")
+            except Exception:
+                gym_nombre = "Gimnasio"
+
+        numero = None
+        try:
+            comp_existing = svc.obtener_comprobante_por_pago(int(pago_id))
+            if comp_existing:
+                numero = comp_existing.get('numero_comprobante')
+        except Exception:
+            numero = None
+
+        if not numero:
+            try:
+                numero = svc.get_next_receipt_number()
+            except Exception:
+                numero = None
+
+        emitido_por = None
+        try:
+            prof_uid = request.session.get("gestion_profesor_user_id")
+            prof_id = request.session.get("gestion_profesor_id")
+            emitido_por = svc.obtener_profesor_nombre(
+                profesor_user_id=int(prof_uid) if prof_uid else None,
+                profesor_id=int(prof_id) if prof_id else None
+            )
+        except Exception:
+            emitido_por = None
+
+        fecha_disp = None
+        try:
+            dt = getattr(pago, 'fecha_pago', None)
+            if dt:
+                try:
+                    fecha_disp = dt.strftime("%d/%m/%Y")
+                except Exception:
+                    fecha_disp = str(dt)
+        except Exception:
+            fecha_disp = None
+        if not fecha_disp:
+            try:
+                fecha_disp = _now_local_naive().strftime("%d/%m/%Y")
+            except Exception:
+                fecha_disp = ""
+
+        items = []
+        for d in (detalles or []):
+            try:
+                items.append({
+                    "descripcion": getattr(d, 'descripcion', None) or "Pago",
+                    "cantidad": float(getattr(d, 'cantidad', 1) or 1),
+                    "precio": float(getattr(d, 'precio_unitario', 0.0) or 0.0),
+                })
+            except Exception:
+                continue
+
+        if not items:
+            try:
+                items = [{"descripcion": "Pago", "cantidad": 1, "precio": float(pago.monto or 0.0)}]
+            except Exception:
+                items = [{"descripcion": "Pago", "cantidad": 1, "precio": 0.0}]
+
+        observaciones = None
+        try:
+            observaciones = getattr(pago, 'notas', None)
+        except Exception:
+            observaciones = None
+
+        return {
+            "numero": numero,
+            "titulo": "RECIBO",
+            "fecha": fecha_disp,
+            "gym_nombre": gym_nombre,
+            "gym_direccion": gym_direccion,
+            "logo_url": gym_logo_url,
+            "usuario_nombre": getattr(usuario, 'nombre', None) or "Usuario",
+            "usuario_dni": getattr(usuario, 'dni', None),
+            "metodo_pago": metodo_nombre,
+            "items": items,
+            "subtotal": float(totales.get('subtotal', subtotal) or 0.0),
+            "total": float(totales.get('total', subtotal) or 0.0),
+            "observaciones": observaciones,
+            "emitido_por": emitido_por,
+            "mostrar_logo": bool(mostrar_logo),
+            "mostrar_metodo": bool(mostrar_metodo),
+            "mostrar_dni": bool(mostrar_dni),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating recibo preview: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/api/pagos/{pago_id}/recibo/pdf")
+async def api_pago_recibo_pdf_alias(
+    pago_id: int,
+    request: Request,
+    _=Depends(require_gestion_access),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    try:
+        pdf_url = _get_public_base_url(request) + f"/api/pagos/{int(pago_id)}/recibo.pdf"
+        return {"pdf_url": pdf_url}
+    except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
@@ -1067,7 +1294,39 @@ async def api_pago_recibo_pdf(
             # If apps.core is not in path directly, assume it is available via sys.path from dependencies
             from src.pdf_generator import PDFGenerator
 
-        pdfg = PDFGenerator()
+        logo_url = None
+        gym_name_cfg = None
+        gym_addr_cfg = None
+        try:
+            from src.services.gym_config_service import GymConfigService
+            cfg = GymConfigService(svc.db).obtener_configuracion_gimnasio() or {}
+            logo_url = cfg.get('logo_url') or cfg.get('gym_logo_url')
+            gym_name_cfg = cfg.get('gym_name') or cfg.get('nombre')
+            gym_addr_cfg = cfg.get('gym_address') or cfg.get('direccion')
+        except Exception:
+            logo_url = None
+            gym_name_cfg = None
+            gym_addr_cfg = None
+        if not logo_url:
+            try:
+                from src.utils import _resolve_logo_url
+                logo_url = _resolve_logo_url()
+            except Exception:
+                logo_url = None
+
+        try:
+            if logo_url and not str(logo_url).startswith("http") and not str(logo_url).startswith("/"):
+                from src.services.b2_storage import get_file_url
+                logo_url = get_file_url(str(logo_url))
+        except Exception:
+            pass
+
+        branding_cfg = {
+            'gym_name': gym_name_cfg,
+            'gym_address': gym_addr_cfg,
+            'logo_url': logo_url,
+        }
+        pdfg = PDFGenerator(branding_config=branding_cfg)
         filepath = pdfg.generar_recibo(
             pago,
             usuario,

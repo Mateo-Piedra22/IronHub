@@ -225,6 +225,13 @@ class RoutineTemplateManager:
                 except Exception:
                     pass
 
+            try:
+                if logo_url and not str(logo_url).startswith("http") and not str(logo_url).startswith("/"):
+                    from src.services.b2_storage import get_file_url
+                    logo_url = get_file_url(str(logo_url))
+            except Exception:
+                pass
+
             if not logo_url:
                 try:
                     fallback = resource_path(os.path.join('assets', 'gym_logo.png'))

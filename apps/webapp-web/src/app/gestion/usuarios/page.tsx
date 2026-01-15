@@ -519,8 +519,13 @@ export default function UsuariosPage() {
                     columns={columns}
                     loading={loading}
                     emptyMessage="No se encontraron usuarios"
-                    onRowClick={(row) => {
-                        setSidebarUsuario(row);
+                    onRowClick={async (row) => {
+                        try {
+                            const full = await api.getUsuario(row.id);
+                            setSidebarUsuario((full.ok && full.data) ? full.data : row);
+                        } catch {
+                            setSidebarUsuario(row);
+                        }
                         setSidebarOpen(true);
                     }}
                     pagination={{

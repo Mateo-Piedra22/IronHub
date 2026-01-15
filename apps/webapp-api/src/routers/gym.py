@@ -183,6 +183,13 @@ async def api_gym_data(
     try:
         config = svc.obtener_configuracion_gimnasio()
         if config:
+            try:
+                lu = config.get('logo_url') if isinstance(config, dict) else None
+                if isinstance(lu, str) and lu.strip() and not lu.strip().startswith("http") and not lu.strip().startswith("/"):
+                    from src.services.b2_storage import get_file_url
+                    config['logo_url'] = get_file_url(lu.strip())
+            except Exception:
+                pass
             return config
         # Fallback to simple dict using utils
         return {
@@ -258,20 +265,7 @@ async def api_gym_logo(
 
         # 2. Fallback to Local Storage if cloud failed
         if not public_url:
-            assets_dir = _resolve_existing_dir("assets")
-            try:
-                assets_dir.mkdir(parents=True, exist_ok=True)
-            except Exception:
-                pass
-                
-            local_name = "gym_logo.png" if "png" in ctype else ("logo.svg" if "svg" in ctype else "logo.jpg")
-            dest = assets_dir / local_name
-            try:
-                with open(dest, "wb") as f:
-                    f.write(data)
-                public_url = f"/assets/{local_name}"
-            except Exception as e:
-                return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+            return JSONResponse({"ok": False, "error": "Error subiendo logo"}, status_code=500)
         
 
         if public_url:
@@ -351,9 +345,13 @@ def _sign_excel_view(rutina_id: int, weeks: int, filename: str, ts: int, qr_mode
     except Exception:
         sh = ""
     try:
-        base = f"{int(rutina_id)}|{int(weeks)}|{filename}|{int(ts)}|{qr}|{sh}".encode("utf-8")
+        tenant = str(get_current_tenant() or "").strip().lower()
     except Exception:
-        base = f"{rutina_id}|{weeks}|{filename}|{ts}|{qr}|{sh}".encode("utf-8")
+        tenant = ""
+    try:
+        base = f"{tenant}|{int(rutina_id)}|{int(weeks)}|{filename}|{int(ts)}|{qr}|{sh}".encode("utf-8")
+    except Exception:
+        base = f"{tenant}|{rutina_id}|{weeks}|{filename}|{ts}|{qr}|{sh}".encode("utf-8")
     secret = _get_preview_secret().encode("utf-8")
     return hmac.new(secret, base, hashlib.sha256).hexdigest()
 
@@ -929,6 +927,7 @@ async def api_gym_update_legacy(
 
 @router.post("/api/gym_logo")
 async def api_gym_logo_legacy(
+    request: Request,
     file: UploadFile = File(...), 
     _=Depends(require_gestion_access),
 
@@ -936,12 +935,6 @@ async def api_gym_logo_legacy(
 ):
     """Legacy gym logo upload endpoint using SQLAlchemy."""
     try:
-        assets_dir = _resolve_existing_dir("assets")
-        try:
-            assets_dir.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            os.makedirs(assets_dir, exist_ok=True)
-
         ctype = str(getattr(file, 'content_type', '') or '').lower()
         allowed = {
             "image/png": ".png",
@@ -961,15 +954,20 @@ async def api_gym_logo_legacy(
 
         ext = allowed.get(ctype, ".png")
         filename = f"gym_logo_{int(time.time())}{ext}"
-        filepath = assets_dir / filename
 
-        with open(filepath, "wb") as f:
-            f.write(content)
-            
+        try:
+            tenant = _get_tenant_from_request(request)
+        except Exception:
+            tenant = None
+        if not tenant:
+            tenant = "common"
 
-        svc.actualizar_configuracion('gym_logo_url', f"/assets/{filename}")
-        
-        return {"ok": True, "url": f"/assets/{filename}"}
+        uploaded_url = b2_upload(content, filename, ctype, subfolder=f"logos/{tenant}")
+        if not uploaded_url:
+            return JSONResponse({"ok": False, "error": "Error subiendo logo"}, status_code=500)
+
+        svc.actualizar_configuracion('gym_logo_url', uploaded_url)
+        return {"ok": True, "url": uploaded_url}
     except Exception as e:
         logger.error(f"Error uploading gym logo: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -1358,17 +1356,42 @@ async def api_ejercicios_delete(
 
 @router.get("/api/rutinas")
 async def api_rutinas_list(
+    request: Request,
     usuario_id: Optional[int] = None,
     search: str = "",
     plantillas: Optional[bool] = None,
     es_plantilla: Optional[bool] = None, # Alias for plantillas
     include_exercises: bool = False,
-    _=Depends(require_gestion_access),
 
     svc: TrainingService = Depends(get_training_service)
 ):
     """Get routines using SQLAlchemy. Includes exercises when filtering by user."""
     try:
+        # AuthZ:
+        # - Gestion sessions can list any rutinas (incl templates).
+        # - Member sessions can only list their own rutinas.
+        try:
+            role = str(request.session.get('role') or '').strip().lower()
+        except Exception:
+            role = ""
+
+        logged_in = bool(request.session.get('logged_in'))
+        gestion_prof_user_id = request.session.get('gestion_profesor_user_id')
+        session_user_id = request.session.get('user_id')
+
+        is_gestion = bool(logged_in) or bool(gestion_prof_user_id) or role in (
+            'dueño', 'dueno', 'owner', 'admin', 'administrador', 'profesor'
+        )
+
+        if (not is_gestion) and (session_user_id is None):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+        if not is_gestion:
+            usuario_id = int(session_user_id)
+            plantillas = False
+            es_plantilla = False
+            include_exercises = True
+
         is_template_req = plantillas if plantillas is not None else es_plantilla
         rutinas = svc.obtener_rutinas(
             usuario_id,
@@ -1820,6 +1843,7 @@ async def api_rutina_excel_view_url(
 @router.get("/api/rutinas/{rutina_id}/export/excel_view.xlsx")
 async def api_rutina_excel_view(
     rutina_id: int,
+    request: Request,
     tenant: Optional[str] = None,
     weeks: int = 1,
     filename: Optional[str] = None,
@@ -1827,9 +1851,6 @@ async def api_rutina_excel_view(
     sheet: Optional[str] = None,
     ts: int = 0,
     sig: Optional[str] = None,
-    svc: TrainingService = Depends(get_training_service),
-    user_svc: UserService = Depends(get_user_service),
-    rm: RoutineTemplateManager = Depends(get_rm)
 ):
     """Public endpoint that serves Excel file after verifying signature.
     
@@ -1853,6 +1874,8 @@ async def api_rutina_excel_view(
             raise
         except Exception:
             raise HTTPException(status_code=400, detail="Tenant inválido")
+    else:
+        raise HTTPException(status_code=400, detail="Tenant requerido")
 
     # Validate signature exists
     if not sig:
@@ -1888,13 +1911,19 @@ async def api_rutina_excel_view(
     if not hmac.compare_digest(expected, str(sig)):
         raise HTTPException(status_code=403, detail="Firma inválida")
     
-    # Generate and serve Excel
+    db_gen = None
+    session = None
     try:
+        db_gen = get_db()
+        session = next(db_gen)
+        svc = TrainingService(session)
+        user_svc = UserService(session)
+        rm = RoutineTemplateManager()
+
         rutina_data = svc.obtener_rutina_completa(rutina_id)
         if not rutina_data:
             raise HTTPException(status_code=404, detail="Rutina no encontrada")
-        
-        # Build Rutina and Usuario objects
+
         rutina = Rutina(
             id=rutina_data['id'],
             nombre_rutina=rutina_data.get('nombre_rutina') or rutina_data.get('nombre', ''),
@@ -1902,19 +1931,17 @@ async def api_rutina_excel_view(
             dias_semana=rutina_data.get('dias_semana', 1),
             uuid_rutina=rutina_data.get('uuid_rutina')
         )
-        
-        # Try to fetch full user to ensure DNI/Phone are available for templates
+
         usuario = None
         if rutina_data.get('usuario_id'):
             usuario = user_svc.get_user(rutina_data['usuario_id'])
-            
+
         if not usuario:
             user_name = rutina_data.get('usuario_nombre') or 'Usuario'
             usuario = Usuario(nombre=user_name)
-        
+
         ejercicios_por_dia = _build_exercises_by_day(rutina_data)
 
-        # Generate into a temp file to avoid accumulating previews on disk
         tmp_fd, tmp_path = tempfile.mkstemp(prefix=f"rutina_view_{rutina_id}_", suffix=".xlsx")
         try:
             os.close(tmp_fd)
@@ -1930,14 +1957,13 @@ async def api_rutina_excel_view(
             qr_mode=qr_mode,
             sheet=sheet_norm,
         )
-        
+
         response = FileResponse(
             xlsx_path,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             filename=base_name,
             background=BackgroundTask(_cleanup_file, str(xlsx_path))
         )
-        # Use inline disposition for Office Viewer compatibility
         response.headers["Content-Disposition"] = f'inline; filename="{base_name}"'
         response.headers["Cache-Control"] = "private, max-age=60"
         return response
@@ -1946,6 +1972,17 @@ async def api_rutina_excel_view(
     except Exception as e:
         logging.exception("Error generating Excel for preview")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            if session is not None:
+                session.close()
+        except Exception:
+            pass
+        try:
+            if db_gen is not None:
+                db_gen.close()
+        except Exception:
+            pass
 
 @router.post("/api/rutinas/export/draft_url")
 async def sign_draft_url(

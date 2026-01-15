@@ -105,8 +105,12 @@ export default function ReciboPreviewModal({
                     <div className="flex items-center justify-between border-b border-gray-200 pb-4 mb-4">
                         <div>
                             {preview.mostrar_logo && (
-                                <div className="w-16 h-16 bg-gray-200 rounded-lg mb-2 flex items-center justify-center text-gray-500 text-xs">
-                                    Logo
+                                <div className="w-16 h-16 bg-gray-200 rounded-lg mb-2 flex items-center justify-center text-gray-500 text-xs overflow-hidden">
+                                    {preview.logo_url ? (
+                                        <img src={preview.logo_url} alt="Logo" className="w-full h-full object-contain bg-white" />
+                                    ) : (
+                                        <>Logo</>
+                                    )}
                                 </div>
                             )}
                             <h2 className="text-xl font-bold">{preview.gym_nombre}</h2>

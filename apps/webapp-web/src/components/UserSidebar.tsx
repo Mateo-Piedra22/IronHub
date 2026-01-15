@@ -394,7 +394,7 @@ export default function UserSidebar({
                 initial={{ opacity: 0, x: 300 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 300 }}
-                className="fixed right-0 top-0 h-full w-[400px] max-w-full bg-slate-900 border-l border-slate-800 z-50 flex flex-col overflow-hidden"
+                className="fixed right-0 top-0 h-full w-[400px] max-w-full bg-slate-900 border-l border-slate-800 z-50 flex flex-col overflow-y-auto"
             >
                 {/* Header */}
                 <div className="p-4 border-b border-slate-800 flex items-center justify-between">

@@ -173,6 +173,16 @@ export default function CheckinPage() {
 
     // Handle QR scan
     const handleQRScanned = async (token: string) => {
+        let raw = String(token || '').trim();
+        try {
+            if (raw.includes('token=')) {
+                const qsPart = raw.includes('?') ? raw.split('?', 2)[1] : raw;
+                const params = new URLSearchParams(qsPart);
+                const t = params.get('token');
+                if (t) raw = t.trim();
+            }
+        } catch { }
+
         // Stop scanner temporarily
         if (scannerRef.current) {
             await scannerRef.current.stop();
@@ -181,32 +191,40 @@ export default function CheckinPage() {
 
         // Validate the token
         try {
-            const res = await api.scanStationQR(token);
+            const resCheckin = await api.checkIn(raw);
 
-            if (res.ok && res.data?.ok) {
-                const timestamp = new Date().toLocaleTimeString('es-AR');
-                const result: CheckinResult = {
+            if (resCheckin.ok && resCheckin.data?.ok) {
+                setLastResult({
                     success: true,
-                    message: res.data.mensaje || '¡Check-in exitoso!',
-                    userName: res.data.usuario?.nombre || 'Usuario',
-                    userDni: res.data.usuario?.dni || '',
-                    timestamp,
-                };
-                setLastResult(result);
-
-                // Add to recent list
-                setRecentCheckins((prev) => [
-                    { name: result.userName!, dni: result.userDni!, time: timestamp },
-                    ...prev.slice(0, 4),
-                ]);
-
-                // Play success sound
+                    message: resCheckin.data?.mensaje || 'OK',
+                });
                 playSuccessSound();
             } else {
-                setLastResult({
-                    success: false,
-                    message: res.data?.mensaje || res.error || 'Error al escanear',
-                });
+                const res = await api.scanStationQR(raw);
+
+                if (res.ok && res.data?.ok) {
+                    const timestamp = new Date().toLocaleTimeString('es-AR');
+                    const result: CheckinResult = {
+                        success: true,
+                        message: res.data.mensaje || '¡Check-in exitoso!',
+                        userName: res.data.usuario?.nombre || 'Usuario',
+                        userDni: res.data.usuario?.dni || '',
+                        timestamp,
+                    };
+                    setLastResult(result);
+
+                    setRecentCheckins((prev) => [
+                        { name: result.userName!, dni: result.userDni!, time: timestamp },
+                        ...prev.slice(0, 4),
+                    ]);
+
+                    playSuccessSound();
+                } else {
+                    setLastResult({
+                        success: false,
+                        message: res.data?.mensaje || res.error || resCheckin.error || 'Error al escanear',
+                    });
+                }
             }
         } catch {
             setLastResult({

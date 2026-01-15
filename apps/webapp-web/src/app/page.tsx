@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import HomeSelector from '@/components/HomeSelector';
 import { Loader2 } from 'lucide-react';
+import { api } from '@/lib/api';
 
 interface GymData {
     gym_name?: string;
@@ -25,49 +26,30 @@ export default function HomePage() {
     useEffect(() => {
         async function loadData() {
             try {
-                // Fetch gym branding data
-                const gymRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/gym/data`, {
-                    headers: { Accept: 'application/json' },
-                    credentials: 'include',
-                });
-                if (gymRes.ok) {
-                    const data = await gymRes.json();
-                    setGymData(data);
-                }
+                const gymRes = await api.getPublicGymData();
+                if (gymRes.ok && gymRes.data) setGymData(gymRes.data);
             } catch {
                 // Fallback to defaults
             }
 
             try {
-                // Check maintenance status
-                const maintRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/maintenance_status`, {
-                    credentials: 'include',
-                });
-                if (maintRes.ok) {
-                    const data = await maintRes.json();
-                    if (data.active) {
-                        setMaintenanceMsg(data.message || 'Mantenimiento en curso');
-                        setShowMaintenance(true);
-                    }
+                const maintRes = await api.getMaintenanceStatus();
+                if (maintRes.ok && maintRes.data?.active) {
+                    setMaintenanceMsg(maintRes.data.message || 'Mantenimiento en curso');
+                    setShowMaintenance(true);
                 }
             } catch {
                 // Ignore
             }
 
             try {
-                // Check suspension status
-                const suspRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/suspension_status`, {
-                    credentials: 'include',
-                });
-                if (suspRes.ok) {
-                    const data = await suspRes.json();
-                    if (data.suspended) {
-                        setSuspensionData({
-                            reason: data.reason || 'Servicio suspendido',
-                            until: data.until || '',
-                        });
-                        setShowSuspension(true);
-                    }
+                const suspRes = await api.getSuspensionStatus();
+                if (suspRes.ok && suspRes.data?.suspended) {
+                    setSuspensionData({
+                        reason: suspRes.data.reason || 'Servicio suspendido',
+                        until: suspRes.data.until || '',
+                    });
+                    setShowSuspension(true);
                 }
             } catch {
                 // Ignore

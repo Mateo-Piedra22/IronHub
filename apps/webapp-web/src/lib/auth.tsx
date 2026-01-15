@@ -30,6 +30,7 @@ export function useAuth() {
 const protectedRoutes = {
     '/gestion': ['owner', 'admin', 'profesor'],
     '/dashboard': ['owner', 'admin', 'profesor', 'user'],
+    '/usuario': ['user'],
 };
 
 export function AuthProvider({ children }: { children: ReactNode }) {

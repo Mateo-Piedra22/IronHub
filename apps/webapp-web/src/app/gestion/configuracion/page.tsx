@@ -265,15 +265,11 @@ export default function ConfiguracionPage() {
     const { success, error } = useToast();
 
     // State
-    const [activeTab, setActiveTab] = useState<'cuotas' | 'metodos' | 'conceptos'>('cuotas');
     const [loading, setLoading] = useState(true);
-
-    // Data
-    const [tiposCuota, setTiposCuota] = useState<TipoCuota[]>([]);
-    const [metodosPago, setMetodosPago] = useState<MetodoPago[]>([]);
-    const [conceptos, setConceptos] = useState<ConceptoPago[]>([]);
-
-    // Modal state
+    const [gymNombre, setGymNombre] = useState<string>('');
+    const [gymLogoUrl, setGymLogoUrl] = useState<string>('');
+    const [logoUploading, setLogoUploading] = useState(false);
+    const [activeTab, setActiveTab] = useState<'cuotas' | 'metodos' | 'conceptos'>('cuotas');
     const [cuotaFormOpen, setCuotaFormOpen] = useState(false);
     const [cuotaToEdit, setCuotaToEdit] = useState<TipoCuota | null>(null);
     const [simpleFormOpen, setSimpleFormOpen] = useState(false);
@@ -282,10 +278,21 @@ export default function ConfiguracionPage() {
     const [itemToDelete, setItemToDelete] = useState<{ type: 'cuota' | 'metodo' | 'concepto'; item: TipoCuota | MetodoPago | ConceptoPago } | null>(null);
     const [deleteLoading, setDeleteLoading] = useState(false);
 
-    // Load
+    // Data
+    const [tiposCuota, setTiposCuota] = useState<TipoCuota[]>([]);
+    const [metodosPago, setMetodosPago] = useState<MetodoPago[]>([]);
+    const [conceptos, setConceptos] = useState<ConceptoPago[]>([]);
+
+    // Load data
     const loadData = useCallback(async () => {
         setLoading(true);
         try {
+            const gymRes = await api.getGymData();
+            if (gymRes.ok && gymRes.data) {
+                setGymNombre(gymRes.data.nombre || '');
+                setGymLogoUrl(gymRes.data.logo_url || '');
+            }
+
             const [cuotasRes, metodosRes, conceptosRes] = await Promise.all([
                 api.getTiposCuota(),
                 api.getMetodosPago(),
@@ -300,6 +307,25 @@ export default function ConfiguracionPage() {
             setLoading(false);
         }
     }, [error]);
+
+    const handleLogoSelected = async (file: File | null) => {
+        if (!file) return;
+        setLogoUploading(true);
+        try {
+            const res = await api.uploadGymLogo(file);
+            if (res.ok && res.data?.ok) {
+                const url = res.data.logo_url || '';
+                setGymLogoUrl(url);
+                success('Logo actualizado');
+            } else {
+                error(res.error || res.data?.error || 'Error al subir logo');
+            }
+        } catch {
+            error('Error de conexión');
+        } finally {
+            setLogoUploading(false);
+        }
+    };
 
     useEffect(() => {
         loadData();
@@ -453,14 +479,56 @@ export default function ConfiguracionPage() {
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
+                className="flex items-center justify-between"
             >
-                <h1 className="text-2xl font-display font-bold text-white flex items-center gap-3">
-                    <Settings className="w-6 h-6 text-primary-400" />
-                    Configuración
-                </h1>
-                <p className="text-slate-400 mt-1">
-                    Configura tipos de cuota, métodos de pago y conceptos
-                </p>
+                <div>
+                    <h1 className="text-2xl font-display font-bold text-white flex items-center gap-3">
+                        <Settings className="w-6 h-6 text-primary-400" />
+                        Configuración
+                    </h1>
+                    <p className="text-slate-400 mt-1">
+                        Configura tipos de cuota, métodos de pago y conceptos
+                    </p>
+                </div>
+            </motion.div>
+
+            {/* Branding / Logo */}
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.05 }}
+                className="card p-4"
+            >
+                <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-4">
+                        <div className="w-14 h-14 rounded-xl bg-slate-800 border border-slate-700 overflow-hidden flex items-center justify-center">
+                            {gymLogoUrl ? (
+                                <img src={gymLogoUrl} alt="Logo" className="w-full h-full object-contain bg-white" />
+                            ) : (
+                                <span className="text-xs text-slate-500">Sin logo</span>
+                            )}
+                        </div>
+                        <div>
+                            <div className="text-sm text-slate-400">Gimnasio</div>
+                            <div className="font-semibold text-white">{gymNombre || '—'}</div>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <label className="inline-flex items-center">
+                            <input
+                                type="file"
+                                accept="image/png,image/jpeg,image/jpg,image/svg+xml"
+                                className="hidden"
+                                disabled={logoUploading}
+                                onChange={(e) => handleLogoSelected(e.target.files?.[0] || null)}
+                            />
+                            <Button type="button" variant="secondary" isLoading={logoUploading} disabled={logoUploading}>
+                                Cargar logo
+                            </Button>
+                        </label>
+                    </div>
+                </div>
             </motion.div>
 
             {/* Tabs */}

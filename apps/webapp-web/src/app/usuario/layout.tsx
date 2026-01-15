@@ -2,11 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import {
     Dumbbell, LayoutDashboard, CreditCard, Calendar,
     Clipboard, LogOut, User, Bell
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
+import { api } from '@/lib/api';
 
 const navigation = [
     { name: 'Inicio', href: '/usuario', icon: LayoutDashboard },
@@ -23,6 +25,19 @@ export default function DashboardLayout({
 }) {
     const pathname = usePathname();
     const { logout } = useAuth();
+    const [gymLogoUrl, setGymLogoUrl] = useState<string>('');
+
+    useEffect(() => {
+        const loadBranding = async () => {
+            try {
+                const res = await api.getPublicGymData();
+                if (res.ok && res.data?.logo_url) setGymLogoUrl(res.data.logo_url);
+            } catch {
+                // ignore
+            }
+        };
+        loadBranding();
+    }, []);
 
     return (
         <div className="min-h-screen">
@@ -33,7 +48,11 @@ export default function DashboardLayout({
                         {/* Logo */}
                         <Link href="/usuario" className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center shadow-sm">
-                                <Dumbbell className="w-5 h-5 text-white" />
+                                {gymLogoUrl ? (
+                                    <img src={gymLogoUrl} alt="Logo" className="w-7 h-7 object-contain bg-white/90 rounded-md p-1" />
+                                ) : (
+                                    <Dumbbell className="w-5 h-5 text-white" />
+                                )}
                             </div>
                             <span className="text-lg font-display font-bold text-white hidden sm:block">
                                 Mi Gimnasio

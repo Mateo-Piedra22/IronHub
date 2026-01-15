@@ -305,6 +305,25 @@ export interface GymData {
     subdominio?: string;
 }
 
+export interface PublicGymData {
+    gym_name?: string;
+    logo_url?: string;
+}
+
+export interface MaintenanceStatus {
+    active: boolean;
+    active_now?: boolean;
+    until?: string;
+    message?: string;
+}
+
+export interface SuspensionStatus {
+    suspended: boolean;
+    reason?: string;
+    until?: string;
+    hard?: boolean;
+}
+
 export interface SessionUser {
     id: number;
     nombre: string;
@@ -466,6 +485,7 @@ export interface ReciboPreview {
     fecha: string;
     gym_nombre: string;
     gym_direccion?: string;
+    logo_url?: string;
     usuario_nombre: string;
     usuario_dni?: string;
     metodo_pago?: string;
@@ -515,6 +535,37 @@ class ApiClient {
             return { ok: true, data: data as T };
         } catch (error) {
             console.error('API Error:', error);
+            return {
+                ok: false,
+                error: 'Error de conexión. Verifica tu conexión a internet.',
+            };
+        }
+    }
+
+    async uploadGymLogo(file: File): Promise<ApiResponse<{ ok: boolean; logo_url?: string; error?: string }>> {
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+            const url = `${this.baseUrl}/api/gym/logo`;
+            const response = await fetch(url, {
+                method: 'POST',
+                body: formData,
+                credentials: 'include',
+                headers: {
+                    'X-Tenant': typeof window !== 'undefined' ? getCurrentSubdomain() : '',
+                },
+            });
+
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                return {
+                    ok: false,
+                    error: data?.error || data?.detail || `Error ${response.status}`,
+                };
+            }
+
+            return { ok: true, data };
+        } catch {
             return {
                 ok: false,
                 error: 'Error de conexión. Verifica tu conexión a internet.',
@@ -643,6 +694,18 @@ class ApiClient {
         return this.request<GymData>('/api/gym/data');
     }
 
+    async getPublicGymData() {
+        return this.request<PublicGymData>('/gym/data');
+    }
+
+    async getMaintenanceStatus() {
+        return this.request<MaintenanceStatus>('/maintenance_status');
+    }
+
+    async getSuspensionStatus() {
+        return this.request<SuspensionStatus>('/suspension_status');
+    }
+
     // === Usuarios ===
     async getUsuarios(params?: { search?: string; activo?: boolean; page?: number; limit?: number }) {
         const searchParams = new URLSearchParams();
@@ -688,11 +751,13 @@ class ApiClient {
     }
 
     // === Files ===
-    async uploadExerciseVideo(file: File): Promise<ApiResponse<{ url: string; mime: string }>> {
+    async uploadExerciseVideo(file: File, name?: string): Promise<ApiResponse<{ url: string; mime: string }>> {
         const formData = new FormData();
         formData.append('file', file);
         try {
-            const url = `${this.baseUrl}/api/exercises/video`;
+            const p = new URLSearchParams();
+            if (name) p.set('name', String(name));
+            const url = `${this.baseUrl}/api/exercises/video${p.toString() ? `?${p.toString()}` : ''}`;
             const response = await fetch(url, {
                 method: 'POST',
                 body: formData,

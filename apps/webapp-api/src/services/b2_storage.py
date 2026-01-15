@@ -23,14 +23,81 @@ logger = logging.getLogger(__name__)
 
 # Configuration from environment
 B2_BUCKET_NAME = os.getenv("B2_BUCKET_NAME", "motiona-assets")
-B2_KEY_ID = os.getenv("B2_KEY_ID", "")
-B2_APPLICATION_KEY = os.getenv("B2_APPLICATION_KEY", "")
+B2_KEY_ID = (
+    os.getenv("B2_KEY_ID", "")
+    or os.getenv("B2_ACCOUNT_ID", "")
+    or os.getenv("B2_MASTER_KEY_ID", "")
+)
+B2_APPLICATION_KEY = (
+    os.getenv("B2_APPLICATION_KEY", "")
+    or os.getenv("B2_APP_KEY", "")
+    or os.getenv("B2_MASTER_APPLICATION_KEY", "")
+)
 B2_ENDPOINT_URL = os.getenv("B2_ENDPOINT_URL", "s3.us-east-005.backblazeb2.com")
 B2_MEDIA_PREFIX = os.getenv("B2_MEDIA_PREFIX", "assets")
 B2_PUBLIC_BASE_URL = os.getenv("B2_PUBLIC_BASE_URL", "https://f005.backblazeb2.com")
-CDN_CUSTOM_DOMAIN = os.getenv("CDN_CUSTOM_DOMAIN", "")
 
 MAX_B2_UPLOAD_BYTES = int(os.getenv("MAX_B2_UPLOAD_BYTES", str(60 * 1024 * 1024)))
+
+
+def _get_direct_public_base() -> str:
+    """Return a direct Backblaze public base URL (never a CDN domain)."""
+    # 1) Prefer explicit public base, but only if it is a Backblaze host
+    try:
+        base = str(B2_PUBLIC_BASE_URL or "").strip().rstrip("/")
+    except Exception:
+        base = ""
+
+    if base and not (base.startswith("http://") or base.startswith("https://")):
+        base = f"https://{base.lstrip('/')}"
+
+    if base.endswith("/file"):
+        base = base[:-5]
+
+    if base and "backblazeb2.com" in base.lower():
+        return base
+
+    # 2) Derive from S3 endpoint region (e.g. s3.us-east-005.backblazeb2.com -> f005.backblazeb2.com)
+    try:
+        ep = str(B2_ENDPOINT_URL or "").strip().lower()
+        ep = ep.replace("https://", "").replace("http://", "")
+        m = re.search(r"-(\d{3})\.backblazeb2\.com", ep)
+        if m:
+            return f"https://f{m.group(1)}.backblazeb2.com"
+    except Exception:
+        pass
+
+    # 3) Safe fallback (may still be wrong for some regions but avoids CDN)
+    return "https://f000.backblazeb2.com"
+
+
+def _normalize_key_layout(key: str) -> str:
+    """Normalize legacy keys to the current tenant-assets layout.
+
+    Current layout: assets/<tenant>-assets/<folder>/...
+    Legacy layout:  assets/<tenant>/<folder>/...
+    """
+    try:
+        s = str(key or "").lstrip("/")
+        if not s or ".." in s:
+            return s
+        prefix = f"{B2_MEDIA_PREFIX}/"
+        if not s.startswith(prefix):
+            return s
+        rest = s[len(prefix):]
+        parts = rest.split("/", 2)
+        if len(parts) < 2:
+            return s
+        tenant_part = parts[0]
+        folder_part = parts[1]
+        if tenant_part.endswith("-assets"):
+            return s
+        if folder_part not in ("logos", "videos", "exercises", "uploads"):
+            return s
+        # Rewrite tenant folder
+        return f"{prefix}{tenant_part}-assets/{rest.split('/', 1)[1]}"
+    except Exception:
+        return str(key or "")
 
 
 def get_s3_client():
@@ -47,9 +114,12 @@ def get_s3_client():
         return None
     
     try:
+        endpoint = str(B2_ENDPOINT_URL or "").strip()
+        if endpoint and not (endpoint.startswith("http://") or endpoint.startswith("https://")):
+            endpoint = f"https://{endpoint}"
         return boto3.client(
             's3',
-            endpoint_url=f"https://{B2_ENDPOINT_URL}",
+            endpoint_url=endpoint,
             aws_access_key_id=B2_KEY_ID,
             aws_secret_access_key=B2_APPLICATION_KEY,
             config=Config(
@@ -74,16 +144,14 @@ def get_cdn_url(file_path: str) -> str:
         Full URL to access the file
     """
     try:
-        p = str(file_path or "").lstrip("/")
+        p = _normalize_key_layout(str(file_path or "")).lstrip("/")
         if not p or ".." in p:
             return ""
     except Exception:
         return ""
 
-    if CDN_CUSTOM_DOMAIN:
-        return f"https://{CDN_CUSTOM_DOMAIN}/{p}"
-    else:
-        return f"{B2_PUBLIC_BASE_URL}/file/{B2_BUCKET_NAME}/{p}"
+    base = _get_direct_public_base()
+    return f"{base}/file/{B2_BUCKET_NAME}/{p}"
 
 
 def _sanitize_tenant(tenant: str) -> str:
@@ -151,8 +219,9 @@ def upload_file(
     stem = stem[:80] if stem else "file"
     safe_filename = f"{stem}{ext}".lower()
     
-    # Build the full path: assets/{tenant}/{folder}/{hash}_{filename}
-    file_key = f"{B2_MEDIA_PREFIX}/{tenant_safe}/{folder_safe}/{file_hash}_{safe_filename}"
+    # Build the full path: assets/{tenant}-assets/{folder}/{hash}_{filename}
+    tenant_folder = f"{tenant_safe}-assets"
+    file_key = f"{B2_MEDIA_PREFIX}/{tenant_folder}/{folder_safe}/{file_hash}_{safe_filename}"
     
     try:
         client.put_object(
@@ -232,7 +301,8 @@ def list_tenant_files(tenant: str, folder: str = "") -> list:
         return []
     
     tenant_safe = _sanitize_tenant(tenant)
-    prefix = f"{B2_MEDIA_PREFIX}/{tenant_safe}/"
+    tenant_folder = f"{tenant_safe}-assets"
+    prefix = f"{B2_MEDIA_PREFIX}/{tenant_folder}/"
     if folder:
         folder_safe = _sanitize_folder(folder)
         prefix += f"{folder_safe}/"
@@ -359,11 +429,39 @@ def get_file_url(file_path: str) -> str:
     if not file_path:
         return ""
     
-    # Already a URL
-    if file_path.startswith("http") or file_path.startswith("/"):
+    # Local/static paths
+    if file_path.startswith("/"):
         return file_path
-    
-    return get_cdn_url(file_path)
+
+    # Full URL
+    if file_path.startswith("http://") or file_path.startswith("https://"):
+        try:
+            parsed = urllib.parse.urlparse(file_path)
+            path = parsed.path or ""
+
+            # Any host: if URL contains /file/<bucket>/<key>, rewrite to direct B2
+            marker = f"/file/{B2_BUCKET_NAME}/"
+            if marker in path:
+                key = path.split(marker, 1)[1].lstrip("/")
+                if key and ".." not in key:
+                    return get_cdn_url(_normalize_key_layout(key))
+
+            # Legacy CDN mapping directly to keys (e.g. https://<cdn>/<assets/...>)
+            try:
+                key2 = path.lstrip("/")
+                if key2.startswith(f"{B2_MEDIA_PREFIX}/") and ".." not in key2:
+                    # Be conservative: only rewrite if it looks like our media layout
+                    if any(seg in key2.split("/") for seg in ("logos", "videos", "exercises", "uploads")):
+                        return get_cdn_url(_normalize_key_layout(key2))
+            except Exception:
+                pass
+
+            return file_path
+        except Exception:
+            return file_path
+
+    # Key/path stored in DB
+    return get_cdn_url(_normalize_key_layout(file_path))
 
 
 def extract_file_key(file_url_or_key: str) -> Optional[str]:
@@ -386,7 +484,9 @@ def extract_file_key(file_url_or_key: str) -> Optional[str]:
 
         # If already looks like a key
         if not s.startswith("http://") and not s.startswith("https://"):
-            return s if s.startswith(prefix) and ".." not in s else None
+            if s.startswith(prefix) and ".." not in s:
+                return _normalize_key_layout(s)
+            return None
 
         parsed = urllib.parse.urlparse(s)
         path = parsed.path or ""
@@ -397,15 +497,18 @@ def extract_file_key(file_url_or_key: str) -> Optional[str]:
         marker = f"/file/{B2_BUCKET_NAME}/"
         if marker in path:
             key = path.split(marker, 1)[1].lstrip("/")
-            return key if key.startswith(prefix) and ".." not in key else None
+            if key.startswith(prefix) and ".." not in key:
+                return _normalize_key_layout(key)
+            return None
 
-        # Case 2: Custom CDN domain that maps directly to keys
-        if CDN_CUSTOM_DOMAIN and netloc == CDN_CUSTOM_DOMAIN.strip().lower():
-            key = path.lstrip("/")
-            # Some setups keep /file/<bucket>/<key> on the CDN
-            if key.startswith(f"file/{B2_BUCKET_NAME}/"):
-                key = key.split(f"file/{B2_BUCKET_NAME}/", 1)[1]
-            return key if key.startswith(prefix) and ".." not in key else None
+        # Case 2: URLs that map directly to keys: https://<host>/<assets/...>
+        try:
+            key2 = path.lstrip("/")
+            if key2.startswith(prefix) and ".." not in key2:
+                if any(seg in key2.split("/") for seg in ("logos", "videos", "exercises", "uploads")):
+                    return _normalize_key_layout(key2)
+        except Exception:
+            pass
 
         # Unknown URL
         return None

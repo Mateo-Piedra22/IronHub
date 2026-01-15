@@ -20,6 +20,7 @@ export default function GestionLoginPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [showPassword, setShowPassword] = useState(false);
+    const [gymLogoUrl, setGymLogoUrl] = useState<string>('');
 
     // Professors list
     const [profesores, setProfesores] = useState<ProfesorBasico[]>([]);
@@ -45,6 +46,18 @@ export default function GestionLoginPage() {
             }
         };
         loadProfesores();
+    }, []);
+
+    useEffect(() => {
+        const loadBranding = async () => {
+            try {
+                const res = await api.getPublicGymData();
+                if (res.ok && res.data?.logo_url) setGymLogoUrl(res.data.logo_url);
+            } catch {
+                // ignore
+            }
+        };
+        loadBranding();
     }, []);
 
     const isOwnerSelected = selectedProfile === '__OWNER__';
@@ -113,7 +126,11 @@ export default function GestionLoginPage() {
                         transition={{ delay: 0.1 }}
                         className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 shadow-md mb-4"
                     >
-                        <Dumbbell className="w-8 h-8 text-white" />
+                        {gymLogoUrl ? (
+                            <img src={gymLogoUrl} alt="Logo" className="w-10 h-10 object-contain bg-white/90 rounded-xl p-2" />
+                        ) : (
+                            <Dumbbell className="w-8 h-8 text-white" />
+                        )}
                     </motion.div>
                     <h1 className="text-2xl font-display font-bold text-white">Panel de Gestión</h1>
                     <p className="text-slate-400 mt-1">Acceso para profesores o dueño</p>

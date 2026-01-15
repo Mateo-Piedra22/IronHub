@@ -310,6 +310,27 @@ class TrainingService(BaseService):
             
             results = []
 
+            ejercicios_count_by_rutina: Dict[int, int] = {}
+            if rutinas:
+                try:
+                    rutina_ids = [int(r.id) for r in rutinas if getattr(r, 'id', None) is not None]
+                except Exception:
+                    rutina_ids = []
+                if rutina_ids:
+                    try:
+                        rows = self.db.execute(
+                            select(RutinaEjercicio.rutina_id, func.count(RutinaEjercicio.id))
+                            .where(RutinaEjercicio.rutina_id.in_(rutina_ids))
+                            .group_by(RutinaEjercicio.rutina_id)
+                        ).all()
+                        for rid, cnt in rows:
+                            try:
+                                ejercicios_count_by_rutina[int(rid)] = int(cnt or 0)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
             ejercicios_by_rutina: Dict[int, List[Dict[str, Any]]] = {}
             if include_exercises and rutinas:
                 rutina_ids = [int(r.id) for r in rutinas if getattr(r, 'id', None) is not None]
@@ -407,8 +428,16 @@ class TrainingService(BaseService):
                     exs_flat = ejercicios_by_rutina.get(int(r.id), [])
                     rout_dict['ejercicios'] = exs_flat
                     rout_dict['dias'] = _build_days(getattr(r, 'dias_semana', None), exs_flat)
+                    try:
+                        rout_dict['ejercicios_count'] = int(len(exs_flat or []))
+                    except Exception:
+                        rout_dict['ejercicios_count'] = int(ejercicios_count_by_rutina.get(int(r.id), 0) or 0)
                 else:
                     rout_dict['dias'] = _build_days(getattr(r, 'dias_semana', None), [])
+                    try:
+                        rout_dict['ejercicios_count'] = int(ejercicios_count_by_rutina.get(int(r.id), 0) or 0)
+                    except Exception:
+                        rout_dict['ejercicios_count'] = 0
                 
                 results.append(rout_dict)
             return results

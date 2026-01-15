@@ -97,10 +97,15 @@ class UserRepository(BaseRepository):
                 'nombre': (u.nombre or "").strip(), 
                 'dni': u.dni, 
                 'telefono': u.telefono, 
+                'email': getattr(u, 'email', None),
                 'rol': (u.rol or "").strip().lower(), 
                 'tipo_cuota': u.tipo_cuota, 
                 'activo': u.activo, 
-                'fecha_registro': u.fecha_registro
+                'fecha_registro': u.fecha_registro,
+                'fecha_proximo_vencimiento': getattr(u, 'fecha_proximo_vencimiento', None),
+                'cuotas_vencidas': getattr(u, 'cuotas_vencidas', None),
+                'ultimo_pago': getattr(u, 'ultimo_pago', None),
+                'notas': getattr(u, 'notas', None),
             }
             for u in users
         ]
