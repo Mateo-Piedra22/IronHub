@@ -1,5 +1,6 @@
 from pathlib import Path
 import logging
+from typing import Optional
 from fastapi import APIRouter, Request, Depends, status, Form, Query
 from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
