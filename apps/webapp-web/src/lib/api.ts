@@ -691,11 +691,27 @@ class ApiClient {
 
     // === Gym Data ===
     async getGymData() {
-        return this.request<GymData>('/api/gym/data');
+        const res = await this.request<GymData>('/api/gym/data');
+        try {
+            if (res.ok && res.data?.logo_url && res.data.logo_url.startsWith('/')) {
+                res.data.logo_url = `${this.baseUrl}${res.data.logo_url}`;
+            }
+        } catch {
+            // ignore
+        }
+        return res;
     }
 
     async getPublicGymData() {
-        return this.request<PublicGymData>('/gym/data');
+        const res = await this.request<PublicGymData>('/gym/data');
+        try {
+            if (res.ok && res.data?.logo_url && res.data.logo_url.startsWith('/')) {
+                res.data.logo_url = `${this.baseUrl}${res.data.logo_url}`;
+            }
+        } catch {
+            // ignore
+        }
+        return res;
     }
 
     async getMaintenanceStatus() {
@@ -939,7 +955,11 @@ class ApiClient {
     }
 
     getRutinaPdfUrl(id: number, weeks: number = 1): string {
-        return `${this.baseUrl}/api/rutinas/${id}/export/pdf?weeks=${weeks}`;
+        const p = new URLSearchParams();
+        p.set('weeks', String(weeks));
+        const t = typeof window !== 'undefined' ? getCurrentSubdomain() : '';
+        if (t) p.set('tenant', t);
+        return `${this.baseUrl}/api/rutinas/${id}/export/pdf?${p.toString()}`;
     }
 
     getRutinaExcelUrl(id: number, params?: {
@@ -953,6 +973,9 @@ class ApiClient {
         if (params?.qr_mode) p.set('qr_mode', params.qr_mode);
         if (params?.sheet_name) p.set('sheet', params.sheet_name);
         if (params?.user_override) p.set('user_override', params.user_override);
+
+        const t = typeof window !== 'undefined' ? getCurrentSubdomain() : '';
+        if (t) p.set('tenant', t);
 
         const query = p.toString();
         return `${this.baseUrl}/api/rutinas/${id}/export/excel${query ? `?${query}` : ''}`;
@@ -971,6 +994,9 @@ class ApiClient {
         if (params?.weeks) p.set('weeks', String(params.weeks));
         if (params?.qr_mode) p.set('qr_mode', params.qr_mode);
         if (params?.sheet_name) p.set('sheet', params.sheet_name);
+
+        const t = typeof window !== 'undefined' ? getCurrentSubdomain() : '';
+        if (t) p.set('tenant', t);
 
         const query = p.toString();
         return this.request<{ url: string }>(`/api/rutinas/${id}/export/excel_view_url${query ? `?${query}` : ''}`);

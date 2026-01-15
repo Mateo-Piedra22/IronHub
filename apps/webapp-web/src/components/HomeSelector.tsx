@@ -93,6 +93,13 @@ export default function HomeSelector({ gymName, logoUrl }: HomeSelectorProps) {
                                 src={logoUrl}
                                 alt={`Logo de ${gymName}`}
                                 className="w-11 h-11 rounded-xl object-cover"
+                                onError={(e) => {
+                                    try {
+                                        (e.currentTarget as HTMLImageElement).src = '';
+                                    } catch {
+                                        // ignore
+                                    }
+                                }}
                             />
                         ) : (
                             <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center">

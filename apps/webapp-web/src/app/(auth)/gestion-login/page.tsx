@@ -127,7 +127,12 @@ export default function GestionLoginPage() {
                         className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 shadow-md mb-4"
                     >
                         {gymLogoUrl ? (
-                            <img src={gymLogoUrl} alt="Logo" className="w-10 h-10 object-contain bg-white/90 rounded-xl p-2" />
+                            <img
+                                src={gymLogoUrl}
+                                alt="Logo"
+                                className="w-10 h-10 object-contain bg-white/90 rounded-xl p-2"
+                                onError={() => setGymLogoUrl('')}
+                            />
                         ) : (
                             <Dumbbell className="w-8 h-8 text-white" />
                         )}

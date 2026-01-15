@@ -559,10 +559,8 @@ class RoutineTemplateManager:
             template_key = 5
         
         template_path = self.template_paths[template_key]
-        
         if not template_path.exists():
-            self.logger.warning(f"Plantilla {template_path} no encontrada, usando plantilla de 3 días")
-            template_path = self.template_paths[3]
+            raise FileNotFoundError(f"Plantilla no encontrada: {template_path}")
         
         self.logger.info(f"Plantilla seleccionada: {template_path} para {num_days} días")
         return template_path

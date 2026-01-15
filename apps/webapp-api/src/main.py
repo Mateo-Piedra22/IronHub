@@ -86,11 +86,12 @@ try:
 
     _assets_dir = _resolve_existing_dir("assets")
     try:
-        _assets_dir.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        pass
-
-    app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
+        if _assets_dir.exists() and _assets_dir.is_dir():
+            app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
+        else:
+            raise FileNotFoundError(f"Directory '{_assets_dir}' does not exist")
+    except Exception as e:
+        logger.warning(f"Could not mount /assets: {e}")
 except Exception as e:
     logger.warning(f"Could not mount /assets: {e}")
 

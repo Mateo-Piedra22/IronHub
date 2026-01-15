@@ -1482,12 +1482,24 @@ async def api_rutinas_create(
         return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
 
 @router.get("/api/rutinas/{rutina_id}/export/pdf")
-async def api_rutina_export_pdf(rutina_id: int, weeks: int = 1, filename: Optional[str] = None, qr_mode: str = "auto", sheet: Optional[str] = None, _=Depends(require_gestion_access), svc: TrainingService = Depends(get_training_service)):
+async def api_rutina_export_pdf(rutina_id: int, weeks: int = 1, filename: Optional[str] = None, qr_mode: str = "auto", sheet: Optional[str] = None, tenant: Optional[str] = None, _=Depends(require_gestion_access), svc: TrainingService = Depends(get_training_service)):
     """Export routine as PDF using RoutineTemplateManager."""
     rm = get_rm()
     if rm is None:
         raise HTTPException(status_code=503, detail="RoutineTemplateManager no disponible")
     try:
+        try:
+            t = str(tenant or "").strip().lower()
+        except Exception:
+            t = ""
+        if t:
+            try:
+                ok_t, _err = validate_tenant_name(t)
+                if ok_t:
+                    set_current_tenant(t)
+            except Exception:
+                pass
+
         weeks_n, qr_norm, sheet_norm = _normalize_rutina_export_params(weeks, qr_mode, sheet)
         rutina_data = svc.obtener_rutina_completa(rutina_id)
         if not rutina_data:
@@ -1686,6 +1698,7 @@ async def api_rutina_export_excel(
     weeks: int = 1,
     qr_mode: str = "sheet",
     sheet: Optional[str] = None,
+    tenant: Optional[str] = None,
     user_override: Optional[str] = None,
     filename: Optional[str] = None,
     _=Depends(require_gestion_access),
@@ -1696,6 +1709,18 @@ async def api_rutina_export_excel(
     try:
         if rm is None:
             raise HTTPException(status_code=503, detail="RoutineTemplateManager no disponible")
+
+        try:
+            t = str(tenant or "").strip().lower()
+        except Exception:
+            t = ""
+        if t:
+            try:
+                ok_t, _err = validate_tenant_name(t)
+                if ok_t:
+                    set_current_tenant(t)
+            except Exception:
+                pass
 
         weeks_n, qr_norm, sheet_norm = _normalize_rutina_export_params(weeks, qr_mode, sheet)
         rutina_data = svc.obtener_rutina_completa(rutina_id)
@@ -1755,6 +1780,7 @@ async def api_rutina_excel_view_url(
     filename: Optional[str] = None,
     qr_mode: str = "sheet",
     sheet: Optional[str] = None,
+    tenant: Optional[str] = None,
     _=Depends(require_gestion_access),
     svc: TrainingService = Depends(get_training_service),
 ):
@@ -1765,11 +1791,11 @@ async def api_rutina_excel_view_url(
     excel_view.xlsx endpoint which verifies the signature before serving.
     """
     try:
-        tenant = None
-        try:
-            tenant = str(get_current_tenant() or "").strip().lower()
-        except Exception:
-            tenant = None
+        if not tenant:
+            try:
+                tenant = str(get_current_tenant() or "").strip().lower()
+            except Exception:
+                tenant = None
         if not tenant:
             try:
                 tenant = str(request.session.get("tenant") or "").strip().lower()

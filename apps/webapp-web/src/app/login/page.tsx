@@ -70,7 +70,12 @@ export default function OwnerLoginPage() {
                     <div className="flex flex-col items-center mb-8">
                         <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center mb-4 shadow-md">
                             {gymLogoUrl ? (
-                                <img src={gymLogoUrl} alt="Logo" className="w-10 h-10 object-contain bg-white/90 rounded-xl p-2" />
+                                <img
+                                    src={gymLogoUrl}
+                                    alt="Logo"
+                                    className="w-10 h-10 object-contain bg-white/90 rounded-xl p-2"
+                                    onError={() => setGymLogoUrl('')}
+                                />
                             ) : (
                                 <Dumbbell className="w-8 h-8 text-white" />
                             )}
