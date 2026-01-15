@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 templates_dir = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(templates_dir))
 
-@router.get("/")
+@router.get("/public")
 async def index(request: Request):
     """Root endpoint - returns JSON with gym info. Frontend handles the UI."""
     return JSONResponse({

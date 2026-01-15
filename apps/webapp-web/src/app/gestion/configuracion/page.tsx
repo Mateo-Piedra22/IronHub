@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
     Settings,
@@ -283,6 +283,8 @@ export default function ConfiguracionPage() {
     const [metodosPago, setMetodosPago] = useState<MetodoPago[]>([]);
     const [conceptos, setConceptos] = useState<ConceptoPago[]>([]);
 
+    const logoInputRef = useRef<HTMLInputElement | null>(null);
+
     // Load data
     const loadData = useCallback(async () => {
         setLoading(true);
@@ -515,18 +517,26 @@ export default function ConfiguracionPage() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                        <label className="inline-flex items-center">
-                            <input
-                                type="file"
-                                accept="image/png,image/jpeg,image/jpg,image/svg+xml"
-                                className="hidden"
-                                disabled={logoUploading}
-                                onChange={(e) => handleLogoSelected(e.target.files?.[0] || null)}
-                            />
-                            <Button type="button" variant="secondary" isLoading={logoUploading} disabled={logoUploading}>
-                                Cargar logo
-                            </Button>
-                        </label>
+                        <input
+                            ref={logoInputRef}
+                            type="file"
+                            accept="image/png,image/jpeg,image/jpg,image/svg+xml"
+                            className="hidden"
+                            disabled={logoUploading}
+                            onChange={(e) => {
+                                handleLogoSelected(e.target.files?.[0] || null);
+                                e.currentTarget.value = '';
+                            }}
+                        />
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            isLoading={logoUploading}
+                            disabled={logoUploading}
+                            onClick={() => logoInputRef.current?.click()}
+                        >
+                            Cargar logo
+                        </Button>
                     </div>
                 </div>
             </motion.div>

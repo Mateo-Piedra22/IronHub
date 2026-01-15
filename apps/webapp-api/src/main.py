@@ -648,6 +648,7 @@ async def get_gym_info(
 
 # Import all routers
 from src.routers import users, gym, payments, whatsapp, attendance, exercises, auth
+from src.routers import public
 from src.routers import profesores, inscripciones
 from src.routers import reports, admin
 
@@ -659,6 +660,7 @@ app.include_router(payments.router, tags=["Payments"])
 app.include_router(whatsapp.router, tags=["WhatsApp"])
 app.include_router(attendance.router, tags=["Attendance"])
 app.include_router(exercises.router, tags=["Exercises"])
+app.include_router(public.router, tags=["Public"])
 app.include_router(profesores.router, tags=["Profesores"])
 app.include_router(inscripciones.router, tags=["Inscripciones"])
 app.include_router(reports.router, tags=["Reports"])

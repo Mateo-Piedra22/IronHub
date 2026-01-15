@@ -612,7 +612,7 @@ export default function PagosPage() {
             align: 'center',
             render: (row) => (
                 row.recibo_numero ? (
-                    <span className="text-primary-400 font-mono text-sm">#{row.recibo_numero}</span>
+                    <span className="text-primary-400 font-mono text-sm">{String(row.recibo_numero)}</span>
                 ) : (
                     <span className="text-slate-600">-</span>
                 )

@@ -116,7 +116,7 @@ export interface Pago {
     tipo_cuota_id?: number;
     tipo_cuota_nombre?: string;
     notas?: string;
-    recibo_numero?: number;
+    recibo_numero?: string | number;
     estado?: string;
 }
 

@@ -315,6 +315,24 @@ export default function RutinasPage() {
     const [excelPreviewOpen, setExcelPreviewOpen] = useState(false);
     const [excelPreviewUrl, setExcelPreviewUrl] = useState<string | null>(null);
 
+    const openRutinaPreview = useCallback(async (r: Rutina) => {
+        setLoading(true);
+        try {
+            const resDetails = await api.getRutina(r.id);
+            if (resDetails.ok && resDetails.data) {
+                setRutinaToPreview(resDetails.data);
+            } else {
+                setRutinaToPreview(r);
+            }
+            setPreviewOpen(true);
+        } catch {
+            setRutinaToPreview(r);
+            setPreviewOpen(true);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
     const openRutinaEditor = useCallback(async (r: Rutina) => {
         setLoading(true);
         try {
@@ -626,6 +644,15 @@ export default function RutinasPage() {
                         <FileSpreadsheet className="w-4 h-4" />
                     </button>
                     <a
+                        href={api.getRutinaExcelUrl(row.id, { weeks: 4 })}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                        title="Descargar Excel"
+                    >
+                        <Download className="w-4 h-4" />
+                    </a>
+                    <a
                         href={api.getRutinaPdfUrl(row.id)}
                         target="_blank"
                         rel="noopener noreferrer"
@@ -644,10 +671,7 @@ export default function RutinasPage() {
                         <Settings2 className="w-4 h-4" />
                     </button>
                     <button
-                        onClick={() => {
-                            setRutinaToPreview(row);
-                            setPreviewOpen(true);
-                        }}
+                        onClick={() => openRutinaPreview(row)}
                         className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                         title="Ver"
                     >

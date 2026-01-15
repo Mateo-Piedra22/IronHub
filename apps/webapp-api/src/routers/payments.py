@@ -743,6 +743,7 @@ async def api_pagos_list(
                 "metodo_pago_id": r.get("metodo_pago_id"),
                 "metodo_pago_nombre": metodo_nombre,
                 "concepto_nombre": r.get("concepto_nombre") or r.get("concepto"),
+                "recibo_numero": r.get("recibo_numero"),
                 "estado": r.get("estado"),
             }
 

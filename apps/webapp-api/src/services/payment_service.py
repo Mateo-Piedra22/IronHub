@@ -1248,6 +1248,39 @@ class PaymentService(BaseService):
                 pass
         
         pagos = self.db.execute(stmt).scalars().all()
+
+        # Map latest emitted receipt number (ComprobantePago.numero_comprobante) per payment
+        recibo_por_pago: Dict[int, str] = {}
+        try:
+            pago_ids = [int(p.id) for p in pagos if getattr(p, 'id', None) is not None]
+        except Exception:
+            pago_ids = []
+        if pago_ids:
+            try:
+                comps = (
+                    self.db.execute(
+                        select(ComprobantePago)
+                        .where(
+                            ComprobantePago.pago_id.in_(pago_ids),
+                            ComprobantePago.estado == 'emitido',
+                        )
+                        .order_by(ComprobantePago.pago_id.asc(), ComprobantePago.fecha_creacion.desc())
+                    )
+                    .scalars()
+                    .all()
+                )
+                for c in comps:
+                    try:
+                        pid = int(c.pago_id)
+                    except Exception:
+                        continue
+                    if pid not in recibo_por_pago:
+                        try:
+                            recibo_por_pago[pid] = str(c.numero_comprobante)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
         
         # Get payment method names
         metodos = {m.id: m.nombre for m in self.db.execute(select(MetodoPago)).scalars().all()}
@@ -1263,7 +1296,8 @@ class PaymentService(BaseService):
                 'año': p.año,
                 'fecha_pago': p.fecha_pago.isoformat() if p.fecha_pago else None,
                 'metodo_pago_id': p.metodo_pago_id,
-                'metodo_pago': metodos.get(p.metodo_pago_id) if p.metodo_pago_id else None
+                'metodo_pago': metodos.get(p.metodo_pago_id) if p.metodo_pago_id else None,
+                'recibo_numero': recibo_por_pago.get(int(p.id))
             }
             for p in pagos
         ]
@@ -1321,6 +1355,8 @@ class PaymentService(BaseService):
 
     # ========== Receipt Numbering Config ==========
 
+    _RECIBO_TIPO_COMPROBANTE = "recibo"
+
     def get_next_receipt_number(self) -> str:
         """Get next receipt number based on configured pattern."""
         try:
@@ -1346,7 +1382,14 @@ class PaymentService(BaseService):
     def get_receipt_numbering_config(self) -> Dict[str, Any]:
         """Get receipt numbering configuration from NumeracionComprobantes."""
         try:
-            stmt = select(NumeracionComprobante).where(NumeracionComprobante.activo == True).limit(1)
+            stmt = (
+                select(NumeracionComprobante)
+                .where(
+                    NumeracionComprobante.activo == True,
+                    NumeracionComprobante.tipo_comprobante == self._RECIBO_TIPO_COMPROBANTE,
+                )
+                .limit(1)
+            )
             nc = self.db.execute(stmt).scalar_one_or_none()
             
             if nc:
@@ -1373,11 +1416,18 @@ class PaymentService(BaseService):
     def save_receipt_numbering_config(self, config: Dict[str, Any]) -> bool:
         """Save receipt numbering configuration."""
         try:
-            stmt = select(NumeracionComprobante).where(NumeracionComprobante.activo == True).limit(1)
+            stmt = (
+                select(NumeracionComprobante)
+                .where(
+                    NumeracionComprobante.activo == True,
+                    NumeracionComprobante.tipo_comprobante == self._RECIBO_TIPO_COMPROBANTE,
+                )
+                .limit(1)
+            )
             nc = self.db.execute(stmt).scalar_one_or_none()
             
             if not nc:
-                nc = NumeracionComprobante(activo=True)
+                nc = NumeracionComprobante(activo=True, tipo_comprobante=self._RECIBO_TIPO_COMPROBANTE)
                 self.db.add(nc)
             
             if 'prefix' in config:
@@ -1401,11 +1451,19 @@ class PaymentService(BaseService):
     def increment_receipt_number(self) -> str:
         """Increment and return new receipt number."""
         try:
-            stmt = select(NumeracionComprobante).where(NumeracionComprobante.activo == True).limit(1)
+            stmt = (
+                select(NumeracionComprobante)
+                .where(
+                    NumeracionComprobante.activo == True,
+                    NumeracionComprobante.tipo_comprobante == self._RECIBO_TIPO_COMPROBANTE,
+                )
+                .limit(1)
+            )
             nc = self.db.execute(stmt).scalar_one_or_none()
             
             if not nc:
                 nc = NumeracionComprobante(
+                    tipo_comprobante=self._RECIBO_TIPO_COMPROBANTE,
                     prefijo='REC', 
                     numero_inicial=1, 
                     longitud_numero=8, 

@@ -183,6 +183,17 @@ async def api_gym_data(
     try:
         config = svc.obtener_configuracion_gimnasio()
         if config:
+            # Frontend contract expects { nombre, logo_url }
+            try:
+                if isinstance(config, dict):
+                    if 'nombre' not in config:
+                        config['nombre'] = config.get('gym_name') or config.get('nombre')
+                    if 'gym_name' not in config and config.get('nombre'):
+                        config['gym_name'] = config.get('nombre')
+                    if 'gym_logo_url' not in config and config.get('logo_url'):
+                        config['gym_logo_url'] = config.get('logo_url')
+            except Exception:
+                pass
             try:
                 lu = config.get('logo_url') if isinstance(config, dict) else None
                 if isinstance(lu, str) and lu.strip() and not lu.strip().startswith("http") and not lu.strip().startswith("/"):
@@ -194,7 +205,9 @@ async def api_gym_data(
         # Fallback to simple dict using utils
         return {
             "gym_name": get_gym_name(),
-            "logo_url": _resolve_logo_url()
+            "nombre": get_gym_name(),
+            "logo_url": _resolve_logo_url(),
+            "gym_logo_url": _resolve_logo_url(),
         }
     except Exception as e:
         logger.error(f"Error getting gym data: {e}")
@@ -231,7 +244,7 @@ async def api_gym_update(
 async def api_gym_logo(
     request: Request, 
     file: UploadFile = File(...), 
-    _=Depends(require_owner),
+    _=Depends(require_gestion_access),
 
     svc: GymConfigService = Depends(get_gym_config_service)
 ):

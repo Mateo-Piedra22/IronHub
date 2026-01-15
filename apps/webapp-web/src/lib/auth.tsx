@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useState, useCallback, type ReactNode } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { api, type SessionUser } from '@/lib/api';
 
@@ -39,9 +39,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<SessionUser | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
+    // Avoid redirect races on navigation: mark loading synchronously when route changes.
+    useLayoutEffect(() => {
+        setIsLoading(true);
+    }, [pathname]);
+
     const checkSession = useCallback(async () => {
+        setIsLoading(true);
         try {
-            const context = pathname?.startsWith('/gestion') ? 'gestion' : 'auto';
+            const context = pathname?.startsWith('/gestion')
+                ? 'gestion'
+                : pathname?.startsWith('/usuario')
+                    ? 'usuario'
+                    : 'auto';
             const res = await api.getSession(context);
             if (res.ok && res.data?.authenticated && res.data.user) {
                 setUser(res.data.user);
