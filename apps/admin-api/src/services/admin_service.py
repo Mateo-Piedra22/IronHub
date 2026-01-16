@@ -2517,9 +2517,18 @@ class AdminService:
 
             waba_id = str(cfg.get("waba_id") or "").strip()
             token_raw = str(cfg.get("access_token") or "").strip()
+            if token_raw:
+                try:
+                    SecureConfig.require_waba_encryption()
+                except Exception:
+                    pass
             token = SecureConfig.decrypt_waba_secret(token_raw) if token_raw else ""
+            if token_raw.startswith("gAAAA") and not token:
+                return {"ok": False, "error": "token_decrypt_failed: revisar WABA_ENCRYPTION_KEY y cryptography en admin-api"}
             if not token and (token_raw.startswith("EAA") or token_raw.startswith("EAAB") or token_raw.startswith("EAAJ")):
                 token = token_raw
+            if token and token.startswith("gAAAA"):
+                return {"ok": False, "error": "token_encrypted_or_unreadable: revisar WABA_ENCRYPTION_KEY (admin-api debe poder desencriptar)"}
 
             if not waba_id or not token:
                 return {"ok": False, "error": "tenant_whatsapp_missing_waba_or_token"}
@@ -2637,9 +2646,18 @@ class AdminService:
             phone_id = str(cfg.get("phone_id") or "").strip()
             waba_id = str(cfg.get("waba_id") or "").strip()
             token_raw = str(cfg.get("access_token") or "").strip()
+            if token_raw:
+                try:
+                    SecureConfig.require_waba_encryption()
+                except Exception:
+                    pass
             token = SecureConfig.decrypt_waba_secret(token_raw) if token_raw else ""
+            if token_raw.startswith("gAAAA") and not token:
+                return {"ok": False, "error": "token_decrypt_failed: revisar WABA_ENCRYPTION_KEY y cryptography en admin-api"}
             if not token and (token_raw.startswith("EAA") or token_raw.startswith("EAAB") or token_raw.startswith("EAAJ")):
                 token = token_raw
+            if token and token.startswith("gAAAA"):
+                return {"ok": False, "error": "token_encrypted_or_unreadable: revisar WABA_ENCRYPTION_KEY (admin-api debe poder desencriptar)"}
 
             if not phone_id or not waba_id:
                 return {"ok": False, "error": "missing_phone_or_waba", "phone_id": phone_id, "waba_id": waba_id}

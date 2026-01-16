@@ -165,6 +165,29 @@ class SecureConfig:
             return None
 
     @classmethod
+    def _is_weak_waba_key(cls, k: str) -> bool:
+        s = (k or "").strip()
+        if not s:
+            return True
+        if len(s) < 16:
+            return True
+        if s.isdigit():
+            return True
+        if s in ("12345678901234567890123456789012", "password", "changeme", "ironhub", "admin"):
+            return True
+        return False
+
+    @classmethod
+    def require_waba_encryption(cls) -> None:
+        env = (os.getenv("ENV") or os.getenv("APP_ENV") or "").strip().lower()
+        dev_mode = cls.get_env_bool("DEVELOPMENT_MODE", False) or env in ("dev", "development", "local")
+        k = str(os.getenv("WABA_ENCRYPTION_KEY") or "").strip()
+        if dev_mode:
+            return
+        if cls._is_weak_waba_key(k) or cls._get_fernet() is None:
+            raise RuntimeError("WABA_ENCRYPTION_KEY débil/ausente o cryptography no disponible (requerido en producción)")
+
+    @classmethod
     def encrypt_waba_secret(cls, secret: str) -> str:
         if not secret:
             return ''

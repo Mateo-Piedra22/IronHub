@@ -45,7 +45,9 @@ async function apiRequest<T>(url: string, opts: RequestInit = {}): Promise<ApiRe
         });
         const data = (await res.json().catch(() => null)) as any;
         if (!res.ok) {
-            return { ok: false, error: data?.error || data?.detail || data?.mensaje || 'Error' };
+            const raw = data?.error || data?.detail || data?.mensaje || 'Error';
+            const msg = typeof raw === 'string' ? raw : JSON.stringify(raw);
+            return { ok: false, error: msg };
         }
         return { ok: true, data };
     } catch {
@@ -63,7 +65,7 @@ export default function MetaReviewPage() {
     const [message, setMessage] = useState('Mensaje de prueba desde IronHub (Meta review)');
     const [sendTplName, setSendTplName] = useState('ih_meta_review_demo_v1');
     const [sendTplLanguage, setSendTplLanguage] = useState('es_AR');
-    const [sendTplParams, setSendTplParams] = useState('Mateo');
+    const [sendTplParams, setSendTplParams] = useState('');
 
     const [tplName, setTplName] = useState('ih_meta_review_demo_v1');
     const [tplBody, setTplBody] = useState('Hola {{1}}. Esto es una demo de IronHub para revisión de Meta.');

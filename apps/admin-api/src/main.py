@@ -1071,6 +1071,14 @@ async def gym_whatsapp_health(request: Request, gym_id: int):
     adm = get_admin_service()
     result = adm.whatsapp_health_check_for_gym(int(gym_id))
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
-    return result
+        err = result.get("error")
+        if not err:
+            try:
+                errs = result.get("errors") or []
+                if isinstance(errs, list) and errs:
+                    err = str(errs[0])
+            except Exception:
+                err = None
+        return JSONResponse({**result, "ok": False, "error": str(err or "Error")}, status_code=200)
+    return JSONResponse(result, status_code=200)
 
