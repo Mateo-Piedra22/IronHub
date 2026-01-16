@@ -1767,7 +1767,7 @@ async def api_rutina_export_excel(
     filename: Optional[str] = None,
     _=Depends(require_gestion_access),
     svc: TrainingService = Depends(get_training_service),
-    rm: RoutineTemplateManager = Depends(get_rm)
+    rm = Depends(get_rm)
 ):
     """Export a routine as Excel."""
     try:
@@ -2126,7 +2126,9 @@ async def api_rutina_excel_view(
         session = factory()
         svc = TrainingService(session)
         user_svc = UserService(session)
-        rm = RoutineTemplateManager()
+        rm = get_rm()
+        if rm is None:
+            raise HTTPException(status_code=503, detail="RoutineTemplateManager no disponible")
 
         rutina_data = svc.obtener_rutina_completa(rutina_id)
         if not rutina_data:
@@ -2266,7 +2268,9 @@ async def api_rutina_pdf_view(
             raise HTTPException(status_code=503, detail=f"Database connection unavailable for tenant '{t}'")
         session = factory()
         svc = TrainingService(session)
-        rm = RoutineTemplateManager()
+        rm = get_rm()
+        if rm is None:
+            raise HTTPException(status_code=503, detail="RoutineTemplateManager no disponible")
 
         rutina_data = svc.obtener_rutina_completa(rutina_id)
         if not rutina_data:
