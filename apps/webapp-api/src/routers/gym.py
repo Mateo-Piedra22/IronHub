@@ -40,7 +40,7 @@ from src.models.orm_models import (
     Rutina, Usuario, RutinaEjercicio, Ejercicio, Clase, ClaseBloque, ClaseBloqueItem
 )
 
-from src.database.tenant_connection import get_current_tenant, set_current_tenant, validate_tenant_name
+from src.database.tenant_connection import get_current_tenant, set_current_tenant, validate_tenant_name, get_tenant_session_factory
 from src.routine_manager import RoutineTemplateManager
 from src.utils import get_gym_name, _resolve_logo_url, _resolve_existing_dir, get_webapp_base_url
 from src.services.gym_config_service import GymConfigService
@@ -731,7 +731,37 @@ def _lookup_video_info(ejercicio_id: Any, nombre: Optional[str]) -> Dict[str, An
 def _build_exercises_by_day(rutina: Any) -> Dict[int, list]:
     try:
         grupos: Dict[int, list] = {}
-        ejercicios = getattr(rutina, "ejercicios", []) or []
+        ejercicios = []
+        if isinstance(rutina, dict):
+            ejercicios = rutina.get("ejercicios") or []
+            if not ejercicios:
+                dias = rutina.get("dias") or []
+                flat: list[dict] = []
+                for d in (dias or []):
+                    try:
+                        dnum = int(d.get("numero") or d.get("dayNumber") or d.get("dia") or 1)
+                    except Exception:
+                        dnum = 1
+                    for ex in (d.get("ejercicios") or []):
+                        if not isinstance(ex, dict):
+                            continue
+                        flat.append(
+                            {
+                                "id": ex.get("id"),
+                                "rutina_id": rutina.get("id"),
+                                "ejercicio_id": ex.get("ejercicio_id") or ex.get("id_ejercicio"),
+                                "dia_semana": ex.get("dia_semana") or ex.get("dia") or dnum,
+                                "series": ex.get("series"),
+                                "repeticiones": ex.get("repeticiones"),
+                                "orden": ex.get("orden"),
+                                "nombre_ejercicio": ex.get("nombre_ejercicio") or ex.get("ejercicio_nombre") or ex.get("nombre"),
+                                "ejercicio": ex.get("ejercicio"),
+                            }
+                        )
+                ejercicios = flat
+        else:
+            ejercicios = getattr(rutina, "ejercicios", []) or []
+
         for r in ejercicios:
             try:
                 if isinstance(r, dict):
@@ -762,7 +792,7 @@ def _build_exercises_by_day(rutina: Any) -> Dict[int, list]:
                             r_obj.ejercicio = Ejercicio(id=int(r_obj.ejercicio_id or 0))
                     except Exception:
                         r_obj.ejercicio = None
-                    nombre_actual = r.get("nombre_ejercicio")
+                    nombre_actual = r.get("nombre_ejercicio") or r.get("ejercicio_nombre") or r.get("nombre")
                     if not nombre_actual:
                         nombre_nested = getattr(r_obj.ejercicio, "nombre", None) if r_obj.ejercicio is not None else None
                         if nombre_nested:
@@ -1508,8 +1538,9 @@ async def api_rutina_export_pdf(rutina_id: int, weeks: int = 1, filename: Option
         # Build Rutina object for RoutineTemplateManager
         rutina = Rutina(
             id=rutina_data['id'],
-            nombre_rutina=rutina_data['nombre_rutina'],
+            nombre_rutina=rutina_data.get('nombre_rutina') or rutina_data.get('nombre', ''),
             descripcion=rutina_data.get('descripcion'),
+            dias_semana=rutina_data.get('dias_semana', 1),
             categoria=rutina_data.get('categoria'),
             uuid_rutina=rutina_data.get('uuid_rutina')
         )
@@ -1519,6 +1550,8 @@ async def api_rutina_export_pdf(rutina_id: int, weeks: int = 1, filename: Option
         usuario = Usuario(nombre=rutina_data.get('usuario_nombre') or 'Usuario')
         
         ejercicios_por_dia = _build_exercises_by_day(rutina_data)
+        if not ejercicios_por_dia:
+            raise HTTPException(status_code=400, detail="La rutina no contiene ejercicios")
 
         tmp_xlsx_fd, tmp_xlsx = tempfile.mkstemp(prefix=f"rutina_{rutina_id}_", suffix=".xlsx")
         try:
@@ -1531,15 +1564,18 @@ async def api_rutina_export_pdf(rutina_id: int, weeks: int = 1, filename: Option
         except Exception:
             pass
 
-        xlsx_path = rm.generate_routine_excel(
-            rutina,
-            usuario,
-            ejercicios_por_dia,
-            output_path=tmp_xlsx,
-            weeks=weeks_n,
-            qr_mode=qr_norm,
-            sheet=sheet_norm,
-        )
+        try:
+            xlsx_path = rm.generate_routine_excel(
+                rutina,
+                usuario,
+                ejercicios_por_dia,
+                output_path=tmp_xlsx,
+                weeks=weeks_n,
+                qr_mode=qr_norm,
+                sheet=sheet_norm,
+            )
+        except ValueError as ve:
+            raise HTTPException(status_code=400, detail=str(ve))
         pdf_path = rm.convert_excel_to_pdf(xlsx_path, pdf_path=tmp_pdf)
 
         pdf_filename = _sanitize_download_filename(filename, f"rutina_{rutina_id}", ".pdf")
@@ -1741,21 +1777,26 @@ async def api_rutina_export_excel(
         usuario = Usuario(nombre=user_name)
         
         ejercicios_por_dia = _build_exercises_by_day(rutina_data)
+        if not ejercicios_por_dia:
+            raise HTTPException(status_code=400, detail="La rutina no contiene ejercicios")
 
         tmp_xlsx_fd, tmp_xlsx = tempfile.mkstemp(prefix=f"rutina_{rutina_id}_", suffix=".xlsx")
         try:
             os.close(tmp_xlsx_fd)
         except Exception:
             pass
-        xlsx_path = rm.generate_routine_excel(
-            rutina,
-            usuario,
-            ejercicios_por_dia,
-            output_path=tmp_xlsx,
-            weeks=weeks_n,
-            qr_mode=qr_norm,
-            sheet=sheet_norm,
-        )
+        try:
+            xlsx_path = rm.generate_routine_excel(
+                rutina,
+                usuario,
+                ejercicios_por_dia,
+                output_path=tmp_xlsx,
+                weeks=weeks_n,
+                qr_mode=qr_norm,
+                sheet=sheet_norm,
+            )
+        except ValueError as ve:
+            raise HTTPException(status_code=400, detail=str(ve))
         excel_filename = _sanitize_download_filename(filename, f"rutina_{rutina_id}", ".xlsx")
         return FileResponse(
             xlsx_path,
@@ -1950,11 +1991,12 @@ async def api_rutina_excel_view(
     if not hmac.compare_digest(expected, str(sig)):
         raise HTTPException(status_code=403, detail="Firma inválida")
     
-    db_gen = None
     session = None
     try:
-        db_gen = get_db()
-        session = next(db_gen)
+        factory = get_tenant_session_factory(t)
+        if not factory:
+            raise HTTPException(status_code=503, detail=f"Database connection unavailable for tenant '{t}'")
+        session = factory()
         svc = TrainingService(session)
         user_svc = UserService(session)
         rm = RoutineTemplateManager()
@@ -1980,6 +2022,8 @@ async def api_rutina_excel_view(
             usuario = Usuario(nombre=user_name)
 
         ejercicios_por_dia = _build_exercises_by_day(rutina_data)
+        if not ejercicios_por_dia:
+            raise HTTPException(status_code=400, detail="La rutina no contiene ejercicios")
 
         tmp_fd, tmp_path = tempfile.mkstemp(prefix=f"rutina_view_{rutina_id}_", suffix=".xlsx")
         try:
@@ -1987,15 +2031,18 @@ async def api_rutina_excel_view(
         except Exception:
             pass
 
-        xlsx_path = rm.generate_routine_excel(
-            rutina,
-            usuario,
-            ejercicios_por_dia,
-            output_path=tmp_path,
-            weeks=weeks,
-            qr_mode=qr_mode,
-            sheet=sheet_norm,
-        )
+        try:
+            xlsx_path = rm.generate_routine_excel(
+                rutina,
+                usuario,
+                ejercicios_por_dia,
+                output_path=tmp_path,
+                weeks=weeks,
+                qr_mode=qr_mode,
+                sheet=sheet_norm,
+            )
+        except ValueError as ve:
+            raise HTTPException(status_code=400, detail=str(ve))
 
         response = FileResponse(
             xlsx_path,
@@ -2015,11 +2062,6 @@ async def api_rutina_excel_view(
         try:
             if session is not None:
                 session.close()
-        except Exception:
-            pass
-        try:
-            if db_gen is not None:
-                db_gen.close()
         except Exception:
             pass
 
@@ -2059,6 +2101,8 @@ async def sign_draft_url(
         
         return JSONResponse({"url": url})
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Error signing draft")
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
@@ -2076,6 +2120,8 @@ async def render_draft_excel(
     Public endpoint to render draft excel from URL data.
     """
     try:
+        if rm is None:
+            raise HTTPException(status_code=503, detail="RoutineTemplateManager no disponible")
         # Verify timestamp
         now = int(time.time())
         if abs(now - ts) > 600: # 10 min
@@ -2168,15 +2214,18 @@ async def render_draft_excel(
         except Exception:
             pass
 
-        xlsx_path = rm.generate_routine_excel(
-            rutina,
-            usuario,
-            exercises_by_day,
-            output_path=tmp_path,
-            weeks=weeks,
-            qr_mode=qr_mode,
-            sheet=sheet_name,
-        )
+        try:
+            xlsx_path = rm.generate_routine_excel(
+                rutina,
+                usuario,
+                exercises_by_day,
+                output_path=tmp_path,
+                weeks=weeks,
+                qr_mode=qr_mode,
+                sheet=sheet_name,
+            )
+        except ValueError as ve:
+            raise HTTPException(status_code=400, detail=str(ve))
         
         base_name = os.path.basename(filename) if filename else f"draft_{ts}.xlsx"
         if not base_name.lower().endswith('.xlsx'):

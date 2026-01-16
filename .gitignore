@@ -18,6 +18,7 @@ env/
 # Archivos de logs y carpetas de logs
 logs/
 *.log
+*.csv
 
 # Archivos de trazas o dumps
 *.trae

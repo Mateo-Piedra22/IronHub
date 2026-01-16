@@ -139,7 +139,34 @@ export default function ReciboPreviewModal({
     };
 
     const handlePrint = () => {
-        window.print();
+        const el = document.getElementById('recibo-preview');
+        if (!el) return;
+        const w = window.open('', '_blank', 'noopener,noreferrer,width=900,height=1200');
+        if (!w) return;
+        w.document.open();
+        w.document.write(`<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Recibo</title>
+  <style>
+    @page { margin: 12mm; }
+    html, body { height: auto; }
+    body { margin: 0; background: #fff; color: #000; font-family: Arial, Helvetica, sans-serif; }
+    #recibo-preview { width: 720px; margin: 0 auto; }
+    img { max-width: 100%; height: auto; }
+  </style>
+</head>
+<body>
+  ${el.outerHTML}
+</body>
+</html>`);
+        w.document.close();
+        w.focus();
+        w.setTimeout(() => {
+            try { w.print(); } catch { }
+        }, 400);
     };
 
     if (!isOpen || !pago) return null;
@@ -156,7 +183,7 @@ export default function ReciboPreviewModal({
             isOpen={isOpen}
             onClose={onClose}
             title="Vista Previa de Recibo"
-            size="lg"
+            size={editing ? 'full' : 'lg'}
             footer={
                 <>
                     <Button variant="secondary" onClick={onClose}>
