@@ -4,7 +4,6 @@ import base64
 import json
 import hashlib
 from typing import Any, Dict
-from .security_utils import SecurityUtils
 try:
     from cryptography.fernet import Fernet, InvalidToken  # type: ignore
 except Exception:
@@ -97,7 +96,19 @@ class SecureConfig:
         if not stored_hash:
             stored_password = cls.get_env_variable('DEV_PASSWORD', required=False)
             return stored_password and password == stored_password
-        return SecurityUtils.verify_password(password, stored_hash)
+        try:
+            sh = str(stored_hash or "").strip()
+        except Exception:
+            sh = stored_hash
+        if not sh:
+            return False
+        if sh.startswith("$2"):
+            try:
+                import bcrypt  # type: ignore
+                return bool(bcrypt.checkpw(password.encode("utf-8"), sh.encode("utf-8")))
+            except Exception:
+                return False
+        return sh == password
 
     @classmethod
     def get_webapp_base_url(cls) -> str:
