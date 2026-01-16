@@ -2462,10 +2462,18 @@ async def render_draft_excel(
             re = RutinaEjercicio(
                 dia_semana=dia,
                 orden=int(ej.get('orden', 0)),
-                series=(int(ej.get('series') or 0) if str(ej.get('series') or '').strip().isdigit() else 0),
+                series=str(ej.get('series') or '').strip(),
                 repeticiones=str(ej.get('repeticiones', '')),
                 ejercicio=ej_base
             )
+            try:
+                setattr(re, "nombre_ejercicio", ej.get("nombre_ejercicio") or ej.get("nombre") or None)
+            except Exception:
+                pass
+            try:
+                setattr(re, "notas", str(ej.get("notas") or ej.get("nota") or "").strip())
+            except Exception:
+                pass
             exercises_by_day[dia].append(re)
             
         # Extract config from payload
@@ -2592,10 +2600,18 @@ async def render_draft_pdf(
             re = RutinaEjercicio(
                 dia_semana=dia,
                 orden=int(ej.get('orden', 0) or 0),
-                series=(int(ej.get('series') or 0) if str(ej.get('series') or '').strip().isdigit() else 0),
+                series=str(ej.get('series') or '').strip(),
                 repeticiones=str(ej.get('repeticiones', '')),
                 ejercicio=ej_base
             )
+            try:
+                setattr(re, "nombre_ejercicio", ej.get("nombre_ejercicio") or ej.get("nombre") or None)
+            except Exception:
+                pass
+            try:
+                setattr(re, "notas", str(ej.get("notas") or ej.get("nota") or "").strip())
+            except Exception:
+                pass
             exercises_by_day[dia].append(re)
 
         qr_mode = str(payload.get('qr_mode', 'inline') or 'inline').strip().lower()

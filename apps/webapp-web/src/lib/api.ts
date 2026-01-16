@@ -21,12 +21,24 @@ function getCurrentSubdomain(): string {
         return process.env.NEXT_PUBLIC_DEV_SUBDOMAIN || 'demo';
     }
 
+    // Avoid treating the API host itself as a tenant
+    if (hostname.startsWith('api.')) return '';
+
     // Extract subdomain from {gym}.ironhub.motiona.xyz
     const domainParts = hostname.split('.');
     const tenantParts = TENANT_DOMAIN.split('.');
 
     if (domainParts.length > tenantParts.length) {
         return domainParts[0];
+    }
+
+    // Fallback for deployments where NEXT_PUBLIC_TENANT_DOMAIN does not match the current host
+    // (e.g. different base domain). Use the first label when the host has a subdomain.
+    if (domainParts.length >= 3) {
+        const candidate = (domainParts[0] || '').trim().toLowerCase();
+        if (candidate && !['www', 'api', 'admin', 'admin-api'].includes(candidate)) {
+            return candidate;
+        }
     }
 
     return '';

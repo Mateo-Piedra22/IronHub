@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone
 
@@ -13,11 +14,14 @@ from datetime import datetime, timezone
 import os
 
 from src.dependencies import get_admin_db, CURRENT_TENANT
+from src.database.tenant_connection import get_tenant_session_factory
+from src.services.gym_config_service import GymConfigService
 from src.utils import (
     _is_tenant_suspended, _get_tenant_suspension_info,
-    _resolve_theme_vars, _resolve_logo_url, get_gym_name,
+    _resolve_theme_vars, _resolve_logo_url, get_gym_name, validate_tenant_name,
     _resolve_existing_dir
 )
+from src.services.b2_storage import get_file_url
 # Import preview helper from gym router
 try:
     from src.routers.gym import _get_excel_preview_routine
@@ -36,6 +40,9 @@ logger = logging.getLogger(__name__)
 templates_dir = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(templates_dir))
 
+_GYM_DATA_PUBLIC_CACHE: Dict[str, Dict[str, Any]] = {}
+_GYM_DATA_PUBLIC_CACHE_TTL_S = 300
+
 @router.get("/public")
 async def index(request: Request):
     """Root endpoint - returns JSON with gym info. Frontend handles the UI."""
@@ -48,10 +55,68 @@ async def index(request: Request):
 
 @router.get("/gym/data")
 async def gym_data_public(request: Request):
-    return JSONResponse({
-        "gym_name": get_gym_name("Gimnasio"),
-        "logo_url": _resolve_logo_url(),
-    })
+    tenant = ""
+    try:
+        tenant = str(CURRENT_TENANT.get() or "").strip().lower()
+    except Exception:
+        tenant = ""
+    if not tenant:
+        try:
+            tenant = str(request.headers.get("x-tenant") or "").strip().lower()
+        except Exception:
+            tenant = ""
+    if tenant:
+        try:
+            ok, _err = validate_tenant_name(tenant)
+            if not ok:
+                tenant = ""
+        except Exception:
+            tenant = ""
+
+    cache_key = tenant or "__no_tenant__"
+    now = int(time.time())
+    cached = _GYM_DATA_PUBLIC_CACHE.get(cache_key)
+    if cached and isinstance(cached, dict):
+        try:
+            if now - int(cached.get("ts") or 0) < _GYM_DATA_PUBLIC_CACHE_TTL_S:
+                return JSONResponse(cached.get("data") or {"gym_name": "Gimnasio", "logo_url": "/assets/logo.svg"})
+        except Exception:
+            pass
+
+    gym_name = "Gimnasio"
+    logo_url: Optional[str] = None
+    if tenant:
+        try:
+            factory = get_tenant_session_factory(tenant)
+            if factory:
+                session = factory()
+                try:
+                    cfg = GymConfigService(session).obtener_configuracion_gimnasio() or {}
+                    gym_name = str(cfg.get("gym_name") or cfg.get("nombre") or gym_name)
+                    logo_url = cfg.get("logo_url") or cfg.get("gym_logo_url") or cfg.get("main_logo_url")
+                finally:
+                    session.close()
+        except Exception:
+            pass
+
+    if logo_url:
+        try:
+            s = str(logo_url).strip()
+            if s and not s.startswith("http") and not s.startswith("/"):
+                logo_url = get_file_url(s)
+            else:
+                logo_url = s
+        except Exception:
+            logo_url = None
+
+    if not logo_url:
+        logo_url = _resolve_logo_url()
+    if not gym_name:
+        gym_name = get_gym_name("Gimnasio")
+
+    payload = {"gym_name": gym_name, "logo_url": logo_url}
+    _GYM_DATA_PUBLIC_CACHE[cache_key] = {"ts": now, "data": payload}
+    return JSONResponse(payload)
 
 @router.get("/checkin")
 async def checkin_page(request: Request):
