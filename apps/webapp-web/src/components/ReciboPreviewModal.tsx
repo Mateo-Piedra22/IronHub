@@ -138,35 +138,45 @@ export default function ReciboPreviewModal({
         }
     };
 
-    const handlePrint = () => {
-        const el = document.getElementById('recibo-preview');
-        if (!el) return;
-        const w = window.open('', '_blank', 'noopener,noreferrer,width=900,height=1200');
-        if (!w) return;
-        w.document.open();
-        w.document.write(`<!doctype html>
-<html lang="es">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Recibo</title>
-  <style>
-    @page { margin: 12mm; }
-    html, body { height: auto; }
-    body { margin: 0; background: #fff; color: #000; font-family: Arial, Helvetica, sans-serif; }
-    #recibo-preview { width: 720px; margin: 0 auto; }
-    img { max-width: 100%; height: auto; }
-  </style>
-</head>
-<body>
-  ${el.outerHTML}
-</body>
-</html>`);
-        w.document.close();
-        w.focus();
-        w.setTimeout(() => {
-            try { w.print(); } catch { }
-        }, 400);
+    const handlePrint = async () => {
+        if (!pago) return;
+        try {
+            const res = await api.downloadReciboPDF(pago.id);
+            if (res.ok && res.data?.pdf_url) {
+                const iframe = document.createElement('iframe');
+                iframe.style.position = 'fixed';
+                iframe.style.right = '0';
+                iframe.style.bottom = '0';
+                iframe.style.width = '0';
+                iframe.style.height = '0';
+                iframe.style.border = '0';
+                iframe.src = res.data.pdf_url;
+                document.body.appendChild(iframe);
+
+                const cleanup = () => {
+                    try {
+                        document.body.removeChild(iframe);
+                    } catch {
+                        // ignore
+                    }
+                };
+
+                iframe.onload = () => {
+                    try {
+                        iframe.contentWindow?.focus();
+                        iframe.contentWindow?.print();
+                    } catch {
+                        // ignore
+                    } finally {
+                        window.setTimeout(cleanup, 1200);
+                    }
+                };
+                return;
+            }
+            error(res.error || 'Error al generar PDF');
+        } catch {
+            error('Error al imprimir');
+        }
     };
 
     if (!isOpen || !pago) return null;

@@ -533,6 +533,10 @@ async def api_auth_session(request: Request, context: str = Query("auto")):
         # Normalize some legacy spellings
         if rol_out in ("dueño", "dueno"):
             rol_out = "owner"
+        if rol_out in ("cliente", "socio", "member", "usuario", "usuarios"):
+            rol_out = "user"
+        if rol_out not in ("owner", "admin", "profesor", "user"):
+            rol_out = "user"
         return JSONResponse({
             "authenticated": True,
             "user": {
