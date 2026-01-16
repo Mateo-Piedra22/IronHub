@@ -78,6 +78,12 @@ export function ExcelPreviewViewer({
         return null;
     }
 
+    const urlLower = excelUrl.toLowerCase();
+    const isPdf =
+        urlLower.includes('.pdf') ||
+        urlLower.includes('/pdf_view.pdf') ||
+        urlLower.includes('/render_draft.pdf');
+
     const looksLocal =
         excelUrl.includes('localhost') ||
         excelUrl.includes('127.0.0.1') ||
@@ -94,9 +100,12 @@ export function ExcelPreviewViewer({
 
     // Office Online Viewer requires the Excel file to be reachable from the public internet.
     // If the URL is local/private, fall back to a download CTA instead of showing "file not found".
-    const useOfficeViewer = excelUrl.startsWith('http') && !looksLocal;
+    const useOfficeViewer = !isPdf && excelUrl.startsWith('http') && !looksLocal;
     const viewerUrl = useOfficeViewer
         ? `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(excelUrl)}`
+        : excelUrl;
+    const officeTabUrl = useOfficeViewer
+        ? `https://view.officeapps.live.com/op/view.aspx?src=${encodeURIComponent(excelUrl)}`
         : excelUrl;
 
     return (
@@ -203,32 +212,57 @@ export function ExcelPreviewViewer({
                             transformOrigin: 'top left',
                         }}
                     >
-                        {/* Fallback message for local files */}
-                        {!useOfficeViewer ? (
+                        {isPdf ? (
+                            <iframe
+                                key={refreshKey}
+                                src={excelUrl}
+                                className="w-full h-full border-0"
+                                onLoad={handleIframeLoad}
+                                title="PDF Preview"
+                            />
+                        ) : !useOfficeViewer ? (
                             <div className="flex flex-col items-center justify-center h-full gap-4 text-slate-400">
                                 <FileSpreadsheet className="w-16 h-16 text-slate-600" />
                                 <div className="text-center">
-                                    <p className="font-medium">Archivo Excel Generado</p>
+                                    <p className="font-medium">{isPdf ? 'Vista Previa Generada' : 'Archivo Excel Generado'}</p>
                                     <p className="text-sm text-slate-500">
-                                        Usa el botón &quot;Descargar Excel&quot; para ver el archivo
+                                        {isPdf ? 'La previsualización se muestra como PDF dentro del panel' : 'Usa el botón \"Descargar Excel\" para ver el archivo'}
                                     </p>
                                 </div>
                                 <Button
                                     variant="secondary"
                                     onClick={() => window.open(excelUrl, '_blank')}
                                 >
-                                    Descargar Excel
+                                    {isPdf ? 'Abrir PDF' : 'Descargar Excel'}
                                 </Button>
                             </div>
                         ) : (
-                            <iframe
-                                key={refreshKey}
-                                src={viewerUrl}
-                                className="w-full h-full border-0"
-                                onLoad={handleIframeLoad}
-                                title="Excel Preview"
-                                sandbox="allow-scripts allow-same-origin allow-popups"
-                            />
+                            <div className="w-full h-full flex flex-col">
+                                <div className="px-3 py-2 border-b border-slate-800 flex items-center justify-end gap-2">
+                                    <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        onClick={() => window.open(officeTabUrl, '_blank', 'noopener,noreferrer')}
+                                    >
+                                        Abrir en Office
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        onClick={() => window.open(excelUrl, '_blank', 'noopener,noreferrer')}
+                                    >
+                                        Abrir XLSX
+                                    </Button>
+                                </div>
+                                <iframe
+                                    key={refreshKey}
+                                    src={viewerUrl}
+                                    className="w-full flex-1 border-0"
+                                    onLoad={handleIframeLoad}
+                                    title="Excel Preview"
+                                    sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-downloads allow-top-navigation-by-user-activation"
+                                />
+                            </div>
                         )}
                     </div>
                 </motion.div>

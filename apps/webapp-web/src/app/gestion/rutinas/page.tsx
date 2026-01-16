@@ -538,7 +538,7 @@ export default function RutinasPage() {
     // Open Excel preview with Office Online Viewer
     const handleOpenExcelPreview = async (rutina: Rutina) => {
         try {
-            const res = await api.getRutinaExcelViewUrl(rutina.id, { weeks: 4 });
+            const res = await api.getRutinaPdfViewUrl(rutina.id, { weeks: 4 });
             if (res.ok && res.data?.url) {
                 setExcelPreviewUrl(res.data.url);
                 setExcelPreviewOpen(true);

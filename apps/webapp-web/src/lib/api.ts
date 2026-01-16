@@ -1004,8 +1004,36 @@ class ApiClient {
         return this.request<{ url: string }>(`/api/rutinas/${id}/export/excel_view_url${query ? `?${query}` : ''}`);
     }
 
+    /**
+     * Get a signed URL for a robust in-app preview (PDF rendered server-side).
+     * This is intended to be embedded in an iframe and does not rely on Office Online.
+     */
+    async getRutinaPdfViewUrl(id: number, params?: {
+        weeks?: number;
+        qr_mode?: 'inline' | 'sheet' | 'none';
+        sheet_name?: string;
+    }): Promise<ApiResponse<{ url: string }>> {
+        const p = new URLSearchParams();
+        if (params?.weeks) p.set('weeks', String(params.weeks));
+        if (params?.qr_mode) p.set('qr_mode', params.qr_mode);
+        if (params?.sheet_name) p.set('sheet', params.sheet_name);
+
+        const t = typeof window !== 'undefined' ? getCurrentSubdomain() : '';
+        if (t) p.set('tenant', t);
+
+        const query = p.toString();
+        return this.request<{ url: string }>(`/api/rutinas/${id}/export/pdf_view_url${query ? `?${query}` : ''}`);
+    }
+
     async getRutinaDraftExcelViewUrl(data: any) {
         return this.request<{ url: string }>('/api/rutinas/export/draft_url', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    async getRutinaDraftPdfViewUrl(data: any) {
+        return this.request<{ url: string }>('/api/rutinas/export/draft_pdf_url', {
             method: 'POST',
             body: JSON.stringify(data)
         });

@@ -1928,6 +1928,105 @@ async def api_rutina_excel_view_url(
         logging.exception("Error generating Excel view URL")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.get("/api/rutinas/{rutina_id}/export/pdf_view_url")
+async def api_rutina_pdf_view_url(
+    rutina_id: int,
+    request: Request,
+    weeks: int = 1,
+    filename: Optional[str] = None,
+    qr_mode: str = "sheet",
+    sheet: Optional[str] = None,
+    tenant: Optional[str] = None,
+    _=Depends(require_gestion_access),
+    svc: TrainingService = Depends(get_training_service),
+):
+    """Generate a signed URL for robust in-app PDF preview.
+
+    Office Online Viewer inside iframes is not reliable due to third-party cookie policies.
+    This endpoint returns a signed URL to a public PDF endpoint that can be embedded in an iframe.
+    """
+    try:
+        if not tenant:
+            try:
+                tenant = str(get_current_tenant() or "").strip().lower()
+            except Exception:
+                tenant = None
+        if not tenant:
+            try:
+                tenant = str(request.session.get("tenant") or "").strip().lower()
+            except Exception:
+                tenant = None
+        if not tenant:
+            try:
+                tenant = str(request.headers.get("x-tenant") or "").strip().lower()
+            except Exception:
+                tenant = None
+
+        if tenant:
+            try:
+                ok_t, _err = validate_tenant_name(tenant)
+                if not ok_t:
+                    tenant = None
+            except Exception:
+                tenant = None
+
+        if not tenant:
+            raise HTTPException(status_code=400, detail="Tenant requerido para previsualización")
+
+        try:
+            set_current_tenant(str(tenant))
+        except Exception:
+            pass
+
+        rutina_data = svc.obtener_rutina_completa(rutina_id)
+        if not rutina_data:
+            raise HTTPException(status_code=404, detail="Rutina no encontrada")
+
+        if not filename:
+            nombre_rutina = rutina_data.get('nombre_rutina') or rutina_data.get('nombre', f'rutina_{rutina_id}')
+            usuario_nombre = rutina_data.get('usuario_nombre', '')
+            dias = rutina_data.get('dias_semana', 1)
+            parts = ['rutina', nombre_rutina, f'{dias}-dias']
+            if usuario_nombre:
+                parts.append(usuario_nombre)
+            filename = '_'.join(parts) + '.pdf'
+
+        base_name = os.path.basename(filename)
+        if not base_name.lower().endswith('.pdf'):
+            base_name = f"{base_name}.pdf"
+        base_name = base_name[:150].replace('\\', '_').replace('/', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+
+        weeks = max(1, min(int(weeks), 4))
+        qr_mode = str(qr_mode or "sheet").strip().lower()
+        if qr_mode == "auto":
+            qr_mode = "sheet"
+        if qr_mode not in ("inline", "sheet", "none"):
+            qr_mode = "sheet"
+        sheet_norm = (str(sheet).strip()[:64]) if sheet else None
+
+        ts = int(time.time())
+        sig = _sign_excel_view(rutina_id, weeks, base_name, ts, qr_mode=qr_mode, sheet=sheet_norm)
+
+        base_url = _get_public_base_url(request)
+        params = {
+            "tenant": tenant,
+            "weeks": str(weeks),
+            "filename": base_name,
+            "qr_mode": qr_mode,
+            "sheet": sheet_norm or "",
+            "ts": str(ts),
+            "sig": sig,
+        }
+        qs = urllib.parse.urlencode(params, safe="")
+        full_url = f"{base_url}/api/rutinas/{rutina_id}/export/pdf_view.pdf?{qs}"
+        return JSONResponse({"url": full_url})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.exception("Error generating PDF view URL")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/api/rutinas/{rutina_id}/export/excel_view.xlsx")
 async def api_rutina_excel_view(
     rutina_id: int,
@@ -2077,6 +2176,136 @@ async def api_rutina_excel_view(
 async def api_rutina_excel_view_options(rutina_id: int):
     return _add_office_viewer_headers(Response(status_code=204))
 
+
+@router.get("/api/rutinas/{rutina_id}/export/pdf_view.pdf")
+async def api_rutina_pdf_view(
+    rutina_id: int,
+    request: Request,
+    tenant: Optional[str] = None,
+    weeks: int = 1,
+    filename: Optional[str] = None,
+    qr_mode: str = "sheet",
+    sheet: Optional[str] = None,
+    ts: int = 0,
+    sig: Optional[str] = None,
+):
+    """Public endpoint that serves a PDF preview after verifying signature."""
+    try:
+        t = str(tenant or "").strip().lower()
+    except Exception:
+        t = ""
+    if t:
+        try:
+            ok_t, _err = validate_tenant_name(t)
+            if ok_t:
+                set_current_tenant(t)
+            else:
+                raise HTTPException(status_code=400, detail="Tenant inválido")
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=400, detail="Tenant inválido")
+    else:
+        raise HTTPException(status_code=400, detail="Tenant requerido")
+
+    if not sig:
+        raise HTTPException(status_code=403, detail="Firma requerida")
+
+    weeks = max(1, min(int(weeks), 4))
+    qr_mode = str(qr_mode or "sheet").strip().lower()
+    if qr_mode == "auto":
+        qr_mode = "sheet"
+    if qr_mode not in ("inline", "sheet", "none"):
+        qr_mode = "sheet"
+    sheet_norm = (str(sheet).strip()[:64]) if sheet else None
+
+    base_name = os.path.basename(filename) if filename else f"rutina_{rutina_id}.pdf"
+    if not base_name.lower().endswith('.pdf'):
+        base_name = f"{base_name}.pdf"
+    base_name = base_name[:150].replace('\\', '_').replace('/', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+
+    try:
+        now = int(time.time())
+        if abs(now - int(ts)) > 600:
+            raise HTTPException(status_code=403, detail="Link de previsualización expirado")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=403, detail="Timestamp inválido")
+
+    expected = _sign_excel_view(rutina_id, weeks, base_name, int(ts), qr_mode=qr_mode, sheet=sheet_norm)
+    if not hmac.compare_digest(expected, str(sig)):
+        raise HTTPException(status_code=403, detail="Firma inválida")
+
+    session = None
+    tmp_xlsx = None
+    tmp_pdf = None
+    try:
+        factory = get_tenant_session_factory(t)
+        if not factory:
+            raise HTTPException(status_code=503, detail=f"Database connection unavailable for tenant '{t}'")
+        session = factory()
+        svc = TrainingService(session)
+        rm = RoutineTemplateManager()
+
+        rutina_data = svc.obtener_rutina_completa(rutina_id)
+        if not rutina_data:
+            raise HTTPException(status_code=404, detail="Rutina no encontrada")
+
+        rutina = Rutina(
+            id=rutina_data['id'],
+            nombre_rutina=rutina_data.get('nombre_rutina') or rutina_data.get('nombre', ''),
+            descripcion=rutina_data.get('descripcion'),
+            dias_semana=rutina_data.get('dias_semana', 1),
+            categoria=rutina_data.get('categoria'),
+            uuid_rutina=rutina_data.get('uuid_rutina')
+        )
+        usuario = Usuario(nombre=rutina_data.get('usuario_nombre') or 'Usuario')
+        ejercicios_por_dia = _build_exercises_by_day(rutina_data)
+        if not ejercicios_por_dia:
+            raise HTTPException(status_code=400, detail="La rutina no contiene ejercicios")
+
+        tmp_xlsx_fd, tmp_xlsx = tempfile.mkstemp(prefix=f"rutina_{rutina_id}_", suffix=".xlsx")
+        try:
+            os.close(tmp_xlsx_fd)
+        except Exception:
+            pass
+        tmp_pdf_fd, tmp_pdf = tempfile.mkstemp(prefix=f"rutina_{rutina_id}_", suffix=".pdf")
+        try:
+            os.close(tmp_pdf_fd)
+        except Exception:
+            pass
+
+        try:
+            xlsx_path = rm.generate_routine_excel(
+                rutina,
+                usuario,
+                ejercicios_por_dia,
+                output_path=tmp_xlsx,
+                weeks=weeks,
+                qr_mode=qr_mode,
+                sheet=sheet_norm,
+            )
+        except ValueError as ve:
+            raise HTTPException(status_code=400, detail=str(ve))
+
+        pdf_path = rm.convert_excel_to_pdf(xlsx_path, pdf_path=tmp_pdf)
+        pdf_name = os.path.basename(base_name)
+        resp = FileResponse(
+            pdf_path,
+            media_type="application/pdf",
+            filename=pdf_name,
+            background=BackgroundTask(_cleanup_files, str(pdf_path), str(xlsx_path))
+        )
+        resp.headers["Content-Disposition"] = f'inline; filename="{pdf_name}"'
+        return _add_office_viewer_headers(resp)
+    finally:
+        try:
+            if session is not None:
+                session.close()
+        except Exception:
+            pass
+
 @router.post("/api/rutinas/export/draft_url")
 async def sign_draft_url(
     request: Request,
@@ -2117,6 +2346,41 @@ async def sign_draft_url(
         raise
     except Exception as e:
         logger.exception("Error signing draft")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/api/rutinas/export/draft_pdf_url")
+async def sign_draft_pdf_url(
+    request: Request,
+    _=Depends(require_gestion_access),
+    svc: GymConfigService = Depends(get_gym_config_service)
+):
+    """Generate signed URL for draft PDF preview using compressed data in URL."""
+    try:
+        data = await request.json()
+        json_str = json.dumps(data)
+        if len(json_str.encode('utf-8')) > _MAX_PREVIEW_JSON_BYTES:
+            raise HTTPException(status_code=413, detail="Payload demasiado grande")
+        compressed = zlib.compress(json_str.encode('utf-8'))
+        b64_data = base64.urlsafe_b64encode(compressed).decode('utf-8')
+        if len(b64_data) > _MAX_PREVIEW_B64_CHARS:
+            raise HTTPException(status_code=413, detail="Payload demasiado grande")
+
+        ts = int(time.time())
+        rnd = secrets.token_hex(4)
+        filename = f"draft_{ts}_{rnd}.pdf"
+
+        secret = _get_preview_secret()
+        to_sign = f"draftpdf:{b64_data}:{ts}:{filename}:{secret}"
+        sig = hmac.new(secret.encode(), to_sign.encode(), hashlib.sha256).hexdigest()
+
+        base_url = _get_public_base_url(request)
+        url = f"{base_url}/api/public/rutinas/render_draft.pdf?ts={ts}&data={b64_data}&sig={sig}&filename={filename}"
+        return JSONResponse({"url": url})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error signing draft pdf")
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
@@ -2257,6 +2521,140 @@ async def render_draft_excel(
         raise
     except Exception as e:
         logger.exception("Error rendering draft")
+        raise HTTPException(status_code=500, detail="Server Error")
+
+
+@router.get("/api/public/rutinas/render_draft.pdf")
+async def render_draft_pdf(
+    ts: int,
+    data: str,
+    sig: str,
+    filename: Optional[str] = None,
+    rm: RoutineTemplateManager = Depends(get_rm)
+):
+    """Public endpoint to render draft PDF from URL data."""
+    try:
+        if rm is None:
+            raise HTTPException(status_code=503, detail="RoutineTemplateManager no disponible")
+        now = int(time.time())
+        if abs(now - ts) > 600:
+            raise HTTPException(status_code=403, detail="Expired")
+
+        secret = _get_preview_secret()
+        fname = filename or ""
+        to_sign = f"draftpdf:{data}:{ts}:{fname}:{secret}"
+        expected = hmac.new(secret.encode(), to_sign.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, sig):
+            raise HTTPException(status_code=403, detail="Invalid signature")
+
+        try:
+            json_str = _safe_decompress_url_payload(data)
+            if len(json_str.encode('utf-8')) > _MAX_PREVIEW_DECOMPRESSED_BYTES:
+                raise HTTPException(status_code=413, detail="Payload demasiado grande")
+            payload = json.loads(json_str)
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=400, detail="Corrupt data")
+
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Payload inválido")
+
+        rutina_info = payload.get('rutina', {})
+        usuario_info = payload.get('usuario', {})
+        ejercicios_list = payload.get('ejercicios', [])
+        if not isinstance(ejercicios_list, list):
+            ejercicios_list = []
+
+        rutina = Rutina(
+            nombre_rutina=rutina_info.get('nombre', 'Borrador'),
+            descripcion=rutina_info.get('descripcion', ''),
+            dias_semana=int(rutina_info.get('dias_semana', 1) or 1),
+            categoria=rutina_info.get('categoria', 'general')
+        )
+        usuario = Usuario(nombre=usuario_info.get('nombre', 'Usuario'))
+
+        exercises_by_day: Dict[int, List[RutinaEjercicio]] = {}
+        for ej in ejercicios_list[:200]:
+            try:
+                dia = int(ej.get('dia', 1))
+            except Exception:
+                dia = 1
+            if dia not in exercises_by_day:
+                exercises_by_day[dia] = []
+            if len(exercises_by_day[dia]) >= 20:
+                continue
+            ej_base = Ejercicio(
+                nombre=ej.get('nombre_ejercicio', 'Ejercicio'),
+                video_url=ej.get('video_url'),
+                descripcion=ej.get('descripcion')
+            )
+            re = RutinaEjercicio(
+                dia_semana=dia,
+                orden=int(ej.get('orden', 0) or 0),
+                series=(int(ej.get('series') or 0) if str(ej.get('series') or '').strip().isdigit() else 0),
+                repeticiones=str(ej.get('repeticiones', '')),
+                ejercicio=ej_base
+            )
+            exercises_by_day[dia].append(re)
+
+        qr_mode = str(payload.get('qr_mode', 'inline') or 'inline').strip().lower()
+        if qr_mode not in ('inline', 'sheet', 'none'):
+            qr_mode = 'inline'
+        sheet_name = payload.get('sheet') or payload.get('sheet_name') or None
+        try:
+            sheet_name = (str(sheet_name).strip()[:64]) if sheet_name else None
+        except Exception:
+            sheet_name = None
+        try:
+            weeks = int(payload.get('weeks', 1))
+        except Exception:
+            weeks = 1
+        weeks = max(1, min(weeks, 4))
+
+        tmp_xlsx_fd, tmp_xlsx = tempfile.mkstemp(prefix=f"draft_{ts}_", suffix=".xlsx")
+        try:
+            os.close(tmp_xlsx_fd)
+        except Exception:
+            pass
+        tmp_pdf_fd, tmp_pdf = tempfile.mkstemp(prefix=f"draft_{ts}_", suffix=".pdf")
+        try:
+            os.close(tmp_pdf_fd)
+        except Exception:
+            pass
+
+        try:
+            xlsx_path = rm.generate_routine_excel(
+                rutina,
+                usuario,
+                exercises_by_day,
+                output_path=tmp_xlsx,
+                weeks=weeks,
+                qr_mode=qr_mode,
+                sheet=sheet_name,
+            )
+        except ValueError as ve:
+            raise HTTPException(status_code=400, detail=str(ve))
+
+        pdf_path = rm.convert_excel_to_pdf(xlsx_path, pdf_path=tmp_pdf)
+
+        base_name = os.path.basename(filename) if filename else f"draft_{ts}.pdf"
+        if not base_name.lower().endswith('.pdf'):
+            base_name = f"{base_name}.pdf"
+        base_name = base_name[:150].replace('\\', '_').replace('/', '_').replace(':', '_').replace('*', '_').replace('?', '_').replace('\"', '_').replace('<', '_').replace('>', '_').replace('|', '_')
+
+        res = FileResponse(
+            pdf_path,
+            media_type="application/pdf",
+            filename=base_name,
+            background=BackgroundTask(_cleanup_files, str(pdf_path), str(xlsx_path))
+        )
+        res.headers["Content-Disposition"] = f'inline; filename=\"{base_name}\"'
+        return _add_office_viewer_headers(res)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Error rendering draft pdf")
         raise HTTPException(status_code=500, detail="Server Error")
 
 

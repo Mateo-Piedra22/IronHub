@@ -421,7 +421,7 @@ function ExcelPreviewPanel({ rutinaId, isVisible, draftData, weeks }: ExcelPrevi
 
                 if (draftData) {
                     // Draft mode
-                    const res = await api.getRutinaDraftExcelViewUrl({
+                    const res = await api.getRutinaDraftPdfViewUrl({
                         ...draftData,
                         weeks, // Ensure weeks is explicit in draft data (though already in draftData object)
                         qr_mode: qrMode,
@@ -432,7 +432,7 @@ function ExcelPreviewPanel({ rutinaId, isVisible, draftData, weeks }: ExcelPrevi
                     }
                 } else if (rutinaId) {
                     // Saved mode
-                    const res = await api.getRutinaExcelViewUrl(rutinaId, {
+                    const res = await api.getRutinaPdfViewUrl(rutinaId, {
                         weeks,
                         qr_mode: qrMode,
                         sheet_name: sheetName || undefined

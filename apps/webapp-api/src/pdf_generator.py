@@ -45,8 +45,15 @@ class PDFGenerator:
             or None
         )
         # Usar gym_name del branding si está, sino cargarlo del sistema, con fallback a "Gimnasio"
-        self.gym_name = self.branding_config.get('gym_name') or get_gym_name('Gimnasio')
-        self.gym_address = self.branding_config.get('gym_address', 'Saavedra 2343, Santa Fe')
+        # Importante: ReportLab falla si recibe None en Paragraph (internamente llama .split()).
+        try:
+            self.gym_name = str((self.branding_config.get('gym_name') or get_gym_name('Gimnasio') or 'Gimnasio'))
+        except Exception:
+            self.gym_name = 'Gimnasio'
+        try:
+            self.gym_address = str((self.branding_config.get('gym_address') or 'Saavedra 2343, Santa Fe'))
+        except Exception:
+            self.gym_address = 'Saavedra 2343, Santa Fe'
     
     def _get_dynamic_color(self, color_key, fallback_color):
         """Obtiene un color del sistema de branding dinámico o usa el fallback"""

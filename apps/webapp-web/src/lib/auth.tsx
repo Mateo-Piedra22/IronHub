@@ -90,9 +90,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (isLoading) return;
 
         // Check if current path needs protection
-        const matchedRoute = Object.keys(protectedRoutes).find((route) =>
-            pathname?.startsWith(route)
-        );
+        const matchedRoute = Object.keys(protectedRoutes).find((route) => {
+            if (!pathname) return false;
+            return pathname === route || pathname.startsWith(`${route}/`);
+        });
 
         if (matchedRoute) {
             const allowedRoles = protectedRoutes[matchedRoute as keyof typeof protectedRoutes];
