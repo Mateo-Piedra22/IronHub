@@ -153,6 +153,18 @@ export interface WhatsAppConfig {
     send_timeout_seconds?: number;
 }
 
+export interface WhatsAppTemplateCatalogItem {
+    template_name: string;
+    category: 'UTILITY' | 'AUTHENTICATION' | 'MARKETING' | string;
+    language: string;
+    body_text: string;
+    example_params?: any;
+    active: boolean;
+    version: number;
+    created_at?: string;
+    updated_at?: string;
+}
+
 export interface GymDetails extends Gym {
     whatsapp_phone_id?: string;
     whatsapp_access_token?: string;
@@ -503,12 +515,39 @@ export const api = {
             body: JSON.stringify(config),
         }),
 
+    clearGymWhatsApp: (id: number) =>
+        request<{ ok: boolean }>(`/gyms/${id}/whatsapp`, {
+            method: 'DELETE',
+        }),
+
     sendWhatsAppTest: (gymId: number, phone: string, message: string) =>
         request<{ ok: boolean; message?: string; error?: string }>(`/gyms/${gymId}/whatsapp/test`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({ phone, message }),
         }),
+
+    getWhatsAppTemplateCatalog: (activeOnly = false) =>
+        request<{ templates: WhatsAppTemplateCatalogItem[] }>(`/whatsapp/templates?active_only=${activeOnly ? '1' : '0'}`),
+
+    upsertWhatsAppTemplateCatalog: (templateName: string, data: Partial<WhatsAppTemplateCatalogItem>) =>
+        request<{ ok: boolean }>(`/whatsapp/templates/${encodeURIComponent(templateName)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        }),
+
+    deleteWhatsAppTemplateCatalog: (templateName: string) =>
+        request<{ ok: boolean }>(`/whatsapp/templates/${encodeURIComponent(templateName)}`, { method: 'DELETE' }),
+
+    provisionGymWhatsAppTemplates: (gymId: number) =>
+        request<{ ok: boolean; existing_count: number; created: string[]; failed: Array<{ name: string; error: string }> }>(
+            `/gyms/${gymId}/whatsapp/provision-templates`,
+            { method: 'POST' }
+        ),
+
+    getGymWhatsAppHealth: (gymId: number) =>
+        request<any>(`/gyms/${gymId}/whatsapp/health`),
 
     // ========== PAYMENT MANAGEMENT (Restored from deprecated) ==========
 

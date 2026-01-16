@@ -200,6 +200,7 @@ export default function UsuariosPage() {
     // State
     const [usuarios, setUsuarios] = useState<Usuario[]>([]);
     const [loading, setLoading] = useState(true);
+    const [asistenciasHoyIds, setAsistenciasHoyIds] = useState<Set<number>>(new Set());
     const [search, setSearch] = useState('');
     const [filterActivo, setFilterActivo] = useState<boolean | undefined>(undefined);
     const [page, setPage] = useState(1);
@@ -223,15 +224,21 @@ export default function UsuariosPage() {
     const loadUsuarios = useCallback(async () => {
         setLoading(true);
         try {
-            const res = await api.getUsuarios({
+            const [res, hoyRes] = await Promise.all([
+                api.getUsuarios({
                 search: search || undefined,
                 activo: filterActivo,
                 page,
                 limit: pageSize,
-            });
+                }),
+                api.getAsistenciasHoyIds().catch(() => ({ ok: false } as any)),
+            ]);
             if (res.ok && res.data) {
                 setUsuarios(res.data.usuarios);
                 setTotal(res.data.total);
+            }
+            if (hoyRes && (hoyRes as any).ok && Array.isArray((hoyRes as any).data)) {
+                setAsistenciasHoyIds(new Set<number>((hoyRes as any).data as number[]));
             }
         } catch {
             error('Error al cargar usuarios');
@@ -304,7 +311,18 @@ export default function UsuariosPage() {
                         {getInitials(row.nombre)}
                     </div>
                     <div>
-                        <div className="font-medium text-white">{row.nombre}</div>
+                        <div className="font-medium text-white flex items-center gap-2">
+                            <span className="truncate">{row.nombre}</span>
+                            {asistenciasHoyIds.has(row.id) && (
+                                <span
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-success-500/15 text-success-300 border border-success-500/20"
+                                    title="Asistió hoy"
+                                >
+                                    <CheckCircle2 className="w-3 h-3" />
+                                    Hoy
+                                </span>
+                            )}
+                        </div>
                         {row.dni && <div className="text-xs text-slate-500">DNI: {row.dni}</div>}
                     </div>
                 </div>

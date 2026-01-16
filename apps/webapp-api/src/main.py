@@ -769,6 +769,7 @@ from src.routers import users, gym, payments, whatsapp, attendance, exercises, a
 from src.routers import public
 from src.routers import profesores, inscripciones
 from src.routers import reports, admin
+from src.routers import meta_review
 
 # Include routers
 app.include_router(auth.router, tags=["Auth"])
@@ -783,5 +784,6 @@ app.include_router(profesores.router, tags=["Profesores"])
 app.include_router(inscripciones.router, tags=["Inscripciones"])
 app.include_router(reports.router, tags=["Reports"])
 app.include_router(admin.router, tags=["Admin"])
+app.include_router(meta_review.router, tags=["Meta Review"])
 
 

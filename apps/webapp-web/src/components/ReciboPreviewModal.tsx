@@ -131,7 +131,39 @@ export default function ReciboPreviewModal({
         const res = await api.downloadReciboPDF(pago.id);
         setDownloading(false);
         if (res.ok && res.data?.pdf_url) {
-            window.open(res.data.pdf_url, '_blank');
+            let url = res.data.pdf_url;
+            if (draft) {
+                try {
+                    const u = new URL(url);
+                    if (draft.titulo) u.searchParams.set('titulo', String(draft.titulo));
+                    if (draft.gym_nombre) u.searchParams.set('gym_name', String(draft.gym_nombre));
+                    if (draft.gym_direccion) u.searchParams.set('gym_address', String(draft.gym_direccion));
+                    if (draft.fecha) u.searchParams.set('fecha', String(draft.fecha));
+                    if (draft.metodo_pago) u.searchParams.set('metodo', String(draft.metodo_pago));
+                    if (draft.usuario_nombre) u.searchParams.set('usuario_nombre', String(draft.usuario_nombre));
+                    if (draft.usuario_dni) u.searchParams.set('usuario_dni', String(draft.usuario_dni));
+                    if (draft.observaciones) u.searchParams.set('observaciones', String(draft.observaciones));
+                    if (draft.emitido_por) u.searchParams.set('emitido_por', String(draft.emitido_por));
+                    u.searchParams.set('mostrar_logo', draft.mostrar_logo ? '1' : '0');
+                    u.searchParams.set('mostrar_metodo', draft.mostrar_metodo ? '1' : '0');
+                    u.searchParams.set('mostrar_dni', draft.mostrar_dni ? '1' : '0');
+                    const tipoCuota = (pago.tipo_cuota_nombre || '').trim() || (draft.items?.length === 1 ? String(draft.items[0]?.descripcion || '').trim() : '');
+                    if (tipoCuota) u.searchParams.set('tipo_cuota', tipoCuota);
+                    if (Array.isArray(draft.items) && draft.items.length > 0) {
+                        const items = draft.items.map((it) => ({
+                            descripcion: it.descripcion,
+                            cantidad: Number(it.cantidad) || 1,
+                            precio_unitario: Number(it.precio) || 0,
+                        }));
+                        u.searchParams.set('items', JSON.stringify(items));
+                        u.searchParams.set('subtotal', String(Number(draft.subtotal) || 0));
+                        u.searchParams.set('total', String(Number(draft.total) || 0));
+                    }
+                    url = u.toString();
+                } catch {
+                }
+            }
+            window.open(url, '_blank');
             success('PDF generado');
         } else {
             error(res.error || 'Error al generar PDF');
@@ -143,6 +175,38 @@ export default function ReciboPreviewModal({
         try {
             const res = await api.downloadReciboPDF(pago.id);
             if (res.ok && res.data?.pdf_url) {
+                let url = res.data.pdf_url;
+                if (draft) {
+                    try {
+                        const u = new URL(url);
+                        if (draft.titulo) u.searchParams.set('titulo', String(draft.titulo));
+                        if (draft.gym_nombre) u.searchParams.set('gym_name', String(draft.gym_nombre));
+                        if (draft.gym_direccion) u.searchParams.set('gym_address', String(draft.gym_direccion));
+                        if (draft.fecha) u.searchParams.set('fecha', String(draft.fecha));
+                        if (draft.metodo_pago) u.searchParams.set('metodo', String(draft.metodo_pago));
+                        if (draft.usuario_nombre) u.searchParams.set('usuario_nombre', String(draft.usuario_nombre));
+                        if (draft.usuario_dni) u.searchParams.set('usuario_dni', String(draft.usuario_dni));
+                        if (draft.observaciones) u.searchParams.set('observaciones', String(draft.observaciones));
+                        if (draft.emitido_por) u.searchParams.set('emitido_por', String(draft.emitido_por));
+                        u.searchParams.set('mostrar_logo', draft.mostrar_logo ? '1' : '0');
+                        u.searchParams.set('mostrar_metodo', draft.mostrar_metodo ? '1' : '0');
+                        u.searchParams.set('mostrar_dni', draft.mostrar_dni ? '1' : '0');
+                        const tipoCuota = (pago.tipo_cuota_nombre || '').trim() || (draft.items?.length === 1 ? String(draft.items[0]?.descripcion || '').trim() : '');
+                        if (tipoCuota) u.searchParams.set('tipo_cuota', tipoCuota);
+                        if (Array.isArray(draft.items) && draft.items.length > 0) {
+                            const items = draft.items.map((it) => ({
+                                descripcion: it.descripcion,
+                                cantidad: Number(it.cantidad) || 1,
+                                precio_unitario: Number(it.precio) || 0,
+                            }));
+                            u.searchParams.set('items', JSON.stringify(items));
+                            u.searchParams.set('subtotal', String(Number(draft.subtotal) || 0));
+                            u.searchParams.set('total', String(Number(draft.total) || 0));
+                        }
+                        url = u.toString();
+                    } catch {
+                    }
+                }
                 const iframe = document.createElement('iframe');
                 iframe.style.position = 'fixed';
                 iframe.style.right = '0';
@@ -150,7 +214,7 @@ export default function ReciboPreviewModal({
                 iframe.style.width = '0';
                 iframe.style.height = '0';
                 iframe.style.border = '0';
-                iframe.src = res.data.pdf_url;
+                iframe.src = url;
                 document.body.appendChild(iframe);
 
                 const cleanup = () => {

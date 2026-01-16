@@ -27,7 +27,7 @@ import {
     Input,
     type Column,
 } from '@/components/ui';
-import { api, type WhatsAppConfig, type WhatsAppMensaje, type WhatsAppStatus } from '@/lib/api';
+import { api, type WhatsAppConfig, type WhatsAppMensaje, type WhatsAppStatus, type WhatsAppTemplate, type WhatsAppTrigger } from '@/lib/api';
 import { formatDate, formatTime, cn } from '@/lib/utils';
 
 // Message type labels
@@ -58,6 +58,7 @@ export default function WhatsAppPage() {
         phone_number_id: '',
         whatsapp_business_account_id: '',
         access_token: '',
+        access_token_present: false,
         webhook_verify_token: '',
         enabled: false,
         webhook_enabled: false,
@@ -65,10 +66,27 @@ export default function WhatsAppPage() {
     const [configModalOpen, setConfigModalOpen] = useState(false);
     const [configSaving, setConfigSaving] = useState(false);
 
+    const [connectLoading, setConnectLoading] = useState(false);
+
     // Messages
     const [mensajes, setMensajes] = useState<WhatsAppMensaje[]>([]);
     const [mensajesLoading, setMensajesLoading] = useState(false);
     const [filter, setFilter] = useState<'all' | 'pending' | 'failed'>('all');
+
+    // Templates
+    const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
+    const [templatesLoading, setTemplatesLoading] = useState(false);
+    const [templateModalOpen, setTemplateModalOpen] = useState(false);
+    const [templateSaving, setTemplateSaving] = useState(false);
+    const [editingTemplateName, setEditingTemplateName] = useState<string>('');
+    const [editingTemplateBody, setEditingTemplateBody] = useState<string>('');
+    const [editingTemplateActive, setEditingTemplateActive] = useState<boolean>(true);
+
+    // Triggers
+    const [triggers, setTriggers] = useState<WhatsAppTrigger[]>([]);
+    const [triggersLoading, setTriggersLoading] = useState(false);
+    const [automationLoading, setAutomationLoading] = useState(false);
+    const [automationLastResult, setAutomationLastResult] = useState<{ scanned: number; sent: number; dry_run: boolean } | null>(null);
 
     // Bulk actions
     const [bulkLoading, setBulkLoading] = useState(false);
@@ -90,7 +108,8 @@ export default function WhatsAppPage() {
             setConfig({
                 phone_number_id: res.data.phone_number_id || '',
                 whatsapp_business_account_id: res.data.whatsapp_business_account_id || '',
-                access_token: res.data.access_token || '',
+                access_token: '',
+                access_token_present: !!res.data.access_token_present,
                 webhook_verify_token: res.data.webhook_verify_token || '',
                 enabled: res.data.enabled ?? false,
                 webhook_enabled: res.data.webhook_enabled ?? false,
@@ -107,11 +126,31 @@ export default function WhatsAppPage() {
         setMensajesLoading(false);
     }, []);
 
+    const loadTemplates = useCallback(async () => {
+        setTemplatesLoading(true);
+        const res = await api.getWhatsAppTemplates();
+        if (res.ok && res.data?.templates) {
+            setTemplates(res.data.templates);
+        }
+        setTemplatesLoading(false);
+    }, []);
+
+    const loadTriggers = useCallback(async () => {
+        setTriggersLoading(true);
+        const res = await api.getWhatsAppTriggers();
+        if (res.ok && res.data?.triggers) {
+            setTriggers(res.data.triggers);
+        }
+        setTriggersLoading(false);
+    }, []);
+
     useEffect(() => {
         loadStatus();
         loadConfig();
         loadMensajes();
-    }, [loadStatus, loadConfig, loadMensajes]);
+        loadTemplates();
+        loadTriggers();
+    }, [loadStatus, loadConfig, loadMensajes, loadTemplates, loadTriggers]);
 
     // Save config
     const handleSaveConfig = async () => {
@@ -122,8 +161,212 @@ export default function WhatsAppPage() {
             success('Configuración guardada');
             setConfigModalOpen(false);
             loadStatus();
+            loadConfig();
         } else {
             error(res.error || 'Error al guardar');
+        }
+    };
+
+    const ensureFacebookSdk = async (appId: string, apiVersion: string) => {
+        const w = window as any;
+        if (w.FB) {
+            try {
+                w.FB.init({ appId, cookie: true, xfbml: false, version: apiVersion });
+            } catch {}
+            return;
+        }
+        await new Promise<void>((resolve, reject) => {
+            w.fbAsyncInit = function () {
+                try {
+                    w.FB.init({ appId, cookie: true, xfbml: false, version: apiVersion });
+                    resolve();
+                } catch (e) {
+                    reject(e);
+                }
+            };
+            const id = 'facebook-jssdk';
+            if (document.getElementById(id)) return;
+            const js = document.createElement('script');
+            js.id = id;
+            js.src = 'https://connect.facebook.net/en_US/sdk.js';
+            js.async = true;
+            js.defer = true;
+            js.onerror = () => reject(new Error('No se pudo cargar el SDK de Meta'));
+            document.body.appendChild(js);
+        });
+    };
+
+    const handleEmbeddedSignupConnect = async () => {
+        setConnectLoading(true);
+        setAutomationLastResult(null);
+        const connectBaseRaw = (process.env.NEXT_PUBLIC_WHATSAPP_CONNECT_BASE_URL || '').trim();
+        const connectBases = connectBaseRaw
+            ? connectBaseRaw.split(',').map((s) => s.trim()).filter(Boolean)
+            : [];
+        const connectOrigins = connectBases
+            .map((b) => {
+                try {
+                    return new URL(b).origin;
+                } catch {
+                    return '';
+                }
+            })
+            .filter(Boolean);
+
+        let listener: ((event: MessageEvent) => void) | null = null;
+        try {
+            if (connectBases.length > 0 && connectOrigins.length > 0) {
+                const connectBase = connectBases[0].replace(/\/+$/, '');
+                const connectUrl = `${connectBase}/connect/whatsapp?return_origin=${encodeURIComponent(window.location.origin)}`;
+                const popup = window.open(connectUrl, 'ih-wa-connect', 'popup=yes,width=520,height=720');
+                if (!popup) {
+                    throw new Error('No se pudo abrir la ventana emergente. Habilitá popups.');
+                }
+
+                let done = false;
+                let finishResolve: (() => void) | null = null;
+                const finishPromise = new Promise<void>((resolve) => (finishResolve = resolve));
+
+                const maybeDone = async (payload: any) => {
+                    if (done) return;
+                    done = true;
+                    try {
+                        if (payload?.ok) {
+                            const res = await api.completeWhatsAppEmbeddedSignup({
+                                code: String(payload.code || ''),
+                                waba_id: String(payload.waba_id || ''),
+                                phone_number_id: String(payload.phone_number_id || ''),
+                            });
+                            if (res.ok) {
+                                success('WhatsApp conectado. Plantillas en proceso de creación.');
+                                await loadConfig();
+                                await loadStatus();
+                            } else {
+                                error(res.error || 'Error al completar el registro');
+                            }
+                        } else {
+                            error(String(payload?.error || 'No se pudo completar el registro'));
+                        }
+                    } finally {
+                        finishResolve?.();
+                        try {
+                            popup.close();
+                        } catch {}
+                    }
+                };
+
+                listener = (event: MessageEvent) => {
+                    try {
+                        if (!connectOrigins.includes(event.origin)) return;
+                        const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+                        if (!data || data.type !== 'IH_WA_CONNECT_RESULT') return;
+                        void maybeDone(data.payload);
+                    } catch {}
+                };
+                window.addEventListener('message', listener);
+
+                await Promise.race([
+                    finishPromise,
+                    new Promise<void>((_resolve, reject) => setTimeout(() => reject(new Error('Tiempo de espera agotado')), 180000)),
+                    new Promise<void>((_resolve, reject) => {
+                        const t = setInterval(() => {
+                            try {
+                                if (popup.closed && !done) {
+                                    clearInterval(t);
+                                    reject(new Error('Ventana cerrada'));
+                                }
+                            } catch {}
+                        }, 500);
+                    }),
+                ]);
+                return;
+            }
+
+            const cfgRes = await api.getWhatsAppEmbeddedSignupConfig();
+            if (!cfgRes.ok || !cfgRes.data?.app_id || !cfgRes.data?.config_id) {
+                error(cfgRes.error || 'Falta configuración de Embedded Signup');
+                setConnectLoading(false);
+                return;
+            }
+            const embedded = cfgRes.data;
+
+            await ensureFacebookSdk(embedded.app_id, embedded.api_version || 'v19.0');
+
+            const w = window as any;
+            let code: string | null = null;
+            let wabaId: string | null = null;
+            let phoneNumberId: string | null = null;
+            let done = false;
+            let finishResolve: (() => void) | null = null;
+            const finishPromise = new Promise<void>((resolve) => {
+                finishResolve = resolve;
+            });
+
+            const maybeComplete = async () => {
+                if (done) return;
+                if (!code || !wabaId || !phoneNumberId) return;
+                done = true;
+                const res = await api.completeWhatsAppEmbeddedSignup({
+                    code,
+                    waba_id: wabaId,
+                    phone_number_id: phoneNumberId,
+                });
+                if (res.ok) {
+                    success('WhatsApp conectado. Plantillas en proceso de creación.');
+                    await loadConfig();
+                    await loadStatus();
+                } else {
+                    error(res.error || 'Error al completar el registro');
+                }
+                finishResolve?.();
+            };
+
+            listener = (event: MessageEvent) => {
+                try {
+                    if (event.origin !== 'https://www.facebook.com' && event.origin !== 'https://web.facebook.com') return;
+                    const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+                    if (!data || data.type !== 'WA_EMBEDDED_SIGNUP') return;
+                    if (data.event === 'FINISH') {
+                        const d = data.data || {};
+                        wabaId = String(d.waba_id || '');
+                        phoneNumberId = String(d.phone_number_id || '');
+                        void maybeComplete();
+                    }
+                } catch {}
+            };
+
+            window.addEventListener('message', listener);
+
+            await new Promise<void>((resolve) => {
+                w.FB.login(
+                    (response: any) => {
+                        try {
+                            code = response?.authResponse?.code ? String(response.authResponse.code) : null;
+                        } catch {
+                            code = null;
+                        }
+                        void maybeComplete();
+                        resolve();
+                    },
+                    {
+                        config_id: embedded.config_id,
+                        response_type: 'code',
+                        override_default_response_type: true,
+                        extras: { sessionInfoVersion: 2 },
+                    }
+                );
+            });
+            await Promise.race([
+                finishPromise,
+                new Promise<void>((_resolve, reject) => setTimeout(() => reject(new Error('Tiempo de espera agotado')), 120000)),
+            ]);
+        } catch (e: any) {
+            error(e?.message || 'Error al iniciar el registro');
+        } finally {
+            try {
+                if (listener) window.removeEventListener('message', listener);
+            } catch {}
+            setConnectLoading(false);
         }
     };
 
@@ -162,6 +405,85 @@ export default function WhatsAppPage() {
             loadMensajes();
         } else {
             error(res.error || 'Error al limpiar');
+        }
+    };
+
+    const openNewTemplate = () => {
+        setEditingTemplateName('');
+        setEditingTemplateBody('');
+        setEditingTemplateActive(true);
+        setTemplateModalOpen(true);
+    };
+
+    const openEditTemplate = (t: WhatsAppTemplate) => {
+        setEditingTemplateName(t.template_name);
+        setEditingTemplateBody(t.body_text || '');
+        setEditingTemplateActive(!!t.active);
+        setTemplateModalOpen(true);
+    };
+
+    const handleSaveTemplate = async () => {
+        const name = editingTemplateName.trim();
+        if (!name) {
+            error('Nombre de plantilla requerido');
+            return;
+        }
+        setTemplateSaving(true);
+        const res = await api.upsertWhatsAppTemplate(name, { body_text: editingTemplateBody, active: editingTemplateActive });
+        setTemplateSaving(false);
+        if (res.ok) {
+            success('Plantilla guardada');
+            setTemplateModalOpen(false);
+            loadTemplates();
+        } else {
+            error(res.error || 'Error al guardar plantilla');
+        }
+    };
+
+    const handleDeleteTemplate = async (name: string) => {
+        if (!confirm(`¿Eliminar la plantilla "${name}"?`)) return;
+        const res = await api.deleteWhatsAppTemplate(name);
+        if (res.ok) {
+            success('Plantilla eliminada');
+            loadTemplates();
+        } else {
+            error(res.error || 'Error al eliminar plantilla');
+        }
+    };
+
+    const handleUpdateTrigger = async (t: WhatsAppTrigger) => {
+        const res = await api.updateWhatsAppTrigger(t.trigger_key, {
+            enabled: !!t.enabled,
+            template_name: t.template_name ?? null,
+            cooldown_minutes: t.cooldown_minutes,
+        });
+        if (res.ok) {
+            success('Trigger actualizado');
+            loadTriggers();
+        } else {
+            error(res.error || 'Error al actualizar trigger');
+        }
+    };
+
+    const handleInitDefaultTriggers = async () => {
+        const res = await api.updateWhatsAppTrigger('overdue_daily', { enabled: false, cooldown_minutes: 1440 });
+        if (res.ok) {
+            success('Triggers inicializados');
+            loadTriggers();
+        } else {
+            error(res.error || 'Error al inicializar triggers');
+        }
+    };
+
+    const handleRunAutomation = async (dryRun: boolean) => {
+        setAutomationLoading(true);
+        const res = await api.runWhatsAppAutomation({ dry_run: dryRun, trigger_keys: ['overdue_daily'] });
+        setAutomationLoading(false);
+        if (res.ok && res.data) {
+            setAutomationLastResult({ scanned: res.data.scanned, sent: res.data.sent, dry_run: res.data.dry_run });
+            success(dryRun ? 'Dry-run ejecutado' : 'Automatización ejecutada');
+        } else {
+            error(res.error || 'Error al ejecutar automatización');
         }
     };
 
@@ -275,6 +597,14 @@ export default function WhatsAppPage() {
                         title="Refrescar"
                     >
                         <RefreshCw className="w-4 h-4" />
+                    </Button>
+                    <Button
+                        variant="secondary"
+                        leftIcon={<MessageSquare className="w-4 h-4" />}
+                        onClick={handleEmbeddedSignupConnect}
+                        isLoading={connectLoading}
+                    >
+                        Conectar con Meta
                     </Button>
                     <Button
                         variant="secondary"
@@ -414,6 +744,131 @@ export default function WhatsAppPage() {
                 />
             </motion.div>
 
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.35 }}
+                className="grid grid-cols-1 lg:grid-cols-2 gap-4"
+            >
+                <div className="card p-4">
+                    <div className="flex items-center justify-between gap-3">
+                        <div>
+                            <div className="text-white font-semibold">Plantillas (Internas)</div>
+                            <div className="text-xs text-slate-500">Biblioteca interna (útil para fallback a texto)</div>
+                        </div>
+                        <Button size="sm" variant="secondary" onClick={openNewTemplate} leftIcon={<Bell className="w-4 h-4" />}>
+                            Nueva
+                        </Button>
+                    </div>
+                    <div className="mt-4 space-y-2">
+                        {templatesLoading ? (
+                            <div className="text-sm text-slate-400">Cargando...</div>
+                        ) : templates.length === 0 ? (
+                            <div className="text-sm text-slate-400">No hay plantillas cargadas.</div>
+                        ) : (
+                            templates.map((t) => (
+                                <div key={t.template_name} className="flex items-start justify-between gap-3 rounded-lg bg-slate-900/40 border border-slate-800 p-3">
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-2">
+                                            <div className="font-medium text-white truncate">{t.template_name}</div>
+                                            <span className={cn('text-xs px-2 py-0.5 rounded-full', t.active ? 'bg-success-500/20 text-success-400' : 'bg-slate-700 text-slate-300')}>
+                                                {t.active ? 'Activa' : 'Inactiva'}
+                                            </span>
+                                        </div>
+                                        <div className="text-xs text-slate-500 mt-1 truncate">{t.body_text}</div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <Button size="sm" variant="ghost" onClick={() => openEditTemplate(t)}>
+                                            Editar
+                                        </Button>
+                                        <Button size="sm" variant="danger" onClick={() => handleDeleteTemplate(t.template_name)}>
+                                            Borrar
+                                        </Button>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </div>
+
+                <div className="card p-4">
+                    <div className="flex items-center justify-between gap-3">
+                        <div>
+                            <div className="text-white font-semibold">Automatizaciones</div>
+                            <div className="text-xs text-slate-500">Switches por gimnasio (tenant)</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Button size="sm" variant="secondary" onClick={handleInitDefaultTriggers} disabled={triggersLoading}>
+                                Inicializar
+                            </Button>
+                            <Button size="sm" variant="secondary" onClick={() => loadTriggers()} disabled={triggersLoading}>
+                                Refrescar
+                            </Button>
+                        </div>
+                    </div>
+
+                    <div className="mt-4 space-y-2">
+                        {triggersLoading ? (
+                            <div className="text-sm text-slate-400">Cargando...</div>
+                        ) : triggers.length === 0 ? (
+                            <div className="text-sm text-slate-400">No hay triggers configurados.</div>
+                        ) : (
+                            triggers.map((t) => (
+                                <div key={t.trigger_key} className="rounded-lg bg-slate-900/40 border border-slate-800 p-3">
+                                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <div className="font-medium text-white">{t.trigger_key}</div>
+                                            <div className="text-xs text-slate-500 mt-1">
+                                                Última ejecución: {t.last_run_at ? formatDate(t.last_run_at) + ' ' + formatTime(t.last_run_at) : 'nunca'}
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <label className="flex items-center gap-2 text-sm text-slate-300">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={!!t.enabled}
+                                                    onChange={(e) => setTriggers((prev) => prev.map((x) => x.trigger_key === t.trigger_key ? { ...x, enabled: e.target.checked } : x))}
+                                                />
+                                                Habilitado
+                                            </label>
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs text-slate-500">Cooldown (min)</span>
+                                                <input
+                                                    className="w-20 bg-slate-950 border border-slate-800 rounded px-2 py-1 text-sm text-white"
+                                                    type="number"
+                                                    value={t.cooldown_minutes ?? 0}
+                                                    onChange={(e) => {
+                                                        const v = Number(e.target.value);
+                                                        setTriggers((prev) => prev.map((x) => x.trigger_key === t.trigger_key ? { ...x, cooldown_minutes: Number.isFinite(v) ? v : 0 } : x));
+                                                    }}
+                                                />
+                                            </div>
+                                            <Button size="sm" variant="secondary" onClick={() => handleUpdateTrigger(t)}>
+                                                Guardar
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+
+                    <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-t border-slate-800 pt-4">
+                        <div className="text-xs text-slate-500">
+                            {automationLastResult ? `Último run: scanned=${automationLastResult.scanned}, sent=${automationLastResult.sent}, dry_run=${automationLastResult.dry_run}` : 'Sin ejecuciones recientes'}
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Button size="sm" variant="secondary" onClick={() => handleRunAutomation(true)} isLoading={automationLoading}>
+                                Dry-run
+                            </Button>
+                            <Button size="sm" onClick={() => handleRunAutomation(false)} isLoading={automationLoading}>
+                                Ejecutar
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            </motion.div>
+
             {/* Config Modal */}
             <Modal
                 isOpen={configModalOpen}
@@ -458,7 +913,9 @@ export default function WhatsAppPage() {
                             type="password"
                             placeholder="EAAxxxxxx..."
                         />
-                        <p className="text-xs text-slate-500 mt-1">Token de acceso de la API de Meta</p>
+                        <p className="text-xs text-slate-500 mt-1">
+                            {config.access_token_present ? 'Token ya configurado (dejar vacío para mantenerlo).' : 'Token de acceso de la API de Meta.'}
+                        </p>
                     </div>
                     <div>
                         <Input
@@ -495,6 +952,46 @@ export default function WhatsAppPage() {
                             </div>
                         </label>
                     </div>
+                </div>
+            </Modal>
+
+            <Modal
+                isOpen={templateModalOpen}
+                onClose={() => setTemplateModalOpen(false)}
+                title={editingTemplateName ? `Editar plantilla: ${editingTemplateName}` : 'Nueva plantilla'}
+                size="lg"
+                footer={
+                    <>
+                        <Button variant="secondary" onClick={() => setTemplateModalOpen(false)}>
+                            Cancelar
+                        </Button>
+                        <Button onClick={handleSaveTemplate} isLoading={templateSaving}>
+                            Guardar
+                        </Button>
+                    </>
+                }
+            >
+                <div className="space-y-4">
+                    <Input
+                        label="Nombre"
+                        value={editingTemplateName}
+                        onChange={(e) => setEditingTemplateName(e.target.value)}
+                        placeholder="welcome"
+                        disabled={templates.some((t) => t.template_name === editingTemplateName)}
+                    />
+                    <div>
+                        <div className="text-sm text-slate-300 mb-1">Body</div>
+                        <textarea
+                            className="w-full min-h-[160px] bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm"
+                            value={editingTemplateBody}
+                            onChange={(e) => setEditingTemplateBody(e.target.value)}
+                            placeholder="Texto..."
+                        />
+                    </div>
+                    <label className="flex items-center gap-2 text-sm text-slate-300">
+                        <input type="checkbox" checked={editingTemplateActive} onChange={(e) => setEditingTemplateActive(e.target.checked)} />
+                        Activa
+                    </label>
                 </div>
             </Modal>
 

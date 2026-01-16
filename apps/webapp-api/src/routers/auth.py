@@ -8,6 +8,8 @@ from fastapi.templating import Jinja2Templates
 from src.dependencies import get_auth_service, get_attendance_service, ensure_tenant_context, require_user_auth
 from src.services.auth_service import AuthService
 from src.services.attendance_service import AttendanceService
+from sqlalchemy import select
+from src.database.orm_models import Profesor
 from src.utils import (
     _resolve_theme_vars, _resolve_logo_url, 
     get_gym_name, _issue_usuario_jwt, _get_usuario_nombre,
@@ -295,6 +297,7 @@ async def gestion_auth(
         return RedirectResponse(url=redirect_url, status_code=303)
         
     usuario_id_raw = data.get("usuario_id")
+    profesor_id_raw = data.get("profesor_id")
     owner_password = str(data.get("owner_password", "")).strip()
     pin_raw = data.get("pin")
 
@@ -311,10 +314,24 @@ async def gestion_auth(
         return error_response("Credenciales inválidas")
 
     # Professor/User login logic
+    profesor_id = None
     try:
-        usuario_id = int(usuario_id_raw) if usuario_id_raw is not None else None
+        profesor_id = int(profesor_id_raw) if profesor_id_raw is not None else None
     except Exception:
-        usuario_id = None
+        profesor_id = None
+
+    usuario_id = None
+    if profesor_id:
+        try:
+            p = svc.db.execute(select(Profesor).where(Profesor.id == int(profesor_id)).limit(1)).scalars().first()
+            usuario_id = int(getattr(p, "usuario_id", None) or 0) or None
+        except Exception:
+            usuario_id = None
+    if usuario_id is None:
+        try:
+            usuario_id = int(usuario_id_raw) if usuario_id_raw is not None else None
+        except Exception:
+            usuario_id = None
         
     pin = str(pin_raw or "").strip()
     
@@ -338,12 +355,15 @@ async def gestion_auth(
     user_name = getattr(user, 'nombre', None) if user else None
     
     # Check for professor privileges
-    profesores = svc.obtener_profesores_activos()
-    profesor_id = None
-    for p in profesores:
-        if p.get('usuario_id') == usuario_id:
-            profesor_id = p.get('id')
-            break
+    try:
+        if not profesor_id:
+            profesores = svc.obtener_profesores_activos()
+            for p in profesores:
+                if p.get('usuario_id') == usuario_id:
+                    profesor_id = p.get('id')
+                    break
+    except Exception:
+        profesor_id = profesor_id
         
     request.session["gestion_profesor_user_id"] = usuario_id
     request.session["tenant"] = tenant

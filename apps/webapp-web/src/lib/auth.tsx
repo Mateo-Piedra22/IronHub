@@ -29,7 +29,7 @@ export function useAuth() {
 // Protected routes config
 const protectedRoutes = {
     '/gestion': ['owner', 'admin', 'profesor'],
-    '/dashboard': ['owner', 'admin', 'profesor', 'user'],
+    '/dashboard': ['owner'],
     '/usuario': ['user', 'owner', 'admin', 'profesor'],
 };
 
@@ -106,6 +106,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 // Not authenticated - redirect to login
                 if (matchedRoute === '/gestion') {
                     router.replace('/gestion-login');
+                } else if (matchedRoute === '/dashboard') {
+                    router.replace('/login');
                 } else {
                     router.replace('/usuario-login');
                 }

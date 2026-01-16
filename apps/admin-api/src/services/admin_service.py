@@ -6,6 +6,7 @@ import unicodedata
 import secrets
 import hashlib
 import base64
+import json
 from typing import Any, Dict, List, Optional
 import psycopg2
 import psycopg2.extras
@@ -189,6 +190,26 @@ class AdminService:
                 cur.execute(
                     "CREATE TABLE IF NOT EXISTS gym_subscriptions (id BIGSERIAL PRIMARY KEY, gym_id BIGINT NOT NULL REFERENCES gyms(id) ON DELETE CASCADE, plan_id BIGINT NOT NULL REFERENCES plans(id) ON DELETE RESTRICT, start_date DATE NOT NULL, next_due_date DATE NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW())"
                 )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS whatsapp_template_catalog (
+                        id BIGSERIAL PRIMARY KEY,
+                        template_name TEXT UNIQUE NOT NULL,
+                        category TEXT NOT NULL DEFAULT 'UTILITY',
+                        language TEXT NOT NULL DEFAULT 'es_AR',
+                        body_text TEXT NOT NULL,
+                        example_params JSONB,
+                        active BOOLEAN NOT NULL DEFAULT TRUE,
+                        version INTEGER NOT NULL DEFAULT 1,
+                        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+                        updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                    )
+                    """
+                )
+                try:
+                    cur.execute("CREATE INDEX IF NOT EXISTS idx_whatsapp_template_catalog_active ON whatsapp_template_catalog (active)")
+                except Exception:
+                    pass
                 try:
                     cur.execute("CREATE INDEX IF NOT EXISTS idx_gyms_subdominio_lower ON gyms (lower(subdominio))")
                 except Exception:
@@ -203,6 +224,31 @@ class AdminService:
                     except Exception:
                         pass
                 conn.commit()
+
+                try:
+                    cur.execute("SELECT COUNT(*) FROM whatsapp_template_catalog")
+                    c = int((cur.fetchone() or [0])[0])
+                    if c == 0:
+                        defaults = self._default_whatsapp_template_catalog()
+                        for t in defaults:
+                            cur.execute(
+                                "INSERT INTO whatsapp_template_catalog (template_name, category, language, body_text, example_params, active, version) VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (template_name) DO NOTHING",
+                                (
+                                    t.get("template_name"),
+                                    t.get("category"),
+                                    t.get("language"),
+                                    t.get("body_text"),
+                                    psycopg2.extras.Json(t.get("example_params")) if t.get("example_params") is not None else None,
+                                    bool(t.get("active", True)),
+                                    int(t.get("version", 1)),
+                                ),
+                            )
+                        conn.commit()
+                except Exception:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
         except Exception as e:
             logger.error(f"Error ensuring schema: {e}")
 
@@ -1853,11 +1899,38 @@ class AdminService:
         except Exception:
             return False
 
+    def clear_gym_whatsapp_config(self, gym_id: int) -> bool:
+        try:
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    UPDATE gyms
+                    SET whatsapp_phone_id = NULL,
+                        whatsapp_access_token = NULL,
+                        whatsapp_business_account_id = NULL,
+                        whatsapp_verify_token = NULL,
+                        whatsapp_app_secret = NULL,
+                        whatsapp_nonblocking = FALSE,
+                        whatsapp_send_timeout_seconds = NULL
+                    WHERE id = %s
+                    """,
+                    (int(gym_id),)
+                )
+                conn.commit()
+            try:
+                self._push_whatsapp_to_gym_db(int(gym_id))
+            except Exception:
+                pass
+            return True
+        except Exception:
+            return False
+
     def _push_whatsapp_to_gym_db(self, gym_id: int) -> bool:
         try:
             with self.db.get_connection_context() as conn:
                 cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                cur.execute("SELECT db_name, subdominio, whatsapp_phone_id, whatsapp_access_token, whatsapp_business_account_id, whatsapp_verify_token, whatsapp_app_secret FROM gyms WHERE id = %s", (int(gym_id),))
+                cur.execute("SELECT db_name, subdominio, whatsapp_phone_id, whatsapp_access_token, whatsapp_business_account_id, whatsapp_verify_token, whatsapp_app_secret, whatsapp_nonblocking, whatsapp_send_timeout_seconds FROM gyms WHERE id = %s", (int(gym_id),))
                 row = cur.fetchone()
             if not row: return False
             
@@ -1905,17 +1978,74 @@ class AdminService:
                                 "INSERT INTO configuracion (clave, valor) VALUES (%s, %s) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor",
                                 (k, v)
                             )
+                        def _delete_config(k):
+                            t_cur.execute("DELETE FROM configuracion WHERE clave = %s", (k,))
 
-                        if row.get("whatsapp_phone_id"):
-                            _upsert_config("WHATSAPP_PHONE_ID", str(row.get("whatsapp_phone_id")))
-                        if row.get("whatsapp_business_account_id"):
-                            _upsert_config("WHATSAPP_BUSINESS_ACCOUNT_ID", str(row.get("whatsapp_business_account_id")))
+                        phone_id = str(row.get("whatsapp_phone_id") or "").strip()
+                        waba_id = str(row.get("whatsapp_business_account_id") or "").strip()
+
+                        if phone_id:
+                            _upsert_config("WHATSAPP_PHONE_ID", phone_id)
+                        else:
+                            _delete_config("WHATSAPP_PHONE_ID")
+
+                        if waba_id:
+                            _upsert_config("WHATSAPP_BUSINESS_ACCOUNT_ID", waba_id)
+                        else:
+                            _delete_config("WHATSAPP_BUSINESS_ACCOUNT_ID")
+
                         if at:
                             _upsert_config("WHATSAPP_ACCESS_TOKEN", at)
+                        else:
+                            _delete_config("WHATSAPP_ACCESS_TOKEN")
+
                         if vt:
                             _upsert_config("WHATSAPP_VERIFY_TOKEN", vt)
+                            _upsert_config("webhook_verify_token", vt)
+                        else:
+                            _delete_config("WHATSAPP_VERIFY_TOKEN")
+                            _delete_config("webhook_verify_token")
+
                         if asc:
                             _upsert_config("WHATSAPP_APP_SECRET", asc)
+                        else:
+                            _delete_config("WHATSAPP_APP_SECRET")
+
+                        try:
+                            nb = bool(row.get("whatsapp_nonblocking") or False)
+                            _upsert_config("NONBLOCKING_WHATSAPP_SEND", "1" if nb else "0")
+                        except Exception:
+                            pass
+                        try:
+                            st = row.get("whatsapp_send_timeout_seconds")
+                            if st is None:
+                                _delete_config("WHATSAPP_SEND_TIMEOUT_SECONDS")
+                            else:
+                                _upsert_config("WHATSAPP_SEND_TIMEOUT_SECONDS", str(st))
+                        except Exception:
+                            pass
+
+                        t_cur.execute(
+                            """
+                            CREATE TABLE IF NOT EXISTS whatsapp_config (
+                                id SERIAL PRIMARY KEY,
+                                phone_id VARCHAR(50) NOT NULL,
+                                waba_id VARCHAR(50) NOT NULL,
+                                access_token TEXT,
+                                active BOOLEAN DEFAULT TRUE,
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                            )
+                            """
+                        )
+
+                        if phone_id and waba_id and at:
+                            t_cur.execute("UPDATE whatsapp_config SET active = FALSE")
+                            t_cur.execute(
+                                "INSERT INTO whatsapp_config (phone_id, waba_id, access_token, active) VALUES (%s, %s, %s, TRUE)",
+                                (phone_id, waba_id, at)
+                            )
+                        else:
+                            t_cur.execute("UPDATE whatsapp_config SET active = FALSE")
                             
                         # Push CDN/Logo URL config if available
                         try:
@@ -2225,9 +2355,379 @@ class AdminService:
             return False
 
     def listar_templates(self) -> List[Dict[str, Any]]:
-        # Placeholder: return empty list or hardcoded templates
-        # If there was a templates table, query it here.
-        return []
+        return self.listar_whatsapp_template_catalog()
+
+    def _default_whatsapp_template_catalog(self) -> List[Dict[str, Any]]:
+        lang = (os.getenv("WHATSAPP_TEMPLATE_LANGUAGE") or "es_AR").strip()
+        templates = [
+            ("ih_welcome_v1", "UTILITY", f"Hola {{{{1}}}}. ¡Bienvenido/a! Si necesitás ayuda, respondé a este mensaje.", ["Mateo"]),
+            ("ih_payment_confirmed_v1", "UTILITY", "Hola {{1}}. Confirmamos tu pago de ${{2}} correspondiente a {{3}}. ¡Gracias!", ["Mateo", "25000", "01/2026"]),
+            ("ih_membership_due_today_v1", "UTILITY", "Hola {{1}}. Recordatorio: tu cuota vence hoy ({{2}}). Si ya abonaste, ignorá este mensaje.", ["Mateo", "16/01"]),
+            ("ih_membership_due_soon_v1", "UTILITY", "Hola {{1}}. Tu cuota vence el {{2}}. Si querés, respondé a este mensaje y te ayudamos a regularizar.", ["Mateo", "20/01"]),
+            ("ih_membership_overdue_v1", "UTILITY", "Hola {{1}}. Tu cuota está vencida. Si ya abonaste, ignorá este mensaje. Si necesitás ayuda, respondé “AYUDA”.", ["Mateo"]),
+            ("ih_membership_deactivated_v1", "UTILITY", "Hola {{1}}. Tu acceso está temporalmente suspendido. Motivo: {{2}}. Respondé a este mensaje si necesitás asistencia.", ["Mateo", "cuotas vencidas"]),
+            ("ih_membership_reactivated_v1", "UTILITY", "Hola {{1}}. Tu acceso fue reactivado. ¡Gracias!", ["Mateo"]),
+            ("ih_class_booking_confirmed_v1", "UTILITY", "Reserva confirmada: {{1}} el {{2}} a las {{3}}. Si no podés asistir, respondé “CANCELAR”.", ["Funcional", "16/01", "19:00"]),
+            ("ih_class_booking_cancelled_v1", "UTILITY", "Tu reserva para {{1}} ({{2}} {{3}}) fue cancelada.", ["Funcional", "16/01", "19:00"]),
+            ("ih_class_reminder_v1", "UTILITY", "Hola {{1}}. Recordatorio: {{2}} el {{3}} a las {{4}}.", ["Mateo", "Funcional", "16/01", "19:00"]),
+            ("ih_waitlist_spot_available_v1", "UTILITY", "Hola {{1}}. Se liberó un cupo para {{2}} ({{3}} {{4}}). Respondé “SI” para tomarlo.", ["Mateo", "Funcional", "viernes", "19:00"]),
+            ("ih_waitlist_confirmed_v1", "UTILITY", "Listo {{1}}. Te anotamos en {{2}} ({{3}} {{4}}).", ["Mateo", "Funcional", "viernes", "19:00"]),
+            ("ih_schedule_change_v1", "UTILITY", "Aviso: hubo un cambio en {{1}}. Nuevo horario: {{2}} {{3}}.", ["Funcional", "viernes", "20:00"]),
+            ("ih_auth_code_v1", "AUTHENTICATION", "Tu código de verificación es {{1}}. Vence en {{2}} minutos. No lo compartas con nadie.", ["928314", "10"]),
+            ("ih_marketing_promo_v1", "MARKETING", "Hola {{1}}. Esta semana tenemos {{2}}. Si querés más info, respondé a este mensaje.", ["Mateo", "descuento del 10% en el plan trimestral"]),
+            ("ih_marketing_new_class_v1", "MARKETING", "Nueva clase disponible: {{1}}. Primer horario: {{2}} {{3}}. ¿Querés que te reservemos un lugar?", ["Movilidad", "miércoles", "18:00"]),
+        ]
+        return [
+            {
+                "template_name": name,
+                "category": category,
+                "language": lang,
+                "body_text": body,
+                "example_params": examples,
+                "active": True,
+                "version": 1,
+            }
+            for name, category, body, examples in templates
+        ]
+
+    def listar_whatsapp_template_catalog(self, active_only: bool = False) -> List[Dict[str, Any]]:
+        try:
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                if active_only:
+                    cur.execute(
+                        "SELECT template_name, category, language, body_text, example_params, active, version, created_at, updated_at FROM whatsapp_template_catalog WHERE active = TRUE ORDER BY template_name ASC"
+                    )
+                else:
+                    cur.execute(
+                        "SELECT template_name, category, language, body_text, example_params, active, version, created_at, updated_at FROM whatsapp_template_catalog ORDER BY template_name ASC"
+                    )
+                rows = cur.fetchall() or []
+            out = []
+            for r in rows:
+                out.append(
+                    {
+                        "template_name": str(r.get("template_name") or ""),
+                        "category": str(r.get("category") or "UTILITY"),
+                        "language": str(r.get("language") or "es_AR"),
+                        "body_text": str(r.get("body_text") or ""),
+                        "example_params": r.get("example_params"),
+                        "active": bool(r.get("active") is True),
+                        "version": int(r.get("version") or 1),
+                        "created_at": str(r.get("created_at") or ""),
+                        "updated_at": str(r.get("updated_at") or ""),
+                    }
+                )
+            return out
+        except Exception:
+            return []
+
+    def upsert_whatsapp_template_catalog(self, template_name: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        name = str(template_name or "").strip()
+        if not name:
+            return {"ok": False, "error": "template_name_required"}
+        try:
+            category = str((data or {}).get("category") or "UTILITY").strip().upper()
+            if category not in ("UTILITY", "AUTHENTICATION", "MARKETING"):
+                category = "UTILITY"
+            language = str((data or {}).get("language") or "es_AR").strip()
+            body_text = str((data or {}).get("body_text") or "").strip()
+            if not body_text:
+                return {"ok": False, "error": "body_text_required"}
+            active = bool((data or {}).get("active", True))
+            version = int((data or {}).get("version") or 1)
+            examples = (data or {}).get("example_params")
+            examples_json = psycopg2.extras.Json(examples) if examples is not None else None
+
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO whatsapp_template_catalog (template_name, category, language, body_text, example_params, active, version, updated_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,NOW())
+                    ON CONFLICT (template_name) DO UPDATE SET
+                        category = EXCLUDED.category,
+                        language = EXCLUDED.language,
+                        body_text = EXCLUDED.body_text,
+                        example_params = EXCLUDED.example_params,
+                        active = EXCLUDED.active,
+                        version = EXCLUDED.version,
+                        updated_at = NOW()
+                    """,
+                    (name, category, language, body_text, examples_json, active, version),
+                )
+                conn.commit()
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def delete_whatsapp_template_catalog(self, template_name: str) -> Dict[str, Any]:
+        name = str(template_name or "").strip()
+        if not name:
+            return {"ok": False, "error": "template_name_required"}
+        try:
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute("DELETE FROM whatsapp_template_catalog WHERE template_name = %s", (name,))
+                conn.commit()
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def provision_whatsapp_templates_to_gym(self, gym_id: int) -> Dict[str, Any]:
+        try:
+            gid = int(gym_id)
+        except Exception:
+            return {"ok": False, "error": "invalid_gym_id"}
+
+        if requests is None:
+            return {"ok": False, "error": "requests_not_available"}
+
+        try:
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute("SELECT db_name FROM gyms WHERE id = %s", (gid,))
+                row = cur.fetchone()
+            if not row:
+                return {"ok": False, "error": "gym_not_found"}
+            db_name = str(row.get("db_name") or "").strip()
+            if not db_name:
+                return {"ok": False, "error": "gym_db_missing"}
+
+            params = self.resolve_admin_db_params()
+            pg_params = {
+                "host": params.get("host"),
+                "port": params.get("port"),
+                "dbname": db_name,
+                "user": params.get("user"),
+                "password": params.get("password"),
+                "sslmode": params.get("sslmode"),
+                "connect_timeout": params.get("connect_timeout"),
+                "application_name": "admin_provision_whatsapp_templates",
+            }
+
+            with psycopg2.connect(**pg_params) as t_conn:
+                with t_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as t_cur:
+                    t_cur.execute(
+                        "SELECT phone_id, waba_id, access_token FROM whatsapp_config WHERE active = TRUE ORDER BY created_at DESC LIMIT 1"
+                    )
+                    cfg = t_cur.fetchone()
+            if not cfg:
+                return {"ok": False, "error": "tenant_whatsapp_not_configured"}
+
+            waba_id = str(cfg.get("waba_id") or "").strip()
+            token_raw = str(cfg.get("access_token") or "").strip()
+            token = SecureConfig.decrypt_waba_secret(token_raw) if token_raw else ""
+            if not token and (token_raw.startswith("EAA") or token_raw.startswith("EAAB") or token_raw.startswith("EAAJ")):
+                token = token_raw
+
+            if not waba_id or not token:
+                return {"ok": False, "error": "tenant_whatsapp_missing_waba_or_token"}
+
+            templates = self.listar_whatsapp_template_catalog(active_only=True)
+            if not templates:
+                templates = self._default_whatsapp_template_catalog()
+
+            api_version = (os.getenv("META_GRAPH_API_VERSION") or os.getenv("WHATSAPP_API_VERSION") or "v19.0").strip()
+            list_url = f"https://graph.facebook.com/{api_version}/{waba_id}/message_templates"
+            headers = {"Authorization": f"Bearer {token}"}
+
+            existing = set()
+            after = None
+            for _ in range(10):
+                params_q = {"fields": "name,status", "limit": "200"}
+                if after:
+                    params_q["after"] = after
+                resp = requests.get(list_url, headers=headers, params=params_q, timeout=20)
+                data = resp.json() if resp.content else {}
+                if resp.status_code >= 400:
+                    return {"ok": False, "error": str((data or {}).get("error") or data or resp.text)}
+                for item in (data.get("data") or []):
+                    n = (item or {}).get("name")
+                    if n:
+                        existing.add(str(n))
+                cursors = ((data.get("paging") or {}).get("cursors") or {})
+                after = cursors.get("after")
+                if not after:
+                    break
+
+            created = []
+            failed = []
+            create_url = list_url
+            for t in templates:
+                name = str(t.get("template_name") or "").strip()
+                if not name or name in existing:
+                    continue
+                body_text = str(t.get("body_text") or "").strip()
+                lang = str(t.get("language") or "es_AR").strip()
+                cat = str(t.get("category") or "UTILITY").strip().upper()
+                examples = t.get("example_params") or []
+                payload = {
+                    "name": name,
+                    "language": lang,
+                    "category": cat,
+                    "components": [
+                        {
+                            "type": "BODY",
+                            "text": body_text,
+                            "example": {"body_text": [examples]} if isinstance(examples, list) and examples else None,
+                        }
+                    ],
+                }
+                if payload["components"][0]["example"] is None:
+                    payload["components"][0].pop("example", None)
+                try:
+                    r2 = requests.post(create_url, headers={**headers, "Content-Type": "application/json"}, json=payload, timeout=30)
+                    d2 = r2.json() if r2.content else {}
+                    if r2.status_code >= 400:
+                        failed.append({"name": name, "error": str((d2 or {}).get("error") or d2 or r2.text)})
+                    else:
+                        created.append(name)
+                except Exception as e:
+                    failed.append({"name": name, "error": str(e)})
+
+            self.log_action("owner", "whatsapp_templates_provisioned", gid, f"created={len(created)} failed={len(failed)}")
+            return {"ok": True, "existing_count": len(existing), "created": created, "failed": failed}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def whatsapp_health_check_for_gym(self, gym_id: int) -> Dict[str, Any]:
+        try:
+            gid = int(gym_id)
+        except Exception:
+            return {"ok": False, "error": "invalid_gym_id"}
+
+        if requests is None:
+            return {"ok": False, "error": "requests_not_available"}
+
+        try:
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute("SELECT db_name FROM gyms WHERE id = %s", (gid,))
+                row = cur.fetchone()
+            if not row:
+                return {"ok": False, "error": "gym_not_found"}
+            db_name = str(row.get("db_name") or "").strip()
+            if not db_name:
+                return {"ok": False, "error": "gym_db_missing"}
+
+            params = self.resolve_admin_db_params()
+            pg_params = {
+                "host": params.get("host"),
+                "port": params.get("port"),
+                "dbname": db_name,
+                "user": params.get("user"),
+                "password": params.get("password"),
+                "sslmode": params.get("sslmode"),
+                "connect_timeout": params.get("connect_timeout"),
+                "application_name": "admin_whatsapp_health_check",
+            }
+
+            with psycopg2.connect(**pg_params) as t_conn:
+                with t_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as t_cur:
+                    t_cur.execute(
+                        "SELECT phone_id, waba_id, access_token FROM whatsapp_config WHERE active = TRUE ORDER BY created_at DESC LIMIT 1"
+                    )
+                    cfg = t_cur.fetchone()
+                    t_cur.execute("SELECT valor FROM configuracion WHERE clave = %s LIMIT 1", ("WHATSAPP_SEND_TIMEOUT_SECONDS",))
+                    r_to = t_cur.fetchone()
+            if not cfg:
+                return {"ok": False, "error": "tenant_whatsapp_not_configured"}
+
+            phone_id = str(cfg.get("phone_id") or "").strip()
+            waba_id = str(cfg.get("waba_id") or "").strip()
+            token_raw = str(cfg.get("access_token") or "").strip()
+            token = SecureConfig.decrypt_waba_secret(token_raw) if token_raw else ""
+            if not token and (token_raw.startswith("EAA") or token_raw.startswith("EAAB") or token_raw.startswith("EAAJ")):
+                token = token_raw
+
+            if not phone_id or not waba_id:
+                return {"ok": False, "error": "missing_phone_or_waba", "phone_id": phone_id, "waba_id": waba_id}
+            if not token:
+                return {"ok": False, "error": "missing_token", "phone_id": phone_id, "waba_id": waba_id}
+
+            api_version = (os.getenv("META_GRAPH_API_VERSION") or os.getenv("WHATSAPP_API_VERSION") or "v19.0").strip()
+            try:
+                timeout = float((r_to or {}).get("valor") or 25.0) if r_to else 25.0
+            except Exception:
+                timeout = 25.0
+            if timeout < 5:
+                timeout = 5.0
+            if timeout > 120:
+                timeout = 120.0
+
+            headers = {"Authorization": f"Bearer {token}"}
+            errors: list[str] = []
+            phone_info: Dict[str, Any] = {}
+            templates = {"count": 0, "approved": 0, "pending": 0, "rejected": 0}
+
+            try:
+                r = requests.get(
+                    f"https://graph.facebook.com/{api_version}/{phone_id}",
+                    headers=headers,
+                    params={"fields": "id,display_phone_number,verified_name,quality_rating,platform_type,code_verification_status"},
+                    timeout=timeout,
+                )
+                data = r.json() if r.content else {}
+                if r.status_code >= 400:
+                    errors.append(str((data or {}).get("error") or data or f"HTTP {r.status_code}"))
+                else:
+                    phone_info = data if isinstance(data, dict) else {}
+            except Exception as e:
+                errors.append(str(e))
+
+            try:
+                r = requests.get(
+                    f"https://graph.facebook.com/{api_version}/{waba_id}/message_templates",
+                    headers=headers,
+                    params={"fields": "name,status", "limit": "200"},
+                    timeout=timeout,
+                )
+                data = r.json() if r.content else {}
+                if r.status_code >= 400:
+                    errors.append(str((data or {}).get("error") or data or f"HTTP {r.status_code}"))
+                else:
+                    items = data.get("data") or []
+                    templates["count"] = int(len(items))
+                    for it in items:
+                        st = str((it or {}).get("status") or "").upper()
+                        if st == "APPROVED":
+                            templates["approved"] += 1
+                        elif st in ("PENDING", "IN_APPEAL"):
+                            templates["pending"] += 1
+                        elif st == "REJECTED":
+                            templates["rejected"] += 1
+            except Exception as e:
+                errors.append(str(e))
+
+            app_id = (os.getenv("META_APP_ID") or os.getenv("FACEBOOK_APP_ID") or "").strip()
+            subscribed = None
+            if app_id:
+                try:
+                    r = requests.get(
+                        f"https://graph.facebook.com/{api_version}/{waba_id}/subscribed_apps",
+                        headers=headers,
+                        timeout=timeout,
+                    )
+                    data = r.json() if r.content else {}
+                    if r.status_code >= 400:
+                        errors.append(str((data or {}).get("error") or data or f"HTTP {r.status_code}"))
+                    else:
+                        subscribed = any(str((x or {}).get("id") or "") == str(app_id) for x in (data.get("data") or []))
+                except Exception as e:
+                    errors.append(str(e))
+
+            return {
+                "ok": len(errors) == 0,
+                "phone_id": phone_id,
+                "waba_id": waba_id,
+                "phone": phone_info,
+                "templates": templates,
+                "subscribed_apps": {"app_id": app_id or None, "subscribed": subscribed},
+                "errors": errors,
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     def set_gym_owner_password(self, gym_id: int, new_password: str) -> bool:
         """

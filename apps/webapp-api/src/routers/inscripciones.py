@@ -9,8 +9,9 @@ from fastapi import status
 from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
-from src.dependencies import require_gestion_access, get_inscripciones_service
+from src.dependencies import require_gestion_access, require_owner, get_inscripciones_service, get_whatsapp_dispatch_service
 from src.services.inscripciones_service import InscripcionesService
+from src.services.whatsapp_dispatch_service import WhatsAppDispatchService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ async def api_clase_tipos_list(
 @router.post("/api/clases/tipos")
 async def api_clase_tipo_create(
     request: Request,
-    _=Depends(require_gestion_access),
+    _=Depends(require_owner),
     svc: InscripcionesService = Depends(get_inscripciones_service)
 ):
     """Create a class type."""
@@ -67,7 +68,7 @@ async def api_clase_tipo_create(
 @router.delete("/api/clases/tipos/{tipo_id}")
 async def api_clase_tipo_delete(
     tipo_id: int,
-    _=Depends(require_gestion_access),
+    _=Depends(require_owner),
     svc: InscripcionesService = Depends(get_inscripciones_service)
 ):
     """Delete a class type (soft delete)."""
@@ -80,6 +81,23 @@ async def api_clase_tipo_delete(
 
 
 # === Clase Horarios ===
+
+@router.get("/api/clases/agenda")
+async def api_clases_agenda(
+    request: Request,
+    _=Depends(require_gestion_access),
+    svc: InscripcionesService = Depends(get_inscripciones_service)
+):
+    """List schedule entries across classes (calendar view)."""
+    role = str(request.session.get("role") or "").lower()
+    profesor_id = None
+    if role == "profesor":
+        pid = request.session.get("gestion_profesor_id")
+        if pid is None:
+            return {"agenda": []}
+        profesor_id = int(pid)
+    return {"agenda": svc.obtener_agenda(profesor_id=profesor_id)}
+
 
 @router.get("/api/clases/{clase_id}/horarios")
 async def api_clase_horarios_list(
@@ -310,7 +328,8 @@ async def api_lista_espera_notify(
     horario_id: int,
     request: Request,
     _=Depends(require_gestion_access),
-    svc: InscripcionesService = Depends(get_inscripciones_service)
+    svc: InscripcionesService = Depends(get_inscripciones_service),
+    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service)
 ):
     """Notify next person in waitlist via WhatsApp."""
     try:
@@ -319,13 +338,14 @@ async def api_lista_espera_notify(
         
         if not first:
             return {"ok": False, "message": "Lista de espera vacía"}
-        
-        # WhatsApp notification would be handled separately
-        return {
-            "ok": True,
-            "notified_user": first.get('nombre'),
-            "whatsapp_sent": False  # Simplified - actual WhatsApp integration would be here
-        }
+        info = svc.obtener_horario_info(horario_id) or {}
+        ok = wa.send_waitlist_promotion(
+            int(first.get('usuario_id')),
+            str(info.get('clase_nombre') or ''),
+            str(info.get('dia') or ''),
+            str(info.get('hora_inicio') or ''),
+        )
+        return {"ok": True, "notified_user": first.get('nombre'), "whatsapp_sent": bool(ok)}
     except Exception as e:
         logger.error(f"Error notifying waitlist: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -347,7 +367,7 @@ async def api_clase_ejercicios_list(
 async def api_clase_ejercicios_update(
     clase_id: int,
     request: Request,
-    _=Depends(require_gestion_access),
+    _=Depends(require_owner),
     svc: InscripcionesService = Depends(get_inscripciones_service)
 ):
     """Update exercises for a class (replaces all)."""

@@ -4,7 +4,7 @@ import { useState, useEffect, use, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
     Loader2, ArrowLeft, MessageSquare, Wrench, Palette, CreditCard,
-    Key, Activity, FileText, Save, Send, Check, X, AlertCircle, Upload
+    Key, Activity, FileText, Save, Send, Check, X, AlertCircle, Upload, Trash2
 } from 'lucide-react';
 import Link from 'next/link';
 import { api, type Gym, type GymDetails, type WhatsAppConfig, type Payment } from '@/lib/api';
@@ -48,6 +48,10 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     // WhatsApp test
     const [waTestPhone, setWaTestPhone] = useState('');
     const [waTestMessage, setWaTestMessage] = useState('Mensaje de prueba');
+    const [provisioningTemplates, setProvisioningTemplates] = useState(false);
+    const [provisionTemplatesMsg, setProvisionTemplatesMsg] = useState('');
+    const [waHealthLoading, setWaHealthLoading] = useState(false);
+    const [waHealthMsg, setWaHealthMsg] = useState('');
 
     // Payment form
     const [paymentAmount, setPaymentAmount] = useState('');
@@ -165,6 +169,24 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
             }
         } catch {
             showMessage('Error al guardar');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleClearWhatsApp = async () => {
+        if (!confirm('¿Borrar la configuración de WhatsApp de este gimnasio?')) return;
+        setSaving(true);
+        try {
+            const res = await api.clearGymWhatsApp(gymId);
+            if (res.ok) {
+                setWaConfig({});
+                showMessage('Configuración de WhatsApp borrada');
+            } else {
+                showMessage(res.error || 'Error al borrar');
+            }
+        } catch {
+            showMessage('Error al borrar');
         } finally {
             setSaving(false);
         }
@@ -316,6 +338,42 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
             showMessage('Error');
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleProvisionTemplates = async () => {
+        setProvisioningTemplates(true);
+        setProvisionTemplatesMsg('');
+        try {
+            const res = await api.provisionGymWhatsAppTemplates(gymId);
+            if (res.ok && res.data) {
+                const failed = (res.data.failed || []).length;
+                setProvisionTemplatesMsg(`OK: created=${(res.data.created || []).length}, failed=${failed}, existing=${res.data.existing_count}`);
+            } else {
+                setProvisionTemplatesMsg(res.error || 'Error provisionando plantillas');
+            }
+        } finally {
+            setProvisioningTemplates(false);
+        }
+    };
+
+    const handleWhatsAppHealthCheck = async () => {
+        setWaHealthLoading(true);
+        setWaHealthMsg('');
+        try {
+            const res = await api.getGymWhatsAppHealth(gymId);
+            if (res.ok && res.data) {
+                const t = res.data.templates || {};
+                const phone = res.data.phone || {};
+                const sub = res.data.subscribed_apps || {};
+                setWaHealthMsg(
+                    `OK: phone=${phone.display_phone_number || '—'} quality=${phone.quality_rating || '—'} templates=${t.count || 0} approved=${t.approved || 0} pending=${t.pending || 0} subscribed=${String(sub.subscribed)}`
+                );
+            } else {
+                setWaHealthMsg(res.error || 'Error en health-check');
+            }
+        } finally {
+            setWaHealthLoading(false);
         }
     };
 
@@ -540,10 +598,30 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                 <span className="text-slate-300">Envío no bloqueante</span>
                             </label>
                         </div>
-                        <button onClick={handleSaveWhatsApp} disabled={saving} className="btn-primary flex items-center gap-2">
-                            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                            Guardar
-                        </button>
+                        <div className="flex flex-wrap gap-3">
+                            <button onClick={handleSaveWhatsApp} disabled={saving} className="btn-primary flex items-center gap-2">
+                                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                Guardar
+                            </button>
+                            <button onClick={handleClearWhatsApp} disabled={saving} className="btn-danger flex items-center gap-2">
+                                <Trash2 className="w-4 h-4" />
+                                Borrar configuración
+                            </button>
+                            <button onClick={handleProvisionTemplates} disabled={provisioningTemplates} className="btn-secondary flex items-center gap-2">
+                                {provisioningTemplates ? <Loader2 className="w-4 h-4 animate-spin" /> : <MessageSquare className="w-4 h-4" />}
+                                Provisionar plantillas estándar
+                            </button>
+                            <button onClick={handleWhatsAppHealthCheck} disabled={waHealthLoading} className="btn-secondary flex items-center gap-2">
+                                {waHealthLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Activity className="w-4 h-4" />}
+                                Health check
+                            </button>
+                        </div>
+                        {provisionTemplatesMsg ? (
+                            <div className="text-sm text-slate-300">{provisionTemplatesMsg}</div>
+                        ) : null}
+                        {waHealthMsg ? (
+                            <div className="text-sm text-slate-300">{waHealthMsg}</div>
+                        ) : null}
                         <div className="pt-4 border-t border-slate-800">
                             <h3 className="font-medium text-white mb-3">Prueba de WhatsApp</h3>
                             <div className="flex gap-3">

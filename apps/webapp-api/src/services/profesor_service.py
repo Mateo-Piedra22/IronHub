@@ -4,6 +4,7 @@ from datetime import datetime, date, timedelta, timezone, time
 from calendar import monthrange
 import logging
 import os
+from threading import Lock
 
 try:
     from zoneinfo import ZoneInfo
@@ -29,6 +30,9 @@ from src.database.orm_models import (
 
 logger = logging.getLogger(__name__)
 
+_ACTIVE_SESSION_INDEX_LOCK = Lock()
+_ACTIVE_SESSION_INDEX_READY = False
+
 
 class ProfesorService(BaseService):
     """
@@ -38,6 +42,99 @@ class ProfesorService(BaseService):
 
     def __init__(self, db: Session):
         super().__init__(db)
+        self._ensure_unique_active_session_index()
+
+    def _active_session_index_exists(self) -> bool:
+        try:
+            row = self.db.execute(
+                text(
+                    """
+                    SELECT 1
+                    FROM pg_indexes
+                    WHERE schemaname = 'public'
+                      AND indexname = 'uniq_sesion_activa_por_profesor'
+                    LIMIT 1
+                    """
+                )
+            ).fetchone()
+            return bool(row)
+        except Exception:
+            return False
+
+    def _heal_duplicate_active_sessions(self) -> None:
+        rows = self.db.execute(
+            text(
+                """
+                SELECT profesor_id, array_agg(id ORDER BY hora_inicio DESC NULLS LAST, id DESC) AS ids
+                FROM profesor_horas_trabajadas
+                WHERE hora_fin IS NULL
+                GROUP BY profesor_id
+                HAVING COUNT(*) > 1
+                """
+            )
+        ).fetchall()
+        if not rows:
+            return
+        for profesor_id, ids in rows:
+            if not ids or len(ids) <= 1:
+                continue
+            to_close = list(ids[1:])
+            self.db.execute(
+                text(
+                    """
+                    UPDATE profesor_horas_trabajadas
+                    SET hora_fin = hora_inicio,
+                        minutos_totales = 0,
+                        horas_totales = 0
+                    WHERE id = ANY(:ids)
+                      AND hora_fin IS NULL
+                    """
+                ),
+                {"ids": to_close},
+            )
+
+    def _ensure_unique_active_session_index(self) -> None:
+        global _ACTIVE_SESSION_INDEX_READY
+        if _ACTIVE_SESSION_INDEX_READY:
+            return
+        with _ACTIVE_SESSION_INDEX_LOCK:
+            if _ACTIVE_SESSION_INDEX_READY:
+                return
+            if self._active_session_index_exists():
+                _ACTIVE_SESSION_INDEX_READY = True
+                return
+            try:
+                self.db.execute(
+                    text(
+                        """
+                        CREATE UNIQUE INDEX IF NOT EXISTS uniq_sesion_activa_por_profesor
+                        ON profesor_horas_trabajadas(profesor_id)
+                        WHERE hora_fin IS NULL
+                        """
+                    )
+                )
+                self.db.commit()
+            except Exception:
+                self.db.rollback()
+                try:
+                    self._heal_duplicate_active_sessions()
+                    self.db.commit()
+                except Exception:
+                    self.db.rollback()
+                try:
+                    self.db.execute(
+                        text(
+                            """
+                            CREATE UNIQUE INDEX IF NOT EXISTS uniq_sesion_activa_por_profesor
+                            ON profesor_horas_trabajadas(profesor_id)
+                            WHERE hora_fin IS NULL
+                            """
+                        )
+                    )
+                    self.db.commit()
+                except Exception:
+                    self.db.rollback()
+            _ACTIVE_SESSION_INDEX_READY = self._active_session_index_exists()
 
     def _get_app_timezone(self):
         tz_name = (
@@ -85,6 +182,21 @@ class ProfesorService(BaseService):
             return local_dt.isoformat(timespec='seconds')
         except Exception:
             return utc_naive.isoformat(timespec='seconds')
+
+    def _local_time_hhmm(self, dt: Optional[datetime]) -> Optional[str]:
+        if dt is None:
+            return None
+        iso = self._local_naive_iso(dt)
+        if not iso:
+            return None
+        try:
+            if "T" in iso:
+                return iso.split("T", 1)[1][:5]
+            if " " in iso:
+                return iso.split(" ", 1)[1][:5]
+        except Exception:
+            return None
+        return None
 
     def _cfg_key(self, profesor_id: int, name: str) -> str:
         return f"profesor:{int(profesor_id)}:{name}"
@@ -276,7 +388,7 @@ class ProfesorService(BaseService):
             .where(Usuario.activo == True)\
             .order_by(Usuario.nombre)
         results = self.db.execute(stmt).all()
-        return [{'profesor_id': r.id, 'usuario_id': r.usuario_id, 'nombre': r.nombre} for r in results]
+        return [{'profesor_id': r.id, 'nombre': r.nombre} for r in results]
 
     def get_teacher_details_list(self, start_date: Optional[date] = None, end_date: Optional[date] = None) -> List[Dict]:
         """
@@ -413,6 +525,34 @@ class ProfesorService(BaseService):
                                      hasta=end_date.isoformat() if end_date else None)
 
     # ========== Sesiones (ProfesorHoraTrabajada) ==========
+    def obtener_sesion_activa(self, profesor_id: int) -> Optional[Dict[str, Any]]:
+        try:
+            s = (
+                self.db.execute(
+                    select(ProfesorHoraTrabajada)
+                    .where(
+                        ProfesorHoraTrabajada.profesor_id == int(profesor_id),
+                        ProfesorHoraTrabajada.hora_fin == None,
+                    )
+                    .order_by(ProfesorHoraTrabajada.hora_inicio.desc())
+                    .limit(1)
+                )
+                .scalars()
+                .first()
+            )
+            if not s:
+                return None
+            return {
+                'id': s.id,
+                'profesor_id': s.profesor_id,
+                'inicio': self._local_naive_iso(s.hora_inicio),
+                'fin': None,
+                'hora_inicio': self._local_time_hhmm(s.hora_inicio),
+                'hora_fin': None,
+                'already_active': True,
+            }
+        except Exception:
+            return None
 
     def obtener_sesiones(self, profesor_id: int, desde: Optional[str] = None, hasta: Optional[str] = None) -> List[Dict[str, Any]]:
         try:
@@ -428,7 +568,10 @@ class ProfesorService(BaseService):
                     'profesor_id': s.profesor_id,
                     'inicio': self._local_naive_iso(s.hora_inicio),
                     'fin': self._local_naive_iso(s.hora_fin),
-                    'duracion_minutos': s.minutos_totales,
+                    'hora_inicio': self._local_time_hhmm(s.hora_inicio),
+                    'hora_fin': self._local_time_hhmm(s.hora_fin),
+                    'minutos': int(s.minutos_totales or 0),
+                    'tipo': 'extra' if str(getattr(s, 'tipo_actividad', '') or '').strip().lower() == 'extra' else 'normal',
                     'notas': s.notas,
                     'fecha': s.fecha.isoformat()
                 } for s in results
@@ -439,27 +582,58 @@ class ProfesorService(BaseService):
 
     def iniciar_sesion(self, profesor_id: int) -> Dict[str, Any]:
         try:
-            # Check for active session
-            active = self.db.execute(select(ProfesorHoraTrabajada).where(ProfesorHoraTrabajada.profesor_id == profesor_id, ProfesorHoraTrabajada.hora_fin == None)).first()
-            if active:
-                return {'error': 'Ya hay una sesión activa'}
-
+            self._ensure_unique_active_session_index()
             now_utc = self._now_utc_naive()
             fecha_local = self._today_local_date()
-            sesion = ProfesorHoraTrabajada(
-                profesor_id=profesor_id,
-                fecha=fecha_local,
-                hora_inicio=now_utc,
-                hora_fin=None
+
+            row = self.db.execute(
+                text(
+                    """
+                    INSERT INTO profesor_horas_trabajadas (profesor_id, fecha, hora_inicio, hora_fin)
+                    VALUES (:pid, :fecha, :inicio, NULL)
+                    ON CONFLICT (profesor_id) WHERE hora_fin IS NULL DO NOTHING
+                    RETURNING id, hora_inicio
+                    """
+                ),
+                {"pid": int(profesor_id), "fecha": fecha_local, "inicio": now_utc},
             )
-            self.db.add(sesion)
-            self.db.commit()
-            self.db.refresh(sesion)
+            inserted = row.fetchone()
+            if inserted:
+                self.db.commit()
+                inicio_dt = inserted[1] or now_utc
+                return {
+                    'id': int(inserted[0]),
+                    'profesor_id': int(profesor_id),
+                    'inicio': self._local_naive_iso(inicio_dt),
+                    'fin': None,
+                    'hora_inicio': self._local_time_hhmm(inicio_dt),
+                    'hora_fin': None,
+                    'already_active': False,
+                }
+
+            active_row = (
+                self.db.execute(
+                    select(ProfesorHoraTrabajada).where(
+                        ProfesorHoraTrabajada.profesor_id == profesor_id,
+                        ProfesorHoraTrabajada.hora_fin == None
+                    )
+                    .order_by(ProfesorHoraTrabajada.hora_inicio.desc())
+                    .limit(1)
+                )
+                .scalars()
+                .first()
+            )
+            if not active_row:
+                self.db.rollback()
+                return {'error': 'No se pudo iniciar la sesión'}
             return {
-                'id': sesion.id, 
-                'profesor_id': sesion.profesor_id, 
-                'inicio': self._local_naive_iso(sesion.hora_inicio),
-                'fin': None
+                'id': active_row.id,
+                'profesor_id': active_row.profesor_id,
+                'already_active': True,
+                'inicio': self._local_naive_iso(active_row.hora_inicio),
+                'fin': None,
+                'hora_inicio': self._local_time_hhmm(active_row.hora_inicio),
+                'hora_fin': None,
             }
         except Exception as e:
             logger.error(f"Error starting session: {e}")
@@ -486,7 +660,10 @@ class ProfesorService(BaseService):
                 'profesor_id': sesion.profesor_id,
                 'inicio': self._local_naive_iso(sesion.hora_inicio),
                 'fin': self._local_naive_iso(sesion.hora_fin),
-                'duracion_minutos': sesion.minutos_totales
+                'hora_inicio': self._local_time_hhmm(sesion.hora_inicio),
+                'hora_fin': self._local_time_hhmm(sesion.hora_fin),
+                'minutos': int(sesion.minutos_totales or 0),
+                'tipo': 'extra' if str(getattr(sesion, 'tipo_actividad', '') or '').strip().lower() == 'extra' else 'normal',
             }
         except Exception as e:
             logger.error(f"Error ending session: {e}")

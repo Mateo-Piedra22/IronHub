@@ -1,21 +1,57 @@
-"""WhatsApp Router - WhatsApp messaging API using WhatsAppService and PaymentService."""
+"""WhatsApp Router - WhatsApp messaging API (tenant-scoped)."""
 import logging
 import os
 import json
 from typing import Optional, Dict, Any
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Request, Depends, HTTPException, Response
 from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session
+from sqlalchemy import text, select
 
 from src.dependencies import (
     require_gestion_access, require_owner, 
-    get_whatsapp_service, get_payment_service
+    get_whatsapp_service, get_whatsapp_dispatch_service, get_whatsapp_settings_service, get_db_session
 )
 from src.services.whatsapp_service import WhatsAppService
-from src.services.payment_service import PaymentService
+from src.services.whatsapp_dispatch_service import WhatsAppDispatchService
+from src.services.whatsapp_settings_service import WhatsAppSettingsService
+from src.models.orm_models import Configuracion
+from src.database.tenant_connection import validate_tenant_name, set_current_tenant, tenant_session_scope
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _ensure_triggers_table(db: Session) -> None:
+    db.execute(text("""
+        CREATE TABLE IF NOT EXISTS whatsapp_triggers (
+            id SERIAL PRIMARY KEY,
+            trigger_key VARCHAR(80) UNIQUE NOT NULL,
+            enabled BOOLEAN DEFAULT FALSE,
+            template_name VARCHAR(255),
+            cooldown_minutes INTEGER DEFAULT 1440,
+            last_run_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
+    db.commit()
+
+
+def _ensure_templates_table(db: Session) -> None:
+    db.execute(text("""
+        CREATE TABLE IF NOT EXISTS whatsapp_templates (
+            id SERIAL PRIMARY KEY,
+            template_name VARCHAR(255) UNIQUE NOT NULL,
+            header_text VARCHAR(60),
+            body_text TEXT NOT NULL,
+            variables JSONB,
+            active BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """))
+    db.commit()
 
 
 def _is_owner_role(role: str) -> bool:
@@ -45,33 +81,14 @@ def _redact_whatsapp_state_for_role(request: Request, state: Dict[str, Any]) -> 
 async def api_whatsapp_state(
     request: Request,
     _=Depends(require_gestion_access),
-    pm: PaymentService = Depends(get_payment_service)
+    st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service)
 ):
     try:
-        state = pm.obtener_estado_whatsapp() if hasattr(pm, 'obtener_estado_whatsapp') else {"disponible": False}
-        if not isinstance(state, dict):
-            return state
-        redacted = _redact_whatsapp_state_for_role(request, state)
-        cfg = {}
-        try:
-            cfg = pm.obtener_config_whatsapp() if hasattr(pm, 'obtener_config_whatsapp') else {}
-        except Exception:
-            cfg = {}
-        enabled_flag = None
-        try:
-            enabled_flag = cfg.get('enabled') if isinstance(cfg, dict) else None
-        except Exception:
-            enabled_flag = None
-        try:
-            enabled_flag = str(enabled_flag).lower() in ('1', 'true', 'yes') if enabled_flag is not None else None
-        except Exception:
-            enabled_flag = None
-
-        available = bool(redacted.get('disponible'))
-        config_valid = bool(redacted.get('configuracion_valida'))
-        enabled = bool(enabled_flag) if enabled_flag is not None else bool(redacted.get('habilitado'))
-        enabled = bool(enabled and config_valid)
-        server_ok = bool(redacted.get('servidor_activo'))
+        state = st.get_state()
+        available = bool(state.get('disponible'))
+        config_valid = bool(state.get('configuracion_valida'))
+        enabled = bool(state.get('habilitado') and config_valid)
+        server_ok = bool(state.get('servidor_activo'))
         payload = {
             'available': available,
             'enabled': enabled,
@@ -89,10 +106,10 @@ async def api_whatsapp_state(
 @router.get("/api/whatsapp/stats")
 async def api_whatsapp_stats(
     _=Depends(require_owner),
-    pm: PaymentService = Depends(get_payment_service)
+    st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service)
 ):
     try:
-        data = pm.obtener_estadisticas_whatsapp() if hasattr(pm, 'obtener_estadisticas_whatsapp') else {"error": "Not available"}
+        data = st.get_stats()
         if isinstance(data, dict) and "ok" not in data:
             ok_val = "error" not in data
             msg = "OK" if ok_val else str(data.get("error") or "Error")
@@ -130,21 +147,63 @@ async def api_whatsapp_pendientes(
     """Alias for /api/whatsapp/pendings - returns {mensajes: []}."""
     try:
         dias = int(request.query_params.get("dias") or 30)
-        limite = int(request.query_params.get("limit") or 200)
-    except:
-        dias, limite = 30, 200
-    return {"mensajes": svc.obtener_mensajes_fallidos(dias, limite)}
+        limite = int(request.query_params.get("limit") or 300)
+    except Exception:
+        dias, limite = 30, 300
+    items = svc.obtener_resumen_mensajes(dias, limite)
+
+    def map_tipo(t: str) -> str:
+        s = (t or '').strip().lower()
+        if s in ('bienvenida', 'welcome'):
+            return 'welcome'
+        if s in ('pago', 'payment', 'payment_confirmation'):
+            return 'payment'
+        if s in ('desactivacion', 'deactivation'):
+            return 'deactivation'
+        if s in ('overdue', 'recordatorio_vencida', 'payment_reminder'):
+            return 'overdue'
+        if s in ('class_reminder', 'recordatorio_clase'):
+            return 'class_reminder'
+        if s in ('waitlist', 'lista_espera'):
+            return 'class_reminder'
+        return s or 'welcome'
+
+    def map_estado(st: str) -> str:
+        s = (st or '').strip().lower()
+        if s == 'failed':
+            return 'failed'
+        if s in ('sent', 'delivered', 'read'):
+            return 'sent'
+        if s == 'received':
+            return 'sent'
+        return 'pending'
+
+    mensajes = []
+    for m in items:
+        mensajes.append({
+            'id': m.get('id'),
+            'usuario_id': m.get('user_id') or 0,
+            'usuario_nombre': m.get('usuario_nombre') or '',
+            'telefono': m.get('usuario_telefono') or m.get('phone_number') or '',
+            'tipo': map_tipo(m.get('message_type') or ''),
+            'estado': map_estado(m.get('status') or ''),
+            'contenido': m.get('message_content') or '',
+            'error_detail': None,
+            'fecha_envio': m.get('sent_at'),
+            'created_at': m.get('created_at'),
+        })
+    return {"mensajes": mensajes}
 
 
 @router.get("/api/whatsapp/status")
 async def api_whatsapp_status(
     request: Request,
     _=Depends(require_gestion_access),
-    pm: PaymentService = Depends(get_payment_service)
+    st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service)
 ):
     """Alias for /api/whatsapp/state."""
     try:
-        return await api_whatsapp_state(request, pm=pm)
+        return await api_whatsapp_state(request, st=st)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -152,23 +211,12 @@ async def api_whatsapp_status(
 @router.get("/api/whatsapp/config")
 async def api_whatsapp_config_get(
     _=Depends(require_owner),
-    pm: PaymentService = Depends(get_payment_service)
+    st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service)
 ):
     """GET endpoint for WhatsApp config."""
     try:
-        cfg = pm.obtener_config_whatsapp() if hasattr(pm, 'obtener_config_whatsapp') else {}
-        if not isinstance(cfg, dict):
-            cfg = {}
-
-        data = {
-            'phone_number_id': cfg.get('phone_number_id') or '',
-            'whatsapp_business_account_id': cfg.get('whatsapp_business_account_id') or '',
-            'access_token': cfg.get('access_token') or '',
-            'webhook_verify_token': cfg.get('webhook_verify_token') or '',
-            'enabled': bool(str(cfg.get('enabled') or '').lower() in ('1', 'true', 'yes')),
-            'webhook_enabled': bool(str(cfg.get('webhook_enabled') or cfg.get('enable_webhook') or '').lower() in ('1', 'true', 'yes')),
-        }
-        return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", **data}
+        cfg = st.get_ui_config()
+        return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", **cfg}
     except Exception as e:
         return JSONResponse(
             {"ok": False, "mensaje": str(e), "success": False, "message": str(e), "error": str(e)},
@@ -180,7 +228,7 @@ async def api_whatsapp_config_get(
 async def api_whatsapp_config_put(
     request: Request,
     _=Depends(require_owner),
-    pm: PaymentService = Depends(get_payment_service)
+    st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service)
 ):
     try:
         try:
@@ -207,9 +255,8 @@ async def api_whatsapp_config_put(
         if 'webhook_verify_token' in payload:
             cfg_in['webhook_verify_token'] = str(payload.get('webhook_verify_token') or '')
 
-        ok = pm.configurar_whatsapp(cfg_in) if hasattr(pm, 'configurar_whatsapp') else False
-        _ = ok
-        return await api_whatsapp_config_get(pm=pm)
+        _ = st.upsert_manual_config(cfg_in)
+        return await api_whatsapp_config_get(st=st)
     except HTTPException:
         raise
     except Exception as e:
@@ -219,22 +266,259 @@ async def api_whatsapp_config_put(
         )
 
 
+@router.get("/api/whatsapp/embedded-signup/config")
+async def api_whatsapp_embedded_signup_config(
+    _=Depends(require_owner),
+):
+    app_id = (os.getenv("META_APP_ID") or os.getenv("FACEBOOK_APP_ID") or "").strip()
+    config_id = (os.getenv("META_WA_EMBEDDED_SIGNUP_CONFIG_ID") or "").strip()
+    api_version = (os.getenv("META_GRAPH_API_VERSION") or os.getenv("WHATSAPP_API_VERSION") or "v19.0").strip()
+    if not app_id or not config_id:
+        return JSONResponse(
+            {"ok": False, "mensaje": "Falta configuración", "success": False, "message": "Falta configuración", "error": "Missing config"},
+            status_code=503,
+        )
+    return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", "app_id": app_id, "config_id": config_id, "api_version": api_version}
+
+
+@router.post("/api/whatsapp/embedded-signup/complete")
+async def api_whatsapp_embedded_signup_complete(
+    request: Request,
+    _=Depends(require_owner),
+    st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service),
+):
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    code = str((payload or {}).get("code") or "").strip()
+    waba_id = str((payload or {}).get("waba_id") or "").strip()
+    phone_number_id = str((payload or {}).get("phone_number_id") or "").strip()
+    if not code or not waba_id or not phone_number_id:
+        raise HTTPException(status_code=400, detail="code/waba_id/phone_number_id requeridos")
+    access_token = st.exchange_code_for_access_token(code)
+    st.set_credentials_from_embedded_signup(waba_id=waba_id, phone_number_id=phone_number_id, access_token=access_token)
+    provision = st.provision_meta_templates_for_current_config()
+    health = st.meta_health_check()
+    return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", "provision": provision, "health": health}
+
+
+@router.get("/api/whatsapp/health")
+async def api_whatsapp_health(
+    _=Depends(require_owner),
+    st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service),
+):
+    data = st.meta_health_check()
+    ok = bool(data.get("ok"))
+    msg = "OK" if ok else str(data.get("error") or "Error")
+    return {"ok": ok, "mensaje": msg, "success": ok, "message": msg, **data}
+
+
+@router.get("/api/whatsapp/templates")
+async def api_whatsapp_templates_list(
+    _=Depends(require_owner),
+    db: Session = Depends(get_db_session),
+):
+    _ensure_templates_table(db)
+    rows = db.execute(text("""
+        SELECT template_name, body_text, active, created_at
+        FROM whatsapp_templates
+        ORDER BY template_name ASC
+    """)).fetchall()
+    return {"templates": [{"template_name": r[0], "body_text": r[1], "active": bool(r[2]), "created_at": str(r[3]) if r[3] else None} for r in rows]}
+
+
+@router.put("/api/whatsapp/templates/{template_name}")
+async def api_whatsapp_templates_upsert(
+    template_name: str,
+    request: Request,
+    _=Depends(require_owner),
+    db: Session = Depends(get_db_session),
+):
+    _ensure_templates_table(db)
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    body_text = str(payload.get("body_text") or "").strip()
+    if not body_text:
+        raise HTTPException(status_code=400, detail="body_text requerido")
+    active = bool(payload.get("active", True))
+    db.execute(
+        text("""
+            INSERT INTO whatsapp_templates (template_name, body_text, active)
+            VALUES (:name, :body, :active)
+            ON CONFLICT (template_name) DO UPDATE
+            SET body_text = EXCLUDED.body_text,
+                active = EXCLUDED.active
+        """),
+        {"name": template_name, "body": body_text, "active": active},
+    )
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/api/whatsapp/templates/{template_name}")
+async def api_whatsapp_templates_delete(
+    template_name: str,
+    _=Depends(require_owner),
+    db: Session = Depends(get_db_session),
+):
+    _ensure_templates_table(db)
+    r = db.execute(text("DELETE FROM whatsapp_templates WHERE template_name = :name"), {"name": template_name})
+    db.commit()
+    return {"ok": True, "deleted": int(r.rowcount or 0)}
+
+
+@router.get("/api/whatsapp/triggers")
+async def api_whatsapp_triggers_list(
+    _=Depends(require_owner),
+    db: Session = Depends(get_db_session),
+):
+    _ensure_triggers_table(db)
+    rows = db.execute(text("""
+        SELECT trigger_key, enabled, template_name, cooldown_minutes, last_run_at
+        FROM whatsapp_triggers
+        ORDER BY trigger_key ASC
+    """)).fetchall()
+    return {"triggers": [{
+        "trigger_key": r[0],
+        "enabled": bool(r[1]),
+        "template_name": r[2],
+        "cooldown_minutes": int(r[3] or 0),
+        "last_run_at": str(r[4]) if r[4] else None,
+    } for r in rows]}
+
+
+@router.put("/api/whatsapp/triggers/{trigger_key}")
+async def api_whatsapp_triggers_upsert(
+    trigger_key: str,
+    request: Request,
+    _=Depends(require_owner),
+    db: Session = Depends(get_db_session),
+):
+    _ensure_triggers_table(db)
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    enabled = bool(payload.get("enabled", False))
+    template_name = payload.get("template_name")
+    cooldown_minutes = payload.get("cooldown_minutes")
+    try:
+        cooldown_minutes = int(cooldown_minutes) if cooldown_minutes is not None else 1440
+    except Exception:
+        cooldown_minutes = 1440
+    db.execute(
+        text("""
+            INSERT INTO whatsapp_triggers (trigger_key, enabled, template_name, cooldown_minutes)
+            VALUES (:k, :en, :tpl, :cd)
+            ON CONFLICT (trigger_key) DO UPDATE
+            SET enabled = EXCLUDED.enabled,
+                template_name = EXCLUDED.template_name,
+                cooldown_minutes = EXCLUDED.cooldown_minutes
+        """),
+        {"k": trigger_key, "en": enabled, "tpl": template_name, "cd": cooldown_minutes},
+    )
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/api/whatsapp/automation/run")
+async def api_whatsapp_automation_run(
+    request: Request,
+    _=Depends(require_owner),
+    db: Session = Depends(get_db_session),
+    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service),
+):
+    _ensure_triggers_table(db)
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    trigger_keys = payload.get("trigger_keys")
+    dry_run = bool(payload.get("dry_run", False))
+    if trigger_keys and not isinstance(trigger_keys, list):
+        trigger_keys = None
+
+    triggers = db.execute(text("""
+        SELECT trigger_key, enabled, cooldown_minutes
+        FROM whatsapp_triggers
+    """)).fetchall()
+    trig_map = {r[0]: {"enabled": bool(r[1]), "cooldown_minutes": int(r[2] or 0)} for r in triggers}
+
+    def _selected(k: str) -> bool:
+        return (trigger_keys is None) or (k in set(str(x) for x in trigger_keys))
+
+    sent = 0
+    scanned = 0
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    if _selected("overdue_daily") and trig_map.get("overdue_daily", {}).get("enabled"):
+        cooldown = int(trig_map.get("overdue_daily", {}).get("cooldown_minutes") or 1440)
+        since = now - timedelta(minutes=cooldown)
+        users = db.execute(text("""
+            SELECT id, telefono
+            FROM usuarios
+            WHERE activo = TRUE
+              AND COALESCE(cuotas_vencidas, 0) > 0
+              AND fecha_proximo_vencimiento IS NOT NULL
+              AND fecha_proximo_vencimiento < CURRENT_DATE
+              AND TRIM(COALESCE(telefono,'')) <> ''
+        """)).fetchall()
+        for uid, _tel in users:
+            scanned += 1
+            already = db.execute(text("""
+                SELECT 1 FROM whatsapp_messages
+                WHERE user_id = :uid
+                  AND message_type = 'overdue'
+                  AND sent_at >= :since
+                LIMIT 1
+            """), {"uid": int(uid), "since": since}).fetchone()
+            if already:
+                continue
+            if dry_run:
+                sent += 1
+                continue
+            if wa.send_overdue_reminder(int(uid)):
+                sent += 1
+        if not dry_run:
+            db.execute(text("UPDATE whatsapp_triggers SET last_run_at = :now WHERE trigger_key = 'overdue_daily'"), {"now": now})
+            db.commit()
+
+    return {"ok": True, "scanned": scanned, "sent": sent, "dry_run": dry_run}
+
+
 @router.post("/api/whatsapp/retry-all")
 async def api_whatsapp_retry_all(
     _=Depends(require_owner),
     svc: WhatsAppService = Depends(get_whatsapp_service),
-    pm: PaymentService = Depends(get_payment_service)
+    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service)
 ):
     """Retry all failed WhatsApp messages."""
     try:
-        failed_messages = svc.obtener_mensajes_fallidos(30, 100)
+        failed_messages = svc.obtener_mensajes_fallidos(30, 200)
         retried = 0
         for msg in failed_messages:
             uid = msg.get('usuario_id') or msg.get('user_id')
+            mtype = (msg.get('message_type') or '').strip().lower()
             if uid:
                 try:
-                    pm.enviar_mensaje_bienvenida_whatsapp(uid) if hasattr(pm, 'enviar_mensaje_bienvenida_whatsapp') else None
-                    retried += 1
+                    ok = False
+                    if mtype in ("welcome", "bienvenida"):
+                        ok = wa.send_welcome(int(uid))
+                    elif mtype in ("payment", "pago", "payment_confirmation"):
+                        ok = wa.send_payment_confirmation(int(uid))
+                    elif mtype in ("deactivation", "desactivacion"):
+                        ok = wa.send_deactivation(int(uid), "Por decisión del administrador")
+                    elif mtype in ("overdue", "recordatorio_vencida", "payment_reminder"):
+                        ok = wa.send_overdue_reminder(int(uid))
+                    elif mtype in ("class_reminder", "recordatorio_clase"):
+                        ok = wa.send_class_reminder(int(uid), "", "", "")
+                    else:
+                        ok = wa.send_welcome(int(uid))
+                    if ok:
+                        retried += 1
                 except:
                     pass
         return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", "retried": retried}
@@ -267,12 +551,30 @@ async def api_whatsapp_mensaje_retry(
     mensaje_id: int,
     _=Depends(require_owner),
     svc: WhatsAppService = Depends(get_whatsapp_service),
-    pm: PaymentService = Depends(get_payment_service)
+    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service)
 ):
     """Retry a specific WhatsApp message by ID."""
-    # Get message info
-    # For now, just return success - message retry would need more context
-    return {"ok": True}
+    msg = svc.obtener_mensaje_por_id(mensaje_id)
+    if not msg:
+        return JSONResponse({"ok": False, "mensaje": "Mensaje no encontrado", "success": False, "message": "Mensaje no encontrado"}, status_code=404)
+    uid = msg.get('user_id')
+    if not uid:
+        return JSONResponse({"ok": False, "mensaje": "Mensaje sin usuario asociado", "success": False, "message": "Mensaje sin usuario asociado"}, status_code=400)
+    mtype = (msg.get('message_type') or '').strip().lower()
+    ok = False
+    if mtype in ("welcome", "bienvenida"):
+        ok = wa.send_welcome(int(uid))
+    elif mtype in ("payment", "pago", "payment_confirmation"):
+        ok = wa.send_payment_confirmation(int(uid))
+    elif mtype in ("deactivation", "desactivacion"):
+        ok = wa.send_deactivation(int(uid), "Por decisión del administrador")
+    elif mtype in ("overdue", "recordatorio_vencida", "payment_reminder"):
+        ok = wa.send_overdue_reminder(int(uid))
+    elif mtype in ("class_reminder", "recordatorio_clase"):
+        ok = wa.send_class_reminder(int(uid), "", "", "")
+    else:
+        ok = wa.send_welcome(int(uid))
+    return {"ok": bool(ok), "success": bool(ok), "mensaje": "OK" if ok else "Error", "message": "OK" if ok else "Error"}
 
 
 @router.post("/api/whatsapp/retry")
@@ -280,7 +582,7 @@ async def api_whatsapp_retry(
     request: Request,
     _=Depends(require_owner),
     svc: WhatsAppService = Depends(get_whatsapp_service),
-    pm: PaymentService = Depends(get_payment_service)
+    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service)
 ):
     try:
         payload = await request.json()
@@ -303,20 +605,27 @@ async def api_whatsapp_retry(
     last_type = (last.get("message_type") or "").lower() if last else ""
     
     if last_type in ("welcome", "bienvenida"):
-        ok = pm.enviar_mensaje_bienvenida_whatsapp(uid) if hasattr(pm, 'enviar_mensaje_bienvenida_whatsapp') else False
+        ok = wa.send_welcome(uid)
         msg = "OK" if bool(ok) else "Error"
         return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg, "tipo": last_type or "welcome"}
     elif last_type in ("overdue", "recordatorio_vencida", "payment_reminder"):
-        if hasattr(pm, 'whatsapp_manager') and pm.whatsapp_manager:
-            ok = pm.whatsapp_manager.enviar_recordatorio_cuota_vencida(uid)
-            msg = "OK" if bool(ok) else "Error"
-            return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg, "tipo": last_type}
-        return JSONResponse(
-            {"ok": False, "mensaje": "WhatsApp manager not available", "success": False, "message": "WhatsApp manager not available"},
-            status_code=503,
-        )
+        ok = wa.send_overdue_reminder(uid)
+        msg = "OK" if bool(ok) else "Error"
+        return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg, "tipo": last_type}
+    elif last_type in ("payment", "pago", "payment_confirmation"):
+        ok = wa.send_payment_confirmation(uid)
+        msg = "OK" if bool(ok) else "Error"
+        return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg, "tipo": last_type}
+    elif last_type in ("deactivation", "desactivacion"):
+        ok = wa.send_deactivation(uid, "Por decisión del administrador")
+        msg = "OK" if bool(ok) else "Error"
+        return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg, "tipo": last_type}
+    elif last_type in ("class_reminder", "recordatorio_clase"):
+        ok = wa.send_class_reminder(uid, "", "", "")
+        msg = "OK" if bool(ok) else "Error"
+        return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg, "tipo": last_type}
     else:
-        ok = pm.enviar_mensaje_bienvenida_whatsapp(uid) if hasattr(pm, 'enviar_mensaje_bienvenida_whatsapp') else False
+        ok = wa.send_welcome(uid)
         msg = "OK" if bool(ok) else "Error"
         return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg, "tipo": last_type or "welcome"}
 
@@ -343,11 +652,9 @@ async def api_whatsapp_clear_failures(
 
 
 @router.post("/api/whatsapp/server/start")
-async def api_whatsapp_server_start(_=Depends(require_owner), pm: PaymentService = Depends(get_payment_service)):
+async def api_whatsapp_server_start(_=Depends(require_owner)):
     try:
-        ok = pm.iniciar_servidor_whatsapp() if hasattr(pm, 'iniciar_servidor_whatsapp') else False
-        msg = "OK" if bool(ok) else "Error"
-        return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg}
+        return {"ok": False, "mensaje": "No soportado", "success": False, "message": "No soportado"}
     except Exception as e:
         return JSONResponse(
             {"ok": False, "mensaje": str(e), "success": False, "message": str(e), "error": str(e)},
@@ -356,11 +663,9 @@ async def api_whatsapp_server_start(_=Depends(require_owner), pm: PaymentService
 
 
 @router.post("/api/whatsapp/server/stop")
-async def api_whatsapp_server_stop(_=Depends(require_owner), pm: PaymentService = Depends(get_payment_service)):
+async def api_whatsapp_server_stop(_=Depends(require_owner)):
     try:
-        ok = pm.detener_servidor_whatsapp() if hasattr(pm, 'detener_servidor_whatsapp') else False
-        msg = "OK" if bool(ok) else "Error"
-        return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg}
+        return {"ok": False, "mensaje": "No soportado", "success": False, "message": "No soportado"}
     except Exception as e:
         return JSONResponse(
             {"ok": False, "mensaje": str(e), "success": False, "message": str(e), "error": str(e)},
@@ -369,22 +674,21 @@ async def api_whatsapp_server_stop(_=Depends(require_owner), pm: PaymentService 
 
 
 @router.post("/api/whatsapp/config")
-async def api_whatsapp_config(request: Request, _=Depends(require_owner), pm: PaymentService = Depends(get_payment_service)):
+async def api_whatsapp_config(request: Request, _=Depends(require_owner), st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service)):
     try:
         data = await request.json() if request.headers.get("content-type", "").startswith("application/json") else await request.form()
     except:
         data = {}
     allowed = {"phone_number_id", "whatsapp_business_account_id", "access_token", "allowlist_numbers", "allowlist_enabled", "enable_webhook", "max_retries", "retry_delay_seconds"}
     cfg = {k: data.get(k) for k in allowed if k in data}
-    ok = pm.configurar_whatsapp(cfg) if hasattr(pm, 'configurar_whatsapp') else False
-    msg = "OK" if bool(ok) else "Error"
-    return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg, "applied_keys": list(cfg.keys())}
+    _ = st.upsert_manual_config(cfg)
+    return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", "applied_keys": list(cfg.keys())}
 
 
 @router.post("/api/usuarios/{usuario_id}/whatsapp/bienvenida")
-async def api_usuario_whatsapp_bienvenida(usuario_id: int, _=Depends(require_gestion_access), pm: PaymentService = Depends(get_payment_service)):
+async def api_usuario_whatsapp_bienvenida(usuario_id: int, _=Depends(require_gestion_access), wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service)):
     try:
-        ok = pm.enviar_mensaje_bienvenida_whatsapp(usuario_id) if hasattr(pm, 'enviar_mensaje_bienvenida_whatsapp') else False
+        ok = wa.send_welcome(usuario_id)
         msg = "OK" if bool(ok) else "Error"
         return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg}
     except Exception as e:
@@ -395,74 +699,47 @@ async def api_usuario_whatsapp_bienvenida(usuario_id: int, _=Depends(require_ges
 
 
 @router.post("/api/usuarios/{usuario_id}/whatsapp/confirmacion_pago")
-async def api_usuario_whatsapp_confirmacion_pago(usuario_id: int, request: Request, _=Depends(require_gestion_access), pm: PaymentService = Depends(get_payment_service)):
+async def api_usuario_whatsapp_confirmacion_pago(usuario_id: int, request: Request, _=Depends(require_gestion_access), wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service)):
     try:
         payload = await request.json()
     except:
         payload = {}
     
-    if not hasattr(pm, 'whatsapp_manager') or not pm.whatsapp_manager:
-        return JSONResponse(
-            {"ok": False, "mensaje": "WhatsApp manager not available", "success": False, "message": "WhatsApp manager not available"},
-            status_code=503,
-        )
-    
     monto = payload.get("monto")
     mes = payload.get("mes") or payload.get("month")
     anio = payload.get("año") or payload.get("anio") or payload.get("year")
-    
-    # Get user info
-    usuario = pm.obtener_usuario_por_id(usuario_id) if hasattr(pm, 'obtener_usuario_por_id') else None
-    telefono = getattr(usuario, 'telefono', None) if usuario else None
-    nombre = getattr(usuario, 'nombre', None) if usuario else None
-    
-    # Get last payment if needed
-    if monto is None or mes is None or anio is None:
-        pagos = pm.obtener_historial_pagos(usuario_id, limit=1) if hasattr(pm, 'obtener_historial_pagos') else []
-        if pagos:
-            monto = monto or getattr(pagos[0], 'monto', None)
-            mes = mes or getattr(pagos[0], 'mes', None)
-            anio = anio or getattr(pagos[0], 'año', None)
-    
-    if not telefono or monto is None or mes is None or anio is None:
-        return JSONResponse(
-            {"ok": False, "mensaje": "Datos insuficientes", "success": False, "message": "Datos insuficientes"},
-            status_code=400,
-        )
-    
-    ok = pm.whatsapp_manager.send_payment_confirmation({
-        'user_id': usuario_id, 'phone': str(telefono), 'name': str(nombre or ""),
-        'amount': float(monto), 'date': f"{int(mes):02d}/{int(anio)}"
-    })
+    try:
+        monto_f = float(monto) if monto is not None else None
+    except Exception:
+        monto_f = None
+    try:
+        mes_i = int(mes) if mes is not None else None
+    except Exception:
+        mes_i = None
+    try:
+        anio_i = int(anio) if anio is not None else None
+    except Exception:
+        anio_i = None
+    ok = wa.send_payment_confirmation(usuario_id, monto_f, mes_i, anio_i)
     msg = "OK" if bool(ok) else "Error"
     return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg}
 
 
 @router.post("/api/usuarios/{usuario_id}/whatsapp/desactivacion")
-async def api_usuario_whatsapp_desactivacion(usuario_id: int, request: Request, _=Depends(require_gestion_access), pm: PaymentService = Depends(get_payment_service)):
-    if not hasattr(pm, 'whatsapp_manager') or not pm.whatsapp_manager:
-        return JSONResponse(
-            {"ok": False, "mensaje": "WhatsApp manager not available", "success": False, "message": "WhatsApp manager not available"},
-            status_code=503,
-        )
+async def api_usuario_whatsapp_desactivacion(usuario_id: int, request: Request, _=Depends(require_gestion_access), wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service)):
     try:
         payload = await request.json()
     except:
         payload = {}
     motivo = (payload.get("motivo") or "cuotas vencidas").strip()
-    ok = pm.whatsapp_manager.enviar_notificacion_desactivacion(usuario_id=usuario_id, motivo=motivo, force_send=True)
+    ok = wa.send_deactivation(usuario_id=usuario_id, motivo=motivo)
     msg = "OK" if bool(ok) else "Error"
     return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg}
 
 
 @router.post("/api/usuarios/{usuario_id}/whatsapp/recordatorio_vencida")
-async def api_usuario_whatsapp_recordatorio_vencida(usuario_id: int, _=Depends(require_gestion_access), pm: PaymentService = Depends(get_payment_service)):
-    if not hasattr(pm, 'whatsapp_manager') or not pm.whatsapp_manager:
-        return JSONResponse(
-            {"ok": False, "mensaje": "WhatsApp manager not available", "success": False, "message": "WhatsApp manager not available"},
-            status_code=503,
-        )
-    ok = pm.whatsapp_manager.enviar_recordatorio_cuota_vencida(usuario_id)
+async def api_usuario_whatsapp_recordatorio_vencida(usuario_id: int, _=Depends(require_gestion_access), wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service)):
+    ok = wa.send_overdue_reminder(usuario_id)
     msg = "OK" if bool(ok) else "Error"
     return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg}
 
@@ -472,7 +749,7 @@ async def api_usuario_whatsapp_force(
     usuario_id: int,
     request: Request,
     _=Depends(require_owner),
-    pm: PaymentService = Depends(get_payment_service)
+    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service)
 ):
     """Force send a WhatsApp message of a specific type to a user."""
     try:
@@ -482,42 +759,37 @@ async def api_usuario_whatsapp_force(
     
     tipo = (payload.get("tipo") or "").lower()
     
-    if not hasattr(pm, 'whatsapp_manager') or not pm.whatsapp_manager:
-        return JSONResponse(
-            {"ok": False, "mensaje": "WhatsApp manager not available", "success": False, "message": "WhatsApp manager not available"},
-            status_code=503,
-        )
-    
     ok = False
     if tipo in ("welcome", "bienvenida"):
-        ok = pm.enviar_mensaje_bienvenida_whatsapp(usuario_id) if hasattr(pm, 'enviar_mensaje_bienvenida_whatsapp') else False
+        ok = wa.send_welcome(usuario_id)
     elif tipo in ("overdue", "vencida", "recordatorio"):
-        ok = pm.whatsapp_manager.enviar_recordatorio_cuota_vencida(usuario_id)
+        ok = wa.send_overdue_reminder(usuario_id)
     elif tipo in ("deactivation", "desactivacion"):
-        ok = pm.whatsapp_manager.enviar_notificacion_desactivacion(usuario_id=usuario_id, motivo="Por decisión del administrador", force_send=True)
+        ok = wa.send_deactivation(usuario_id=usuario_id, motivo="Por decisión del administrador")
+    elif tipo in ("payment", "pago"):
+        ok = wa.send_payment_confirmation(usuario_id)
+    elif tipo in ("class_reminder", "clase", "recordatorio_clase"):
+        ok = wa.send_class_reminder(usuario_id, "", "", "")
     else:
         # Default to welcome
-        ok = pm.enviar_mensaje_bienvenida_whatsapp(usuario_id) if hasattr(pm, 'enviar_mensaje_bienvenida_whatsapp') else False
+        ok = wa.send_welcome(usuario_id)
 
     msg = "OK" if bool(ok) else "Error"
     return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg}
 
 
 @router.post("/api/usuarios/{usuario_id}/whatsapp/recordatorio_clase")
-async def api_usuario_whatsapp_recordatorio_clase(usuario_id: int, request: Request, _=Depends(require_gestion_access), pm: PaymentService = Depends(get_payment_service)):
-    if not hasattr(pm, 'whatsapp_manager') or not pm.whatsapp_manager:
-        return JSONResponse(
-            {"ok": False, "mensaje": "WhatsApp manager not available", "success": False, "message": "WhatsApp manager not available"},
-            status_code=503,
-        )
+async def api_usuario_whatsapp_recordatorio_clase(usuario_id: int, request: Request, _=Depends(require_gestion_access), wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service)):
     try:
         payload = await request.json()
     except:
         payload = {}
-    ok = pm.whatsapp_manager.enviar_recordatorio_horario_clase(usuario_id, {
-        'tipo_clase': payload.get('tipo_clase') or payload.get('clase_nombre') or '',
-        'fecha': payload.get('fecha') or '', 'hora': payload.get('hora') or ''
-    })
+    ok = wa.send_class_reminder(
+        usuario_id,
+        payload.get('tipo_clase') or payload.get('clase_nombre') or '',
+        payload.get('fecha') or '',
+        payload.get('hora') or ''
+    )
     msg = "OK" if bool(ok) else "Error"
     return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg}
 
@@ -539,7 +811,8 @@ async def api_usuario_whatsapp_ultimo(usuario_id: int, request: Request, _=Depen
 async def api_usuario_whatsapp_historial(usuario_id: int, request: Request, _=Depends(require_gestion_access), svc: WhatsAppService = Depends(get_whatsapp_service)):
     tipo = request.query_params.get("tipo")
     limite = int(request.query_params.get("limit") or 50)
-    return {"mensajes": svc.obtener_historial_usuario(usuario_id, tipo, limite)}
+    items = svc.obtener_historial_usuario(usuario_id, tipo, limite)
+    return {"mensajes": items, "items": items}
 
 
 @router.delete("/api/usuarios/{usuario_id}/whatsapp/{message_pk}")
@@ -568,32 +841,58 @@ async def api_usuario_whatsapp_delete_by_mid(usuario_id: int, message_id: str, _
 # --- Webhooks ---
 
 @router.get("/webhooks/whatsapp")
-async def whatsapp_verify(request: Request):
+async def whatsapp_verify(request: Request, st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service)):
     mode = request.query_params.get("hub.mode")
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
-    expected = os.getenv("WHATSAPP_VERIFY_TOKEN", "")
+    expected = os.getenv("WHATSAPP_VERIFY_TOKEN", "") or st.get_webhook_verify_token()
     if mode == "subscribe" and expected and token == expected and challenge:
         return Response(content=str(challenge), media_type="text/plain")
     raise HTTPException(status_code=403, detail="Invalid verify token")
 
 
+@router.get("/webhooks/whatsapp/{tenant}")
+async def whatsapp_verify_tenant(tenant: str, request: Request):
+    ok, err = validate_tenant_name(str(tenant or ""))
+    if not ok:
+        raise HTTPException(status_code=404, detail=str(err or "Not found"))
+    set_current_tenant(str(tenant).strip().lower())
+    with tenant_session_scope(str(tenant).strip().lower()) as db:
+        st = WhatsAppSettingsService(db)
+        mode = request.query_params.get("hub.mode")
+        token = request.query_params.get("hub.verify_token")
+        challenge = request.query_params.get("hub.challenge")
+        expected = os.getenv("WHATSAPP_VERIFY_TOKEN", "") or st.get_webhook_verify_token()
+        if mode == "subscribe" and expected and token == expected and challenge:
+            return Response(content=str(challenge), media_type="text/plain")
+    raise HTTPException(status_code=403, detail="Invalid verify token")
+
+
 @router.post("/webhooks/whatsapp")
-async def whatsapp_webhook(request: Request, svc: WhatsAppService = Depends(get_whatsapp_service)):
+async def whatsapp_webhook(request: Request, svc: WhatsAppService = Depends(get_whatsapp_service), db: Session = Depends(get_db_session)):
     try:
         raw = await request.body()
         dev_mode = os.getenv("DEVELOPMENT_MODE", "").lower() in ("1", "true", "yes") or os.getenv("ENV", "").lower() in ("dev", "development")
         allow_unsigned = os.getenv("ALLOW_UNSIGNED_WHATSAPP_WEBHOOK", "").lower() in ("1", "true", "yes")
 
         app_secret = os.getenv("WHATSAPP_APP_SECRET", "")
+        if not app_secret:
+            try:
+                row = db.execute(select(Configuracion.valor).where(Configuracion.clave == "WHATSAPP_APP_SECRET").limit(1)).first()
+                app_secret = (row[0] if row else "") or ""
+            except Exception:
+                app_secret = ""
         if not app_secret and not (dev_mode or allow_unsigned):
             raise HTTPException(status_code=503, detail="Webhook signature not configured")
 
         if app_secret:
             import hmac, hashlib
             sig = request.headers.get("X-Hub-Signature-256") or ""
-            expected = "sha256=" + hmac.new(app_secret.encode(), raw, hashlib.sha256).hexdigest()
-            if not hmac.compare_digest(expected, sig):
+            expected_hash = hmac.new(app_secret.encode(), raw, hashlib.sha256).hexdigest()
+            incoming_hash = str(sig).strip()
+            if incoming_hash.lower().startswith("sha256="):
+                incoming_hash = incoming_hash.split("=", 1)[1]
+            if not hmac.compare_digest(expected_hash, incoming_hash):
                 raise HTTPException(status_code=403, detail="Invalid signature")
         
         payload = json.loads(raw.decode())
@@ -633,3 +932,74 @@ async def whatsapp_webhook(request: Request, svc: WhatsAppService = Depends(get_
                 svc.registrar_mensaje_entrante(uid, wa_from, text or "", mid)
     
     return {"status": "ok"}
+
+
+@router.post("/webhooks/whatsapp/{tenant}")
+async def whatsapp_webhook_tenant(tenant: str, request: Request):
+    ok, err = validate_tenant_name(str(tenant or ""))
+    if not ok:
+        raise HTTPException(status_code=404, detail=str(err or "Not found"))
+    t = str(tenant).strip().lower()
+    set_current_tenant(t)
+    with tenant_session_scope(t) as db:
+        svc = WhatsAppService(db)
+        try:
+            raw = await request.body()
+            dev_mode = os.getenv("DEVELOPMENT_MODE", "").lower() in ("1", "true", "yes") or os.getenv("ENV", "").lower() in ("dev", "development")
+            allow_unsigned = os.getenv("ALLOW_UNSIGNED_WHATSAPP_WEBHOOK", "").lower() in ("1", "true", "yes")
+
+            app_secret = os.getenv("WHATSAPP_APP_SECRET", "")
+            if not app_secret:
+                try:
+                    row = db.execute(select(Configuracion.valor).where(Configuracion.clave == "WHATSAPP_APP_SECRET").limit(1)).first()
+                    app_secret = (row[0] if row else "") or ""
+                except Exception:
+                    app_secret = ""
+            if not app_secret and not (dev_mode or allow_unsigned):
+                raise HTTPException(status_code=503, detail="Webhook signature not configured")
+
+            if app_secret:
+                import hmac, hashlib
+                sig = request.headers.get("X-Hub-Signature-256") or ""
+                expected_hash = hmac.new(app_secret.encode(), raw, hashlib.sha256).hexdigest()
+                incoming_hash = str(sig).strip()
+                if incoming_hash.lower().startswith("sha256="):
+                    incoming_hash = incoming_hash.split("=", 1)[1]
+                if not hmac.compare_digest(expected_hash, incoming_hash):
+                    raise HTTPException(status_code=403, detail="Invalid signature")
+
+            payload = json.loads(raw.decode())
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=400, detail="Bad Request")
+
+        for entry in payload.get("entry") or []:
+            for change in entry.get("changes") or []:
+                value = change.get("value") or {}
+
+                for status in value.get("statuses") or []:
+                    mid, stt = status.get("id"), status.get("status")
+                    if mid and stt:
+                        svc.actualizar_estado_mensaje(mid, stt)
+
+                for msg in value.get("messages") or []:
+                    mid = msg.get("id")
+                    mtype = msg.get("type")
+                    wa_from = msg.get("from")
+
+                    text = None
+                    if mtype == "text":
+                        text = (msg.get("text") or {}).get("body")
+                    elif mtype == "button":
+                        text = (msg.get("button") or {}).get("text")
+                    elif mtype == "interactive":
+                        ir = msg.get("interactive") or {}
+                        text = (ir.get("button_reply") or {}).get("title") or (ir.get("list_reply") or {}).get("title")
+                    elif mtype in ("image", "audio", "video", "document"):
+                        text = f"[{mtype}]"
+
+                    uid = svc.obtener_usuario_id_por_telefono(wa_from) if wa_from else None
+                    svc.registrar_mensaje_entrante(uid, wa_from, text or "", mid)
+
+        return {"status": "ok"}

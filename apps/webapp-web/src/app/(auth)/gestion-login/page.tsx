@@ -9,7 +9,6 @@ import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 
 interface ProfesorBasico {
-    usuario_id: number;
     nombre: string;
     profesor_id: number;
 }
@@ -89,7 +88,7 @@ export default function GestionLoginPage() {
         try {
             const credentials = isOwnerSelected
                 ? { usuario_id: '__OWNER__', owner_password: ownerPassword }
-                : { usuario_id: selectedProfile, pin };
+                : { profesor_id: selectedProfile, pin };
 
             const res = await api.gestionLogin(credentials);
 
@@ -170,7 +169,7 @@ export default function GestionLoginPage() {
                                 >
                                     <option value="__OWNER__">👑 Dueño</option>
                                     {profesores.map((p) => (
-                                        <option key={p.usuario_id} value={String(p.usuario_id)}>
+                                        <option key={p.profesor_id} value={String(p.profesor_id)}>
                                             {p.nombre || `Profesor ${p.profesor_id}`}
                                         </option>
                                     ))}

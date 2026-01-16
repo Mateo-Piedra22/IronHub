@@ -20,6 +20,72 @@ class WhatsAppService(BaseService):
     def _now_utc_naive(self) -> datetime:
         return datetime.now(timezone.utc).replace(tzinfo=None)
 
+    def obtener_resumen_mensajes(self, dias: int = 30, limite: int = 300) -> List[Dict[str, Any]]:
+        try:
+            since = self._now_utc_naive() - timedelta(days=int(dias or 0))
+            result = self.db.execute(
+                text("""
+                    SELECT wm.id, wm.user_id,
+                           COALESCE(u.nombre,'') AS usuario_nombre,
+                           COALESCE(u.telefono,'') AS usuario_telefono,
+                           wm.phone_number, wm.message_type, wm.template_name, wm.message_content,
+                           COALESCE(wm.status,'') AS status, wm.message_id, wm.sent_at, wm.created_at
+                    FROM whatsapp_messages wm
+                    LEFT JOIN usuarios u ON u.id = wm.user_id
+                    WHERE wm.sent_at >= :since
+                    ORDER BY wm.sent_at DESC
+                    LIMIT :limite
+                """),
+                {'since': since, 'limite': int(limite or 0)}
+            )
+            return [
+                {
+                    'id': r[0],
+                    'user_id': r[1],
+                    'usuario_nombre': r[2],
+                    'usuario_telefono': r[3],
+                    'phone_number': r[4],
+                    'message_type': r[5],
+                    'template_name': r[6],
+                    'message_content': r[7],
+                    'status': r[8],
+                    'message_id': r[9],
+                    'sent_at': str(r[10]) if r[10] else None,
+                    'created_at': str(r[11]) if r[11] else None,
+                }
+                for r in result.fetchall()
+            ]
+        except Exception as e:
+            logger.error(f"Error getting whatsapp resumen mensajes: {e}")
+            return []
+
+    def obtener_mensaje_por_id(self, mensaje_id: int) -> Optional[Dict[str, Any]]:
+        try:
+            row = self.db.execute(
+                text("""
+                    SELECT id, user_id, message_type, template_name, phone_number, message_content, status, message_id, sent_at, created_at
+                    FROM whatsapp_messages WHERE id = :id LIMIT 1
+                """),
+                {'id': int(mensaje_id)}
+            ).fetchone()
+            if not row:
+                return None
+            return {
+                'id': row[0],
+                'user_id': row[1],
+                'message_type': row[2],
+                'template_name': row[3],
+                'phone_number': row[4],
+                'message_content': row[5],
+                'status': row[6],
+                'message_id': row[7],
+                'sent_at': str(row[8]) if row[8] else None,
+                'created_at': str(row[9]) if row[9] else None,
+            }
+        except Exception as e:
+            logger.error(f"Error getting whatsapp message by id: {e}")
+            return None
+
     # ========== Pendings/Failed Messages ==========
 
     def obtener_mensajes_fallidos(self, dias: int = 30, limite: int = 200) -> List[Dict[str, Any]]:

@@ -16,10 +16,9 @@ import {
     useToast,
     Input,
     Textarea,
-    Select,
 } from '@/components/ui';
 import ClaseDetailModal from '@/components/ClaseDetailModal';
-import { api, type Clase, type Profesor } from '@/lib/api';
+import { api, type Clase, type ClaseAgendaItem, type Profesor } from '@/lib/api';
 import { formatTime, cn } from '@/lib/utils';
 
 // Days of week
@@ -34,22 +33,34 @@ const diasSemana = [
 ];
 
 // Schedule grid view
-function ScheduleGrid({ clases, onEdit, onDelete, onManage }: {
+function ScheduleGrid({ clases, agenda, onEdit, onDelete, onManage }: {
     clases: Clase[];
+    agenda: ClaseAgendaItem[];
     onEdit: (c: Clase) => void;
     onDelete: (c: Clase) => void;
     onManage: (c: Clase) => void;
 }) {
-    // Group by day
-    const byDay: Record<number, Clase[]> = {};
-    diasSemana.forEach((d) => { byDay[d.value] = []; });
-    clases.forEach((c) => {
-        if (byDay[c.dia_semana]) {
-            byDay[c.dia_semana].push(c);
-        }
-    });
+    const diaToValue = (dia: string) => {
+        const d = (dia || '').trim().toLowerCase();
+        if (d === 'lunes') return 1;
+        if (d === 'martes') return 2;
+        if (d === 'miércoles' || d === 'miercoles') return 3;
+        if (d === 'jueves') return 4;
+        if (d === 'viernes') return 5;
+        if (d === 'sábado' || d === 'sabado') return 6;
+        if (d === 'domingo') return 0;
+        return 0;
+    };
 
-    // Sort each day by time
+    const clasesById = new Map<number, Clase>(clases.map((c) => [c.id, c]));
+
+    const byDay: Record<number, ClaseAgendaItem[]> = {};
+    diasSemana.forEach((d) => { byDay[d.value] = []; });
+    agenda.forEach((a) => {
+        const day = diaToValue(a.dia);
+        byDay[day] = byDay[day] || [];
+        byDay[day].push(a);
+    });
     Object.values(byDay).forEach((arr) => arr.sort((a, b) => a.hora_inicio.localeCompare(b.hora_inicio)));
 
     return (
@@ -65,26 +76,30 @@ function ScheduleGrid({ clases, onEdit, onDelete, onManage }: {
                                 Sin clases
                             </div>
                         ) : (
-                            byDay[dia.value].map((clase) => (
+                            byDay[dia.value].map((item) => {
+                                const clase = clasesById.get(item.clase_id) || { id: item.clase_id, nombre: item.clase_nombre, descripcion: item.clase_descripcion || undefined };
+                                const cupoTxt =
+                                    item.cupo && item.cupo > 0
+                                        ? `${item.inscriptos_count || 0}/${item.cupo}`
+                                        : `${item.inscriptos_count || 0}`;
+                                return (
                                 <div
-                                    key={clase.id}
+                                    key={item.horario_id}
                                     className={cn(
                                         'p-3 rounded-xl border border-slate-800 bg-slate-900/50',
                                         'hover:border-primary-500/50 transition-colors group cursor-pointer'
                                     )}
-                                    style={clase.color ? { borderLeftColor: clase.color, borderLeftWidth: 3 } : {}}
                                     onClick={() => onManage(clase)}
                                 >
-                                    <div className="font-medium text-white text-sm">{clase.nombre}</div>
+                                    <div className="font-medium text-white text-sm">{item.clase_nombre}</div>
                                     <div className="text-xs text-slate-400 mt-1 flex items-center gap-1">
                                         <Clock className="w-3 h-3" />
-                                        {formatTime(clase.hora_inicio)} - {formatTime(clase.hora_fin)}
+                                        {formatTime(item.hora_inicio)} - {formatTime(item.hora_fin)}
                                     </div>
-                                    {clase.profesor_nombre && (
-                                        <div className="text-xs text-slate-500 mt-1">
-                                            {clase.profesor_nombre}
-                                        </div>
-                                    )}
+                                    <div className="text-xs text-slate-500 mt-1 flex items-center justify-between gap-2">
+                                        <span className="truncate">{item.profesor_nombre || 'Sin profesor'}</span>
+                                        <span className="tabular-nums">{cupoTxt}</span>
+                                    </div>
                                     <div className="hidden group-hover:flex items-center gap-1 mt-2">
                                         <button
                                             onClick={(e) => { e.stopPropagation(); onManage(clase); }}
@@ -107,7 +122,8 @@ function ScheduleGrid({ clases, onEdit, onDelete, onManage }: {
                                         </button>
                                     </div>
                                 </div>
-                            ))
+                                );
+                            })
                         )}
                     </div>
                 </div>
@@ -122,21 +138,14 @@ interface ClaseFormModalProps {
     isOpen: boolean;
     onClose: () => void;
     clase?: Clase | null;
-    profesores: Profesor[];
     onSuccess: () => void;
 }
 
-function ClaseFormModal({ isOpen, onClose, clase, profesores, onSuccess }: ClaseFormModalProps) {
+function ClaseFormModal({ isOpen, onClose, clase, onSuccess }: ClaseFormModalProps) {
     const [loading, setLoading] = useState(false);
     const [formData, setFormData] = useState({
         nombre: '',
         descripcion: '',
-        dia_semana: 1,
-        hora_inicio: '09:00',
-        hora_fin: '10:00',
-        profesor_id: undefined as number | undefined,
-        capacidad: undefined as number | undefined,
-        color: '#8b5cf6',
     });
     const { success, error } = useToast();
 
@@ -146,23 +155,11 @@ function ClaseFormModal({ isOpen, onClose, clase, profesores, onSuccess }: Clase
                 setFormData({
                     nombre: clase.nombre,
                     descripcion: clase.descripcion || '',
-                    dia_semana: clase.dia_semana,
-                    hora_inicio: clase.hora_inicio,
-                    hora_fin: clase.hora_fin,
-                    profesor_id: clase.profesor_id,
-                    capacidad: clase.capacidad,
-                    color: clase.color || '#8b5cf6',
                 });
             } else {
                 setFormData({
                     nombre: '',
                     descripcion: '',
-                    dia_semana: 1,
-                    hora_inicio: '09:00',
-                    hora_fin: '10:00',
-                    profesor_id: undefined,
-                    capacidad: undefined,
-                    color: '#8b5cf6',
                 });
             }
         }
@@ -228,52 +225,6 @@ function ClaseFormModal({ isOpen, onClose, clase, profesores, onSuccess }: Clase
                     placeholder="Ej: Spinning"
                     required
                 />
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Select
-                        label="Día"
-                        value={formData.dia_semana.toString()}
-                        onChange={(e) => setFormData({ ...formData, dia_semana: Number(e.target.value) })}
-                        options={diasSemana.map((d) => ({ value: d.value.toString(), label: d.label }))}
-                    />
-                    <Select
-                        label="Profesor"
-                        value={formData.profesor_id?.toString() || ''}
-                        onChange={(e) => setFormData({ ...formData, profesor_id: e.target.value ? Number(e.target.value) : undefined })}
-                        placeholder="Seleccionar"
-                        options={profesores.map((p) => ({ value: p.id.toString(), label: p.nombre }))}
-                    />
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <Input
-                        label="Hora inicio"
-                        type="time"
-                        value={formData.hora_inicio}
-                        onChange={(e) => setFormData({ ...formData, hora_inicio: e.target.value })}
-                    />
-                    <Input
-                        label="Hora fin"
-                        type="time"
-                        value={formData.hora_fin}
-                        onChange={(e) => setFormData({ ...formData, hora_fin: e.target.value })}
-                    />
-                    <Input
-                        label="Capacidad"
-                        type="number"
-                        min={1}
-                        value={formData.capacidad || ''}
-                        onChange={(e) => setFormData({ ...formData, capacidad: e.target.value ? Number(e.target.value) : undefined })}
-                        placeholder="Ilimitado"
-                    />
-                </div>
-                <div className="flex items-center gap-4">
-                    <label className="text-sm font-medium text-slate-300">Color</label>
-                    <input
-                        type="color"
-                        value={formData.color}
-                        onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                        className="w-10 h-10 rounded-lg cursor-pointer"
-                    />
-                </div>
                 <Textarea
                     label="Descripción"
                     value={formData.descripcion}
@@ -290,6 +241,7 @@ export default function ClasesPage() {
 
     // State
     const [clases, setClases] = useState<Clase[]>([]);
+    const [agenda, setAgenda] = useState<ClaseAgendaItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [profesores, setProfesores] = useState<Profesor[]>([]);
 
@@ -308,10 +260,9 @@ export default function ClasesPage() {
     const loadClases = useCallback(async () => {
         setLoading(true);
         try {
-            const res = await api.getClases();
-            if (res.ok && res.data) {
-                setClases(res.data.clases);
-            }
+            const [resClases, resAgenda] = await Promise.all([api.getClases(), api.getClasesAgenda()]);
+            if (resClases.ok && resClases.data) setClases(resClases.data.clases);
+            if (resAgenda.ok && resAgenda.data) setAgenda(resAgenda.data.agenda || []);
         } catch {
             error('Error al cargar clases');
         } finally {
@@ -386,6 +337,7 @@ export default function ClasesPage() {
                 ) : (
                     <ScheduleGrid
                         clases={clases}
+                        agenda={agenda}
                         onEdit={(c) => {
                             setClaseToEdit(c);
                             setFormOpen(true);
@@ -410,7 +362,6 @@ export default function ClasesPage() {
                     setClaseToEdit(null);
                 }}
                 clase={claseToEdit}
-                profesores={profesores}
                 onSuccess={loadClases}
             />
 

@@ -24,7 +24,7 @@ from src.database.repositories.payment_repository import PaymentRepository
 from src.database.repositories.user_repository import UserRepository
 from src.database.orm_models import (
     Pago, Usuario, MetodoPago, ConceptoPago, PagoDetalle, TipoCuota,
-    NumeracionComprobante, ComprobantePago, WhatsappConfig, WhatsappMessage, Configuracion
+    NumeracionComprobante, ComprobantePago
 )
 
 logger = logging.getLogger(__name__)
@@ -43,10 +43,6 @@ class PaymentService(BaseService):
         
         # Alert manager stub (for compatibility)
         self._alert_manager = None
-        
-        # WhatsApp integration (optional)
-        self.whatsapp_manager = None
-        self.whatsapp_enabled = False
 
     def _is_exempt_role(self, rol: Optional[str]) -> bool:
         try:
@@ -54,173 +50,6 @@ class PaymentService(BaseService):
         except Exception:
             r = ''
         return r in ('profesor', 'dueño', 'dueno', 'owner')
-
-    # =========================================================================
-    # WHATSAPP CONFIG/STATE (used by routers/whatsapp.py)
-    # =========================================================================
-
-    def _get_whatsapp_config_row(self) -> Optional[WhatsappConfig]:
-        try:
-            return (
-                self.db.execute(
-                    select(WhatsappConfig)
-                    .where(WhatsappConfig.active == True)
-                    .order_by(WhatsappConfig.created_at.desc())
-                    .limit(1)
-                )
-                .scalars()
-                .first()
-            )
-        except Exception:
-            return None
-
-    def _get_configuracion_value(self, clave: str) -> Optional[str]:
-        try:
-            row = (
-                self.db.execute(
-                    select(Configuracion.valor)
-                    .where(Configuracion.clave == clave)
-                    .limit(1)
-                )
-                .first()
-            )
-            return row[0] if row else None
-        except Exception:
-            return None
-
-    def obtener_config_whatsapp(self) -> Dict[str, Any]:
-        """Return WhatsApp config for UI. Note: token redaction is handled by router."""
-        cfg_row = self._get_whatsapp_config_row()
-        config: Dict[str, Any] = {
-            'phone_number_id': getattr(cfg_row, 'phone_id', '') if cfg_row else '',
-            'whatsapp_business_account_id': getattr(cfg_row, 'waba_id', '') if cfg_row else '',
-            'access_token': getattr(cfg_row, 'access_token', '') if cfg_row else '',
-            'enabled': self._get_configuracion_value('enabled'),
-            'webhook_enabled': self._get_configuracion_value('webhook_enabled'),
-            'webhook_verify_token': self._get_configuracion_value('webhook_verify_token'),
-            'allowlist_numbers': self._get_configuracion_value('allowlist_numbers') or '',
-            'allowlist_enabled': self._get_configuracion_value('allowlist_enabled'),
-            'enable_webhook': self._get_configuracion_value('enable_webhook'),
-            'max_retries': self._get_configuracion_value('max_retries'),
-            'retry_delay_seconds': self._get_configuracion_value('retry_delay_seconds'),
-        }
-        return config
-
-    def configurar_whatsapp(self, configuracion: Dict[str, Any]) -> bool:
-        """Persist WhatsApp config. Returns whether configuration is considered valid."""
-        if not isinstance(configuracion, dict):
-            return False
-
-        try:
-            phone_id = None
-            waba_id = None
-            access_token = None
-
-            if 'phone_number_id' in configuracion:
-                phone_id = str(configuracion.get('phone_number_id') or '').strip() or None
-            if 'whatsapp_business_account_id' in configuracion:
-                waba_id = str(configuracion.get('whatsapp_business_account_id') or '').strip() or None
-            if 'access_token' in configuracion:
-                access_token = str(configuracion.get('access_token') or '').strip() or None
-
-            row = self._get_whatsapp_config_row()
-            if row is None:
-                if phone_id is None:
-                    phone_id = ''
-                if waba_id is None:
-                    waba_id = ''
-                row = WhatsappConfig(phone_id=phone_id, waba_id=waba_id, access_token=access_token, active=True)
-                self.db.add(row)
-            else:
-                if phone_id is not None:
-                    row.phone_id = phone_id
-                if waba_id is not None:
-                    row.waba_id = waba_id
-                if access_token is not None:
-                    row.access_token = access_token
-
-            # Store preferences in Configuracion
-            for k in ('enabled', 'webhook_enabled', 'webhook_verify_token', 'allowlist_numbers', 'allowlist_enabled', 'enable_webhook', 'max_retries', 'retry_delay_seconds'):
-                if k in configuracion:
-                    try:
-                        val_str = str(configuracion.get(k) if configuracion.get(k) is not None else '')
-                    except Exception:
-                        val_str = ''
-                    stmt = insert(Configuracion).values(clave=k, valor=val_str).on_conflict_do_update(
-                        index_elements=['clave'],
-                        set_={'valor': val_str}
-                    )
-                    self.db.execute(stmt)
-
-            self.db.commit()
-
-            # Consider "valid" if required IDs and token exist
-            cfg_row = self._get_whatsapp_config_row()
-            self.whatsapp_enabled = bool(
-                cfg_row
-                and (getattr(cfg_row, 'phone_id', '') or '').strip()
-                and (getattr(cfg_row, 'waba_id', '') or '').strip()
-                and (getattr(cfg_row, 'access_token', '') or '').strip()
-            )
-            return self.whatsapp_enabled
-        except Exception as e:
-            self.db.rollback()
-            logger.error(f"Error al configurar WhatsApp (PaymentService): {e}")
-            return False
-
-    def obtener_estado_whatsapp(self) -> Dict[str, Any]:
-        cfg = self.obtener_config_whatsapp()
-        # Determine validity based on required fields
-        valid = bool(
-            str(cfg.get('phone_number_id') or '').strip()
-            and str(cfg.get('whatsapp_business_account_id') or '').strip()
-            and str(cfg.get('access_token') or '').strip()
-        )
-        # This API implementation doesn't embed a webhook server
-        return {
-            'disponible': True,
-            'habilitado': bool(valid),
-            'servidor_activo': False,
-            'configuracion_valida': bool(valid),
-            'config': cfg,
-        }
-
-    def obtener_estadisticas_whatsapp(self) -> Dict[str, Any]:
-        """Basic WhatsApp message statistics computed from whatsapp_messages."""
-        try:
-            total = self.db.execute(select(func.count(WhatsappMessage.id))).scalar() or 0
-            since_30 = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
-            ultimo_mes = (
-                self.db.execute(
-                    select(func.count(WhatsappMessage.id)).where(WhatsappMessage.sent_at >= since_30)
-                ).scalar()
-                or 0
-            )
-            by_type = dict(
-                self.db.execute(
-                    select(WhatsappMessage.message_type, func.count(WhatsappMessage.id)).group_by(WhatsappMessage.message_type)
-                ).all()
-            )
-            by_status = dict(
-                self.db.execute(
-                    select(WhatsappMessage.status, func.count(WhatsappMessage.id)).group_by(WhatsappMessage.status)
-                ).all()
-            )
-            return {
-                'total_mensajes': int(total),
-                'mensajes_ultimo_mes': int(ultimo_mes),
-                'mensajes_por_tipo': {str(k): int(v) for k, v in (by_type or {}).items() if k is not None},
-                'mensajes_por_estado': {str(k): int(v) for k, v in (by_status or {}).items() if k is not None},
-            }
-        except Exception as e:
-            logger.error(f"Error stats whatsapp (PaymentService): {e}")
-            return {'error': str(e)}
-
-    def iniciar_servidor_whatsapp(self) -> bool:
-        return False
-
-    def detener_servidor_whatsapp(self) -> bool:
-        return False
 
     def _get_app_timezone(self):
         tz_name = (

@@ -232,6 +232,9 @@ export interface Sesion {
     hora_fin: string;
     minutos: number;
     tipo: 'normal' | 'extra';
+    inicio?: string | null;
+    fin?: string | null;
+    notas?: string | null;
 }
 
 // === Rutina Types ===
@@ -289,13 +292,15 @@ export interface Clase {
     id: number;
     nombre: string;
     descripcion?: string;
-    hora_inicio: string;
-    hora_fin: string;
-    dia_semana: number;
-    profesor_id?: number;
-    profesor_nombre?: string;
-    capacidad?: number;
-    color?: string;
+    hora_inicio?: string;
+    hora_fin?: string;
+    dia_semana?: number;
+    profesor_id?: number | null;
+    profesor_nombre?: string | null;
+    capacidad?: number | null;
+    color?: string | null;
+    activo?: boolean;
+    activa?: boolean;
 }
 
 // === Asistencia Types ===
@@ -417,6 +422,20 @@ export interface ClaseHorario {
     inscriptos_count?: number;
 }
 
+export interface ClaseAgendaItem {
+    horario_id: number;
+    clase_id: number;
+    clase_nombre: string;
+    clase_descripcion?: string | null;
+    dia: string;
+    hora_inicio: string;
+    hora_fin: string;
+    profesor_id?: number | null;
+    profesor_nombre?: string | null;
+    cupo?: number | null;
+    inscriptos_count?: number;
+}
+
 export interface Inscripcion {
     id: number;
     horario_id: number;
@@ -479,6 +498,7 @@ export interface WhatsAppConfig {
     phone_number_id?: string;
     whatsapp_business_account_id?: string;
     access_token?: string;
+    access_token_present?: boolean;
     webhook_verify_token?: string;
     enabled: boolean;
     webhook_enabled: boolean;
@@ -502,6 +522,27 @@ export interface WhatsAppStatus {
     enabled: boolean;
     server_ok: boolean;
     config_valid: boolean;
+}
+
+export interface WhatsAppEmbeddedSignupConfig {
+    app_id: string;
+    config_id: string;
+    api_version: string;
+}
+
+export interface WhatsAppTemplate {
+    template_name: string;
+    body_text: string;
+    active: boolean;
+    created_at?: string;
+}
+
+export interface WhatsAppTrigger {
+    trigger_key: string;
+    enabled: boolean;
+    template_name?: string | null;
+    cooldown_minutes: number;
+    last_run_at?: string | null;
 }
 
 // === Recibo Types ===
@@ -687,7 +728,8 @@ class ApiClient {
 
     // Gestion login with professor selector or owner (for /gestion-login)
     async gestionLogin(credentials: {
-        usuario_id: string; // '__OWNER__' for owner or numeric user ID
+        usuario_id?: string; // '__OWNER__' for owner (legacy) or numeric user ID
+        profesor_id?: string; // professor profile id
         pin?: string;
         owner_password?: string;
     }) {
@@ -741,7 +783,6 @@ class ApiClient {
     // Get basic professor list for gestion login dropdown
     async getProfesoresBasico() {
         return this.request<Array<{
-            usuario_id: number;
             nombre: string;
             profesor_id: number;
         }>>('/api/profesores_basico');
@@ -1018,6 +1059,10 @@ class ApiClient {
         );
     }
 
+    async getSesionActiva(profesorId: number) {
+        return this.request<{ sesion: Sesion | null }>(`/api/profesores/${profesorId}/sesiones/activa`);
+    }
+
     // === Rutinas ===
     async getRutinas(params?: { plantillas?: boolean; usuario_id?: number; search?: string }) {
         const searchParams = new URLSearchParams();
@@ -1239,6 +1284,10 @@ class ApiClient {
     // === Clases ===
     async getClases() {
         return this.request<{ clases: Clase[] }>('/api/clases');
+    }
+
+    async getClasesAgenda() {
+        return this.request<{ agenda: ClaseAgendaItem[] }>('/api/clases/agenda');
     }
 
     // === Asistencias ===
@@ -1714,6 +1763,52 @@ class ApiClient {
 
     async getWhatsAppMensajesPendientes() {
         return this.request<{ mensajes: WhatsAppMensaje[] }>('/api/whatsapp/pendientes');
+    }
+
+    async getWhatsAppEmbeddedSignupConfig() {
+        return this.request<WhatsAppEmbeddedSignupConfig>('/api/whatsapp/embedded-signup/config');
+    }
+
+    async completeWhatsAppEmbeddedSignup(data: { code: string; waba_id: string; phone_number_id: string }) {
+        return this.request<{ ok: boolean; provision?: any }>(`/api/whatsapp/embedded-signup/complete`, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    }
+
+    async getWhatsAppTemplates() {
+        return this.request<{ templates: WhatsAppTemplate[] }>('/api/whatsapp/templates');
+    }
+
+    async upsertWhatsAppTemplate(templateName: string, data: { body_text: string; active?: boolean }) {
+        return this.request<{ ok: boolean }>(`/api/whatsapp/templates/${encodeURIComponent(templateName)}`, {
+            method: 'PUT',
+            body: JSON.stringify(data),
+        });
+    }
+
+    async deleteWhatsAppTemplate(templateName: string) {
+        return this.request<{ ok: boolean; deleted: number }>(`/api/whatsapp/templates/${encodeURIComponent(templateName)}`, {
+            method: 'DELETE',
+        });
+    }
+
+    async getWhatsAppTriggers() {
+        return this.request<{ triggers: WhatsAppTrigger[] }>('/api/whatsapp/triggers');
+    }
+
+    async updateWhatsAppTrigger(triggerKey: string, data: { enabled: boolean; template_name?: string | null; cooldown_minutes?: number }) {
+        return this.request<{ ok: boolean }>(`/api/whatsapp/triggers/${encodeURIComponent(triggerKey)}`, {
+            method: 'PUT',
+            body: JSON.stringify(data),
+        });
+    }
+
+    async runWhatsAppAutomation(data: { trigger_keys?: string[]; dry_run?: boolean }) {
+        return this.request<{ ok: boolean; scanned: number; sent: number; dry_run: boolean }>('/api/whatsapp/automation/run', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
     }
 
     async getWhatsAppHistorial(usuarioId: number) {

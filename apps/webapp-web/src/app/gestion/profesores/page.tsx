@@ -151,6 +151,45 @@ function SessionTimer({ profesor, onSessionUpdate }: SessionTimerProps) {
     const { success, error } = useToast();
 
     useEffect(() => {
+        const hydrate = async () => {
+            try {
+                const resActive = await api.getSesionActiva(profesor.id);
+                let active = resActive.ok ? (resActive.data?.sesion as any) : null;
+                if (!active) {
+                    const res = await api.getSesiones(profesor.id);
+                    if (!res.ok || !res.data?.sesiones) return;
+                    const fallback = (res.data.sesiones as any[]).find((s) => !s.hora_fin && !s.fin);
+                    if (!fallback) return;
+                    active = fallback;
+                }
+                setIsActive(true);
+                setCurrentSesionId(active.id);
+                const iso = active.inicio || null;
+                if (iso) {
+                    const dt = new Date(iso);
+                    if (!isNaN(dt.getTime())) {
+                        setStartTime(dt);
+                        setElapsed(Math.floor((Date.now() - dt.getTime()) / 1000));
+                        return;
+                    }
+                }
+                if (active.fecha && active.hora_inicio) {
+                    const dt = new Date(`${active.fecha}T${active.hora_inicio}`);
+                    if (!isNaN(dt.getTime())) {
+                        setStartTime(dt);
+                        setElapsed(Math.floor((Date.now() - dt.getTime()) / 1000));
+                        return;
+                    }
+                }
+                setStartTime(new Date());
+                setElapsed(0);
+            } catch {
+            }
+        };
+        hydrate();
+    }, [profesor.id]);
+
+    useEffect(() => {
         let interval: NodeJS.Timeout;
         if (isActive && startTime) {
             interval = setInterval(() => {
@@ -173,8 +212,20 @@ function SessionTimer({ profesor, onSessionUpdate }: SessionTimerProps) {
             const res = await api.startSesion(profesor.id);
             if (res.ok && res.data) {
                 setIsActive(true);
-                setStartTime(new Date());
-                setElapsed(0);
+                const iso = (res.data as any).inicio || null;
+                if (iso) {
+                    const dt = new Date(iso);
+                    if (!isNaN(dt.getTime())) {
+                        setStartTime(dt);
+                        setElapsed(Math.floor((Date.now() - dt.getTime()) / 1000));
+                    } else {
+                        setStartTime(new Date());
+                        setElapsed(0);
+                    }
+                } else {
+                    setStartTime(new Date());
+                    setElapsed(0);
+                }
                 setCurrentSesionId(res.data.id);
                 success('Sesión iniciada');
             } else {

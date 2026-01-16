@@ -92,6 +92,8 @@ from src.services.attendance_service import AttendanceService
 from src.services.inscripciones_service import InscripcionesService
 from src.services.profesor_service import ProfesorService
 from src.services.whatsapp_service import WhatsAppService
+from src.services.whatsapp_dispatch_service import WhatsAppDispatchService
+from src.services.whatsapp_settings_service import WhatsAppSettingsService
 from src.services.reports_service import ReportsService
 from src.services.admin_service import AdminService
 
@@ -320,6 +322,12 @@ def get_profesor_service(session: Session = Depends(get_db_session)) -> Profesor
 def get_whatsapp_service(session: Session = Depends(get_db_session)) -> WhatsAppService:
     """Get WhatsAppService instance with current session."""
     return WhatsAppService(session)
+
+def get_whatsapp_dispatch_service(session: Session = Depends(get_db_session)) -> WhatsAppDispatchService:
+    return WhatsAppDispatchService(session)
+
+def get_whatsapp_settings_service(session: Session = Depends(get_db_session)) -> WhatsAppSettingsService:
+    return WhatsAppSettingsService(session)
 
 
 def get_reports_service(session: Session = Depends(get_db_session)) -> ReportsService:

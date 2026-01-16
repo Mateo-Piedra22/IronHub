@@ -692,6 +692,19 @@ async def update_gym_whatsapp(request: Request, gym_id: int):
     return {"ok": bool(ok)}
 
 
+@app.delete("/gyms/{gym_id}/whatsapp")
+async def clear_gym_whatsapp(request: Request, gym_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    ok = adm.clear_gym_whatsapp_config(gym_id)
+    if ok:
+        try:
+            adm.log_action("owner", "clear_gym_whatsapp", gym_id, None)
+        except Exception:
+            pass
+    return {"ok": bool(ok)}
+
+
 # ========== GYM REMINDER MESSAGE (used by admin-web) ==========
 
 
@@ -952,7 +965,8 @@ async def send_whatsapp_test(
         raise HTTPException(status_code=404, detail="Gimnasio no encontrado")
     
     phone_id = (gym.get("whatsapp_phone_id") or "").strip()
-    access_token = (gym.get("whatsapp_access_token") or "").strip()
+    access_token_enc = (gym.get("whatsapp_access_token") or "").strip()
+    access_token = SecureConfig.decrypt_waba_secret(access_token_enc) if access_token_enc else ""
     
     if not phone_id or not access_token:
         return {"ok": False, "error": "WhatsApp no configurado para este gimnasio"}
@@ -972,7 +986,8 @@ async def send_whatsapp_test(
     import httpx
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            url = f"https://graph.facebook.com/v18.0/{phone_id}/messages"
+            api_version = (os.getenv("WHATSAPP_API_VERSION") or "v19.0").strip()
+            url = f"https://graph.facebook.com/{api_version}/{phone_id}/messages"
             payload = {
                 "messaging_product": "whatsapp",
                 "recipient_type": "individual",
@@ -995,4 +1010,55 @@ async def send_whatsapp_test(
                 return {"ok": False, "error": error_msg}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+@app.get("/whatsapp/templates")
+async def list_whatsapp_template_catalog(request: Request, active_only: bool = False):
+    require_admin(request)
+    adm = get_admin_service()
+    return {"ok": True, "templates": adm.listar_whatsapp_template_catalog(active_only=bool(active_only))}
+
+
+@app.put("/whatsapp/templates/{template_name}")
+async def upsert_whatsapp_template_catalog(request: Request, template_name: str):
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    result = adm.upsert_whatsapp_template_catalog(template_name, payload if isinstance(payload, dict) else {})
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
+    return {"ok": True}
+
+
+@app.delete("/whatsapp/templates/{template_name}")
+async def delete_whatsapp_template_catalog(request: Request, template_name: str):
+    require_admin(request)
+    adm = get_admin_service()
+    result = adm.delete_whatsapp_template_catalog(template_name)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
+    return {"ok": True}
+
+
+@app.post("/gyms/{gym_id}/whatsapp/provision-templates")
+async def provision_whatsapp_templates_for_gym(request: Request, gym_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    result = adm.provision_whatsapp_templates_to_gym(int(gym_id))
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
+    return result
+
+
+@app.get("/gyms/{gym_id}/whatsapp/health")
+async def gym_whatsapp_health(request: Request, gym_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    result = adm.whatsapp_health_check_for_gym(int(gym_id))
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
+    return result
 

@@ -80,6 +80,27 @@ class InscripcionesService(BaseService):
         except Exception:
             return False
 
+    def obtener_horario_info(self, horario_id: int) -> Optional[Dict[str, Any]]:
+        try:
+            row = self.db.execute(
+                text("""
+                    SELECT ch.dia,
+                           TO_CHAR(ch.hora_inicio, 'HH24:MI') as hora_inicio,
+                           COALESCE(c.nombre,'') as clase_nombre
+                    FROM clase_horarios ch
+                    JOIN clases c ON c.id = ch.clase_id
+                    WHERE ch.id = :id
+                    LIMIT 1
+                """),
+                {'id': int(horario_id)}
+            ).fetchone()
+            if not row:
+                return None
+            return {'dia': row[0], 'hora_inicio': row[1], 'clase_nombre': row[2]}
+        except Exception as e:
+            logger.error(f"Error getting horario info: {e}")
+            return None
+
     def ensure_tables(self) -> None:
         """Ensure all inscripciones-related tables exist."""
         try:
@@ -129,10 +150,90 @@ class InscripcionesService(BaseService):
                     UNIQUE(horario_id, usuario_id)
                 )
             """))
+            self.db.execute(text("""
+                CREATE TABLE IF NOT EXISTS clase_bloques (
+                    id SERIAL PRIMARY KEY,
+                    clase_id INTEGER NOT NULL,
+                    nombre VARCHAR(200) NOT NULL,
+                    orden INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP
+                )
+            """))
+            self.db.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_clase_bloques_clase_id ON clase_bloques(clase_id)
+            """))
+            self.db.execute(text("""
+                CREATE TABLE IF NOT EXISTS clase_bloque_items (
+                    id SERIAL PRIMARY KEY,
+                    bloque_id INTEGER NOT NULL,
+                    ejercicio_id INTEGER,
+                    orden INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP
+                )
+            """))
+            self.db.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_clase_bloque_items_bloque_id ON clase_bloque_items(bloque_id)
+            """))
             self.db.commit()
         except Exception as e:
             logger.error(f"Error ensuring inscripciones tables: {e}")
             self.db.rollback()
+
+    def obtener_agenda(self, profesor_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        try:
+            params: Dict[str, Any] = {}
+            where = ""
+            if profesor_id is not None:
+                where = "WHERE ch.profesor_id = :pid"
+                params["pid"] = int(profesor_id)
+            result = self.db.execute(text(f"""
+                SELECT
+                    ch.id,
+                    ch.clase_id,
+                    COALESCE(c.nombre,'') as clase_nombre,
+                    COALESCE(c.descripcion,'') as clase_descripcion,
+                    ch.dia,
+                    TO_CHAR(ch.hora_inicio, 'HH24:MI') as hora_inicio,
+                    TO_CHAR(ch.hora_fin, 'HH24:MI') as hora_fin,
+                    ch.profesor_id,
+                    ch.cupo,
+                    COALESCE(u.nombre,'') as profesor_nombre,
+                    COUNT(i.id) as inscriptos_count
+                FROM clase_horarios ch
+                JOIN clases c ON c.id = ch.clase_id
+                LEFT JOIN profesores p ON ch.profesor_id = p.id
+                LEFT JOIN usuarios u ON u.id = p.usuario_id
+                LEFT JOIN inscripciones i ON i.horario_id = ch.id
+                {where}
+                GROUP BY
+                    ch.id, ch.clase_id, c.nombre, c.descripcion, ch.dia, ch.hora_inicio, ch.hora_fin,
+                    ch.profesor_id, ch.cupo, u.nombre
+                ORDER BY 
+                    CASE ch.dia 
+                        WHEN 'lunes' THEN 1 WHEN 'martes' THEN 2 WHEN 'miércoles' THEN 3 
+                        WHEN 'miercoles' THEN 3 WHEN 'jueves' THEN 4 WHEN 'viernes' THEN 5 
+                        WHEN 'sábado' THEN 6 WHEN 'sabado' THEN 6 WHEN 'domingo' THEN 7 
+                    END, ch.hora_inicio
+            """), params)
+            return [
+                {
+                    "horario_id": r[0],
+                    "clase_id": r[1],
+                    "clase_nombre": r[2],
+                    "clase_descripcion": r[3] or None,
+                    "dia": r[4],
+                    "hora_inicio": r[5],
+                    "hora_fin": r[6],
+                    "profesor_id": r[7],
+                    "cupo": r[8],
+                    "profesor_nombre": r[9] or None,
+                    "inscriptos_count": int(r[10] or 0),
+                }
+                for r in result.fetchall()
+            ]
+        except Exception as e:
+            logger.error(f"Error getting agenda: {e}")
+            return []
 
     # ========== Clase Tipos ==========
 

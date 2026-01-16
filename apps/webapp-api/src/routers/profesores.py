@@ -120,6 +120,13 @@ async def api_profesor_sesiones(profesor_id: int, request: Request, _=Depends(re
     return {"sesiones": svc.obtener_sesiones(profesor_id, request.query_params.get("desde"), request.query_params.get("hasta"))}
 
 
+@router.get("/api/profesores/{profesor_id}/sesiones/activa")
+async def api_profesor_sesion_activa(profesor_id: int, request: Request, _=Depends(require_gestion_access), svc: ProfesorService = Depends(get_profesor_service)):
+    """Get active session for professor, if any."""
+    _assert_profesor_access(request, profesor_id)
+    return {"sesion": svc.obtener_sesion_activa(profesor_id)}
+
+
 @router.post("/api/profesores/{profesor_id}/sesiones/start")
 async def api_profesor_sesion_start(profesor_id: int, request: Request, _=Depends(require_gestion_access), svc: ProfesorService = Depends(get_profesor_service)):
     """Start a new session."""
@@ -208,7 +215,18 @@ async def api_profesor_config_get(profesor_id: int, request: Request, _=Depends(
     """Get profesor configuration."""
     try:
         _assert_profesor_access(request, profesor_id)
-        return svc.obtener_config(profesor_id)
+        cfg = svc.obtener_config(profesor_id) or {}
+        try:
+            role = str(request.session.get("role") or "").strip().lower()
+        except Exception:
+            role = ""
+        if role == "profesor":
+            try:
+                cfg.pop("monto", None)
+                cfg.pop("usuario_vinculado_id", None)
+            except Exception:
+                pass
+        return cfg
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
