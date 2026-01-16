@@ -124,9 +124,7 @@ async def ensure_tenant_context(request: Request) -> Optional[str]:
     return None
 
 
-def _try_set_tenant_from_request(request: Optional[Request]) -> Optional[str]:
-    if request is None:
-        return None
+def _try_set_tenant_from_request(request: Request) -> Optional[str]:
 
     session_tenant: Optional[str] = None
     try:
@@ -188,7 +186,7 @@ def _try_set_tenant_from_request(request: Optional[Request]) -> Optional[str]:
     return str(tenant).strip().lower()
 
 
-def get_db_session(request: Optional[Request] = None) -> Generator[Session, None, None]:
+def get_db_session(request: Request) -> Generator[Session, None, None]:
     """
     Get a database session for the current tenant.
     Uses CURRENT_TENANT context variable to determine which database to connect to.
