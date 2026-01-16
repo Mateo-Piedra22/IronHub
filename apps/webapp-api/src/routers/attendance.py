@@ -269,23 +269,34 @@ async def api_asistencias_list(
         usuario_id = request.query_params.get("usuario_id")
         desde = request.query_params.get("desde")
         hasta = request.query_params.get("hasta")
+        q = request.query_params.get("q")
         limit_q = request.query_params.get("limit")
+        offset_q = request.query_params.get("offset")
+        page_q = request.query_params.get("page")
         
         limit = int(limit_q) if (limit_q and str(limit_q).isdigit()) else 50
+        limit = max(1, min(limit, 200))
+        offset = 0
+        if offset_q and str(offset_q).isdigit():
+            offset = int(offset_q)
+        elif page_q and str(page_q).isdigit():
+            page_n = max(1, int(page_q))
+            offset = (page_n - 1) * limit
+        offset = max(0, offset)
         
         if (not logged_in) and (session_user_id is not None):
             usuario_id = str(int(session_user_id))
 
-        records = svc.obtener_asistencias_detalle(start=desde, end=hasta)
-        
-        # Filter by usuario_id if provided
-        if usuario_id and str(usuario_id).isdigit():
-            uid = int(usuario_id)
-            records = [r for r in records if r.get("usuario_id") == uid]
-        
-        total = len(records)
-        sliced = records[:limit] if limit else records
-        return {"asistencias": sliced, "total": total}
+        uid_filter = int(usuario_id) if (usuario_id and str(usuario_id).isdigit()) else None
+        out = svc.obtener_asistencias_detalle_paginadas(
+            usuario_id=uid_filter,
+            start=desde,
+            end=hasta,
+            q=q,
+            limit=limit,
+            offset=offset,
+        )
+        return {"asistencias": list(out.get("items") or []), "total": int(out.get("total") or 0)}
     except Exception as e:
         logger.error(f"Error listing asistencias: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -313,13 +324,26 @@ async def api_usuario_asistencias(
             raise HTTPException(status_code=400, detail="usuario_id requerido")
         
         limit = int(limit_q) if (limit_q and str(limit_q).isdigit()) else 50
-        
-        # Get all attendance and filter by user
-        records = svc.obtener_asistencias_detalle(start=None, end=None)
-        user_records = [r for r in records if r.get("usuario_id") == int(usuario_id)]
-        
-        sliced = user_records[:limit] if limit else user_records
-        return {"asistencias": sliced}
+        limit = max(1, min(limit, 200))
+        offset_q = request.query_params.get("offset")
+        page_q = request.query_params.get("page")
+        offset = 0
+        if offset_q and str(offset_q).isdigit():
+            offset = int(offset_q)
+        elif page_q and str(page_q).isdigit():
+            page_n = max(1, int(page_q))
+            offset = (page_n - 1) * limit
+        offset = max(0, offset)
+
+        out = svc.obtener_asistencias_detalle_paginadas(
+            usuario_id=int(usuario_id),
+            start=None,
+            end=None,
+            q=None,
+            limit=limit,
+            offset=offset,
+        )
+        return {"asistencias": list(out.get("items") or []), "total": int(out.get("total") or 0)}
     except HTTPException:
         raise
     except Exception as e:

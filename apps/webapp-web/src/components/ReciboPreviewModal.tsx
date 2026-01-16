@@ -157,7 +157,6 @@ export default function ReciboPreviewModal({
                     try {
                         document.body.removeChild(iframe);
                     } catch {
-                        // ignore
                     }
                 };
 
@@ -166,7 +165,6 @@ export default function ReciboPreviewModal({
                         iframe.contentWindow?.focus();
                         iframe.contentWindow?.print();
                     } catch {
-                        // ignore
                     } finally {
                         window.setTimeout(cleanup, 1200);
                     }

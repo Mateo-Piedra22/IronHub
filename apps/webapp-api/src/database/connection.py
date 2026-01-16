@@ -55,11 +55,24 @@ DATABASE_URL = get_database_url()
 
 # Configuración del Engine
 try:
+    is_serverless = False
+    try:
+        is_serverless = bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME") or os.getenv("K_SERVICE"))
+    except Exception:
+        is_serverless = False
+    try:
+        pool_size = int(os.getenv("DB_POOL_SIZE", "1" if is_serverless else "10"))
+    except Exception:
+        pool_size = 1 if is_serverless else 10
+    try:
+        max_overflow = int(os.getenv("DB_MAX_OVERFLOW", "0" if is_serverless else "20"))
+    except Exception:
+        max_overflow = 0 if is_serverless else 20
     engine = create_engine(
         DATABASE_URL,
         pool_pre_ping=True,       # Verifica la conexión antes de usarla
-        pool_size=10,             # Tamaño del pool
-        max_overflow=20,          # Conexiones extra permitidas
+        pool_size=pool_size,      # Tamaño del pool (serverless: bajo)
+        max_overflow=max_overflow,# Conexiones extra permitidas
         pool_recycle=1800,        # Reciclar conexiones cada 30 mins
         connect_args={
             "options": "-c timezone=America/Argentina/Buenos_Aires"
@@ -105,11 +118,24 @@ ADMIN_DATABASE_URL = get_admin_database_url()
 
 # Configuración del Engine Admin
 try:
+    is_serverless = False
+    try:
+        is_serverless = bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME") or os.getenv("K_SERVICE"))
+    except Exception:
+        is_serverless = False
+    try:
+        admin_pool_size = int(os.getenv("ADMIN_DB_POOL_SIZE", "1" if is_serverless else "5"))
+    except Exception:
+        admin_pool_size = 1 if is_serverless else 5
+    try:
+        admin_max_overflow = int(os.getenv("ADMIN_DB_MAX_OVERFLOW", "0" if is_serverless else "10"))
+    except Exception:
+        admin_max_overflow = 0 if is_serverless else 10
     admin_engine = create_engine(
         ADMIN_DATABASE_URL,
         pool_pre_ping=True,
-        pool_size=5,
-        max_overflow=10,
+        pool_size=admin_pool_size,
+        max_overflow=admin_max_overflow,
         pool_recycle=1800,
         connect_args={"options": "-c timezone=America/Argentina/Buenos_Aires"}
     )

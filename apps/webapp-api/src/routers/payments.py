@@ -699,6 +699,7 @@ async def api_pagos_list(
         page_q = request.query_params.get("page")
         
         limit = int(limit_q) if (limit_q and str(limit_q).isdigit()) else 50
+        limit = max(1, min(limit, 100))
         offset = 0
         if offset_q and str(offset_q).isdigit():
             offset = int(offset_q)
@@ -706,50 +707,47 @@ async def api_pagos_list(
             page_n = max(1, int(page_q))
             offset = (page_n - 1) * limit
         offset = max(0, offset)
-        
-        # Map desde/hasta to start/end for service
-        rows = svc.obtener_pagos_por_fecha(desde, hasta)
-        
-        # Filter by usuario_id
-        if not is_gestion:
-            usuario_id = str(int(session_user_id))
-        if usuario_id and str(usuario_id).isdigit():
-            uid = int(usuario_id)
-            rows = [r for r in rows if r.get("usuario_id") == uid]
-        
-        # Filter by metodo_id if provided
-        if metodo_id and str(metodo_id).isdigit():
-            mid = int(metodo_id)
-            rows = [r for r in rows if r.get("metodo_pago_id") == mid]
-        
-        def _normalize_pago_row(r: Dict[str, Any]) -> Dict[str, Any]:
-            anio_val = r.get("anio")
-            if anio_val is None:
-                anio_val = r.get("año")
-            fecha_val = r.get("fecha")
-            if not fecha_val:
-                fecha_val = r.get("fecha_pago")
-            metodo_nombre = r.get("metodo_pago_nombre")
-            if not metodo_nombre:
-                metodo_nombre = r.get("metodo_pago")
-            return {
-                "id": r.get("id"),
-                "usuario_id": r.get("usuario_id"),
-                "usuario_nombre": r.get("usuario_nombre"),
-                "monto": r.get("monto") or 0,
-                "fecha": fecha_val,
-                "mes": r.get("mes"),
-                "anio": anio_val,
-                "metodo_pago_id": r.get("metodo_pago_id"),
-                "metodo_pago_nombre": metodo_nombre,
-                "concepto_nombre": r.get("concepto_nombre") or r.get("concepto"),
-                "recibo_numero": r.get("recibo_numero"),
-                "estado": r.get("estado"),
-            }
 
-        total = len(rows)
-        sliced = rows[offset:offset+limit]
-        return {"pagos": [_normalize_pago_row(r) for r in sliced], "total": total}
+        uid_filter: Optional[int] = None
+        if not is_gestion:
+            uid_filter = int(session_user_id)
+        elif usuario_id and str(usuario_id).isdigit():
+            uid_filter = int(usuario_id)
+
+        mid_filter: Optional[int] = None
+        if metodo_id and str(metodo_id).isdigit():
+            mid_filter = int(metodo_id)
+
+        out = svc.obtener_pagos_por_fecha_paginados(
+            start=desde,
+            end=hasta,
+            usuario_id=uid_filter,
+            metodo_id=mid_filter,
+            limit=limit,
+            offset=offset,
+        )
+        items = list(out.get("items") or [])
+        total = int(out.get("total") or 0)
+
+        pagos_out = []
+        for r in items:
+            pagos_out.append(
+                {
+                    "id": r.get("id"),
+                    "usuario_id": r.get("usuario_id"),
+                    "usuario_nombre": r.get("usuario_nombre"),
+                    "monto": r.get("monto") or 0,
+                    "fecha": r.get("fecha_pago"),
+                    "mes": r.get("mes"),
+                    "anio": r.get("anio"),
+                    "metodo_pago_id": r.get("metodo_pago_id"),
+                    "metodo_pago_nombre": r.get("metodo_pago"),
+                    "recibo_numero": r.get("recibo_numero"),
+                    "estado": r.get("estado"),
+                }
+            )
+
+        return {"pagos": pagos_out, "total": total}
     except Exception as e:
         logger.error(f"Error obteniendo pagos: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)

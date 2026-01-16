@@ -64,7 +64,7 @@ rutinas_exportadas/
 recibos/
 backups/
 tests/
-scripts/
+#scripts/
 
 # Artefactos de build
 build/

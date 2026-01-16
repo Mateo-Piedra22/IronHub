@@ -32,8 +32,9 @@ export default function UsuarioLoginPage() {
     useEffect(() => {
         const loadBranding = async () => {
             try {
-                const res = await api.getPublicGymData();
-                if (res.ok && res.data?.logo_url) setGymLogoUrl(res.data.logo_url);
+                const res = await api.getBootstrap('usuario');
+                const logo = res.ok ? (res.data?.gym?.logo_url || '') : '';
+                if (logo) setGymLogoUrl(logo);
             } catch {
                 // ignore
             }

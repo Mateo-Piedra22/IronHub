@@ -41,7 +41,6 @@ from src.models.orm_models import (
 )
 
 from src.database.tenant_connection import get_current_tenant, set_current_tenant, validate_tenant_name, get_tenant_session_factory
-from src.routine_manager import RoutineTemplateManager
 from src.utils import get_gym_name, _resolve_logo_url, _resolve_existing_dir, get_webapp_base_url
 from src.services.gym_config_service import GymConfigService
 from src.services.clase_service import ClaseService
@@ -1414,6 +1413,9 @@ async def api_rutinas_list(
     plantillas: Optional[bool] = None,
     es_plantilla: Optional[bool] = None, # Alias for plantillas
     include_exercises: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+    page: Optional[int] = None,
 
     svc: TrainingService = Depends(get_training_service)
 ):
@@ -1444,14 +1446,32 @@ async def api_rutinas_list(
             es_plantilla = False
             include_exercises = True
 
+        try:
+            lim = max(1, min(int(limit or 50), 100))
+        except Exception:
+            lim = 50
+        try:
+            off = max(0, int(offset or 0))
+        except Exception:
+            off = 0
+        if off <= 0 and page is not None:
+            try:
+                p = int(page)
+                if p > 0:
+                    off = (p - 1) * lim
+            except Exception:
+                pass
+
         is_template_req = plantillas if plantillas is not None else es_plantilla
-        rutinas = svc.obtener_rutinas(
-            usuario_id,
+        out = svc.obtener_rutinas_paginadas(
+            usuario_id=usuario_id,
             include_exercises=include_exercises,
             search=search,
             solo_plantillas=is_template_req,
+            limit=lim,
+            offset=off,
         )
-        return {"rutinas": rutinas}
+        return {"rutinas": list(out.get("items") or []), "total": int(out.get("total") or 0)}
     except Exception as e:
         logger.error(f"Error listing rutinas: {e}")
         msg = str(e)
@@ -2390,7 +2410,7 @@ async def render_draft_excel(
     data: str,
     sig: str,
     filename: Optional[str] = None,
-    rm: RoutineTemplateManager = Depends(get_rm)
+    rm = Depends(get_rm)
 ):
     """
     Public endpoint to render draft excel from URL data.
@@ -2538,7 +2558,7 @@ async def render_draft_pdf(
     data: str,
     sig: str,
     filename: Optional[str] = None,
-    rm: RoutineTemplateManager = Depends(get_rm)
+    rm = Depends(get_rm)
 ):
     """Public endpoint to render draft PDF from URL data."""
     try:

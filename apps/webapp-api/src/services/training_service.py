@@ -445,6 +445,50 @@ class TrainingService(BaseService):
             logger.error(f"Error listing rutinas: {e}")
             return []
 
+    def obtener_rutinas_paginadas(
+        self,
+        usuario_id: Optional[int] = None,
+        include_exercises: bool = False,
+        search: str = None,
+        solo_plantillas: Optional[bool] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        try:
+            lim = max(1, min(int(limit or 50), 100))
+        except Exception:
+            lim = 50
+        try:
+            off = max(0, int(offset or 0))
+        except Exception:
+            off = 0
+
+        try:
+            stmt_total = select(func.count(Rutina.id))
+            if usuario_id is not None:
+                stmt_total = stmt_total.where(Rutina.usuario_id == usuario_id)
+            if solo_plantillas is not None:
+                if bool(solo_plantillas):
+                    stmt_total = stmt_total.where(Rutina.usuario_id.is_(None))
+                else:
+                    stmt_total = stmt_total.where(Rutina.usuario_id.is_not(None))
+            if search and str(search).strip():
+                like = f"%{str(search).strip().lower()}%"
+                stmt_total = stmt_total.where(func.lower(Rutina.nombre_rutina).like(like))
+            total = int(self.db.execute(stmt_total).scalar() or 0)
+        except Exception:
+            total = 0
+
+        items = self.obtener_rutinas(
+            usuario_id=usuario_id,
+            include_exercises=include_exercises,
+            search=search,
+            solo_plantillas=solo_plantillas,
+            limit=lim,
+            offset=off,
+        )
+        return {"items": items, "total": total}
+
     def crear_rutina(self, data: Dict[str, Any]) -> Optional[int]:
         """Create a new routine."""
         try:

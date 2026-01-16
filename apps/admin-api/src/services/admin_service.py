@@ -37,6 +37,16 @@ class AdminService:
         except Exception as e:
             logger.error(f"Error initializing AdminService infra: {e}")
 
+    def _env_flag(self, name: str, default: bool = False) -> bool:
+        v = os.getenv(name)
+        if v is None:
+            return bool(default)
+        try:
+            s = str(v).strip().lower()
+        except Exception:
+            return bool(default)
+        return s in ("1", "true", "t", "yes", "y", "on")
+
     def _ensure_admin_db_exists(self) -> None:
         """
         Verifica si la base de datos de administración existe y la crea si no.
@@ -135,6 +145,10 @@ class AdminService:
         try:
             with self.db.get_connection_context() as conn:
                 cur = conn.cursor()
+                try:
+                    cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+                except Exception:
+                    pass
                 cur.execute(
                     "CREATE TABLE IF NOT EXISTS gyms (id BIGSERIAL PRIMARY KEY, nombre TEXT NOT NULL, subdominio TEXT NOT NULL UNIQUE, db_name TEXT NOT NULL UNIQUE, b2_bucket_name TEXT, b2_bucket_id TEXT, whatsapp_phone_id TEXT, whatsapp_access_token TEXT, whatsapp_business_account_id TEXT, whatsapp_verify_token TEXT, whatsapp_app_secret TEXT, whatsapp_nonblocking BOOLEAN NOT NULL DEFAULT false, whatsapp_send_timeout_seconds NUMERIC(6,2) NULL, owner_phone TEXT, status TEXT NOT NULL DEFAULT 'active', hard_suspend BOOLEAN NOT NULL DEFAULT false, suspended_until TIMESTAMP WITHOUT TIME ZONE NULL, suspended_reason TEXT NULL, created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW())"
                 )
@@ -175,6 +189,19 @@ class AdminService:
                 cur.execute(
                     "CREATE TABLE IF NOT EXISTS gym_subscriptions (id BIGSERIAL PRIMARY KEY, gym_id BIGINT NOT NULL REFERENCES gyms(id) ON DELETE CASCADE, plan_id BIGINT NOT NULL REFERENCES plans(id) ON DELETE RESTRICT, start_date DATE NOT NULL, next_due_date DATE NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW())"
                 )
+                try:
+                    cur.execute("CREATE INDEX IF NOT EXISTS idx_gyms_subdominio_lower ON gyms (lower(subdominio))")
+                except Exception:
+                    pass
+                try:
+                    cur.execute("CREATE INDEX IF NOT EXISTS idx_gyms_status ON gyms (status)")
+                except Exception:
+                    pass
+                if self._env_flag("ADMIN_DB_ANALYZE_ON_BOOTSTRAP", True):
+                    try:
+                        cur.execute("ANALYZE gyms")
+                    except Exception:
+                        pass
                 conn.commit()
         except Exception as e:
             logger.error(f"Error ensuring schema: {e}")
@@ -890,6 +917,41 @@ class AdminService:
                     conn.commit()
             except Exception as e:
                 logger.warning(f"Could not ensure constraints in {dbname}: {e}")
+
+            try:
+                with engine.connect() as conn:
+                    try:
+                        conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+                    except Exception:
+                        pass
+                    for stmt in (
+                        "CREATE INDEX IF NOT EXISTS idx_usuarios_nombre_trgm ON usuarios USING gin (lower(nombre) gin_trgm_ops)",
+                        "CREATE INDEX IF NOT EXISTS idx_rutinas_nombre_trgm ON rutinas USING gin (lower(nombre_rutina) gin_trgm_ops)",
+                        "CREATE INDEX IF NOT EXISTS idx_ejercicios_nombre_trgm ON ejercicios USING gin (lower(nombre) gin_trgm_ops)",
+                        "CREATE INDEX IF NOT EXISTS idx_rutina_ejercicios_rutina_dia_orden ON rutina_ejercicios (rutina_id, dia_semana, orden)",
+                        "CREATE INDEX IF NOT EXISTS idx_comprobantes_pago_emitido_pago_fecha_desc ON comprobantes_pago (pago_id, fecha_creacion DESC) WHERE estado = 'emitido'",
+                        "CREATE INDEX IF NOT EXISTS idx_pagos_metodo_fecha_desc ON pagos (metodo_pago_id, fecha_pago DESC)",
+                    ):
+                        try:
+                            conn.execute(text(stmt))
+                        except Exception:
+                            pass
+                    if self._env_flag("TENANT_DB_ANALYZE_ON_BOOTSTRAP", True):
+                        for stmt in (
+                            "ANALYZE usuarios",
+                            "ANALYZE rutinas",
+                            "ANALYZE ejercicios",
+                            "ANALYZE pagos",
+                            "ANALYZE comprobantes_pago",
+                            "ANALYZE rutina_ejercicios",
+                        ):
+                            try:
+                                conn.execute(text(stmt))
+                            except Exception:
+                                pass
+                    conn.commit()
+            except Exception as e:
+                logger.warning(f"Could not ensure indexes in {dbname}: {e}")
 
             # 2. Create Owner User if provided
             if owner_data:

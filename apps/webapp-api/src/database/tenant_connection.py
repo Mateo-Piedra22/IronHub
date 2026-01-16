@@ -36,8 +36,18 @@ logger = logging.getLogger(__name__)
 MAX_TENANT_CACHE_SIZE = 50
 
 # Connection pool settings per tenant
-POOL_SIZE_PER_TENANT = 5
-MAX_OVERFLOW_PER_TENANT = 10
+try:
+    _IS_SERVERLESS = bool(os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME") or os.getenv("K_SERVICE"))
+except Exception:
+    _IS_SERVERLESS = False
+try:
+    POOL_SIZE_PER_TENANT = int(os.getenv("TENANT_DB_POOL_SIZE", "1" if _IS_SERVERLESS else "5"))
+except Exception:
+    POOL_SIZE_PER_TENANT = 1 if _IS_SERVERLESS else 5
+try:
+    MAX_OVERFLOW_PER_TENANT = int(os.getenv("TENANT_DB_MAX_OVERFLOW", "0" if _IS_SERVERLESS else "10"))
+except Exception:
+    MAX_OVERFLOW_PER_TENANT = 0 if _IS_SERVERLESS else 10
 POOL_RECYCLE_SECONDS = 1800
 
 # Connection retry settings

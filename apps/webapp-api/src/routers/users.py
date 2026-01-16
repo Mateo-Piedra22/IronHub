@@ -78,7 +78,7 @@ async def api_usuarios_list(
 ):
     try:
         q_effective = (search if (search is not None and str(search).strip() != "") else q)
-        limit_effective = max(1, int(limit or 50))
+        limit_effective = max(1, min(int(limit or 50), 100))
         offset_effective = int(offset or 0)
         if offset_effective <= 0 and page is not None:
             try:
@@ -87,9 +87,15 @@ async def api_usuarios_list(
                     offset_effective = (page_int - 1) * limit_effective
             except Exception:
                 pass
+        offset_effective = max(0, offset_effective)
 
         out = user_service.list_users_paged(q_effective, activo=activo, limit=limit_effective, offset=offset_effective)
-        return {"usuarios": out.get('items', []), "total": int(out.get('total') or 0)}
+        return {
+            "usuarios": out.get('items', []),
+            "total": int(out.get('total') or 0),
+            "limit": int(limit_effective),
+            "offset": int(offset_effective),
+        }
     except Exception as e:
         msg = str(e)
         return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)

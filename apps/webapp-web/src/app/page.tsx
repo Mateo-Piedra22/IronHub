@@ -26,33 +26,32 @@ export default function HomePage() {
     useEffect(() => {
         async function loadData() {
             try {
-                const gymRes = await api.getPublicGymData();
-                if (gymRes.ok && gymRes.data) setGymData(gymRes.data);
-            } catch {
-                // Fallback to defaults
-            }
-
-            try {
-                const maintRes = await api.getMaintenanceStatus();
-                if (maintRes.ok && maintRes.data?.active) {
-                    setMaintenanceMsg(maintRes.data.message || 'Mantenimiento en curso');
-                    setShowMaintenance(true);
-                }
-            } catch {
-                // Ignore
-            }
-
-            try {
-                const suspRes = await api.getSuspensionStatus();
-                if (suspRes.ok && suspRes.data?.suspended) {
-                    setSuspensionData({
-                        reason: suspRes.data.reason || 'Servicio suspendido',
-                        until: suspRes.data.until || '',
+                const res = await api.getBootstrap('auto');
+                if (res.ok && res.data) {
+                    const flags = res.data.flags || {};
+                    setGymData({
+                        gym_name: res.data.gym?.gym_name,
+                        logo_url: res.data.gym?.logo_url,
+                        suspended: !!flags.suspended,
+                        reason: flags.reason || '',
+                        until: flags.until || '',
+                        maintenance: !!flags.maintenance,
+                        maintenance_message: flags.maintenance_message || '',
                     });
-                    setShowSuspension(true);
+                    if (flags.maintenance) {
+                        setMaintenanceMsg(flags.maintenance_message || 'Mantenimiento en curso');
+                        setShowMaintenance(true);
+                    }
+                    if (flags.suspended) {
+                        setSuspensionData({
+                            reason: flags.reason || 'Servicio suspendido',
+                            until: flags.until || '',
+                        });
+                        setShowSuspension(true);
+                    }
                 }
             } catch {
-                // Ignore
+                // ignore
             }
 
             setLoading(false);

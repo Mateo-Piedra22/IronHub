@@ -26,6 +26,13 @@ except Exception:
 
 def _ensure_ejercicios_columns(session: Session, tenant: Optional[str]) -> None:
     try:
+        auto_guard = str(os.getenv("AUTO_SCHEMA_GUARD", "")).strip().lower() in ("1", "true", "yes", "on")
+        dev_mode = str(os.getenv("DEVELOPMENT_MODE", "")).strip().lower() in ("1", "true", "yes", "on")
+        if not auto_guard and not dev_mode:
+            return
+    except Exception:
+        return
+    try:
         key = str(tenant or "__default__")
         if _schema_guard_lock is not None:
             with _schema_guard_lock:

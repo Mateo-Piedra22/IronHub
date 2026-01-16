@@ -87,7 +87,7 @@ async def api_list_exercises(
     """List exercises with pagination and search."""
     try:
         page_n = max(1, int(page or 1))
-        page_size_n = max(1, int(page_size or 20))
+        page_size_n = max(1, min(int(page_size or 20), 50))
         offset = (page_n - 1) * page_size_n
 
         out = svc.obtener_ejercicios_paginados(

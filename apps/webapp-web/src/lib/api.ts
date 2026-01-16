@@ -32,14 +32,11 @@ function getCurrentSubdomain(): string {
         return domainParts[0];
     }
 
-    // Fallback for deployments where NEXT_PUBLIC_TENANT_DOMAIN does not match the current host
-    // (e.g. different base domain). Use the first label when the host has a subdomain.
-    if (domainParts.length >= 3) {
-        const candidate = (domainParts[0] || '').trim().toLowerCase();
-        if (candidate && !['www', 'api', 'admin', 'admin-api'].includes(candidate)) {
-            return candidate;
-        }
-    }
+    // If the frontend is served on a non-tenant domain (e.g. Vercel domain),
+    // require an explicit default tenant via env.
+    const envTenant =
+        (process.env.NEXT_PUBLIC_DEFAULT_TENANT || process.env.NEXT_PUBLIC_DEV_SUBDOMAIN || '').trim();
+    if (envTenant) return envTenant;
 
     return '';
 }
@@ -72,6 +69,32 @@ export interface ApiResponse<T> {
     ok: boolean;
     data?: T;
     error?: string;
+}
+
+type CacheEntry<T> = {
+    ts: number;
+    data: ApiResponse<T>;
+    etag?: string;
+};
+
+const _inMemoryCache: Record<string, CacheEntry<any> | undefined> = {};
+const _inFlight: Record<string, Promise<any> | undefined> = {};
+const _MAX_CACHE_ENTRIES = 250;
+
+function _setCache<T>(key: string, entry: CacheEntry<T>) {
+    _inMemoryCache[key] = entry;
+    try {
+        const keys = Object.keys(_inMemoryCache);
+        if (keys.length > _MAX_CACHE_ENTRIES) {
+            keys
+                .sort((a, b) => (Number(_inMemoryCache[a]?.ts || 0) - Number(_inMemoryCache[b]?.ts || 0)))
+                .slice(0, Math.max(1, keys.length - _MAX_CACHE_ENTRIES))
+                .forEach((k) => {
+                    delete _inMemoryCache[k];
+                });
+        }
+    } catch {
+    }
 }
 
 export interface PaginatedResponse<T> {
@@ -336,6 +359,13 @@ export interface SuspensionStatus {
     hard?: boolean;
 }
 
+export interface BootstrapPayload {
+    tenant?: string | null;
+    gym: PublicGymData;
+    session: { authenticated: boolean; user?: SessionUser | null };
+    flags?: Record<string, any>;
+}
+
 export interface SessionUser {
     id: number;
     nombre: string;
@@ -525,26 +555,71 @@ class ApiClient {
     ): Promise<ApiResponse<T>> {
         try {
             const url = `${this.baseUrl}${endpoint}`;
-            const response = await fetch(url, {
-                ...options,
-                credentials: 'include',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Tenant': typeof window !== 'undefined' ? getCurrentSubdomain() : '',
-                    ...options.headers,
-                },
-            });
+            const method = (options.method || 'GET').toUpperCase();
+            const isGet = method === 'GET';
+            const cacheKey = `${method}:${url}`;
+            const now = Date.now();
 
-            const data = await response.json().catch(() => ({}));
-
-            if (!response.ok) {
-                return {
-                    ok: false,
-                    error: data.detail || data.message || data.error || 'Error de servidor',
-                };
+            const cached = isGet ? _inMemoryCache[cacheKey] : undefined;
+            if (isGet && cached && now - cached.ts < 1500) {
+                return cached.data as ApiResponse<T>;
             }
 
-            return { ok: true, data: data as T };
+            if (isGet && _inFlight[cacheKey]) {
+                return (await _inFlight[cacheKey]) as ApiResponse<T>;
+            }
+
+            const doFetch = async (): Promise<ApiResponse<T>> => {
+                const headers: Record<string, string> = {
+                    'X-Tenant': typeof window !== 'undefined' ? getCurrentSubdomain() : '',
+                };
+                if (!((options.body instanceof FormData) || (options.body instanceof URLSearchParams))) {
+                    headers['Content-Type'] = 'application/json';
+                }
+                for (const [k, v] of Object.entries((options.headers as any) || {})) {
+                    headers[k] = String(v);
+                }
+                if (isGet && cached?.etag && !headers['If-None-Match']) {
+                    headers['If-None-Match'] = cached.etag;
+                }
+
+                const response = await fetch(url, {
+                    ...options,
+                    method,
+                    credentials: 'include',
+                    headers,
+                });
+
+                if (isGet && response.status === 304 && cached) {
+                    const hit = cached.data as ApiResponse<T>;
+                    _setCache(cacheKey, { ts: now, data: hit, etag: cached.etag });
+                    return hit;
+                }
+
+                const data = await response.json().catch(() => ({}));
+
+                if (!response.ok) {
+                    return {
+                        ok: false,
+                        error: (data as any).detail || (data as any).message || (data as any).error || 'Error de servidor',
+                    };
+                }
+
+                const okRes: ApiResponse<T> = { ok: true, data: data as T };
+                if (isGet) {
+                    const etag = response.headers.get('etag') || undefined;
+                    _setCache(cacheKey, { ts: now, data: okRes, etag: etag || cached?.etag });
+                }
+                return okRes;
+            };
+
+            const p = doFetch();
+            if (isGet) _inFlight[cacheKey] = p;
+            try {
+                return await p;
+            } finally {
+                if (isGet) delete _inFlight[cacheKey];
+            }
         } catch (error) {
             console.error('API Error:', error);
             return {
@@ -693,36 +768,85 @@ class ApiClient {
     }
 
     async getSession(context?: 'auto' | 'gestion' | 'usuario') {
+        const cacheKey = `GET:/api/auth/session:${context || 'auto'}`;
+        const now = Date.now();
+        const cached = _inMemoryCache[cacheKey];
+        if (cached && now - cached.ts < 10_000) {
+            return cached.data as ApiResponse<{ authenticated: boolean; user?: SessionUser }>;
+        }
         const p = new URLSearchParams();
         if (context) p.set('context', context);
         const qs = p.toString();
-        return this.request<{ authenticated: boolean; user?: SessionUser }>(
+        const res = await this.request<{ authenticated: boolean; user?: SessionUser }>(
             `/api/auth/session${qs ? `?${qs}` : ''}`
         );
+        _setCache(cacheKey, { ts: now, data: res });
+        return res;
+    }
+
+    async getBootstrap(context?: 'auto' | 'gestion' | 'usuario') {
+        const ctx = context || 'auto';
+        const cacheKey = `GET:/api/bootstrap:${ctx}`;
+        const now = Date.now();
+        const cached = _inMemoryCache[cacheKey];
+        if (cached && now - cached.ts < 5_000) {
+            return cached.data as ApiResponse<BootstrapPayload>;
+        }
+        const p = new URLSearchParams();
+        if (ctx) p.set('context', ctx);
+        const qs = p.toString();
+        const res = await this.request<BootstrapPayload>(`/api/bootstrap${qs ? `?${qs}` : ''}`);
+        _setCache(cacheKey, { ts: now, data: res });
+
+        try {
+            if (res.ok && res.data?.gym) {
+                _setCache(`GET:/gym/data:${getCurrentSubdomain() || ''}`, { ts: now, data: { ok: true, data: res.data.gym } });
+            }
+            if (res.ok && res.data?.session) {
+                _setCache(`GET:/api/auth/session:${ctx}`, {
+                    ts: now,
+                    data: { ok: true, data: { authenticated: !!res.data.session.authenticated, user: (res.data.session.user as any) || undefined } }
+                });
+            }
+        } catch {
+        }
+        return res;
     }
 
     // === Gym Data ===
     async getGymData() {
+        const cacheKey = 'GET:/api/gym/data';
+        const now = Date.now();
+        const cached = _inMemoryCache[cacheKey];
+        if (cached && now - cached.ts < 5 * 60 * 1000) {
+            return cached.data as ApiResponse<GymData>;
+        }
         const res = await this.request<GymData>('/api/gym/data');
         try {
             if (res.ok && res.data?.logo_url && res.data.logo_url.startsWith('/')) {
                 res.data.logo_url = `${this.baseUrl}${res.data.logo_url}`;
             }
         } catch {
-            // ignore
         }
+        _setCache(cacheKey, { ts: now, data: res });
         return res;
     }
 
     async getPublicGymData() {
+        const cacheKey = `GET:/gym/data:${getCurrentSubdomain() || ''}`;
+        const now = Date.now();
+        const cached = _inMemoryCache[cacheKey];
+        if (cached && now - cached.ts < 5 * 60 * 1000) {
+            return cached.data as ApiResponse<PublicGymData>;
+        }
         const res = await this.request<PublicGymData>('/gym/data');
         try {
             if (res.ok && res.data?.logo_url && res.data.logo_url.startsWith('/')) {
                 res.data.logo_url = `${this.baseUrl}${res.data.logo_url}`;
             }
         } catch {
-            // ignore
         }
+        _setCache(cacheKey, { ts: now, data: res });
         return res;
     }
 

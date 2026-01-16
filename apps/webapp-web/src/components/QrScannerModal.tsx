@@ -47,12 +47,10 @@ export function QRScannerModal({ isOpen, onClose, onScan, description }: QRScann
                         await qr.stop();
                     }
                 } catch {
-                    // ignore
                 }
                 try {
                     await qr.clear();
                 } catch {
-                    // ignore
                 }
             };
             void stop();
@@ -100,7 +98,6 @@ export function QRScannerModal({ isOpen, onClose, onScan, description }: QRScann
                             (navigator as any).vibrate?.([40, 30, 40]);
                         }
                     } catch {
-                        // ignore
                     }
                     try {
                         const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
@@ -122,7 +119,6 @@ export function QRScannerModal({ isOpen, onClose, onScan, description }: QRScann
                             };
                         }
                     } catch {
-                        // ignore
                     }
                     setPulse(true);
                     window.setTimeout(() => setPulse(false), 450);
@@ -133,7 +129,6 @@ export function QRScannerModal({ isOpen, onClose, onScan, description }: QRScann
             };
 
             const onError = () => {
-                // ignore scan noise
             };
 
             if (selectedCameraId) {
@@ -162,7 +157,6 @@ export function QRScannerModal({ isOpen, onClose, onScan, description }: QRScann
                 await qr.stop();
             }
         } catch {
-            // ignore
         } finally {
             setRunning(false);
         }

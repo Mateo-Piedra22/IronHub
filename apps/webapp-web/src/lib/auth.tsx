@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useLayoutEffect, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { api, type SessionUser } from '@/lib/api';
 
@@ -38,23 +38,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const pathname = usePathname();
     const [user, setUser] = useState<SessionUser | null>(null);
     const [isLoading, setIsLoading] = useState(true);
-
-    // Avoid redirect races on navigation: mark loading synchronously when route changes.
-    useLayoutEffect(() => {
-        setIsLoading(true);
+    const pathnameRef = useRef<string>('');
+    useEffect(() => {
+        pathnameRef.current = pathname || '';
     }, [pathname]);
 
     const checkSession = useCallback(async () => {
         setIsLoading(true);
         try {
-            const context = pathname?.startsWith('/gestion')
+            const p = pathnameRef.current || '';
+            const context = p.startsWith('/gestion')
                 ? 'gestion'
-                : pathname?.startsWith('/usuario')
+                : p.startsWith('/usuario')
                     ? 'usuario'
                     : 'auto';
-            const res = await api.getSession(context);
-            if (res.ok && res.data?.authenticated && res.data.user) {
-                setUser(res.data.user);
+            const res = await api.getBootstrap(context);
+            if (res.ok && res.data?.session?.authenticated && res.data.session.user) {
+                setUser(res.data.session.user as SessionUser);
             } else {
                 setUser(null);
             }
@@ -63,7 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } finally {
             setIsLoading(false);
         }
-    }, [pathname]);
+    }, []);
 
     const login = useCallback(async (dni: string, password: string) => {
         const res = await api.login({ dni, password });
@@ -80,9 +80,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         router.push('/');
     }, [router]);
 
-    // Check session on mount
+    // Check session on mount + lightweight background refresh (avoid checking on every navigation)
     useEffect(() => {
         checkSession();
+        const id = window.setInterval(() => {
+            checkSession();
+        }, 60_000);
+        return () => window.clearInterval(id);
     }, [checkSession]);
 
     // Route protection

@@ -8,12 +8,15 @@ import os
 import re
 import logging
 import json
+import hashlib
+import time
+import threading
 from dotenv import load_dotenv
 
 load_dotenv()
 
 from fastapi import FastAPI, Request, HTTPException, Form, Depends
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -21,6 +24,28 @@ from fastapi.staticfiles import StaticFiles
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+_API_GET_CACHE: dict[str, dict] = {}
+_API_GET_CACHE_LOCK = threading.RLock()
+try:
+    _API_GET_CACHE_TTL_MS = int(os.getenv("API_GET_CACHE_TTL_MS", "4000"))
+except Exception:
+    _API_GET_CACHE_TTL_MS = 4000
+try:
+    _API_GET_CACHE_MAX = int(os.getenv("API_GET_CACHE_MAX", "600"))
+except Exception:
+    _API_GET_CACHE_MAX = 600
+_API_GET_CACHE_PATH_PREFIXES = (
+    "/api/bootstrap",
+    "/api/auth/session",
+    "/api/usuarios",
+    "/api/pagos",
+    "/api/rutinas",
+    "/api/ejercicios",
+    "/api/profesores_basico",
+    "/api/metodos_pago",
+    "/api/tipos_cuota",
+)
 
 # ============================================================================
 # STARTUP CONFIGURATION VALIDATION
@@ -233,6 +258,41 @@ async def tenant_context_middleware(request: Request, call_next):
         logger.warning(f"NO TENANT CONTEXT for API route: {request.url.path}")
 
     try:
+        try:
+            if request.method == "GET" and str(request.url.path).startswith("/api/"):
+                pth = str(request.url.path)
+                if any(pth.startswith(x) for x in _API_GET_CACHE_PATH_PREFIXES):
+                    try:
+                        t = str(get_current_tenant() or "")
+                    except Exception:
+                        t = ""
+                    try:
+                        q = str(getattr(request.url, "query", "") or "")
+                    except Exception:
+                        q = ""
+                    try:
+                        role = str(request.session.get("role") or "")
+                    except Exception:
+                        role = ""
+                    try:
+                        uid = str(request.session.get("user_id") or "")
+                    except Exception:
+                        uid = ""
+                    ck = f"{t}|{pth}|{q}|{role}|{uid}"
+                    now_ms = int(time.time() * 1000)
+                    with _API_GET_CACHE_LOCK:
+                        ent = _API_GET_CACHE.get(ck)
+                    if ent and (now_ms - int(ent.get("ts") or 0) < _API_GET_CACHE_TTL_MS):
+                        hdrs = dict(ent.get("headers") or {})
+                        return Response(
+                            content=ent.get("body") or b"",
+                            status_code=int(ent.get("status") or 200),
+                            media_type="application/json",
+                            headers=hdrs,
+                        )
+        except Exception:
+            pass
+
         response = await call_next(request)
 
         try:
@@ -270,6 +330,63 @@ async def tenant_context_middleware(request: Request, call_next):
                         try:
                             response.body = new_body
                             response.headers["content-length"] = str(len(new_body))
+                        except Exception:
+                            pass
+
+                        try:
+                            if request.method == "GET" and response.status_code == 200:
+                                etag = hashlib.sha256(new_body).hexdigest()
+                                response.headers["ETag"] = f"\"{etag}\""
+                                vary = response.headers.get("Vary") or ""
+                                vary_parts = [v.strip() for v in vary.split(",") if v.strip()]
+                                for v in ("Cookie", "X-Tenant", "Origin"):
+                                    if v not in vary_parts:
+                                        vary_parts.append(v)
+                                response.headers["Vary"] = ", ".join(vary_parts)
+                                inm = (request.headers.get("if-none-match") or "").strip()
+                                if inm and inm == response.headers["ETag"]:
+                                    response.status_code = 304
+                                    response.body = b""
+                                    response.headers["content-length"] = "0"
+                        except Exception:
+                            pass
+
+                        try:
+                            if request.method == "GET" and response.status_code == 200:
+                                pth = str(request.url.path)
+                                if any(pth.startswith(x) for x in _API_GET_CACHE_PATH_PREFIXES):
+                                    try:
+                                        t = str(get_current_tenant() or "")
+                                    except Exception:
+                                        t = ""
+                                    try:
+                                        q = str(getattr(request.url, "query", "") or "")
+                                    except Exception:
+                                        q = ""
+                                    try:
+                                        role = str(request.session.get("role") or "")
+                                    except Exception:
+                                        role = ""
+                                    try:
+                                        uid = str(request.session.get("user_id") or "")
+                                    except Exception:
+                                        uid = ""
+                                    ck = f"{t}|{pth}|{q}|{role}|{uid}"
+                                    now_ms = int(time.time() * 1000)
+                                    hdrs = {}
+                                    for k in ("ETag", "Cache-Control", "Vary"):
+                                        v = response.headers.get(k)
+                                        if v:
+                                            hdrs[k] = v
+                                    with _API_GET_CACHE_LOCK:
+                                        if len(_API_GET_CACHE) >= _API_GET_CACHE_MAX:
+                                            _API_GET_CACHE.clear()
+                                        _API_GET_CACHE[ck] = {
+                                            "ts": now_ms,
+                                            "status": 200,
+                                            "body": bytes(new_body),
+                                            "headers": hdrs,
+                                        }
                         except Exception:
                             pass
         except Exception:

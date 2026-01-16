@@ -483,6 +483,90 @@ class AttendanceService(BaseService):
             logger.error(f"Error getting attendance details: {e}")
             return []
 
+    def obtener_asistencias_detalle_paginadas(
+        self,
+        usuario_id: Optional[int] = None,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+        q: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        try:
+            try:
+                lim = max(1, min(int(limit or 50), 200))
+            except Exception:
+                lim = 50
+            try:
+                off = max(0, int(offset or 0))
+            except Exception:
+                off = 0
+
+            params: Dict[str, Any] = {"limit": lim, "offset": off}
+            where_parts: list[str] = []
+
+            if usuario_id is not None:
+                try:
+                    params["usuario_id"] = int(usuario_id)
+                    where_parts.append("a.usuario_id = :usuario_id")
+                except Exception:
+                    pass
+
+            if start and end:
+                params["start"] = start
+                params["end"] = end
+                where_parts.append("a.fecha BETWEEN :start AND :end")
+            else:
+                start_date = self._today_local_date() - timedelta(days=30)
+                params["start_date"] = start_date
+                where_parts.append("a.fecha >= :start_date")
+
+            if q and str(q).strip():
+                params["q"] = f"%{q}%"
+                where_parts.append("(u.nombre ILIKE :q)")
+
+            where_sql = " AND ".join(where_parts) if where_parts else "TRUE"
+
+            count_query = f"""
+                SELECT COUNT(*)
+                FROM asistencias a
+                JOIN usuarios u ON u.id = a.usuario_id
+                WHERE {where_sql}
+            """
+            total = 0
+            try:
+                total = int(self.db.execute(text(count_query), params).scalar() or 0)
+            except Exception:
+                total = 0
+
+            query = f"""
+                SELECT a.id, a.usuario_id, a.fecha::date, a.hora_registro, u.nombre
+                FROM asistencias a
+                JOIN usuarios u ON u.id = a.usuario_id
+                WHERE {where_sql}
+                ORDER BY a.fecha DESC, a.hora_registro DESC
+                LIMIT :limit OFFSET :offset
+            """
+            result = self.db.execute(text(query), params)
+            tz = self._get_app_timezone()
+            items = [
+                {
+                    'id': int(row[0]) if row[0] is not None else None,
+                    'usuario_id': int(row[1]) if row[1] is not None else None,
+                    'fecha': str(row[2]) if row[2] else None,
+                    'hora': (
+                        self._as_utc_naive(row[3]).replace(tzinfo=timezone.utc).astimezone(tz).time().isoformat(timespec='seconds')
+                        if row[3] else None
+                    ),
+                    'usuario_nombre': row[4] or ''
+                }
+                for row in result.fetchall()
+            ]
+            return {"items": items, "total": total}
+        except Exception as e:
+            logger.error(f"Error getting paged attendance details: {e}")
+            return {"items": [], "total": 0}
+
     # ========== Station QR Check-in ==========
 
     def _ensure_station_tables(self) -> None:

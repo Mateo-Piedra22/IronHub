@@ -1302,6 +1302,128 @@ class PaymentService(BaseService):
             for p in pagos
         ]
 
+    def obtener_pagos_por_fecha_paginados(
+        self,
+        start: Optional[str] = None,
+        end: Optional[str] = None,
+        usuario_id: Optional[int] = None,
+        metodo_id: Optional[int] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Dict[str, Any]:
+        from sqlalchemy.orm import joinedload
+
+        try:
+            lim = max(1, min(int(limit or 50), 100))
+        except Exception:
+            lim = 50
+        try:
+            off = max(0, int(offset or 0))
+        except Exception:
+            off = 0
+
+        stmt = (
+            select(Pago)
+            .options(joinedload(Pago.usuario))
+            .order_by(Pago.fecha_pago.desc())
+        )
+
+        count_stmt = select(func.count(Pago.id))
+
+        if start:
+            try:
+                start_date = datetime.strptime(start, "%Y-%m-%d").date()
+                stmt = stmt.where(func.date(Pago.fecha_pago) >= start_date)
+                count_stmt = count_stmt.where(func.date(Pago.fecha_pago) >= start_date)
+            except ValueError:
+                pass
+
+        if end:
+            try:
+                end_date = datetime.strptime(end, "%Y-%m-%d").date()
+                stmt = stmt.where(func.date(Pago.fecha_pago) <= end_date)
+                count_stmt = count_stmt.where(func.date(Pago.fecha_pago) <= end_date)
+            except ValueError:
+                pass
+
+        if usuario_id is not None:
+            try:
+                uid = int(usuario_id)
+                stmt = stmt.where(Pago.usuario_id == uid)
+                count_stmt = count_stmt.where(Pago.usuario_id == uid)
+            except Exception:
+                pass
+
+        if metodo_id is not None:
+            try:
+                mid = int(metodo_id)
+                stmt = stmt.where(Pago.metodo_pago_id == mid)
+                count_stmt = count_stmt.where(Pago.metodo_pago_id == mid)
+            except Exception:
+                pass
+
+        total = 0
+        try:
+            total = int(self.db.execute(count_stmt).scalar() or 0)
+        except Exception:
+            total = 0
+
+        pagos = self.db.execute(stmt.limit(lim).offset(off)).scalars().all()
+
+        recibo_por_pago: Dict[int, str] = {}
+        try:
+            pago_ids = [int(p.id) for p in pagos if getattr(p, 'id', None) is not None]
+        except Exception:
+            pago_ids = []
+        if pago_ids:
+            try:
+                comps = (
+                    self.db.execute(
+                        select(ComprobantePago)
+                        .where(
+                            ComprobantePago.pago_id.in_(pago_ids),
+                            ComprobantePago.estado == 'emitido',
+                        )
+                        .order_by(ComprobantePago.pago_id.asc(), ComprobantePago.fecha_creacion.desc())
+                    )
+                    .scalars()
+                    .all()
+                )
+                for c in comps:
+                    try:
+                        pid = int(c.pago_id)
+                    except Exception:
+                        continue
+                    if pid not in recibo_por_pago:
+                        try:
+                            recibo_por_pago[pid] = str(c.numero_comprobante)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        metodos = {m.id: m.nombre for m in self.db.execute(select(MetodoPago)).scalars().all()}
+
+        items = [
+            {
+                'id': p.id,
+                'usuario_id': p.usuario_id,
+                'usuario_nombre': p.usuario.nombre if p.usuario else None,
+                'dni': p.usuario.dni if p.usuario else None,
+                'monto': float(p.monto or 0),
+                'mes': p.mes,
+                'anio': p.año,
+                'fecha_pago': p.fecha_pago.isoformat() if p.fecha_pago else None,
+                'metodo_pago_id': p.metodo_pago_id,
+                'metodo_pago': metodos.get(p.metodo_pago_id) if p.metodo_pago_id else None,
+                'recibo_numero': recibo_por_pago.get(int(p.id)) if getattr(p, 'id', None) is not None else None,
+                'estado': getattr(p, 'estado', None),
+            }
+            for p in pagos
+        ]
+
+        return {"items": items, "total": total}
+
     def obtener_usuario_por_id(self, usuario_id: int) -> Optional[Usuario]:
         """Get user by ID."""
         return self.db.get(Usuario, usuario_id)

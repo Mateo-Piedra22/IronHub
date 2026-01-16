@@ -3,9 +3,8 @@ import os
 import time
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone
-
-import psycopg2
-import psycopg2.extras
+from sqlalchemy import text
+from src.database.connection import AdminSessionLocal
 from pathlib import Path
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse, HTMLResponse, Response, FileResponse
@@ -15,13 +14,13 @@ import os
 
 from src.dependencies import get_admin_db, CURRENT_TENANT
 from src.database.tenant_connection import get_tenant_session_factory
+from src.database.tenant_connection import validate_tenant_name
 from src.services.gym_config_service import GymConfigService
 from src.utils import (
     _is_tenant_suspended, _get_tenant_suspension_info,
-    _resolve_theme_vars, _resolve_logo_url, get_gym_name, validate_tenant_name,
+    _resolve_theme_vars, _resolve_logo_url, get_gym_name,
     _resolve_existing_dir
 )
-from src.services.b2_storage import get_file_url
 # Import preview helper from gym router
 try:
     from src.routers.gym import _get_excel_preview_routine
@@ -42,19 +41,11 @@ templates = Jinja2Templates(directory=str(templates_dir))
 
 _GYM_DATA_PUBLIC_CACHE: Dict[str, Dict[str, Any]] = {}
 _GYM_DATA_PUBLIC_CACHE_TTL_S = 300
+_ADMIN_STATUS_CACHE: Dict[str, Dict[str, Any]] = {}
+_ADMIN_STATUS_CACHE_TTL_S = 30
 
-@router.get("/public")
-async def index(request: Request):
-    """Root endpoint - returns JSON with gym info. Frontend handles the UI."""
-    return JSONResponse({
-        "ok": True,
-        "gym_name": get_gym_name("Gimnasio"),
-        "logo_url": _resolve_logo_url(),
-        "message": "IronHub Gym API"
-    })
 
-@router.get("/gym/data")
-async def gym_data_public(request: Request):
+def _extract_tenant_public(request: Request) -> str:
     tenant = ""
     try:
         tenant = str(CURRENT_TENANT.get() or "").strip().lower()
@@ -72,14 +63,17 @@ async def gym_data_public(request: Request):
                 tenant = ""
         except Exception:
             tenant = ""
+    return tenant
 
+
+def _get_branding_for_tenant(tenant: str) -> Dict[str, Any]:
     cache_key = tenant or "__no_tenant__"
     now = int(time.time())
     cached = _GYM_DATA_PUBLIC_CACHE.get(cache_key)
     if cached and isinstance(cached, dict):
         try:
             if now - int(cached.get("ts") or 0) < _GYM_DATA_PUBLIC_CACHE_TTL_S:
-                return JSONResponse(cached.get("data") or {"gym_name": "Gimnasio", "logo_url": "/assets/logo.svg"})
+                return cached.get("data") or {"gym_name": "Gimnasio", "logo_url": "/assets/logo.svg"}
         except Exception:
             pass
 
@@ -103,6 +97,7 @@ async def gym_data_public(request: Request):
         try:
             s = str(logo_url).strip()
             if s and not s.startswith("http") and not s.startswith("/"):
+                from src.services.b2_storage import get_file_url
                 logo_url = get_file_url(s)
             else:
                 logo_url = s
@@ -116,7 +111,158 @@ async def gym_data_public(request: Request):
 
     payload = {"gym_name": gym_name, "logo_url": logo_url}
     _GYM_DATA_PUBLIC_CACHE[cache_key] = {"ts": now, "data": payload}
-    return JSONResponse(payload)
+    return payload
+
+
+def _get_admin_tenant_status(tenant: str) -> Dict[str, Any]:
+    key = str(tenant or "").strip().lower() or "__no_tenant__"
+    now = int(time.time())
+    cached = _ADMIN_STATUS_CACHE.get(key)
+    if cached and isinstance(cached, dict):
+        try:
+            if now - int(cached.get("ts") or 0) < _ADMIN_STATUS_CACHE_TTL_S:
+                return cached.get("data") or {}
+        except Exception:
+            pass
+
+    data: Dict[str, Any] = {}
+    if tenant:
+        try:
+            ses = AdminSessionLocal()
+            try:
+                row = (
+                    ses.execute(
+                        text(
+                            "SELECT status, suspended_until, suspended_reason "
+                            "FROM gyms WHERE subdominio = :t LIMIT 1"
+                        ),
+                        {"t": str(tenant).strip().lower()},
+                    )
+                    .mappings()
+                    .first()
+                )
+                if row:
+                    data = dict(row)
+            finally:
+                ses.close()
+        except Exception:
+            data = {}
+
+    _ADMIN_STATUS_CACHE[key] = {"ts": now, "data": data}
+    return data
+
+@router.get("/public")
+async def index(request: Request):
+    """Root endpoint - returns JSON with gym info. Frontend handles the UI."""
+    return JSONResponse({
+        "ok": True,
+        "gym_name": get_gym_name("Gimnasio"),
+        "logo_url": _resolve_logo_url(),
+        "message": "IronHub Gym API"
+    })
+
+@router.get("/gym/data")
+async def gym_data_public(request: Request):
+    tenant = _extract_tenant_public(request)
+    payload = _get_branding_for_tenant(tenant)
+    resp = JSONResponse(payload)
+    resp.headers["Cache-Control"] = "public, max-age=60, s-maxage=300, stale-while-revalidate=600"
+    resp.headers["Vary"] = "X-Tenant, Origin"
+    return resp
+
+
+@router.get("/api/bootstrap")
+async def api_bootstrap(request: Request, context: str = "auto"):
+    tenant = _extract_tenant_public(request)
+    branding = _get_branding_for_tenant(tenant)
+
+    try:
+        ctx = str(context or "auto").strip().lower()
+    except Exception:
+        ctx = "auto"
+
+    user_id = request.session.get("user_id")
+    role = request.session.get("role")
+    logged_in = request.session.get("logged_in", False)
+    gestion_prof_user_id = request.session.get("gestion_profesor_user_id")
+
+    session_payload: Dict[str, Any] = {"authenticated": False, "user": None}
+    try:
+        if user_id and ctx in ("auto", "usuario", "user"):
+            nombre = request.session.get("usuario_nombre", "")
+            try:
+                rol_out = str(role or "user").strip().lower() or "user"
+            except Exception:
+                rol_out = "user"
+            if rol_out in ("dueño", "dueno"):
+                rol_out = "owner"
+            if rol_out in ("cliente", "socio", "member", "usuario", "usuarios"):
+                rol_out = "user"
+            if rol_out not in ("owner", "admin", "profesor", "user"):
+                rol_out = "user"
+            session_payload = {
+                "authenticated": True,
+                "user": {"id": int(user_id), "nombre": nombre, "rol": rol_out, "dni": None}
+            }
+        elif gestion_prof_user_id is not None and ctx in ("auto", "gestion"):
+            session_payload = {
+                "authenticated": True,
+                "user": {
+                    "id": int(gestion_prof_user_id),
+                    "nombre": request.session.get("usuario_nombre", "") or "Profesor",
+                    "rol": "profesor",
+                    "dni": None,
+                },
+            }
+        else:
+            try:
+                role_norm = str(role or "").strip().lower()
+            except Exception:
+                role_norm = ""
+            if logged_in and role_norm in ("owner", "dueño", "dueno") and ctx in ("auto", "gestion"):
+                session_payload = {
+                    "authenticated": True,
+                    "user": {"id": 0, "nombre": "Dueño", "rol": "owner", "dni": None},
+                }
+    except Exception:
+        session_payload = {"authenticated": False, "user": None}
+
+    flags: Dict[str, Any] = {"tenant": tenant or None}
+    try:
+        admin_row = _get_admin_tenant_status(tenant) if tenant else {}
+        st = str((admin_row.get("status") or "")).strip().lower()
+        until = admin_row.get("suspended_until")
+        msg = admin_row.get("suspended_reason")
+
+        suspended = st in ("suspended", "suspension")
+        maintenance = (st == "maintenance")
+
+        until_s = ""
+        try:
+            until_s = until.isoformat() if hasattr(until, "isoformat") and until else (str(until or ""))
+        except Exception:
+            until_s = str(until or "")
+
+        flags.update({
+            "suspended": bool(suspended),
+            "reason": str(msg or "") if suspended else "",
+            "until": until_s if suspended else "",
+            "maintenance": bool(maintenance),
+            "maintenance_message": str(msg or "") if maintenance else "",
+        })
+    except Exception:
+        flags.update({"suspended": False, "maintenance": False})
+
+    payload = {
+        "tenant": tenant or None,
+        "gym": branding,
+        "session": session_payload,
+        "flags": flags,
+    }
+    resp = JSONResponse(payload)
+    resp.headers["Cache-Control"] = "private, max-age=5"
+    resp.headers["Vary"] = "Cookie, X-Tenant, Origin"
+    return resp
 
 @router.get("/checkin")
 async def checkin_page(request: Request):
@@ -215,63 +361,34 @@ async def api_theme_get():
 @router.get("/api/maintenance_status")
 async def api_maintenance_status(request: Request):
     try:
-        sub = CURRENT_TENANT.get() or ""
+        sub = str(CURRENT_TENANT.get() or "").strip().lower()
     except Exception:
         sub = ""
-    adm = get_admin_db()
-    if adm is None:
+    if not sub:
         return JSONResponse({"active": False})
+
     try:
-        with adm.db.get_connection_context() as conn:  # type: ignore
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT status, suspended_until, suspended_reason FROM gyms WHERE subdominio = %s", (str(sub).strip().lower(),))
-            row = cur.fetchone() or {}
-            st = str((row.get("status") or "")).lower()
-            active = (st == "maintenance")
-            until = row.get("suspended_until")
-            msg = row.get("suspended_reason")
+        row = _get_admin_tenant_status(sub) or {}
+        st = str((row.get("status") or "")).strip().lower()
+        active = (st == "maintenance")
+        until = row.get("suspended_until")
+        msg = row.get("suspended_reason")
+        active_now = False
+        if active:
             try:
-                from src.database.connection import SessionLocal
-                from src.services.gym_service import GymService
-                tenant_session = SessionLocal()
-                try:
-                    svc = GymService(tenant_session)
-                    config = svc.obtener_configuracion_gimnasio()
-                    act = config.get("maintenance_modal_active")
-                    if str(act or "").strip().lower() in ("1", "true", "yes", "on") and not active:
-                        active = True
-                        try:
-                            m2 = config.get("maintenance_modal_message")
-                            if m2:
-                                msg = m2
-                        except Exception:
-                            pass
-                        try:
-                            u2 = config.get("maintenance_modal_until")
-                            if u2:
-                                until = u2
-                        except Exception:
-                            pass
-                finally:
-                    tenant_session.close()
-            except Exception:
-                pass
-            active_now = False
-            if active:
-                try:
-                    if until:
-                        dt = until if hasattr(until, "tzinfo") else datetime.fromisoformat(str(until))
-                        now = datetime.utcnow().replace(tzinfo=timezone.utc)
-                        active_now = bool(dt <= now)
-                    else:
-                        active_now = True
-                except Exception:
+                if until:
+                    dt = until if hasattr(until, "tzinfo") else datetime.fromisoformat(str(until))
+                    now = datetime.utcnow().replace(tzinfo=timezone.utc)
+                    active_now = bool(dt <= now)
+                else:
                     active_now = True
-            try:
-                u = until.isoformat() if hasattr(until, "isoformat") and until else (str(until or ""))
             except Exception:
-                u = str(until or "")
-            return JSONResponse({"active": bool(active), "active_now": bool(active_now), "until": u, "message": str(msg or "")})
+                active_now = True
+        try:
+            u = until.isoformat() if hasattr(until, "isoformat") and until else (str(until or ""))
+        except Exception:
+            u = str(until or "")
+        return JSONResponse({"active": bool(active), "active_now": bool(active_now), "until": u, "message": str(msg or "")})
     except Exception:
         return JSONResponse({"active": False})
 
@@ -282,14 +399,21 @@ async def api_maintenance_status_alias(request: Request):
 @router.get("/api/suspension_status")
 async def api_suspension_status(request: Request):
     try:
-        sub = CURRENT_TENANT.get() or ""
+        sub = str(CURRENT_TENANT.get() or "").strip().lower()
         if not sub:
             return JSONResponse({"suspended": False})
-        sus = bool(_is_tenant_suspended(sub))
-        info = _get_tenant_suspension_info(sub) if sus else None
-        payload: Dict[str, Any] = {"suspended": sus}
-        if info:
-            payload.update({"reason": info.get("reason"), "until": info.get("until"), "hard": info.get("hard")})
+        row = _get_admin_tenant_status(sub) or {}
+        st = str((row.get("status") or "")).strip().lower()
+        sus = st in ("suspended", "suspension")
+        until = row.get("suspended_until")
+        msg = row.get("suspended_reason")
+        try:
+            u = until.isoformat() if hasattr(until, "isoformat") and until else (str(until or ""))
+        except Exception:
+            u = str(until or "")
+        payload: Dict[str, Any] = {"suspended": bool(sus)}
+        if sus:
+            payload.update({"reason": str(msg or ""), "until": u, "hard": False})
         return JSONResponse(payload)
     except Exception:
         return JSONResponse({"suspended": False})
