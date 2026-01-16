@@ -971,9 +971,9 @@ export function UnifiedRutinaEditor({
                     </div>
                 }
             >
-                <div className="flex gap-4 h-[calc(90vh-160px)] overflow-hidden">
+                <div className="flex gap-4 h-[calc(90vh-160px)] overflow-hidden min-h-0">
                     {/* Left: Editor */}
-                    <div className={cn("flex flex-col gap-4 overflow-y-auto", showPreview ? "w-2/3" : "w-full")}>
+                    <div className={cn("flex flex-col gap-4 min-h-0 overflow-y-auto", showPreview ? "w-2/3" : "w-full")}>
                         {/* Metadata */}
                         <div className="card p-4 space-y-3">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1164,7 +1164,7 @@ export function UnifiedRutinaEditor({
 
                     {/* Right: Preview */}
                     {showPreview && (
-                        <div className="w-1/3 card overflow-hidden">
+                        <div className="w-1/3 card overflow-hidden flex flex-col min-h-0">
                             <ExcelPreviewPanel
                                 rutinaId={rutina?.id || null}
                                 isVisible={showPreview}

@@ -28,8 +28,12 @@ export default function ReciboPreviewModal({
 }: ReciboPreviewModalProps) {
     const { success, error } = useToast();
     const [preview, setPreview] = useState<ReciboPreview | null>(null);
+    const [draft, setDraft] = useState<ReciboPreview | null>(null);
     const [loading, setLoading] = useState(false);
     const [downloading, setDownloading] = useState(false);
+    const [editing, setEditing] = useState(false);
+    const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
+    const [pdfLoading, setPdfLoading] = useState(false);
 
     // Load preview
     useEffect(() => {
@@ -44,11 +48,82 @@ export default function ReciboPreviewModal({
         const res = await api.getReciboPreview(pago.id);
         if (res.ok && res.data) {
             setPreview(res.data);
+            setDraft(res.data);
         } else {
             error(res.error || 'Error al cargar vista previa');
         }
         setLoading(false);
     };
+
+    useEffect(() => {
+        if (!isOpen) return;
+        if (!editing) return;
+        if (!draft) return;
+        if (!pago) return;
+
+        const handle = window.setTimeout(async () => {
+            try {
+                setPdfLoading(true);
+                const payload = {
+                    usuario: {
+                        id: pago.usuario_id,
+                        nombre: draft.usuario_nombre,
+                        dni: draft.usuario_dni,
+                        tipo_cuota: pago.tipo_cuota_nombre,
+                    },
+                    pago: {
+                        monto: draft.total,
+                        mes: pago.mes,
+                        anio: pago.anio,
+                        metodo_pago_id: pago.metodo_pago_id,
+                        metodo_pago_nombre: draft.metodo_pago,
+                    },
+                    detalles: (draft.items || []).map((it) => ({
+                        descripcion: it.descripcion,
+                        cantidad: Number(it.cantidad) || 1,
+                        precio_unitario: Number(it.precio) || 0,
+                    })),
+                    totales: {
+                        subtotal: draft.subtotal,
+                        total: draft.total,
+                    },
+                    branding: {
+                        gym_name: draft.gym_nombre,
+                        gym_address: draft.gym_direccion,
+                        logo_url: draft.logo_url,
+                    },
+                    observaciones: draft.observaciones,
+                    emitido_por: draft.emitido_por,
+                    mostrar_logo: draft.mostrar_logo,
+                    mostrar_metodo: draft.mostrar_metodo,
+                    mostrar_dni: draft.mostrar_dni,
+                    tipo_cuota_override: pago.tipo_cuota_nombre,
+                };
+
+                const res = await api.previewReceipt(payload);
+                if (!res.ok || !res.data?.blob) return;
+                const nextUrl = URL.createObjectURL(res.data.blob);
+                setPdfPreviewUrl((prev) => {
+                    if (prev) URL.revokeObjectURL(prev);
+                    return nextUrl;
+                });
+            } finally {
+                setPdfLoading(false);
+            }
+        }, 600);
+
+        return () => window.clearTimeout(handle);
+    }, [isOpen, editing, draft, pago]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        return () => {
+            setPdfPreviewUrl((prev) => {
+                if (prev) URL.revokeObjectURL(prev);
+                return null;
+            });
+        };
+    }, [isOpen]);
 
     const handleDownload = async () => {
         if (!pago) return;
@@ -69,6 +144,13 @@ export default function ReciboPreviewModal({
 
     if (!isOpen || !pago) return null;
 
+    const data = draft || preview;
+
+    const recalcTotals = (items: ReciboItem[]) => {
+        const subtotal = items.reduce((acc, it) => acc + (Number(it.cantidad) || 0) * (Number(it.precio) || 0), 0);
+        return { subtotal, total: subtotal };
+    };
+
     return (
         <Modal
             isOpen={isOpen}
@@ -79,6 +161,13 @@ export default function ReciboPreviewModal({
                 <>
                     <Button variant="secondary" onClick={onClose}>
                         Cerrar
+                    </Button>
+                    <Button
+                        variant="secondary"
+                        leftIcon={<Settings className="w-4 h-4" />}
+                        onClick={() => setEditing((v) => !v)}
+                    >
+                        {editing ? 'Cerrar editor' : 'Editar'}
                     </Button>
                     <Button
                         variant="secondary"
@@ -99,40 +188,186 @@ export default function ReciboPreviewModal({
         >
             {loading ? (
                 <div className="text-center py-8 text-slate-500">Cargando...</div>
-            ) : preview ? (
-                <div className="bg-white text-black rounded-lg p-6 print:p-0" id="recibo-preview">
+            ) : data ? (
+                <div className={cn(editing ? 'grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4' : '')}>
+                    {editing && (
+                        <div className="bg-slate-900 rounded-lg border border-slate-800 p-4 space-y-4 max-h-[70vh] overflow-auto">
+                            <div className="space-y-2">
+                                <div className="text-sm font-medium text-slate-200">Contenido</div>
+                                <Input
+                                    label="Título"
+                                    value={data.titulo || ''}
+                                    onChange={(e) => setDraft((prev) => prev ? ({ ...prev, titulo: e.target.value }) : prev)}
+                                />
+                                <Input
+                                    label="Gimnasio"
+                                    value={data.gym_nombre || ''}
+                                    onChange={(e) => setDraft((prev) => prev ? ({ ...prev, gym_nombre: e.target.value }) : prev)}
+                                />
+                                <Input
+                                    label="Dirección"
+                                    value={data.gym_direccion || ''}
+                                    onChange={(e) => setDraft((prev) => prev ? ({ ...prev, gym_direccion: e.target.value }) : prev)}
+                                />
+                                <Input
+                                    label="Observaciones"
+                                    value={data.observaciones || ''}
+                                    onChange={(e) => setDraft((prev) => prev ? ({ ...prev, observaciones: e.target.value }) : prev)}
+                                />
+                                <Input
+                                    label="Emitido por"
+                                    value={data.emitido_por || ''}
+                                    onChange={(e) => setDraft((prev) => prev ? ({ ...prev, emitido_por: e.target.value }) : prev)}
+                                />
+                            </div>
+
+                            <div className="space-y-2">
+                                <div className="text-sm font-medium text-slate-200">Visibilidad</div>
+                                <label className="flex items-center gap-2 text-sm text-slate-300">
+                                    <input
+                                        type="checkbox"
+                                        checked={!!data.mostrar_logo}
+                                        onChange={(e) => setDraft((prev) => prev ? ({ ...prev, mostrar_logo: e.target.checked }) : prev)}
+                                    />
+                                    Mostrar logo
+                                </label>
+                                <label className="flex items-center gap-2 text-sm text-slate-300">
+                                    <input
+                                        type="checkbox"
+                                        checked={!!data.mostrar_dni}
+                                        onChange={(e) => setDraft((prev) => prev ? ({ ...prev, mostrar_dni: e.target.checked }) : prev)}
+                                    />
+                                    Mostrar DNI
+                                </label>
+                                <label className="flex items-center gap-2 text-sm text-slate-300">
+                                    <input
+                                        type="checkbox"
+                                        checked={!!data.mostrar_metodo}
+                                        onChange={(e) => setDraft((prev) => prev ? ({ ...prev, mostrar_metodo: e.target.checked }) : prev)}
+                                    />
+                                    Mostrar método de pago
+                                </label>
+                            </div>
+
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <div className="text-sm font-medium text-slate-200">Items</div>
+                                    <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        leftIcon={<Plus className="w-4 h-4" />}
+                                        onClick={() => {
+                                            const nextItems = [...(data.items || []), { descripcion: 'Pago', cantidad: 1, precio: 0 }];
+                                            const totals = recalcTotals(nextItems);
+                                            setDraft((prev) => prev ? ({ ...prev, items: nextItems, ...totals }) : prev);
+                                        }}
+                                    >
+                                        Agregar
+                                    </Button>
+                                </div>
+
+                                <div className="space-y-3">
+                                    {(data.items || []).map((item, idx) => (
+                                        <div key={idx} className="rounded-lg border border-slate-800 p-3 space-y-2">
+                                            <Input
+                                                label="Descripción"
+                                                value={item.descripcion}
+                                                onChange={(e) => {
+                                                    const nextItems = (data.items || []).map((it, i) => i === idx ? ({ ...it, descripcion: e.target.value }) : it);
+                                                    const totals = recalcTotals(nextItems);
+                                                    setDraft((prev) => prev ? ({ ...prev, items: nextItems, ...totals }) : prev);
+                                                }}
+                                            />
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <Input
+                                                    label="Cantidad"
+                                                    type="number"
+                                                    value={String(item.cantidad)}
+                                                    onChange={(e) => {
+                                                        const n = Number(e.target.value);
+                                                        const nextItems = (data.items || []).map((it, i) => i === idx ? ({ ...it, cantidad: Number.isFinite(n) ? n : 1 }) : it);
+                                                        const totals = recalcTotals(nextItems);
+                                                        setDraft((prev) => prev ? ({ ...prev, items: nextItems, ...totals }) : prev);
+                                                    }}
+                                                />
+                                                <Input
+                                                    label="Precio"
+                                                    type="number"
+                                                    value={String(item.precio)}
+                                                    onChange={(e) => {
+                                                        const n = Number(e.target.value);
+                                                        const nextItems = (data.items || []).map((it, i) => i === idx ? ({ ...it, precio: Number.isFinite(n) ? n : 0 }) : it);
+                                                        const totals = recalcTotals(nextItems);
+                                                        setDraft((prev) => prev ? ({ ...prev, items: nextItems, ...totals }) : prev);
+                                                    }}
+                                                />
+                                            </div>
+                                            <div className="flex justify-end">
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    leftIcon={<Trash2 className="w-4 h-4" />}
+                                                    onClick={() => {
+                                                        const nextItems = (data.items || []).filter((_, i) => i !== idx);
+                                                        const totals = recalcTotals(nextItems);
+                                                        setDraft((prev) => prev ? ({ ...prev, items: nextItems, ...totals }) : prev);
+                                                    }}
+                                                >
+                                                    Quitar
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="rounded-lg border border-slate-800 p-3 text-sm text-slate-300">
+                                <div className="flex items-center justify-between">
+                                    <span>Subtotal</span>
+                                    <span>{formatCurrency(data.subtotal)}</span>
+                                </div>
+                                <div className="flex items-center justify-between font-medium">
+                                    <span>Total</span>
+                                    <span>{formatCurrency(data.total)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="space-y-4">
+                        <div className="bg-white text-black rounded-lg p-6 print:p-0" id="recibo-preview">
                     {/* Header */}
                     <div className="flex items-center justify-between border-b border-gray-200 pb-4 mb-4">
                         <div>
-                            {preview.mostrar_logo && (
+                            {data.mostrar_logo && (
                                 <div className="w-16 h-16 bg-gray-200 rounded-lg mb-2 flex items-center justify-center text-gray-500 text-xs overflow-hidden">
-                                    {preview.logo_url ? (
-                                        <img src={preview.logo_url} alt="Logo" className="w-full h-full object-contain bg-white" />
+                                    {data.logo_url ? (
+                                        <img src={data.logo_url} alt="Logo" className="w-full h-full object-contain bg-white" />
                                     ) : (
                                         <>Logo</>
                                     )}
                                 </div>
                             )}
-                            <h2 className="text-xl font-bold">{preview.gym_nombre}</h2>
-                            {preview.gym_direccion && (
-                                <p className="text-gray-600 text-sm">{preview.gym_direccion}</p>
+                            <h2 className="text-xl font-bold">{data.gym_nombre}</h2>
+                            {data.gym_direccion && (
+                                <p className="text-gray-600 text-sm">{data.gym_direccion}</p>
                             )}
                         </div>
                         <div className="text-right">
-                            <h1 className="text-2xl font-bold text-gray-800">{preview.titulo || 'RECIBO'}</h1>
-                            {preview.numero && (
-                                <p className="text-gray-600 font-mono">N° {preview.numero}</p>
+                            <h1 className="text-2xl font-bold text-gray-800">{data.titulo || 'RECIBO'}</h1>
+                            {data.numero && (
+                                <p className="text-gray-600 font-mono">N° {data.numero}</p>
                             )}
-                            <p className="text-gray-600">{preview.fecha}</p>
+                            <p className="text-gray-600">{data.fecha}</p>
                         </div>
                     </div>
 
                     {/* Customer info */}
                     <div className="mb-6">
                         <h3 className="font-semibold text-gray-700">Cliente</h3>
-                        <p className="text-lg">{preview.usuario_nombre}</p>
-                        {preview.mostrar_dni && preview.usuario_dni && (
-                            <p className="text-gray-600">DNI: {preview.usuario_dni}</p>
+                        <p className="text-lg">{data.usuario_nombre}</p>
+                        {data.mostrar_dni && data.usuario_dni && (
+                            <p className="text-gray-600">DNI: {data.usuario_dni}</p>
                         )}
                     </div>
 
@@ -147,7 +382,7 @@ export default function ReciboPreviewModal({
                             </tr>
                         </thead>
                         <tbody>
-                            {preview.items.map((item, idx) => (
+                            {data.items.map((item, idx) => (
                                 <tr key={idx} className="border-b border-gray-100">
                                     <td className="py-2">{item.descripcion}</td>
                                     <td className="text-center py-2">{item.cantidad}</td>
@@ -163,33 +398,53 @@ export default function ReciboPreviewModal({
                         <div className="w-64">
                             <div className="flex justify-between py-2 border-b border-gray-100">
                                 <span>Subtotal</span>
-                                <span>{formatCurrency(preview.subtotal)}</span>
+                                <span>{formatCurrency(data.subtotal)}</span>
                             </div>
                             <div className="flex justify-between py-2 font-bold text-lg">
                                 <span>Total</span>
-                                <span>{formatCurrency(preview.total)}</span>
+                                <span>{formatCurrency(data.total)}</span>
                             </div>
                         </div>
                     </div>
 
                     {/* Payment method */}
-                    {preview.mostrar_metodo && preview.metodo_pago && (
+                    {data.mostrar_metodo && data.metodo_pago && (
                         <div className="mt-4 text-gray-600">
-                            Método de pago: <strong>{preview.metodo_pago}</strong>
+                            Método de pago: <strong>{data.metodo_pago}</strong>
                         </div>
                     )}
 
                     {/* Notes */}
-                    {preview.observaciones && (
+                    {data.observaciones && (
                         <div className="mt-4 p-3 bg-gray-50 rounded text-sm text-gray-600">
-                            {preview.observaciones}
+                            {data.observaciones}
                         </div>
                     )}
 
                     {/* Footer */}
                     <div className="mt-8 pt-4 border-t border-gray-200 text-center text-gray-500 text-sm">
-                        {preview.emitido_por && <p>Emitido por: {preview.emitido_por}</p>}
+                        {data.emitido_por && <p>Emitido por: {data.emitido_por}</p>}
                         <p>Gracias por su preferencia</p>
+                    </div>
+                        </div>
+
+                        {editing && (
+                            <div className="bg-slate-950 rounded-lg border border-slate-800 overflow-hidden">
+                                <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800">
+                                    <div className="text-sm text-slate-200">Vista previa PDF</div>
+                                    <div className="text-xs text-slate-500">{pdfLoading ? 'Generando...' : (pdfPreviewUrl ? 'Listo' : '—')}</div>
+                                </div>
+                                <div className="h-[420px] bg-slate-900">
+                                    {pdfPreviewUrl ? (
+                                        <iframe src={pdfPreviewUrl} className="w-full h-full" />
+                                    ) : (
+                                        <div className="h-full flex items-center justify-center text-slate-500 text-sm">
+                                            Edita el recibo para generar el PDF
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             ) : (

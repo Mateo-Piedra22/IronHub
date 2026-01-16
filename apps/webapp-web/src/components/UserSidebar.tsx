@@ -396,7 +396,7 @@ export default function UserSidebar({
                 initial={{ opacity: 0, x: 300 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 300 }}
-                className="fixed right-0 top-0 h-full w-[400px] max-w-full bg-slate-900 border-l border-slate-800 z-50 flex flex-col overflow-y-auto"
+                className="fixed right-0 top-0 h-full w-[400px] max-w-full bg-slate-900 border-l border-slate-800 z-50 flex flex-col min-h-0 overflow-hidden"
             >
                 {/* Header */}
                 <div className="p-4 border-b border-slate-800 flex items-center justify-between">
@@ -420,6 +420,7 @@ export default function UserSidebar({
                     </button>
                 </div>
 
+                <div className="flex-1 min-h-0 overflow-y-auto">
                 {/* Stats Cards */}
                 <div className="grid grid-cols-2 gap-3 p-4">
                     <div className="card p-3">
@@ -973,6 +974,7 @@ export default function UserSidebar({
                             <p className="text-sm text-slate-500">Sin pagos registrados</p>
                         )}
                     </div>
+                </div>
                 </div>
             </motion.div>
 

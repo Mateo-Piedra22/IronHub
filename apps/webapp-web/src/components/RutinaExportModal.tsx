@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { FileSpreadsheet, Download, QrCode, Loader2 } from "lucide-react";
 import { Modal, Button, Input, Select, useToast } from "@/components/ui";
-import type { Rutina } from "@/lib/api";
+import { api, type Rutina } from "@/lib/api";
 
 interface RutinaExportModalProps {
     isOpen: boolean;
@@ -21,46 +21,28 @@ export function RutinaExportModal({ isOpen, onClose, rutina }: RutinaExportModal
     const { success, error } = useToast();
 
     // Set default filename when modal opens
-    useState(() => {
-        if (rutina) {
-            const safeName = (rutina.nombre || "rutina").replace(/[^a-zA-Z0-9]/g, "_");
-            setFilename(`${safeName}.xlsx`);
-        }
-    });
+    useEffect(() => {
+        if (!isOpen) return;
+        if (!rutina) return;
+        const safeName = (rutina.nombre || "rutina").replace(/[^a-zA-Z0-9]/g, "_");
+        setFilename((prev) => prev || `${safeName}.xlsx`);
+    }, [isOpen, rutina]);
 
     const handleExport = useCallback(async () => {
         if (!rutina) return;
 
         setLoading(true);
         try {
-            const res = await fetch(`/api/rutinas/${rutina.id}/export`, {
-                method: "POST",
-                credentials: "include",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    filename: filename || `rutina_${rutina.id}.xlsx`,
-                    weeks: parseInt(weeks),
-                    qr_placement: qrPlacement,
-                    usuario_nombre: rutina.usuario_nombre,
-                }),
+            const url = api.getRutinaExcelUrl(rutina.id, {
+                weeks: Number.parseInt(weeks, 10) || 1,
+                qr_mode: qrPlacement,
+                user_override: rutina.usuario_nombre || undefined,
+                filename: filename || undefined,
             });
 
-            if (res.ok) {
-                const blob = await res.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = filename || `rutina_${rutina.id}.xlsx`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                window.URL.revokeObjectURL(url);
-                success("Excel exportado correctamente");
-                onClose();
-            } else {
-                const data = await res.json().catch(() => ({}));
-                error(data.detail || "Error al exportar");
-            }
+            window.open(url, "_blank", "noopener,noreferrer");
+            success("Descarga iniciada");
+            onClose();
         } catch {
             error("Error de conexión");
         } finally {

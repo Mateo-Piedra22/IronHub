@@ -89,18 +89,39 @@ class RoutineTemplateManager:
             4: Path(resource_path(os.path.join("assets", "templates", "Plantilla_4_dias.xlsx"))),
             5: Path(resource_path(os.path.join("assets", "templates", "Plantilla_5_dias.xlsx")))
         }
+        try:
+            src_dir = Path(__file__).resolve().parent
+            api_root = src_dir.parent
+            repo_root = api_root.parent.parent
+            for k, p in list(self.template_paths.items()):
+                if p.exists():
+                    continue
+                name = p.name
+                candidates = [
+                    api_root / "assets" / "templates" / name,
+                    repo_root / "assets" / "templates" / name,
+                ]
+                for cand in candidates:
+                    try:
+                        if cand.exists():
+                            self.template_paths[k] = cand
+                            break
+                    except Exception:
+                        continue
+        except Exception:
+            pass
         
         # Directorios de salida con soporte de entorno y fallback a temporal si FS es de solo lectura
         pref_rutinas = os.environ.get("RUTINAS_DIR", "rutinas_exportadas")
         def _ensure_writable_dir(dir_path: str, fallback_subdir: str) -> Path:
             try:
                 p = Path(dir_path)
-                p.mkdir(exist_ok=True)
+                p.mkdir(parents=True, exist_ok=True)
                 return p
             except Exception:
                 tmp_dir = Path(tempfile.gettempdir()) / fallback_subdir
                 try:
-                    tmp_dir.mkdir(exist_ok=True)
+                    tmp_dir.mkdir(parents=True, exist_ok=True)
                 except Exception:
                     tmp_dir = Path(tempfile.gettempdir())
                 return tmp_dir

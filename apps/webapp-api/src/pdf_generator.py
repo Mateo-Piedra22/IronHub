@@ -78,8 +78,35 @@ class PDFGenerator:
         elements = []
 
         # Colores consistentes con el branding
-        header_bg_color = colors.HexColor(self._get_dynamic_color('alt_background_color', '#434C5E'))
-        body_bg_color = colors.HexColor(self._get_dynamic_color('table_body_color', '#D8DEE9'))
+        header_bg_color = colors.HexColor(self._get_dynamic_color('alt_background_color', '#111827'))
+        body_bg_color = colors.HexColor(self._get_dynamic_color('table_body_color', '#FFFFFF'))
+        border_color = colors.HexColor(self._get_dynamic_color('border_color', '#E5E7EB'))
+        muted_text_color = colors.HexColor(self._get_dynamic_color('muted_text_color', '#6B7280'))
+
+        title_style = ParagraphStyle(
+            name='ReceiptTitle',
+            parent=styles['Normal'],
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold',
+            fontSize=16,
+            textColor=colors.HexColor('#111827'),
+        )
+        small_style = ParagraphStyle(
+            name='SmallText',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=9,
+            leading=11,
+            textColor=muted_text_color,
+        )
+        label_style = ParagraphStyle(
+            name='LabelText',
+            parent=styles['Normal'],
+            fontName='Helvetica-Bold',
+            fontSize=9,
+            leading=11,
+            textColor=colors.HexColor('#111827'),
+        )
 
         # Header (titulo, logo y bloque de número/fecha integrado)
         header_text = (titulo or 'RECIBO DE PAGO')
@@ -91,10 +118,10 @@ class PDFGenerator:
         except Exception:
             fecha_str_disp = (fecha_emision or datetime.now().strftime('%d/%m/%Y'))
 
-        right_info_style = ParagraphStyle(name='RightInfo', parent=styles['Normal'], alignment=TA_RIGHT)
-        right_info_para = Paragraph(f"Comprobante N°: {recibo_numero}<br/>Fecha: {fecha_str_disp}", right_info_style)
+        right_info_style = ParagraphStyle(name='RightInfo', parent=small_style, alignment=TA_RIGHT)
+        right_info_para = Paragraph(f"<b>Comprobante</b> N° {recibo_numero}<br/><b>Fecha</b> {fecha_str_disp}", right_info_style)
 
-        header_data = [['', header_text, right_info_para]]
+        header_data = [['', Paragraph(str(header_text), title_style), right_info_para]]
         if mostrar_logo is not False:
             from reportlab.platypus import Image
             tmp_logo_path = None
@@ -130,19 +157,19 @@ class PDFGenerator:
         header_table = Table(header_data, colWidths=[1.7*inch, 4.3*inch, 1.5*inch])
         header_table.setStyle(TableStyle([
             ('ALIGN', (0, 0), (0, 0), 'LEFT'), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('ALIGN', (1, 0), (1, 0), 'CENTER'), ('TEXTCOLOR', (1, 0), (1, 0), colors.darkblue),
-            ('FONTNAME', (1, 0), (1, 0), 'Helvetica-Bold'), ('FONTSIZE', (1, 0), (1, 0), 24),
             ('ALIGN', (2, 0), (2, 0), 'RIGHT'),
+            ('LINEBELOW', (0, 0), (-1, 0), 0.75, border_color),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
         ]))
         elements.append(header_table)
-        elements.append(Spacer(1, 0.25*inch))
+        elements.append(Spacer(1, 0.18*inch))
 
         # Usar número de comprobante si está disponible, sino usar ID del pago
         recibo_numero = numero_comprobante if numero_comprobante else str(pago.id)
         
         gym_name_disp = (gym_name or self.gym_name)
         gym_addr_disp = (gym_address or self.gym_address)
-        elements.append(Spacer(1, 0.3*inch))
+        elements.append(Spacer(1, 0.12*inch))
 
         # Resolver método de pago para detalles del pago
         metodo_nombre = None
@@ -179,7 +206,7 @@ class PDFGenerator:
             periodo_disp = (periodo or periodo_def)
             tipo_cuota_disp = (tipo_cuota or getattr(usuario, 'tipo_cuota', None) or "No especificado")
 
-            info_rows = [[Paragraph('<b>INFORMACIÓN DEL RECIBO</b>', styles['Normal']), '']]
+            info_rows = [[Paragraph('INFORMACIÓN', label_style), '']]
             info_rows.append(['Nombre', nombre_disp])
             if mostrar_dni is not False and dni_disp:
                 info_rows.append(['DNI', str(dni_disp)])
@@ -191,18 +218,18 @@ class PDFGenerator:
             info_table_unificada = Table(info_rows, colWidths=[2.4*inch, 5.1*inch])
             info_table_unificada.setStyle(TableStyle([
                 ('SPAN', (0, 0), (1, 0)),
+                ('TEXTCOLOR', (0, 0), (1, 0), colors.white),
                 ('BACKGROUND', (0, 0), (1, 0), header_bg_color),
-                ('TEXTCOLOR', (0, 0), (1, 0), colors.whitesmoke),
-                ('FONTNAME', (0, 0), (1, 0), 'Helvetica-Bold'),
                 ('ALIGN', (0, 0), (1, 0), 'LEFT'),
                 ('BACKGROUND', (0, 1), (1, -1), body_bg_color),
-                ('GRID', (0, 0), (1, -1), 1, colors.black),
+                ('GRID', (0, 0), (1, -1), 0.5, border_color),
                 ('VALIGN', (0, 1), (1, -1), 'MIDDLE'),
                 ('LEFTPADDING', (0, 1), (1, -1), 6),
                 ('RIGHTPADDING', (0, 1), (1, -1), 6),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
             ]))
             elements.append(info_table_unificada)
-            elements.append(Spacer(1, 0.35*inch))
+            elements.append(Spacer(1, 0.25*inch))
         except Exception:
             pass
 
@@ -242,9 +269,9 @@ class PDFGenerator:
             ('BACKGROUND', (0, 0), (-1, 0), header_bg_color),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
             ('BACKGROUND', (0, 1), (-1, -1), body_bg_color),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('GRID', (0, 0), (-1, -1), 0.5, border_color),
             # Alineación por columna para presentación profesional
             ('ALIGN', (0, 1), (0, -1), 'LEFT'),
             ('ALIGN', (1, 1), (1, -1), 'CENTER'),
@@ -252,9 +279,10 @@ class PDFGenerator:
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('LEFTPADDING', (0, 1), (0, -1), 8),
             ('RIGHTPADDING', (0, 1), (0, -1), 8),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
         ]))
         elements.append(pago_table)
-        elements.append(Spacer(1, 0.4*inch))
+        elements.append(Spacer(1, 0.25*inch))
 
         # Resumen de totales
         subtotal_val = None
@@ -289,24 +317,26 @@ class PDFGenerator:
         total_table.setStyle(TableStyle([
             ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
             ('FONTNAME', (1, 0), (-1, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (1, 0), (-1, -1), 12),
+            ('FONTSIZE', (1, 0), (-1, -1), 10),
             # Resaltar el TOTAL con los colores del sistema
             ('BACKGROUND', (-3, -1), (-1, -1), header_bg_color),
             ('TEXTCOLOR', (-3, -1), (-1, -1), colors.whitesmoke),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
         ]))
         elements.append(total_table)
-        elements.append(Spacer(1, 0.5*inch))
+        elements.append(Spacer(1, 0.25*inch))
 
         # Observaciones y emitido por unificados en panel (si se proporcionan)
         try:
             if observaciones or emitido_por:
-                header_notes = Paragraph('<b>OBSERVACIONES Y EMISIÓN</b>', styles['Normal'])
+                header_notes = Paragraph('NOTAS', label_style)
                 notes_text_parts = []
                 if observaciones:
                     notes_text_parts.append(f"Observaciones: {observaciones}")
                 if emitido_por:
                     notes_text_parts.append(f"Emitido por: {emitido_por}")
-                notes_para = Paragraph('<br/>'.join(notes_text_parts), styles['Normal'])
+                notes_para = Paragraph('<br/>'.join(notes_text_parts), small_style)
                 notes_table = Table([[header_notes], [notes_para]], colWidths=[7.5*inch])
                 notes_table.setStyle(TableStyle([
                     ('BACKGROUND', (0, 0), (-1, 0), header_bg_color),
@@ -314,10 +344,10 @@ class PDFGenerator:
                     ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                     ('ALIGN', (0, 0), (-1, 0), 'LEFT'),
                     ('BACKGROUND', (0, 1), (-1, 1), body_bg_color),
-                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                    ('GRID', (0, 0), (-1, -1), 0.5, border_color),
                 ]))
                 elements.append(notes_table)
-                elements.append(Spacer(1, 0.3*inch))
+                elements.append(Spacer(1, 0.18*inch))
         except Exception:
             pass
 

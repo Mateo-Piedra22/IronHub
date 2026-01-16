@@ -967,12 +967,14 @@ class ApiClient {
         qr_mode?: 'inline' | 'sheet' | 'none';
         sheet_name?: string;
         user_override?: string;
+        filename?: string;
     }): string {
         const p = new URLSearchParams();
         if (params?.weeks) p.set('weeks', String(params.weeks));
         if (params?.qr_mode) p.set('qr_mode', params.qr_mode);
         if (params?.sheet_name) p.set('sheet', params.sheet_name);
         if (params?.user_override) p.set('user_override', params.user_override);
+        if (params?.filename) p.set('filename', params.filename);
 
         const t = typeof window !== 'undefined' ? getCurrentSubdomain() : '';
         if (t) p.set('tenant', t);

@@ -78,9 +78,24 @@ export function ExcelPreviewViewer({
         return null;
     }
 
-    // Build Office Online Viewer URL for public Excel files
-    // For local files, we'll display the Excel URL directly or use a fallback
-    const viewerUrl = excelUrl.startsWith('http')
+    const looksLocal =
+        excelUrl.includes('localhost') ||
+        excelUrl.includes('127.0.0.1') ||
+        excelUrl.includes('0.0.0.0') ||
+        excelUrl.startsWith('http://192.168.') ||
+        excelUrl.startsWith('http://10.') ||
+        excelUrl.startsWith('http://172.16.') ||
+        excelUrl.startsWith('http://172.17.') ||
+        excelUrl.startsWith('http://172.18.') ||
+        excelUrl.startsWith('http://172.19.') ||
+        excelUrl.startsWith('http://172.2') ||
+        excelUrl.startsWith('http://172.30.') ||
+        excelUrl.startsWith('http://172.31.');
+
+    // Office Online Viewer requires the Excel file to be reachable from the public internet.
+    // If the URL is local/private, fall back to a download CTA instead of showing "file not found".
+    const useOfficeViewer = excelUrl.startsWith('http') && !looksLocal;
+    const viewerUrl = useOfficeViewer
         ? `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(excelUrl)}`
         : excelUrl;
 
@@ -189,7 +204,7 @@ export function ExcelPreviewViewer({
                         }}
                     >
                         {/* Fallback message for local files */}
-                        {!excelUrl.startsWith('http') ? (
+                        {!useOfficeViewer ? (
                             <div className="flex flex-col items-center justify-center h-full gap-4 text-slate-400">
                                 <FileSpreadsheet className="w-16 h-16 text-slate-600" />
                                 <div className="text-center">

@@ -56,6 +56,7 @@ logger = logging.getLogger(__name__)
 _MAX_PREVIEW_JSON_BYTES = int(os.environ.get("PREVIEW_MAX_JSON_BYTES", "300000"))  # ~300KB
 _MAX_PREVIEW_B64_CHARS = int(os.environ.get("PREVIEW_MAX_B64_CHARS", "400000"))   # ~400KB chars
 _MAX_PREVIEW_DECOMPRESSED_BYTES = int(os.environ.get("PREVIEW_MAX_DECOMPRESSED_BYTES", "1200000"))  # ~1.2MB
+_PREVIEW_SECRET_CACHE: Optional[str] = None
 
 
 def _cleanup_file(path: str) -> None:
@@ -145,31 +146,6 @@ def _safe_decompress_url_payload(b64_data: str) -> str:
         out_parts.append(tail)
 
     return b"".join(out_parts).decode("utf-8")
-
-def _sign_excel_view(rutina_id: int, weeks: int, filename: str, ts: int, qr_mode: str = "sheet", sheet: str | None = None) -> str:
-    """Generate HMAC signature for Excel view URL."""
-    try:
-        qr = str(qr_mode or "inline").strip().lower()
-        if qr == "auto":
-            qr = "sheet"
-        if qr not in ("inline", "sheet", "none"):
-            qr = "sheet"
-    except Exception:
-        qr = "sheet"
-    try:
-        sh = (str(sheet).strip()[:64]) if (sheet is not None and str(sheet).strip()) else ""
-    except Exception:
-        sh = ""
-    try:
-        tenant = str(get_current_tenant() or "").strip().lower()
-    except Exception:
-        tenant = ""
-    try:
-        base = f"{tenant}|{int(rutina_id)}|{int(weeks)}|{filename}|{int(ts)}|{qr}|{sh}".encode("utf-8")
-    except Exception:
-        base = f"{tenant}|{rutina_id}|{weeks}|{filename}|{ts}|{qr}|{sh}".encode("utf-8")
-    secret = _get_preview_secret().encode("utf-8")
-    return hmac.new(secret, base, hashlib.sha256).hexdigest()
 
 # --- API Configuración ---
 
@@ -329,20 +305,44 @@ async def api_gym_subscription(request: Request, _=Depends(require_gestion_acces
 # --- Helpers for Routine Export / Preview ---
 
 def _get_preview_secret() -> str:
+    global _PREVIEW_SECRET_CACHE
     try:
-        env = os.getenv("WEBAPP_PREVIEW_SECRET", "").strip()
-        if env:
-            return env
+        cached = str(_PREVIEW_SECRET_CACHE or "").strip()
     except Exception:
-        pass
-    for k in ("SESSION_SECRET", "SECRET_KEY", "VERCEL_GITHUB_COMMIT_SHA"):
+        cached = ""
+    if cached:
+        return cached
+
+    candidates = []
+    for k in ("WEBAPP_PREVIEW_SECRET", "SESSION_SECRET", "SECRET_KEY"):
         try:
             v = os.getenv(k, "").strip()
             if v:
-                return v
+                candidates.append(v)
         except Exception:
             continue
-    return "preview-secret"
+
+    if candidates:
+        _PREVIEW_SECRET_CACHE = candidates[0]
+        return _PREVIEW_SECRET_CACHE
+
+    is_prod = False
+    try:
+        if os.getenv("VERCEL") or os.getenv("VERCEL_URL") or os.getenv("NODE_ENV") == "production":
+            is_prod = True
+    except Exception:
+        is_prod = False
+    try:
+        if os.getenv("DEVELOPMENT_MODE", "").lower() in ("1", "true", "yes"):
+            is_prod = False
+    except Exception:
+        pass
+
+    if is_prod:
+        raise RuntimeError("Preview secret no configurado (WEBAPP_PREVIEW_SECRET/SESSION_SECRET/SECRET_KEY)")
+
+    _PREVIEW_SECRET_CACHE = secrets.token_hex(32)
+    return _PREVIEW_SECRET_CACHE
 
 def _sign_excel_view(rutina_id: int, weeks: int, filename: str, ts: int, qr_mode: str = "auto", sheet: str | None = None) -> str:
     try:

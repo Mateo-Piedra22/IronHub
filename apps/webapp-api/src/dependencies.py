@@ -124,7 +124,71 @@ async def ensure_tenant_context(request: Request) -> Optional[str]:
     return None
 
 
-def get_db_session() -> Generator[Session, None, None]:
+def _try_set_tenant_from_request(request: Optional[Request]) -> Optional[str]:
+    if request is None:
+        return None
+
+    session_tenant: Optional[str] = None
+    try:
+        session_tenant = str(request.session.get("tenant") or "").strip().lower() or None
+    except Exception:
+        session_tenant = None
+
+    query_tenant: Optional[str] = None
+    try:
+        query_tenant = str(request.query_params.get("tenant") or "").strip().lower() or None
+    except Exception:
+        query_tenant = None
+
+    header_tenant: Optional[str] = None
+    try:
+        header_tenant = str(request.headers.get("x-tenant") or "").strip().lower() or None
+    except Exception:
+        header_tenant = None
+
+    tenant: Optional[str] = None
+    if session_tenant:
+        if query_tenant and query_tenant != session_tenant and request.url.path.startswith("/api/"):
+            raise HTTPException(status_code=403, detail="Tenant mismatch")
+        if header_tenant and header_tenant != session_tenant and request.url.path.startswith("/api/"):
+            raise HTTPException(status_code=403, detail="Tenant mismatch")
+        tenant = session_tenant
+    else:
+        tenant = query_tenant or header_tenant
+
+    if not tenant:
+        try:
+            host = str(request.headers.get("host") or "").strip()
+        except Exception:
+            host = ""
+
+        if host:
+            base_domain = os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz").strip().lower()
+            host_clean = host.split(":")[0].strip().lower()
+            if base_domain and host_clean.endswith(f".{base_domain}"):
+                candidate = host_clean.replace(f".{base_domain}", "").strip()
+                if candidate and candidate not in ("www", "api", "admin", "admin-api"):
+                    tenant = candidate
+
+    if not tenant:
+        return None
+
+    try:
+        ok, _err = validate_tenant_name(str(tenant))
+    except Exception:
+        ok = False
+
+    if not ok:
+        return None
+
+    try:
+        set_current_tenant(str(tenant).strip().lower())
+    except Exception:
+        return None
+    return str(tenant).strip().lower()
+
+
+def get_db_session(request: Optional[Request] = None) -> Generator[Session, None, None]:
     """
     Get a database session for the current tenant.
     Uses CURRENT_TENANT context variable to determine which database to connect to.
@@ -132,6 +196,9 @@ def get_db_session() -> Generator[Session, None, None]:
     IMPORTANT: If tenant is set but cannot connect, raises an error instead of
     silently falling back to the wrong database.
     """
+    if not get_current_tenant():
+        _try_set_tenant_from_request(request)
+
     tenant = get_current_tenant()
     
     if tenant:
