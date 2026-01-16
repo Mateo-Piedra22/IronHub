@@ -319,6 +319,18 @@ async def get_gym(request: Request, gym_id: int):
         pass
 
     try:
+        tenant_cfg = adm.get_tenant_whatsapp_active_config_for_gym(int(gym_id))
+        if tenant_cfg.get("ok"):
+            gym["tenant_whatsapp_phone_id"] = str(tenant_cfg.get("phone_id") or "")
+            gym["tenant_whatsapp_waba_id"] = str(tenant_cfg.get("waba_id") or "")
+            gym["tenant_whatsapp_access_token_present"] = bool(tenant_cfg.get("access_token_present") is True)
+            gym["tenant_wa_configured"] = bool(tenant_cfg.get("configured") is True)
+            if not bool(gym.get("wa_configured")):
+                gym["wa_configured"] = bool(gym.get("tenant_wa_configured"))
+    except Exception:
+        pass
+
+    try:
         at_raw = gym.get("whatsapp_access_token")
         vt_raw = gym.get("whatsapp_verify_token")
         as_raw = gym.get("whatsapp_app_secret")

@@ -532,6 +532,23 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                 {activeSection === 'whatsapp' && (
                     <div className="space-y-6">
                         <h2 className="text-lg font-semibold text-white">Configuración de WhatsApp</h2>
+                        <div className="card p-4 border border-slate-800 bg-slate-950/40 max-w-2xl">
+                            <div className="text-sm text-slate-400 mb-2">Estado actual (guardado en el tenant)</div>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                                <div>
+                                    <div className="text-slate-500">Phone ID</div>
+                                    <div className="text-white break-all">{(gym as any)?.tenant_whatsapp_phone_id || '—'}</div>
+                                </div>
+                                <div>
+                                    <div className="text-slate-500">WABA ID</div>
+                                    <div className="text-white break-all">{(gym as any)?.tenant_whatsapp_waba_id || '—'}</div>
+                                </div>
+                                <div>
+                                    <div className="text-slate-500">Token</div>
+                                    <div className="text-white">{(gym as any)?.tenant_whatsapp_access_token_present ? 'presente' : '—'}</div>
+                                </div>
+                            </div>
+                        </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
                             <div>
                                 <label className="label">Phone ID</label>

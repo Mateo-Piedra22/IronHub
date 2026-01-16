@@ -2729,6 +2729,66 @@ class AdminService:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def get_tenant_whatsapp_active_config_for_gym(self, gym_id: int) -> Dict[str, Any]:
+        try:
+            gid = int(gym_id)
+        except Exception:
+            return {"ok": False, "error": "invalid_gym_id"}
+
+        try:
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute("SELECT db_name FROM gyms WHERE id = %s", (gid,))
+                row = cur.fetchone()
+            if not row:
+                return {"ok": False, "error": "gym_not_found"}
+            db_name = str(row.get("db_name") or "").strip()
+            if not db_name:
+                return {"ok": False, "error": "gym_db_missing"}
+
+            params = self.resolve_admin_db_params()
+            pg_params = {
+                "host": params.get("host"),
+                "port": params.get("port"),
+                "dbname": db_name,
+                "user": params.get("user"),
+                "password": params.get("password"),
+                "sslmode": params.get("sslmode"),
+                "connect_timeout": params.get("connect_timeout"),
+                "application_name": "admin_get_tenant_whatsapp_config",
+            }
+
+            with psycopg2.connect(**pg_params) as t_conn:
+                with t_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as t_cur:
+                    t_cur.execute(
+                        """
+                        SELECT phone_id, waba_id, access_token, active, created_at
+                        FROM whatsapp_config
+                        WHERE active = TRUE
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """
+                    )
+                    cfg = t_cur.fetchone()
+            if not cfg:
+                return {"ok": True, "configured": False, "phone_id": "", "waba_id": "", "access_token_present": False}
+
+            phone_id = str(cfg.get("phone_id") or "").strip()
+            waba_id = str(cfg.get("waba_id") or "").strip()
+            token_raw = str(cfg.get("access_token") or "").strip()
+            access_token_present = bool(SecureConfig.decrypt_waba_secret(token_raw) or token_raw)
+            configured = bool(phone_id and waba_id and access_token_present)
+
+            return {
+                "ok": True,
+                "configured": configured,
+                "phone_id": phone_id,
+                "waba_id": waba_id,
+                "access_token_present": bool(access_token_present),
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def set_gym_owner_password(self, gym_id: int, new_password: str) -> bool:
         """
         Set the owner password for a specific gym.

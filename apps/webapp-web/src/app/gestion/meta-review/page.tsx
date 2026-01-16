@@ -7,13 +7,39 @@ import { Button, Input, useToast } from '@/components/ui';
 
 type ApiResult<T> = { ok: boolean; data?: T; error?: string };
 
+const TENANT_DOMAIN = process.env.NEXT_PUBLIC_TENANT_DOMAIN || 'ironhub.motiona.xyz';
+function getCurrentSubdomain(): string {
+    if (typeof window === 'undefined') return '';
+    const hostname = window.location.hostname;
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        return process.env.NEXT_PUBLIC_DEV_SUBDOMAIN || 'demo';
+    }
+    if (hostname.startsWith('api.')) return '';
+    const domainParts = hostname.split('.');
+    const tenantParts = TENANT_DOMAIN.split('.');
+    if (domainParts.length > tenantParts.length) {
+        return domainParts[0];
+    }
+    const envTenant = (process.env.NEXT_PUBLIC_DEFAULT_TENANT || process.env.NEXT_PUBLIC_DEV_SUBDOMAIN || '').trim();
+    if (envTenant) return envTenant;
+    return '';
+}
+function getApiBaseUrl(): string {
+    const staticUrl = process.env.NEXT_PUBLIC_API_URL;
+    if (staticUrl) return staticUrl;
+    return `https://api.${TENANT_DOMAIN}`;
+}
+const API_BASE = getApiBaseUrl();
+const CURRENT_TENANT = typeof window !== 'undefined' ? getCurrentSubdomain() : '';
+
 async function apiRequest<T>(url: string, opts: RequestInit = {}): Promise<ApiResult<T>> {
     try {
-        const res = await fetch(url, {
+        const res = await fetch(`${API_BASE}${url}`, {
             ...opts,
             credentials: 'include',
             headers: {
                 'Content-Type': 'application/json',
+                'X-Tenant': CURRENT_TENANT,
                 ...(opts.headers || {}),
             },
         });
