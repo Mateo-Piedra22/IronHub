@@ -35,6 +35,7 @@ import re
 import math
 import subprocess
 import urllib.request
+import urllib.parse
 
 # Importaciones para Excel y PDF
 from xlsxtpl.writerx import BookWriter
@@ -669,9 +670,20 @@ class RoutineTemplateManager:
 
         # Construir enlace para QR usando uuid_rutina si disponible (con fallback a uuid)
         try:
-            base_url = get_webapp_base_url() or "http://127.0.0.1:8000"
+            base_url = (os.getenv("API_BASE_URL") or os.getenv("NEXT_PUBLIC_API_URL") or get_webapp_base_url() or "http://127.0.0.1:8000")
         except Exception:
             base_url = "http://127.0.0.1:8000"
+        try:
+            from src.database.tenant_connection import get_current_tenant
+            tenant = str(get_current_tenant() or "").strip().lower()
+        except Exception:
+            tenant = ""
+        tenant_qs = ""
+        if tenant:
+            try:
+                tenant_qs = f"?tenant={urllib.parse.quote(tenant, safe='')}"
+            except Exception:
+                tenant_qs = f"?tenant={tenant}"
         uuid_val = (getattr(rutina, 'uuid_rutina', '') or getattr(rutina, 'uuid', '') or '')
         qr_link = ''
         if isinstance(uuid_val, str) and uuid_val:
@@ -680,9 +692,9 @@ class RoutineTemplateManager:
             except Exception:
                 is_preview = False
             if is_preview:
-                qr_link = f"{base_url.rstrip('/')}/api/rutinas/preview/qr_scan/{uuid_val}"
+                qr_link = f"{base_url.rstrip('/')}/api/rutinas/preview/qr_scan/{uuid_val}{tenant_qs}"
             else:
-                qr_link = f"{base_url.rstrip('/')}/api/rutinas/qr_scan/{uuid_val}"
+                qr_link = f"{base_url.rstrip('/')}/api/rutinas/qr_scan/{uuid_val}{tenant_qs}"
         template_data['uuid_rutina'] = uuid_val
         # Refuerzo: si el objeto tiene uuid pero no uuid_rutina, propagar para consistencia
         try:

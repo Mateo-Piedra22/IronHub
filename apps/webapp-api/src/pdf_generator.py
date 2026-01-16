@@ -252,7 +252,15 @@ class PDFGenerator:
                     continue
         elif detalles and len(detalles) > 0:
             for det in detalles:
-                desc = det.concepto_nombre or 'Concepto'
+                try:
+                    desc = (
+                        getattr(det, "concepto_nombre", None)
+                        or getattr(det, "descripcion", None)
+                        or getattr(det, "concepto", None)
+                        or "Concepto"
+                    )
+                except Exception:
+                    desc = "Concepto"
                 cantidad_str = f"{det.cantidad:g}"
                 precio_str = f"${det.precio_unitario:,.2f} ARS"
                 subtotal_str = f"${det.subtotal:,.2f} ARS"

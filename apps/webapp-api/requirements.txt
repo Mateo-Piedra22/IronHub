@@ -15,6 +15,9 @@ jinja2>=3.1.0
 xlsxtpl>=0.3.1
 openpyxl>=3.1.0
 reportlab>=4.0.0
+pillow>=10.0.0
+qrcode>=7.4.2
+segno>=1.6.1
 
 
 

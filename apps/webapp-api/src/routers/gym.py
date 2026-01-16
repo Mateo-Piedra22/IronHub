@@ -16,8 +16,8 @@ from typing import Optional, List, Dict, Any
 
 from starlette.background import BackgroundTask
 
-from fastapi import APIRouter, Request, Depends, HTTPException, Body, UploadFile, File, status, Query
-from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
+from fastapi import APIRouter, Request, Depends, HTTPException, Body, UploadFile, File, status, Query, Response
+from fastapi.responses import JSONResponse, FileResponse, RedirectResponse, HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -118,6 +118,15 @@ def _normalize_rutina_export_params(weeks: int, qr_mode: str, sheet: Optional[st
     except Exception:
         sh = None
     return weeks_n, qr, sh
+
+
+def _add_office_viewer_headers(res: Response) -> Response:
+    res.headers["Access-Control-Allow-Origin"] = "*"
+    res.headers["Access-Control-Allow-Methods"] = "GET,HEAD,OPTIONS"
+    res.headers["Access-Control-Allow-Headers"] = "*"
+    res.headers["Access-Control-Expose-Headers"] = "Content-Disposition, Content-Length, Content-Type"
+    res.headers["Cache-Control"] = "public, max-age=60"
+    return res
 
 
 def _safe_decompress_url_payload(b64_data: str) -> str:
@@ -1544,7 +1553,6 @@ async def api_rutina_export_pdf(rutina_id: int, weeks: int = 1, filename: Option
             categoria=rutina_data.get('categoria'),
             uuid_rutina=rutina_data.get('uuid_rutina')
         )
-        rutina.ejercicios = rutina_data.get('ejercicios', [])
         
         # Build Usuario object
         usuario = Usuario(nombre=rutina_data.get('usuario_nombre') or 'Usuario')
@@ -2051,8 +2059,7 @@ async def api_rutina_excel_view(
             background=BackgroundTask(_cleanup_file, str(xlsx_path))
         )
         response.headers["Content-Disposition"] = f'inline; filename="{base_name}"'
-        response.headers["Cache-Control"] = "private, max-age=60"
-        return response
+        return _add_office_viewer_headers(response)
     except HTTPException:
         raise
     except Exception as e:
@@ -2064,6 +2071,11 @@ async def api_rutina_excel_view(
                 session.close()
         except Exception:
             pass
+
+
+@router.options("/api/rutinas/{rutina_id}/export/excel_view.xlsx")
+async def api_rutina_excel_view_options(rutina_id: int):
+    return _add_office_viewer_headers(Response(status_code=204))
 
 @router.post("/api/rutinas/export/draft_url")
 async def sign_draft_url(
@@ -2239,13 +2251,18 @@ async def render_draft_excel(
              background=BackgroundTask(_cleanup_file, str(xlsx_path))
         )
         res.headers["Content-Disposition"] = f'inline; filename="{base_name}"'
-        return res
+        return _add_office_viewer_headers(res)
         
     except HTTPException:
         raise
     except Exception as e:
         logger.exception("Error rendering draft")
         raise HTTPException(status_code=500, detail="Server Error")
+
+
+@router.options("/api/public/rutinas/render_draft.xlsx")
+async def render_draft_excel_options():
+    return _add_office_viewer_headers(Response(status_code=204))
 
 @router.get("/api/maintenance_status")
 async def api_maintenance_status():
@@ -2334,17 +2351,75 @@ async def api_verify_routine_qr(
     }
 
 @router.get("/api/rutinas/qr_scan/{uuid_val}")
-async def api_handle_qr_scan_redirect(
-    uuid_val: str
+async def api_rutina_qr_scan(
+    uuid_val: str,
+    request: Request,
+    tenant: Optional[str] = None,
+    svc: TrainingService = Depends(get_training_service),
 ):
-    """
-    Generic endpoint for generic QR Code Scanners.
-    Redirects to the WebApp Dashboard with a specific action parameter.
-    """
-    try:
-        base_url = get_webapp_base_url()
-    except Exception:
-        base_url = "https://ironhub.motiona.xyz"
-        
-    redirect_url = f"{str(base_url).rstrip('/')}/usuario?action=scan&uuid={uuid_val}"
-    return RedirectResponse(url=redirect_url)
+    dev_mode = os.getenv("DEVELOPMENT_MODE", "").lower() in ("1", "true", "yes") or os.getenv("ENV", "").lower() in ("dev", "development")
+    allow_public = os.getenv("ALLOW_PUBLIC_ROUTINE_QR", "").lower() in ("1", "true", "yes")
+    if not (dev_mode or allow_public):
+        uid = request.session.get("user_id") or request.session.get("checkin_user_id")
+        if not uid:
+            return HTMLResponse("<h3>Acceso requerido</h3><p>Iniciá sesión para ver la rutina.</p>", status_code=401)
+
+    rutina = svc.obtener_rutina_por_uuid(str(uuid_val or "").strip())
+    if not rutina:
+        return HTMLResponse("<h3>Rutina no encontrada</h3>", status_code=404)
+
+    if not bool(rutina.get("activa", True)):
+        return HTMLResponse("<h3>Rutina inactiva</h3>", status_code=403)
+
+    dias = rutina.get("dias") or []
+    nombre = str(rutina.get("nombre_rutina") or rutina.get("nombre") or "Rutina")
+    usuario_nombre = str(rutina.get("usuario_nombre") or "").strip()
+
+    def _esc(s: str) -> str:
+        return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+    parts = [
+        "<!doctype html><html lang='es'><head><meta charset='utf-8'/>",
+        "<meta name='viewport' content='width=device-width, initial-scale=1'/>",
+        f"<title>{_esc(nombre)}</title>",
+        "<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;padding:18px;background:#0b1220;color:#e5e7eb}h1{font-size:18px;margin:0 0 8px}h2{font-size:14px;margin:16px 0 8px;color:#93c5fd}.card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:14px}a{color:#93c5fd;text-decoration:none}a:hover{text-decoration:underline}.ex{display:flex;gap:10px;justify-content:space-between;border-top:1px solid rgba(255,255,255,.08);padding:10px 0}.ex:first-child{border-top:0}.muted{color:#9ca3af;font-size:12px}</style>",
+        "</head><body><div class='card'>",
+        f"<h1>{_esc(nombre)}</h1>",
+    ]
+    if usuario_nombre:
+        parts.append(f"<div class='muted'>{_esc(usuario_nombre)}</div>")
+    if not isinstance(dias, list) or len(dias) == 0:
+        parts.append("<p class='muted'>Sin ejercicios.</p>")
+    else:
+        for d in dias:
+            try:
+                dnum = int(d.get("numero") or d.get("dayNumber") or 0)
+            except Exception:
+                dnum = 0
+            parts.append(f"<h2>Día {dnum or ''}</h2>")
+            parts.append("<div>")
+            for ex in (d.get("ejercicios") or []):
+                if not isinstance(ex, dict):
+                    continue
+                ex_name = str(ex.get("ejercicio_nombre") or ex.get("nombre_ejercicio") or ex.get("nombre") or "Ejercicio")
+                series = str(ex.get("series") or "")
+                reps = str(ex.get("repeticiones") or "")
+                video = ex.get("video_url")
+                left = _esc(ex_name)
+                if video:
+                    left = f"<a href='{_esc(str(video))}' target='_blank' rel='noopener noreferrer'>{left}</a>"
+                right = " ".join([p for p in [("Ser: " + _esc(series)) if series else "", ("Rep: " + _esc(reps)) if reps else ""] if p]).strip()
+                parts.append(f"<div class='ex'><div>{left}</div><div class='muted'>{right}</div></div>")
+            parts.append("</div>")
+    parts.append("</div></body></html>")
+    return HTMLResponse("".join(parts), status_code=200)
+
+
+@router.get("/api/rutinas/preview/qr_scan/{uuid_val}")
+async def api_rutina_qr_scan_preview(
+    uuid_val: str,
+    request: Request,
+    tenant: Optional[str] = None,
+    svc: TrainingService = Depends(get_training_service),
+):
+    return await api_rutina_qr_scan(uuid_val=uuid_val, request=request, tenant=tenant, svc=svc)
