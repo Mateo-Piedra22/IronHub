@@ -23,51 +23,6 @@ const staggerContainer = {
     }
 };
 
-// Header Component
-function Header() {
-    const [scrolled, setScrolled] = useState(false);
-
-    useEffect(() => {
-        const handleScroll = () => setScrolled(window.scrollY > 50);
-        window.addEventListener('scroll', handleScroll);
-        return () => window.removeEventListener('scroll', handleScroll);
-    }, []);
-
-    return (
-        <header className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${scrolled ? 'bg-slate-950/80 backdrop-blur-xl border-b border-slate-800/50' : ''
-            }`}>
-            <div className="max-w-7xl mx-auto px-6 py-4">
-                <nav className="flex items-center justify-between">
-                    <Link href="/" className="flex items-center gap-3 group">
-                        <img
-                            src="/images/logo-ironhub.png"
-                            alt="IronHub"
-                            className="w-10 h-10 rounded-xl shadow-sm group-hover:shadow-md transition-shadow"
-                        />
-                        <span className="text-xl font-display font-bold text-white">
-                            Iron<span className="text-primary-400">Hub</span>
-                        </span>
-                    </Link>
-
-                    <div className="hidden md:flex items-center gap-8">
-                        <a href="#features" className="text-slate-400 hover:text-white transition-colors">Características</a>
-                        <a href="#gyms" className="text-slate-400 hover:text-white transition-colors">Gimnasios</a>
-                        <a href="#about" className="text-slate-400 hover:text-white transition-colors">Sobre Nosotros</a>
-                        <a href="#contact" className="text-slate-400 hover:text-white transition-colors">Contacto</a>
-                    </div>
-
-                    <Link
-                        href="https://admin.ironhub.motiona.xyz"
-                        className="btn-primary text-sm py-2 px-5"
-                    >
-                        Panel Admin
-                    </Link>
-                </nav>
-            </div>
-        </header>
-    );
-}
-
 // Hero Section
 function HeroSection() {
     return (
@@ -555,69 +510,15 @@ function ContactSection() {
     );
 }
 
-// Footer
-function Footer() {
-    return (
-        <footer className="py-12 border-t border-slate-800/50">
-            <div className="max-w-7xl mx-auto px-6">
-                <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-                    {/* IronHub Logo */}
-                    <div className="flex items-center gap-3">
-                        <img
-                            src="/images/logo-ironhub.png"
-                            alt="IronHub"
-                            className="w-8 h-8 rounded-lg"
-                        />
-                        <span className="font-display font-bold text-white">IronHub</span>
-                    </div>
-
-                    {/* MotionA - Powered By */}
-                    <div className="flex flex-col items-center gap-2">
-                        <span className="text-slate-500 text-xs">Desarrollado por</span>
-                        <a
-                            href="https://motiona.xyz"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-2 group hover:opacity-80 transition-opacity"
-                        >
-                            <img
-                                src="/images/logo-motiona.png"
-                                alt="MotionA"
-                                className="w-8 h-8 rounded-lg"
-                            />
-                            <span className="text-white font-semibold group-hover:text-primary-400 transition-colors">MotionA</span>
-                        </a>
-                    </div>
-
-                    {/* Copyright & Links */}
-                    <div className="flex flex-col items-end gap-2">
-                        <div className="flex items-center gap-6">
-                            <a href="#" className="text-slate-500 hover:text-white text-sm transition-colors">Términos</a>
-                            <a href="#" className="text-slate-500 hover:text-white text-sm transition-colors">Privacidad</a>
-                        </div>
-                        <p className="text-slate-500 text-sm">
-                            © {new Date().getFullYear()} MotionA. Todos los derechos reservados.
-                        </p>
-                    </div>
-                </div>
-            </div>
-        </footer>
-    );
-}
-
 // Main Page Component
 export default function LandingPage() {
     return (
-        <>
-            <Header />
-            <main>
-                <HeroSection />
-                <FeaturesSection />
-                <GymsSection />
-                <AboutSection />
-                <ContactSection />
-            </main>
-            <Footer />
-        </>
+        <main className="pt-20">
+            <HeroSection />
+            <FeaturesSection />
+            <GymsSection />
+            <AboutSection />
+            <ContactSection />
+        </main>
     );
 }

@@ -10,6 +10,9 @@
 - App Secret: guardalo solo como secreto del entorno (no lo subas al repo).
 - Privacy Policy URL: obligatorio para pasar a Live.
 - Terms of Service URL: recomendado.
+- Data Deletion:
+  - Instrucciones: `https://ironhub.motiona.xyz/data-deletion`
+  - Callback: `https://ironhub.motiona.xyz/api/meta/data-deletion`
 - App Domains:
   - `ironhub.motiona.xyz`
   - `connect.ironhub.motiona.xyz` (recomendado para evitar whitelists por tenant)
@@ -57,6 +60,9 @@ Eso es lo que va en:
 
 Referencia (guía externa que describe el mismo lugar del “Configuration ID”):
 - Chatwoot docs: “Facebook Login for Business → Configurations → Create Configuration → WhatsApp Embedded Signup” (buscar “WHATSAPP_CONFIGURATION_ID”).
+
+## Checklist
+Ver checklist actualizado en [meta-tech-provider-checklist.md](file:///c:/Users/mateo/OneDrive/Escritorio/Work/Programas/IronHub/docs/meta-tech-provider-checklist.md).
 
 ## 5) Qué va en META_OAUTH_REDIRECT_URI
 En IronHub el flujo usa el SDK JS (popup) y devuelve un `code`. En este caso el `redirect_uri` efectivo suele ser interno del SDK.

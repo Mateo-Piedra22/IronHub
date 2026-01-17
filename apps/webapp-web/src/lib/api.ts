@@ -530,6 +530,23 @@ export interface WhatsAppEmbeddedSignupConfig {
     api_version: string;
 }
 
+export interface WhatsAppEmbeddedSignupReadiness {
+    ok: boolean;
+    app_id_present: boolean;
+    app_secret_present: boolean;
+    config_id_present: boolean;
+    api_version: string;
+    redirect_uri?: string;
+    waba_encryption_key_present: boolean;
+    missing: string[];
+    recommended_urls?: {
+        privacy_policy?: string;
+        terms?: string;
+        data_deletion_instructions?: string;
+        data_deletion_callback?: string;
+    };
+}
+
 export interface WhatsAppTemplate {
     template_name: string;
     body_text: string;
@@ -1767,6 +1784,10 @@ class ApiClient {
 
     async getWhatsAppEmbeddedSignupConfig() {
         return this.request<WhatsAppEmbeddedSignupConfig>('/api/whatsapp/embedded-signup/config');
+    }
+
+    async getWhatsAppEmbeddedSignupReadiness() {
+        return this.request<WhatsAppEmbeddedSignupReadiness>('/api/whatsapp/embedded-signup/readiness');
     }
 
     async completeWhatsAppEmbeddedSignup(data: { code: string; waba_id: string; phone_number_id: string }) {

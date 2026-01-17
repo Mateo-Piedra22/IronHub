@@ -27,7 +27,7 @@ import {
     Input,
     type Column,
 } from '@/components/ui';
-import { api, type WhatsAppConfig, type WhatsAppMensaje, type WhatsAppStatus, type WhatsAppTemplate, type WhatsAppTrigger } from '@/lib/api';
+import { api, type WhatsAppConfig, type WhatsAppMensaje, type WhatsAppStatus, type WhatsAppTemplate, type WhatsAppTrigger, type WhatsAppEmbeddedSignupReadiness } from '@/lib/api';
 import { formatDate, formatTime, cn } from '@/lib/utils';
 
 // Message type labels
@@ -67,6 +67,9 @@ export default function WhatsAppPage() {
     const [configSaving, setConfigSaving] = useState(false);
 
     const [connectLoading, setConnectLoading] = useState(false);
+    const [readiness, setReadiness] = useState<WhatsAppEmbeddedSignupReadiness | null>(null);
+    const [readinessLoading, setReadinessLoading] = useState(false);
+    const [readinessError, setReadinessError] = useState<string>('');
 
     // Messages
     const [mensajes, setMensajes] = useState<WhatsAppMensaje[]>([]);
@@ -144,13 +147,27 @@ export default function WhatsAppPage() {
         setTriggersLoading(false);
     }, []);
 
+    const loadReadiness = useCallback(async () => {
+        setReadinessLoading(true);
+        setReadinessError('');
+        const res = await api.getWhatsAppEmbeddedSignupReadiness();
+        if (res.ok && res.data) {
+            setReadiness(res.data);
+        } else {
+            setReadiness(null);
+            setReadinessError(res.error || 'No se pudo cargar el estado de readiness');
+        }
+        setReadinessLoading(false);
+    }, []);
+
     useEffect(() => {
         loadStatus();
         loadConfig();
         loadMensajes();
         loadTemplates();
         loadTriggers();
-    }, [loadStatus, loadConfig, loadMensajes, loadTemplates, loadTriggers]);
+        loadReadiness();
+    }, [loadStatus, loadConfig, loadMensajes, loadTemplates, loadTriggers, loadReadiness]);
 
     // Save config
     const handleSaveConfig = async () => {
@@ -613,6 +630,94 @@ export default function WhatsAppPage() {
                     >
                         Configurar
                     </Button>
+                </div>
+            </motion.div>
+
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.05 }}
+                className="card p-4"
+            >
+                <div className="flex items-start justify-between gap-4">
+                    <div>
+                        <div className="text-sm text-slate-400">Tech Provider / Embedded Signup</div>
+                        <div className="text-white font-semibold mt-1">Readiness del entorno</div>
+                        <div className="text-slate-400 text-sm mt-1">
+                            Verifica si el backend tiene lo mínimo para conectar WhatsApp con Meta sin configuración manual.
+                        </div>
+                    </div>
+                    <Button variant="ghost" onClick={loadReadiness} title="Refrescar readiness" disabled={readinessLoading}>
+                        <RefreshCw className={cn('w-4 h-4', readinessLoading ? 'animate-spin' : '')} />
+                    </Button>
+                </div>
+
+                <div className="mt-4">
+                    {readinessLoading ? (
+                        <div className="text-slate-400 text-sm flex items-center gap-2">
+                            <Clock className="w-4 h-4" /> Cargando…
+                        </div>
+                    ) : readiness ? (
+                        <div className="space-y-3">
+                            <div className="flex items-center gap-2">
+                                {readiness.ok ? (
+                                    <CheckCircle2 className="w-5 h-5 text-success-400" />
+                                ) : (
+                                    <AlertTriangle className="w-5 h-5 text-warning-400" />
+                                )}
+                                <div className={cn('text-sm font-semibold', readiness.ok ? 'text-success-400' : 'text-warning-400')}>
+                                    {readiness.ok ? 'Listo para Embedded Signup' : 'Faltan configuraciones'}
+                                </div>
+                            </div>
+
+                            {!readiness.ok ? (
+                                <div className="text-sm text-slate-300">
+                                    <div className="text-slate-400 mb-1">Faltan:</div>
+                                    <ul className="list-disc pl-5 space-y-1">
+                                        {(readiness.missing || []).map((m) => (
+                                            <li key={m}>{m}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            ) : null}
+
+                            {readiness.recommended_urls ? (
+                                <div className="text-sm text-slate-300">
+                                    <div className="text-slate-400 mb-1">URLs recomendadas para Meta</div>
+                                    <div className="grid md:grid-cols-2 gap-2">
+                                        {readiness.recommended_urls.privacy_policy ? (
+                                            <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                                                <div className="text-slate-500 text-xs">Privacy</div>
+                                                <div className="text-white break-all">{readiness.recommended_urls.privacy_policy}</div>
+                                            </div>
+                                        ) : null}
+                                        {readiness.recommended_urls.terms ? (
+                                            <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                                                <div className="text-slate-500 text-xs">Terms</div>
+                                                <div className="text-white break-all">{readiness.recommended_urls.terms}</div>
+                                            </div>
+                                        ) : null}
+                                        {readiness.recommended_urls.data_deletion_instructions ? (
+                                            <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                                                <div className="text-slate-500 text-xs">Data deletion (instrucciones)</div>
+                                                <div className="text-white break-all">{readiness.recommended_urls.data_deletion_instructions}</div>
+                                            </div>
+                                        ) : null}
+                                        {readiness.recommended_urls.data_deletion_callback ? (
+                                            <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                                                <div className="text-slate-500 text-xs">Data deletion (callback)</div>
+                                                <div className="text-white break-all">{readiness.recommended_urls.data_deletion_callback}</div>
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                </div>
+                            ) : null}
+                        </div>
+                    ) : (
+                        <div className="text-sm text-danger-400 flex items-center gap-2">
+                            <XCircle className="w-4 h-4" /> {readinessError || 'No disponible'}
+                        </div>
+                    )}
                 </div>
             </motion.div>
 

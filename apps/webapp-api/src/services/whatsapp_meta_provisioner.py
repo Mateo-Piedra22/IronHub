@@ -25,31 +25,53 @@ def standard_meta_templates(language_code: Optional[str] = None) -> List[Dict[st
         }
 
     templates: List[Tuple[str, str, str, List[str]]] = [
-        ("ih_welcome_v1", "UTILITY", "Hola {{1}}. ¡Bienvenido/a! Si necesitás ayuda, respondé a este mensaje.", ["Mateo"]),
+        ("ih_welcome_v1", "UTILITY", "Hola {{1}}. Confirmamos tu registro. Este mensaje es un aviso automático de tu cuenta.", ["Mateo"]),
         ("ih_payment_confirmed_v1", "UTILITY", "Hola {{1}}. Confirmamos tu pago de ${{2}} correspondiente a {{3}}. ¡Gracias!", ["Mateo", "25000", "enero 2026"]),
-        ("ih_membership_due_today_v1", "UTILITY", "Hola {{1}}. Recordatorio: tu cuota vence hoy ({{2}}). Si ya abonaste, ignorá este mensaje.", ["Mateo", "16 de enero"]),
-        ("ih_membership_due_soon_v1", "UTILITY", "Hola {{1}}. Tu cuota vence el {{2}}. Si querés, respondé a este mensaje y te ayudamos a regularizar.", ["Mateo", "20 de enero"]),
-        ("ih_membership_overdue_v1", "UTILITY", "Hola {{1}}. Tu cuota está vencida. Si ya abonaste, ignorá este mensaje. Si necesitás ayuda, respondé “AYUDA”.", ["Mateo"]),
-        ("ih_membership_deactivated_v1", "UTILITY", "Hola {{1}}. Tu acceso está temporalmente suspendido. Motivo: {{2}}. Respondé a este mensaje si necesitás asistencia.", ["Mateo", "cuotas vencidas"]),
+        ("ih_membership_due_today_v1", "UTILITY", "Hola {{1}}. Aviso de cuenta: tu cuota vence hoy ({{2}}). Si ya abonaste, ignorá este mensaje.", ["Mateo", "16 de enero"]),
+        ("ih_membership_due_soon_v1", "UTILITY", "Hola {{1}}. Aviso de cuenta: tu cuota vence el {{2}}. Si ya abonaste, ignorá este mensaje.", ["Mateo", "20 de enero"]),
+        ("ih_membership_overdue_v1", "UTILITY", "Hola {{1}}. Aviso de cuenta: tu cuota figura vencida. Si ya abonaste, ignorá este mensaje.", ["Mateo"]),
+        ("ih_membership_deactivated_v1", "UTILITY", "Hola {{1}}. Aviso de cuenta: tu acceso está temporalmente suspendido. Motivo: {{2}}.", ["Mateo", "cuotas vencidas"]),
         ("ih_membership_reactivated_v1", "UTILITY", "Hola {{1}}. Tu acceso fue reactivado. ¡Gracias!", ["Mateo"]),
         ("ih_class_booking_confirmed_v1", "UTILITY", "Confirmación de reserva: clase {{1}} el {{2}} a las {{3}} hs.", ["Funcional", "16 de enero", "19:00"]),
         ("ih_class_booking_cancelled_v1", "UTILITY", "Tu reserva fue cancelada para la clase {{1}}. Si necesitás ayuda, respondé a este mensaje.", ["Funcional"]),
         ("ih_class_reminder_v1", "UTILITY", "Hola {{1}}. Te recordamos que tenés la clase de {{2}} programada para el día {{3}} a las {{4}} hs. Si no podés asistir, respondé a este mensaje para ayudarte.", ["Mateo", "Funcional", "viernes", "19:00"]),
-        ("ih_waitlist_spot_available_v1", "UTILITY", "Hola {{1}}. Se liberó un cupo para {{2}} ({{3}} {{4}}). Respondé “SI” para tomarlo.", ["Mateo", "Funcional", "viernes", "19:00"]),
+        ("ih_waitlist_spot_available_v1", "UTILITY", "Hola {{1}}. Aviso de lista de espera: se liberó un cupo para {{2}} el {{3}} a las {{4}} hs. Para confirmar, gestioná tu reserva desde la app o en recepción.", ["Mateo", "Funcional", "viernes", "19:00"]),
         ("ih_waitlist_confirmed_v1", "UTILITY", "Listo {{1}}. Te confirmamos tu lugar en la clase de {{2}} para el día {{3}} a las {{4}} hs. Si necesitás cambiarlo, respondé a este mensaje.", ["Mateo", "Funcional", "viernes", "19:00"]),
         ("ih_schedule_change_v1", "UTILITY", "Aviso: hubo un cambio en {{1}}. Nuevo horario: {{2}} a las {{3}} hs. Gracias.", ["Funcional", "viernes", "20:00"]),
         ("ih_marketing_promo_v1", "MARKETING", "Hola {{1}}. Esta semana tenemos {{2}}. Si querés más info, respondé a este mensaje.", ["Mateo", "descuento del 10% en el plan trimestral"]),
         ("ih_marketing_new_class_v1", "MARKETING", "Nueva clase disponible: {{1}}. Primer horario: {{2}} {{3}}. ¿Querés que te reservemos un lugar?", ["Movilidad", "miércoles", "18:00"]),
     ]
 
+    def split_version(n: str) -> tuple[str, Optional[int]]:
+        import re
+
+        s = str(n or "").strip()
+        m = re.match(r"^(?P<base>.+)_v(?P<v>\\d+)$", s)
+        if not m:
+            return (s, None)
+        try:
+            return (m.group("base"), int(m.group("v")))
+        except Exception:
+            return (m.group("base"), None)
+
+    best_by_base: Dict[str, Tuple[str, str, str, List[str], int]] = {}
+    passthrough: List[Tuple[str, str, str, List[str]]] = []
+    for name, category, body_text, examples in templates:
+        base, v = split_version(name)
+        if not v:
+            passthrough.append((name, category, body_text, examples))
+            continue
+        prev = best_by_base.get(base)
+        if not prev or int(v) > int(prev[4]):
+            best_by_base[base] = (name, category, body_text, examples, int(v))
+
+    final_templates: List[Tuple[str, str, str, List[str]]] = passthrough + [
+        (name, category, body_text, examples) for (name, category, body_text, examples, _v) in best_by_base.values()
+    ]
+
     return [
-        {
-            "name": name,
-            "language": lang,
-            "category": category,
-            "components": [body(body_text, examples)],
-        }
-        for name, category, body_text, examples in templates
+        {"name": name, "language": lang, "category": category, "components": [body(body_text, examples)]}
+        for name, category, body_text, examples in final_templates
     ]
 
 

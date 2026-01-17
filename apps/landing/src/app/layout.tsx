@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import SiteHeader from './_components/SiteHeader';
+import SiteFooter from './_components/SiteFooter';
 
 export const metadata: Metadata = {
     title: 'IronHub | Premium Gym Management Platform',
@@ -51,7 +53,9 @@ export default function RootLayout({
 
                     {/* Main content */}
                     <div className="relative z-10">
+                        <SiteHeader />
                         {children}
+                        <SiteFooter />
                     </div>
                 </div>
             </body>

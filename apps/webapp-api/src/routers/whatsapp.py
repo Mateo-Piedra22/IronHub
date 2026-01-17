@@ -281,6 +281,45 @@ async def api_whatsapp_embedded_signup_config(
     return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", "app_id": app_id, "config_id": config_id, "api_version": api_version}
 
 
+@router.get("/api/whatsapp/embedded-signup/readiness")
+async def api_whatsapp_embedded_signup_readiness(
+    _=Depends(require_owner),
+):
+    app_id = (os.getenv("META_APP_ID") or os.getenv("FACEBOOK_APP_ID") or "").strip()
+    app_secret = (os.getenv("META_APP_SECRET") or os.getenv("FACEBOOK_APP_SECRET") or "").strip()
+    config_id = (os.getenv("META_WA_EMBEDDED_SIGNUP_CONFIG_ID") or "").strip()
+    api_version = (os.getenv("META_GRAPH_API_VERSION") or os.getenv("WHATSAPP_API_VERSION") or "v19.0").strip()
+    redirect_uri = (os.getenv("META_OAUTH_REDIRECT_URI") or "").strip()
+    enc_key = (os.getenv("WABA_ENCRYPTION_KEY") or "").strip()
+
+    missing = []
+    if not app_id:
+        missing.append("META_APP_ID")
+    if not app_secret:
+        missing.append("META_APP_SECRET")
+    if not config_id:
+        missing.append("META_WA_EMBEDDED_SIGNUP_CONFIG_ID")
+    if not enc_key:
+        missing.append("WABA_ENCRYPTION_KEY")
+
+    return {
+        "ok": len(missing) == 0,
+        "app_id_present": bool(app_id),
+        "app_secret_present": bool(app_secret),
+        "config_id_present": bool(config_id),
+        "api_version": api_version,
+        "redirect_uri": redirect_uri,
+        "waba_encryption_key_present": bool(enc_key),
+        "missing": missing,
+        "recommended_urls": {
+            "privacy_policy": "https://ironhub.motiona.xyz/privacy",
+            "terms": "https://ironhub.motiona.xyz/terms",
+            "data_deletion_instructions": "https://ironhub.motiona.xyz/data-deletion",
+            "data_deletion_callback": "https://ironhub.motiona.xyz/api/meta/data-deletion",
+        },
+    }
+
+
 @router.post("/api/whatsapp/embedded-signup/complete")
 async def api_whatsapp_embedded_signup_complete(
     request: Request,

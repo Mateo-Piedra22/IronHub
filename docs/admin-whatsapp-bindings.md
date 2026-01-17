@@ -30,3 +30,6 @@
 - Tokens cifrados con `WABA_ENCRYPTION_KEY`.
 - `cryptography` en admin-api para desencriptar.
 - Health con errores legibles (200 + `ok:false`).
+
+## Deuda técnica
+- Meta puede reclasificar plantillas creadas como `UTILITY` a `MARKETING` al aprobarlas (impacta costos/políticas; no rompe envíos). Ver [tech-debt.md](file:///c:/Users/mateo/OneDrive/Escritorio/Work/Programas/IronHub/docs/tech-debt.md).

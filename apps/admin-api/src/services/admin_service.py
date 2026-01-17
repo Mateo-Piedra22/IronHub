@@ -7,7 +7,7 @@ import secrets
 import hashlib
 import base64
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 import psycopg2
 import psycopg2.extras
 from sqlalchemy import create_engine, text
@@ -2360,17 +2360,17 @@ class AdminService:
     def _default_whatsapp_template_catalog(self) -> List[Dict[str, Any]]:
         lang = (os.getenv("WHATSAPP_TEMPLATE_LANGUAGE") or "es_AR").strip()
         templates = [
-            ("ih_welcome_v1", "UTILITY", f"Hola {{{{1}}}}. ¡Bienvenido/a! Si necesitás ayuda, respondé a este mensaje.", ["Mateo"]),
+            ("ih_welcome_v1", "UTILITY", f"Hola {{{{1}}}}. Confirmamos tu registro. Este mensaje es un aviso automático de tu cuenta.", ["Mateo"]),
             ("ih_payment_confirmed_v1", "UTILITY", "Hola {{1}}. Confirmamos tu pago de ${{2}} correspondiente a {{3}}. ¡Gracias!", ["Mateo", "25000", "enero 2026"]),
-            ("ih_membership_due_today_v1", "UTILITY", "Hola {{1}}. Recordatorio: tu cuota vence hoy ({{2}}). Si ya abonaste, ignorá este mensaje.", ["Mateo", "16 de enero"]),
-            ("ih_membership_due_soon_v1", "UTILITY", "Hola {{1}}. Tu cuota vence el {{2}}. Si querés, respondé a este mensaje y te ayudamos a regularizar.", ["Mateo", "20 de enero"]),
-            ("ih_membership_overdue_v1", "UTILITY", "Hola {{1}}. Tu cuota está vencida. Si ya abonaste, ignorá este mensaje. Si necesitás ayuda, respondé “AYUDA”.", ["Mateo"]),
-            ("ih_membership_deactivated_v1", "UTILITY", "Hola {{1}}. Tu acceso está temporalmente suspendido. Motivo: {{2}}. Respondé a este mensaje si necesitás asistencia.", ["Mateo", "cuotas vencidas"]),
+            ("ih_membership_due_today_v1", "UTILITY", "Hola {{1}}. Aviso de cuenta: tu cuota vence hoy ({{2}}). Si ya abonaste, ignorá este mensaje.", ["Mateo", "16 de enero"]),
+            ("ih_membership_due_soon_v1", "UTILITY", "Hola {{1}}. Aviso de cuenta: tu cuota vence el {{2}}. Si ya abonaste, ignorá este mensaje.", ["Mateo", "20 de enero"]),
+            ("ih_membership_overdue_v1", "UTILITY", "Hola {{1}}. Aviso de cuenta: tu cuota figura vencida. Si ya abonaste, ignorá este mensaje.", ["Mateo"]),
+            ("ih_membership_deactivated_v1", "UTILITY", "Hola {{1}}. Aviso de cuenta: tu acceso está temporalmente suspendido. Motivo: {{2}}.", ["Mateo", "cuotas vencidas"]),
             ("ih_membership_reactivated_v1", "UTILITY", "Hola {{1}}. Tu acceso fue reactivado. ¡Gracias!", ["Mateo"]),
             ("ih_class_booking_confirmed_v1", "UTILITY", "Confirmación de reserva: clase {{1}} el {{2}} a las {{3}} hs.", ["Funcional", "16 de enero", "19:00"]),
             ("ih_class_booking_cancelled_v1", "UTILITY", "Tu reserva fue cancelada para la clase {{1}}. Si necesitás ayuda, respondé a este mensaje.", ["Funcional"]),
             ("ih_class_reminder_v1", "UTILITY", "Hola {{1}}. Te recordamos que tenés la clase de {{2}} programada para el día {{3}} a las {{4}} hs. Si no podés asistir, respondé a este mensaje para ayudarte.", ["Mateo", "Funcional", "viernes", "19:00"]),
-            ("ih_waitlist_spot_available_v1", "UTILITY", "Hola {{1}}. Se liberó un cupo para {{2}} el {{3}} a las {{4}} hs. Respondé “SI” para tomarlo.", ["Mateo", "Funcional", "viernes", "19:00"]),
+            ("ih_waitlist_spot_available_v1", "UTILITY", "Hola {{1}}. Aviso de lista de espera: se liberó un cupo para {{2}} el {{3}} a las {{4}} hs. Para confirmar, gestioná tu reserva desde la app o en recepción.", ["Mateo", "Funcional", "viernes", "19:00"]),
             ("ih_waitlist_confirmed_v1", "UTILITY", "Listo {{1}}. Te confirmamos tu lugar en la clase de {{2}} para el día {{3}} a las {{4}} hs. Si necesitás cambiarlo, respondé a este mensaje.", ["Mateo", "Funcional", "viernes", "19:00"]),
             ("ih_schedule_change_v1", "UTILITY", "Aviso: hubo un cambio en {{1}}. Nuevo horario: {{2}} a las {{3}} hs. Gracias.", ["Funcional", "viernes", "20:00"]),
             ("ih_auth_code_v1", "AUTHENTICATION", "Tu código de verificación es {{1}}. Vence en {{2}} minutos. No lo compartas con nadie.", ["928314", "10"]),
@@ -2757,10 +2757,15 @@ class AdminService:
             list_url = f"https://graph.facebook.com/{api_version}/{waba_id}/message_templates"
             headers = {"Authorization": f"Bearer {token}"}
 
-            existing = set()
+            existing: Set[str] = set()
+            created: List[str] = []
+            failed: List[Dict[str, Any]] = []
+            create_url = list_url
+            template_status_by_name: Dict[str, str] = {}
+            template_category_by_name: Dict[str, str] = {}
             after = None
             for _ in range(10):
-                params_q = {"fields": "name,status", "limit": "200"}
+                params_q = {"fields": "name,status,category,language", "limit": "200"}
                 if after:
                     params_q["after"] = after
                 resp = requests.get(list_url, headers=headers, params=params_q, timeout=20)
@@ -2769,35 +2774,48 @@ class AdminService:
                     return {"ok": False, "error": str((data or {}).get("error") or data or resp.text)}
                 for item in (data.get("data") or []):
                     n = (item or {}).get("name")
-                    if n:
-                        existing.add(str(n))
+                    if not n:
+                        continue
+                    name_s = str(n)
+                    existing.add(name_s)
+                    template_status_by_name[name_s] = str((item or {}).get("status") or "")
+                    template_category_by_name[name_s] = str((item or {}).get("category") or "")
                 cursors = ((data.get("paging") or {}).get("cursors") or {})
                 after = cursors.get("after")
                 if not after:
                     break
 
-            created = []
-            failed = []
-            create_url = list_url
-            template_status_by_name: Dict[str, str] = {}
-            after = None
-            for _ in range(10):
-                params_q = {"fields": "name,status", "limit": "200"}
-                if after:
-                    params_q["after"] = after
-                resp = requests.get(list_url, headers=headers, params=params_q, timeout=20)
-                data = resp.json() if resp.content else {}
-                if resp.status_code >= 400:
-                    break
-                for item in (data.get("data") or []):
-                    n = (item or {}).get("name")
-                    st = (item or {}).get("status")
-                    if n:
-                        template_status_by_name[str(n)] = str(st or "")
-                cursors = ((data.get("paging") or {}).get("cursors") or {})
-                after = cursors.get("after")
-                if not after:
-                    break
+            def _split_version(n: str) -> tuple[str, Optional[int]]:
+                s = str(n or "").strip()
+                m = re.match(r"^(?P<base>.+)_v(?P<v>\d+)$", s)
+                if not m:
+                    return (s, None)
+                try:
+                    return (m.group("base"), int(m.group("v")))
+                except Exception:
+                    return (m.group("base"), None)
+
+            max_version_by_base: Dict[str, int] = {}
+            approved_versions_by_base: Dict[str, List[int]] = {}
+            for n, st in (template_status_by_name or {}).items():
+                base, v = _split_version(n)
+                if not v:
+                    continue
+                max_version_by_base[base] = max(int(max_version_by_base.get(base, 0)), int(v))
+                if str(st or "").upper() == "APPROVED":
+                    approved_versions_by_base.setdefault(base, []).append(int(v))
+
+            desired_name_by_base: Dict[str, str] = {}
+            desired_v_by_base: Dict[str, int] = {}
+            for t in templates:
+                n0 = str(t.get("template_name") or "").strip()
+                b0, v0 = _split_version(n0)
+                if not v0:
+                    continue
+                cur = int(desired_v_by_base.get(b0, 0))
+                if int(v0) > cur:
+                    desired_v_by_base[b0] = int(v0)
+                    desired_name_by_base[b0] = n0
 
             def _try_parse_meta_error(raw: Any) -> str:
                 try:
@@ -2820,12 +2838,10 @@ class AdminService:
 
             def _bump_template_name(n: str) -> str:
                 s = str(n or "").strip()
-                m = re.match(r"^(?P<base>.+)_v(?P<v>\d+)$", s)
-                if m:
-                    base = m.group("base")
-                    v = int(m.group("v"))
-                    return f"{base}_v{v + 1}"
-                return f"{s}_v2"
+                base, v = _split_version(s)
+                cur_v = int(v or 1)
+                nxt_v = max(int(max_version_by_base.get(base, 0)), cur_v) + 1
+                return f"{base}_v{nxt_v}"
 
             def _is_meta_name_locked(err: str) -> bool:
                 e = str(err or "").lower()
@@ -2841,6 +2857,11 @@ class AdminService:
             for t in templates:
                 name = str(t.get("template_name") or "").strip()
                 if not name or name in existing:
+                    continue
+                base, v = _split_version(name)
+                if v and int(max_version_by_base.get(base, 0)) > int(v):
+                    continue
+                if v and desired_name_by_base.get(base) and desired_name_by_base.get(base) != name:
                     continue
                 body_text = str(t.get("body_text") or "").strip()
                 lang = str(t.get("language") or "es_AR").strip()
@@ -2883,6 +2904,12 @@ class AdminService:
                             else:
                                 created.append(new_name)
                                 existing.add(new_name)
+                                try:
+                                    b2, v2 = _split_version(new_name)
+                                    if v2:
+                                        max_version_by_base[b2] = max(int(max_version_by_base.get(b2, 0)), int(v2))
+                                except Exception:
+                                    pass
                                 created_bumped.append({"from": name, "to": new_name, "reason": "meta_name_locked"})
                                 try:
                                     with self.db.get_connection_context() as aconn:
@@ -2911,6 +2938,8 @@ class AdminService:
                     else:
                         created.append(name)
                         existing.add(name)
+                        if v:
+                            max_version_by_base[base] = max(int(max_version_by_base.get(base, 0)), int(v))
                 except Exception as e:
                     failed.append({"name": name, "error": str(e)})
 
@@ -2977,17 +3006,30 @@ class AdminService:
                                 cur = nxt
                             return cur
 
+                        def _resolve_best_approved(n: str) -> str:
+                            cur = _resolve_alias(n)
+                            st0 = str(template_status_by_name.get(cur) or "")
+                            if st0.upper() == "APPROVED":
+                                return cur
+                            base0, v0 = _split_version(cur)
+                            if base0 and base0 in approved_versions_by_base:
+                                try:
+                                    best_v = max(int(x) for x in (approved_versions_by_base.get(base0) or []) if int(x) > 0)
+                                except Exception:
+                                    best_v = 0
+                                if best_v > 0:
+                                    cand = f"{base0}_v{best_v}"
+                                    if str(template_status_by_name.get(cand) or "").upper() == "APPROVED":
+                                        return cand
+                            return cur
+
                         for k, tname in (bindings or {}).items():
                             key = f"wa_meta_template_{str(k).strip()}"
                             chosen = str(tname or "").strip()
                             if not chosen:
                                 continue
+                            chosen = _resolve_best_approved(chosen)
                             st = str(template_status_by_name.get(chosen) or "")
-                            if not st or st.upper() != "APPROVED":
-                                alt = _resolve_alias(chosen)
-                                if alt and alt != chosen:
-                                    chosen = alt
-                                    st = str(template_status_by_name.get(chosen) or "")
                             if not st or st.upper() != "APPROVED":
                                 continue
                             t_cur2.execute(
