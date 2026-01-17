@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
     Clock,
     Users,
@@ -10,9 +10,9 @@ import {
     UserPlus,
     Bell,
     X,
-    ChevronDown,
     Edit,
     Dumbbell,
+    Layers,
 } from 'lucide-react';
 import { Button, Modal, Input, Select, Checkbox, ConfirmModal, useToast } from '@/components/ui';
 import {
@@ -20,6 +20,8 @@ import {
     type Clase,
     type ClaseHorario,
     type ClaseEjercicio,
+    type ClaseBloque,
+    type ClaseBloqueItem,
     type Inscripcion,
     type ListaEspera,
     type Profesor,
@@ -36,7 +38,7 @@ interface ClaseDetailModalProps {
     onRefresh: () => void;
 }
 
-type TabType = 'horarios' | 'inscripciones' | 'espera' | 'ejercicios';
+type TabType = 'horarios' | 'inscripciones' | 'espera' | 'ejercicios' | 'bloques';
 
 const diasSemana = [
     { value: 'Lunes', label: 'Lunes' },
@@ -84,6 +86,8 @@ export default function ClaseDetailModal({
     const [inscripciones, setInscripciones] = useState<Inscripcion[]>([]);
     const [usuarios, setUsuarios] = useState<Usuario[]>([]);
     const [selectedUsuarioId, setSelectedUsuarioId] = useState<number | null>(null);
+    const [usuariosSearch, setUsuariosSearch] = useState('');
+    const [usuariosLoading, setUsuariosLoading] = useState(false);
 
     // Lista de espera
     const [listaEspera, setListaEspera] = useState<ListaEspera[]>([]);
@@ -95,11 +99,29 @@ export default function ClaseDetailModal({
     const [selectedEjercicioIds, setSelectedEjercicioIds] = useState<number[]>([]);
     const [savingEjercicios, setSavingEjercicios] = useState(false);
 
+    const [bloques, setBloques] = useState<ClaseBloque[]>([]);
+    const [bloquesLoading, setBloquesLoading] = useState(false);
+    const [selectedBloqueId, setSelectedBloqueId] = useState<number | null>(null);
+    const [bloqueNombre, setBloqueNombre] = useState('');
+    const [bloqueItems, setBloqueItems] = useState<ClaseBloqueItem[]>([]);
+    const [bloqueItemsLoading, setBloqueItemsLoading] = useState(false);
+    const [newBloqueOpen, setNewBloqueOpen] = useState(false);
+    const [newBloqueNombre, setNewBloqueNombre] = useState('');
+    const [savingBloque, setSavingBloque] = useState(false);
+
     // Load data
     useEffect(() => {
         if (clase && isOpen) {
             loadHorarios();
-            loadUsuarios();
+            setActiveTab('horarios');
+            setUsuarios([]);
+            setUsuariosSearch('');
+            setSelectedUsuarioId(null);
+            setEjerciciosSearch('');
+            setSelectedEjercicioIds([]);
+            setSelectedBloqueId(null);
+            setBloques([]);
+            setBloqueItems([]);
         }
     }, [clase?.id, isOpen]);
 
@@ -137,10 +159,16 @@ export default function ClaseDetailModal({
         }
     };
 
-    const loadUsuarios = async () => {
-        const res = await api.getUsuarios({ activo: true, limit: 500 });
-        if (res.ok && res.data) {
-            setUsuarios(res.data.usuarios);
+    const loadUsuarios = async (search: string) => {
+        setUsuariosLoading(true);
+        try {
+            const res = await api.getUsuarios({ activo: true, limit: 60, search: search.trim() || undefined });
+            if (res.ok && res.data) {
+                setUsuarios(res.data.usuarios);
+                setSelectedUsuarioId(null);
+            }
+        } finally {
+            setUsuariosLoading(false);
         }
     };
 
@@ -164,20 +192,153 @@ export default function ClaseDetailModal({
         }
     };
 
+    const loadBloques = async () => {
+        if (!clase) return;
+        setBloquesLoading(true);
+        try {
+            const res = await api.getClaseBloques(clase.id);
+            if (res.ok && res.data) {
+                const list = res.data || [];
+                setBloques(list);
+                if (!selectedBloqueId && list.length) {
+                    setSelectedBloqueId(list[0].id);
+                    setBloqueNombre(list[0].nombre || '');
+                }
+            }
+        } finally {
+            setBloquesLoading(false);
+        }
+    };
+
+    const loadBloqueItems = async (bloqueId: number) => {
+        if (!clase) return;
+        setBloqueItemsLoading(true);
+        try {
+            const res = await api.getClaseBloqueItems(clase.id, bloqueId);
+            if (res.ok && res.data) setBloqueItems(res.data || []);
+        } finally {
+            setBloqueItemsLoading(false);
+        }
+    };
+
+    const addEjercicioToBloque = (e: Ejercicio) => {
+        setBloqueItems((prev) => [
+            ...prev,
+            {
+                ejercicio_id: Number(e.id),
+                nombre_ejercicio: String(e.nombre || ''),
+                orden: prev.length,
+                series: 0,
+                repeticiones: '',
+                descanso_segundos: 0,
+                notas: '',
+            },
+        ]);
+    };
+
+    const removeBloqueItem = (index: number) => {
+        setBloqueItems((prev) => prev.filter((_, i) => i !== index).map((it, i) => ({ ...it, orden: i })));
+    };
+
+    const saveBloque = async () => {
+        if (!clase || !selectedBloqueId) return;
+        setSavingBloque(true);
+        try {
+            const items = (bloqueItems || []).map((it, idx) => ({
+                ejercicio_id: Number(it.ejercicio_id),
+                orden: idx,
+                series: Number(it.series || 0),
+                repeticiones: String(it.repeticiones || ''),
+                descanso_segundos: Number(it.descanso_segundos || 0),
+                notas: String(it.notas || ''),
+            }));
+            const res = await api.updateClaseBloque(clase.id, selectedBloqueId, { nombre: bloqueNombre || 'Bloque', items });
+            if (res.ok) {
+                success('Bloque actualizado');
+                loadBloques();
+                loadBloqueItems(selectedBloqueId);
+            } else {
+                error(res.error || 'Error al guardar bloque');
+            }
+        } finally {
+            setSavingBloque(false);
+        }
+    };
+
+    const createBloque = async () => {
+        if (!clase) return;
+        const nombre = newBloqueNombre.trim();
+        if (!nombre) return;
+        setSavingBloque(true);
+        try {
+            const res = await api.createClaseBloque(clase.id, { nombre, items: [] });
+            if (res.ok && res.data?.id) {
+                success('Bloque creado');
+                setNewBloqueNombre('');
+                setNewBloqueOpen(false);
+                await loadBloques();
+                setSelectedBloqueId(res.data.id);
+            } else {
+                error(res.error || 'Error al crear bloque');
+            }
+        } finally {
+            setSavingBloque(false);
+        }
+    };
+
+    const deleteBloque = async () => {
+        if (!clase || !selectedBloqueId) return;
+        setSavingBloque(true);
+        try {
+            const res = await api.deleteClaseBloque(clase.id, selectedBloqueId);
+            if (res.ok) {
+                success('Bloque eliminado');
+                setSelectedBloqueId(null);
+                setBloqueItems([]);
+                setBloqueNombre('');
+                loadBloques();
+            } else {
+                error(res.error || 'Error al eliminar bloque');
+            }
+        } finally {
+            setSavingBloque(false);
+        }
+    };
+
     useEffect(() => {
         if (!isOpen || !clase) return;
-        if (activeTab !== 'ejercicios') return;
-        loadClaseEjercicios();
-        loadEjerciciosCatalog('');
+        if (activeTab === 'ejercicios') loadClaseEjercicios();
+        if (activeTab === 'ejercicios' || activeTab === 'bloques') loadEjerciciosCatalog('');
+        if (activeTab === 'bloques') loadBloques();
+        if (activeTab === 'inscripciones' || activeTab === 'espera') loadUsuarios('');
     }, [activeTab, isOpen, clase?.id]);
 
     useEffect(() => {
-        if (!isOpen || activeTab !== 'ejercicios') return;
+        if (!isOpen) return;
+        if (activeTab !== 'ejercicios' && activeTab !== 'bloques') return;
+        if (!ejerciciosSearch.trim()) return;
         const t = setTimeout(() => {
             loadEjerciciosCatalog(ejerciciosSearch);
         }, 250);
         return () => clearTimeout(t);
     }, [ejerciciosSearch, activeTab, isOpen]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        if (activeTab !== 'inscripciones' && activeTab !== 'espera') return;
+        const t = setTimeout(() => {
+            loadUsuarios(usuariosSearch);
+        }, 250);
+        return () => clearTimeout(t);
+    }, [usuariosSearch, activeTab, isOpen]);
+
+    useEffect(() => {
+        if (!isOpen || activeTab !== 'bloques') return;
+        if (!selectedBloqueId) return;
+        loadBloqueItems(selectedBloqueId);
+        const b = bloques.find((x) => x.id === selectedBloqueId);
+        setBloqueNombre(b?.nombre || '');
+    }, [selectedBloqueId, bloques, activeTab, isOpen]);
 
     // Horario CRUD
     const handleAddHorario = async () => {
@@ -385,6 +546,7 @@ export default function ClaseDetailModal({
                         { id: 'inscripciones', label: 'Inscriptos', icon: Users },
                         { id: 'espera', label: 'Lista de Espera', icon: List },
                         { id: 'ejercicios', label: 'Ejercicios', icon: Dumbbell },
+                        { id: 'bloques', label: 'Bloques', icon: Layers },
                     ].map((tab) => (
                         <button
                             key={tab.id}
@@ -510,6 +672,18 @@ export default function ClaseDetailModal({
                                 </div>
                             ) : (
                                 <>
+                                    <div className="flex flex-col sm:flex-row gap-2">
+                                        <input
+                                            className="input flex-1"
+                                            value={usuariosSearch}
+                                            onChange={(e) => setUsuariosSearch(e.target.value)}
+                                            placeholder="Buscar usuarios (nombre o DNI)…"
+                                        />
+                                        <Button variant="secondary" onClick={() => loadUsuarios(usuariosSearch)} isLoading={usuariosLoading}>
+                                            Buscar
+                                        </Button>
+                                    </div>
+
                                     {/* Add inscription */}
                                     <div className="flex gap-2">
                                         <Select

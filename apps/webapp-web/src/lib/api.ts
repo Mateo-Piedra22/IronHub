@@ -304,6 +304,24 @@ export interface Clase {
     activa?: boolean;
 }
 
+export interface ClaseBloque {
+    id: number;
+    clase_id: number;
+    nombre: string;
+}
+
+export interface ClaseBloqueItem {
+    id?: number;
+    bloque_id?: number;
+    ejercicio_id: number;
+    nombre_ejercicio?: string;
+    orden: number;
+    series?: number;
+    repeticiones?: string;
+    descanso_segundos?: number;
+    notas?: string;
+}
+
 // === Asistencia Types ===
 export interface Asistencia {
     id: number;
@@ -1811,6 +1829,35 @@ class ApiClient {
         return this.request<{ ok: boolean }>(`/api/clases/${claseId}/ejercicios`, {
             method: 'PUT',
             body: JSON.stringify({ ejercicio_ids: ejercicioIds }),
+        });
+    }
+
+    // === Clase Bloques ===
+    async getClaseBloques(claseId: number) {
+        return this.request<ClaseBloque[]>(`/api/clases/${claseId}/bloques`);
+    }
+
+    async getClaseBloqueItems(claseId: number, bloqueId: number) {
+        return this.request<ClaseBloqueItem[]>(`/api/clases/${claseId}/bloques/${bloqueId}`);
+    }
+
+    async createClaseBloque(claseId: number, data: { nombre: string; items?: ClaseBloqueItem[] }) {
+        return this.request<{ ok: boolean; id: number }>(`/api/clases/${claseId}/bloques`, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    }
+
+    async updateClaseBloque(claseId: number, bloqueId: number, data: { nombre: string; items?: ClaseBloqueItem[] }) {
+        return this.request<{ ok: boolean }>(`/api/clases/${claseId}/bloques/${bloqueId}`, {
+            method: 'PUT',
+            body: JSON.stringify(data),
+        });
+    }
+
+    async deleteClaseBloque(claseId: number, bloqueId: number) {
+        return this.request<{ ok: boolean }>(`/api/clases/${claseId}/bloques/${bloqueId}`, {
+            method: 'DELETE',
         });
     }
 

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 const ADMIN_API_URL = process.env.ADMIN_API_URL || 'https://api-admin.ironhub.motiona.xyz';
+const WEBAPP_API_URL = process.env.WEBAPP_API_URL || 'https://api.ironhub.motiona.xyz';
 
 function isObject(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === 'object';
@@ -9,7 +10,8 @@ function isObject(value: unknown): value is Record<string, unknown> {
 export async function GET() {
     try {
         const base = ADMIN_API_URL.replace(/\/+$/, '');
-        const candidates = [`${base}/gyms/public`, `${base}/api/gyms/public`];
+        const webappBase = WEBAPP_API_URL.replace(/\/+$/, '');
+        const candidates = [`${base}/gyms/public`, `${base}/api/gyms/public`, `${webappBase}/api/public/gyms`];
         let res: Response | null = null;
         for (const url of candidates) {
             const r = await fetch(url, { headers: { Accept: 'application/json' }, next: { revalidate: 60 } });

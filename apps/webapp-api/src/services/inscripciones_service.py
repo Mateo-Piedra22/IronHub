@@ -8,6 +8,7 @@ Replaces raw SQL usage in inscripciones.py with proper ORM queries.
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone, timedelta
 import os
+import threading
 
 try:
     from zoneinfo import ZoneInfo
@@ -22,13 +23,36 @@ from src.services.base import BaseService
 
 logger = logging.getLogger(__name__)
 
+_schema_guard_lock = threading.RLock()
+_schema_guard_done: set[str] = set()
+
 
 class InscripcionesService(BaseService):
     """Service for class enrollments and schedule management."""
 
     def __init__(self, db: Session):
         super().__init__(db)
-        self.ensure_tables()
+        self._ensure_schema_guarded()
+
+    def _ensure_schema_guarded(self) -> None:
+        try:
+            auto_guard = str(os.getenv("AUTO_SCHEMA_GUARD", "")).strip().lower() in ("1", "true", "yes", "on")
+            dev_mode = str(os.getenv("DEVELOPMENT_MODE", "")).strip().lower() in ("1", "true", "yes", "on")
+            if not auto_guard and not dev_mode:
+                return
+        except Exception:
+            return
+        tenant = "__default__"
+        try:
+            from src.database.tenant_connection import get_current_tenant
+            tenant = str(get_current_tenant() or "__default__")
+        except Exception:
+            tenant = "__default__"
+        with _schema_guard_lock:
+            if tenant in _schema_guard_done:
+                return
+            self.ensure_tables()
+            _schema_guard_done.add(tenant)
 
     def _get_app_timezone(self):
         tz_name = (
