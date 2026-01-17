@@ -106,6 +106,28 @@ function OwnerDashboard() {
         run();
     }, []);
 
+    const downloadCsv = useCallback(async (type: 'usuarios' | 'pagos' | 'asistencias' | 'asistencias_audit', params?: { desde?: string; hasta?: string }) => {
+        try {
+            const res = await api.exportToCsv(type, params);
+            if (!res.ok || !res.data) {
+                setError(res.error || 'No se pudo exportar');
+                return;
+            }
+            const blob = res.data;
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+            a.download = `ironhub-${type}-${ts}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            setError(String(e) || 'No se pudo exportar');
+        }
+    }, []);
+
     const refreshAudit = useCallback(async () => {
         setAuditLoading(true);
         try {
@@ -721,10 +743,10 @@ function OwnerDashboard() {
                                 <option value="true">Activos</option>
                                 <option value="false">Inactivos</option>
                             </select>
-                            <Link className="btn-secondary flex items-center gap-2" href="/api/export/usuarios/csv">
+                            <button className="btn-secondary flex items-center gap-2" type="button" onClick={() => downloadCsv('usuarios')}>
                                 <Download className="w-4 h-4" />
                                 CSV
-                            </Link>
+                            </button>
                         </div>
                     </div>
                     <div className="mt-4 overflow-x-auto">
@@ -792,13 +814,14 @@ function OwnerDashboard() {
                                     ))}
                                 </select>
                             </div>
-                            <Link
+                            <button
                                 className="btn-secondary flex items-center gap-2"
-                                href={`/api/export/pagos/csv?desde=${encodeURIComponent(pagosDesde || '')}&hasta=${encodeURIComponent(pagosHasta || '')}`}
+                                type="button"
+                                onClick={() => downloadCsv('pagos', { desde: pagosDesde || undefined, hasta: pagosHasta || undefined })}
                             >
                                 <Download className="w-4 h-4" />
                                 CSV
-                            </Link>
+                            </button>
                         </div>
                     </div>
                     <div className="mt-4 overflow-x-auto">
@@ -896,10 +919,10 @@ function OwnerDashboard() {
                             <h2 className="text-base font-semibold text-white">Asistencias (últimos 7 días)</h2>
                             <div className="text-xs text-slate-500 mt-1">Últimos 20 check-ins</div>
                         </div>
-                        <Link className="btn-secondary flex items-center gap-2" href="/api/export/asistencias/csv">
+                        <button className="btn-secondary flex items-center gap-2" type="button" onClick={() => downloadCsv('asistencias')}>
                             <Download className="w-4 h-4" />
                             CSV
-                        </Link>
+                        </button>
                     </div>
                     <div className="mt-4 overflow-x-auto">
                         <table className="min-w-full text-sm">

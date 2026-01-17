@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
     Plus,
@@ -244,6 +244,14 @@ export default function ClasesPage() {
     const [agenda, setAgenda] = useState<ClaseAgendaItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [profesores, setProfesores] = useState<Profesor[]>([]);
+    const [view, setView] = useState<'agenda' | 'lista'>('agenda');
+    const [clasesSearch, setClasesSearch] = useState('');
+
+    const [tiposOpen, setTiposOpen] = useState(false);
+    const [tipos, setTipos] = useState<any[]>([]);
+    const [tiposLoading, setTiposLoading] = useState(false);
+    const [tipoNombre, setTipoNombre] = useState('');
+    const [tipoColor, setTipoColor] = useState('#6366f1');
 
     // Modals
     const [formOpen, setFormOpen] = useState(false);
@@ -277,6 +285,37 @@ export default function ClasesPage() {
             if (res.ok && res.data) setProfesores(res.data.profesores);
         })();
     }, [loadClases]);
+
+    const horariosCount = useMemo(() => {
+        const m = new Map<number, number>();
+        for (const it of agenda || []) {
+            const id = Number(it.clase_id);
+            if (!Number.isFinite(id)) continue;
+            m.set(id, (m.get(id) || 0) + 1);
+        }
+        return m;
+    }, [agenda]);
+
+    const clasesFiltered = useMemo(() => {
+        const q = (clasesSearch || '').trim().toLowerCase();
+        if (!q) return clases;
+        return (clases || []).filter((c) => String(c.nombre || '').toLowerCase().includes(q) || String(c.descripcion || '').toLowerCase().includes(q));
+    }, [clases, clasesSearch]);
+
+    const loadTipos = useCallback(async () => {
+        setTiposLoading(true);
+        try {
+            const res = await api.getClaseTipos();
+            if (res.ok && res.data) setTipos((res.data.tipos || []) as any[]);
+        } finally {
+            setTiposLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!tiposOpen) return;
+        loadTipos();
+    }, [tiposOpen, loadTipos]);
 
     // Delete handler
     const handleDelete = async () => {
@@ -313,16 +352,38 @@ export default function ClasesPage() {
                         Horarios de clases grupales
                     </p>
                 </div>
-                <Button
-                    leftIcon={<Plus className="w-4 h-4" />}
-                    onClick={() => {
-                        setClaseToEdit(null);
-                        setFormOpen(true);
-                    }}
-                >
-                    Nueva Clase
-                </Button>
+                <div className="flex items-center gap-2">
+                    <Button variant="secondary" onClick={() => setTiposOpen(true)}>
+                        Tipos
+                    </Button>
+                    <Button
+                        leftIcon={<Plus className="w-4 h-4" />}
+                        onClick={() => {
+                            setClaseToEdit(null);
+                            setFormOpen(true);
+                        }}
+                    >
+                        Nueva Clase
+                    </Button>
+                </div>
             </motion.div>
+
+            <div className="flex items-center gap-2">
+                <button
+                    className={cn('px-3 py-2 rounded-lg text-sm border', view === 'agenda' ? 'bg-primary-500/10 border-primary-500/40 text-primary-200' : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:text-white')}
+                    onClick={() => setView('agenda')}
+                    type="button"
+                >
+                    Agenda
+                </button>
+                <button
+                    className={cn('px-3 py-2 rounded-lg text-sm border', view === 'lista' ? 'bg-primary-500/10 border-primary-500/40 text-primary-200' : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:text-white')}
+                    onClick={() => setView('lista')}
+                    type="button"
+                >
+                    Lista
+                </button>
+            </div>
 
             {/* Schedule Grid */}
             <motion.div
@@ -330,7 +391,7 @@ export default function ClasesPage() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 }}
             >
-                {loading ? (
+                {view !== 'agenda' ? null : loading ? (
                     <div className="card p-12 text-center text-slate-500">
                         Cargando horarios...
                     </div>
@@ -353,6 +414,87 @@ export default function ClasesPage() {
                     />
                 )}
             </motion.div>
+
+            {view !== 'lista' ? null : (
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }} className="card p-5">
+                    <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+                        <div>
+                            <h2 className="text-base font-semibold text-white">Listado de clases</h2>
+                            <div className="text-xs text-slate-500 mt-1">Incluye clases sin horarios</div>
+                        </div>
+                        <input className="input w-full sm:w-80" value={clasesSearch} onChange={(e) => setClasesSearch(e.target.value)} placeholder="Buscar..." />
+                    </div>
+
+                    <div className="mt-4 overflow-x-auto">
+                        <table className="min-w-full text-sm">
+                            <thead>
+                                <tr className="text-slate-500">
+                                    <th className="text-left font-medium py-2 pr-4">Nombre</th>
+                                    <th className="text-left font-medium py-2 pr-4">Descripción</th>
+                                    <th className="text-left font-medium py-2 pr-4">Horarios</th>
+                                    <th className="text-right font-medium py-2">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {clasesFiltered.map((c) => {
+                                    const cnt = horariosCount.get(Number(c.id)) || 0;
+                                    return (
+                                        <tr key={String(c.id)} className="border-t border-slate-800/60">
+                                            <td className="py-2 pr-4 text-slate-200">{c.nombre}</td>
+                                            <td className="py-2 pr-4 text-slate-400 max-w-[420px] truncate">{c.descripcion || '—'}</td>
+                                            <td className="py-2 pr-4 text-slate-400 tabular-nums">{cnt}</td>
+                                            <td className="py-2 text-right">
+                                                <div className="inline-flex items-center gap-1">
+                                                    <button
+                                                        className="p-2 rounded-lg text-primary-300 hover:bg-slate-800"
+                                                        onClick={() => {
+                                                            setDetailClase(c);
+                                                            setDetailOpen(true);
+                                                        }}
+                                                        title="Gestionar"
+                                                        type="button"
+                                                    >
+                                                        <Settings className="w-4 h-4" />
+                                                    </button>
+                                                    <button
+                                                        className="p-2 rounded-lg text-slate-300 hover:bg-slate-800"
+                                                        onClick={() => {
+                                                            setClaseToEdit(c);
+                                                            setFormOpen(true);
+                                                        }}
+                                                        title="Editar"
+                                                        type="button"
+                                                    >
+                                                        <Edit className="w-4 h-4" />
+                                                    </button>
+                                                    <button
+                                                        className="p-2 rounded-lg text-slate-300 hover:text-danger-300 hover:bg-slate-800"
+                                                        onClick={() => {
+                                                            setClaseToDelete(c);
+                                                            setDeleteOpen(true);
+                                                        }}
+                                                        title="Eliminar"
+                                                        type="button"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                                {!clasesFiltered.length ? (
+                                    <tr>
+                                        <td className="py-3 text-slate-400" colSpan={4}>
+                                            Sin resultados
+                                        </td>
+                                    </tr>
+                                ) : null}
+                            </tbody>
+                        </table>
+                    </div>
+                </motion.div>
+            )}
 
             {/* Form Modal */}
             <ClaseFormModal
@@ -390,6 +532,71 @@ export default function ClasesPage() {
                 profesores={profesores}
                 onRefresh={loadClases}
             />
+
+            <Modal
+                isOpen={tiposOpen}
+                onClose={() => setTiposOpen(false)}
+                title="Tipos de clase"
+                size="lg"
+                footer={
+                    <Button variant="secondary" onClick={() => setTiposOpen(false)}>
+                        Cerrar
+                    </Button>
+                }
+            >
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                        <Input label="Nombre" value={tipoNombre} onChange={(e) => setTipoNombre(e.target.value)} placeholder="Ej: Spinning" />
+                        <Input label="Color" value={tipoColor} onChange={(e) => setTipoColor(e.target.value)} placeholder="#6366f1" />
+                        <Button
+                            onClick={async () => {
+                                const nombre = tipoNombre.trim();
+                                if (!nombre) return;
+                                const res = await api.createClaseTipo({ nombre, color: tipoColor || undefined });
+                                if (res.ok) {
+                                    success('Tipo creado');
+                                    setTipoNombre('');
+                                    await loadTipos();
+                                } else {
+                                    error(res.error || 'Error al crear tipo');
+                                }
+                            }}
+                        >
+                            Crear
+                        </Button>
+                    </div>
+
+                    <div className="space-y-2">
+                        {tiposLoading ? (
+                            <div className="text-sm text-slate-400">Cargando…</div>
+                        ) : (
+                            tipos.map((t) => (
+                                <div key={String(t.id)} className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                                    <div className="min-w-0">
+                                        <div className="text-sm text-slate-200 truncate">{t.nombre}</div>
+                                        <div className="text-xs text-slate-500">{t.color || '—'}</div>
+                                    </div>
+                                    <Button
+                                        variant="danger"
+                                        onClick={async () => {
+                                            const res = await api.deleteClaseTipo(Number(t.id));
+                                            if (res.ok) {
+                                                success('Tipo eliminado');
+                                                await loadTipos();
+                                            } else {
+                                                error(res.error || 'Error al eliminar');
+                                            }
+                                        }}
+                                    >
+                                        Eliminar
+                                    </Button>
+                                </div>
+                            ))
+                        )}
+                        {!tiposLoading && !tipos.length ? <div className="text-sm text-slate-400">Sin tipos</div> : null}
+                    </div>
+                </div>
+            </Modal>
         </div>
     );
 }

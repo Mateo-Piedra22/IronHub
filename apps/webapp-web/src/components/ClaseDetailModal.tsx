@@ -11,16 +11,20 @@ import {
     Bell,
     X,
     ChevronDown,
+    Edit,
+    Dumbbell,
 } from 'lucide-react';
-import { Button, Modal, Input, Select, useToast } from '@/components/ui';
+import { Button, Modal, Input, Select, Checkbox, ConfirmModal, useToast } from '@/components/ui';
 import {
     api,
     type Clase,
     type ClaseHorario,
+    type ClaseEjercicio,
     type Inscripcion,
     type ListaEspera,
     type Profesor,
     type Usuario,
+    type Ejercicio,
 } from '@/lib/api';
 import { formatTime, cn } from '@/lib/utils';
 
@@ -32,7 +36,7 @@ interface ClaseDetailModalProps {
     onRefresh: () => void;
 }
 
-type TabType = 'horarios' | 'inscripciones' | 'espera';
+type TabType = 'horarios' | 'inscripciones' | 'espera' | 'ejercicios';
 
 const diasSemana = [
     { value: 'Lunes', label: 'Lunes' },
@@ -64,6 +68,17 @@ export default function ClaseDetailModal({
         cupo: undefined as number | undefined,
     });
     const [selectedHorarioId, setSelectedHorarioId] = useState<number | null>(null);
+    const [deleteHorarioOpen, setDeleteHorarioOpen] = useState(false);
+    const [horarioToDelete, setHorarioToDelete] = useState<ClaseHorario | null>(null);
+    const [editHorarioOpen, setEditHorarioOpen] = useState(false);
+    const [horarioToEdit, setHorarioToEdit] = useState<ClaseHorario | null>(null);
+    const [editHorarioForm, setEditHorarioForm] = useState({
+        dia: 'Lunes',
+        hora_inicio: '09:00',
+        hora_fin: '10:00',
+        profesor_id: undefined as number | undefined,
+        cupo: undefined as number | undefined,
+    });
 
     // Inscripciones
     const [inscripciones, setInscripciones] = useState<Inscripcion[]>([]);
@@ -72,6 +87,13 @@ export default function ClaseDetailModal({
 
     // Lista de espera
     const [listaEspera, setListaEspera] = useState<ListaEspera[]>([]);
+
+    const [ejercicios, setEjercicios] = useState<Ejercicio[]>([]);
+    const [ejerciciosLoading, setEjerciciosLoading] = useState(false);
+    const [ejerciciosSearch, setEjerciciosSearch] = useState('');
+    const [claseEjercicios, setClaseEjercicios] = useState<ClaseEjercicio[]>([]);
+    const [selectedEjercicioIds, setSelectedEjercicioIds] = useState<number[]>([]);
+    const [savingEjercicios, setSavingEjercicios] = useState(false);
 
     // Load data
     useEffect(() => {
@@ -122,6 +144,41 @@ export default function ClaseDetailModal({
         }
     };
 
+    const loadClaseEjercicios = async () => {
+        if (!clase) return;
+        const res = await api.getClaseEjercicios(clase.id);
+        if (res.ok && res.data) {
+            const items = res.data.ejercicios || [];
+            setClaseEjercicios(items);
+            setSelectedEjercicioIds(items.map((it) => Number(it.ejercicio_id)).filter((n) => Number.isFinite(n)));
+        }
+    };
+
+    const loadEjerciciosCatalog = async (search: string) => {
+        setEjerciciosLoading(true);
+        try {
+            const res = await api.getEjercicios({ search: search || undefined });
+            if (res.ok && res.data) setEjercicios(res.data.ejercicios || []);
+        } finally {
+            setEjerciciosLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!isOpen || !clase) return;
+        if (activeTab !== 'ejercicios') return;
+        loadClaseEjercicios();
+        loadEjerciciosCatalog('');
+    }, [activeTab, isOpen, clase?.id]);
+
+    useEffect(() => {
+        if (!isOpen || activeTab !== 'ejercicios') return;
+        const t = setTimeout(() => {
+            loadEjerciciosCatalog(ejerciciosSearch);
+        }, 250);
+        return () => clearTimeout(t);
+    }, [ejerciciosSearch, activeTab, isOpen]);
+
     // Horario CRUD
     const handleAddHorario = async () => {
         if (!clase) return;
@@ -141,8 +198,15 @@ export default function ClaseDetailModal({
         }
     };
 
-    const handleDeleteHorario = async (horarioId: number) => {
-        if (!clase) return;
+    const handleDeleteHorario = (horarioId: number) => {
+        const h = horarios.find((x) => x.id === horarioId) || null;
+        setHorarioToDelete(h);
+        setDeleteHorarioOpen(true);
+    };
+
+    const confirmDeleteHorario = async () => {
+        if (!clase || !horarioToDelete) return;
+        const horarioId = horarioToDelete.id;
         const res = await api.deleteClaseHorario(clase.id, horarioId);
         if (res.ok) {
             success('Horario eliminado');
@@ -152,6 +216,58 @@ export default function ClaseDetailModal({
             }
         } else {
             error(res.error || 'Error al eliminar');
+        }
+        setDeleteHorarioOpen(false);
+        setHorarioToDelete(null);
+    };
+
+    const openEditHorario = (horario: ClaseHorario) => {
+        setHorarioToEdit(horario);
+        setEditHorarioForm({
+            dia: String(horario.dia || 'Lunes'),
+            hora_inicio: String(horario.hora_inicio || '09:00').slice(0, 5),
+            hora_fin: String(horario.hora_fin || '10:00').slice(0, 5),
+            profesor_id: horario.profesor_id ? Number(horario.profesor_id) : undefined,
+            cupo: typeof horario.cupo === 'number' ? Number(horario.cupo) : undefined,
+        });
+        setEditHorarioOpen(true);
+    };
+
+    const saveEditHorario = async () => {
+        if (!clase || !horarioToEdit) return;
+        const res = await api.updateClaseHorario(clase.id, horarioToEdit.id, editHorarioForm);
+        if (res.ok) {
+            success('Horario actualizado');
+            setEditHorarioOpen(false);
+            setHorarioToEdit(null);
+            loadHorarios();
+        } else {
+            error(res.error || 'Error al actualizar horario');
+        }
+    };
+
+    const toggleEjercicio = (id: number, checked: boolean) => {
+        setSelectedEjercicioIds((prev) => {
+            const has = prev.includes(id);
+            if (checked && !has) return [...prev, id];
+            if (!checked && has) return prev.filter((x) => x !== id);
+            return prev;
+        });
+    };
+
+    const saveEjercicios = async () => {
+        if (!clase) return;
+        setSavingEjercicios(true);
+        try {
+            const res = await api.updateClaseEjercicios(clase.id, selectedEjercicioIds);
+            if (res.ok) {
+                success('Ejercicios actualizados');
+                loadClaseEjercicios();
+            } else {
+                error(res.error || 'Error al guardar ejercicios');
+            }
+        } finally {
+            setSavingEjercicios(false);
         }
     };
 
@@ -268,6 +384,7 @@ export default function ClaseDetailModal({
                         { id: 'horarios', label: 'Horarios', icon: Clock },
                         { id: 'inscripciones', label: 'Inscriptos', icon: Users },
                         { id: 'espera', label: 'Lista de Espera', icon: List },
+                        { id: 'ejercicios', label: 'Ejercicios', icon: Dumbbell },
                     ].map((tab) => (
                         <button
                             key={tab.id}
@@ -358,12 +475,22 @@ export default function ClaseDetailModal({
                                                 {h.inscriptos_count || 0}{h.cupo && `/${h.cupo}`}
                                             </span>
                                         </div>
-                                        <button
-                                            onClick={() => handleDeleteHorario(h.id)}
-                                            className="p-2 text-slate-400 hover:text-danger-400"
-                                        >
-                                            <Trash2 className="w-4 h-4" />
-                                        </button>
+                                        <div className="flex items-center gap-1">
+                                            <button
+                                                onClick={() => openEditHorario(h)}
+                                                className="p-2 text-slate-400 hover:text-white"
+                                                title="Editar horario"
+                                            >
+                                                <Edit className="w-4 h-4" />
+                                            </button>
+                                            <button
+                                                onClick={() => handleDeleteHorario(h.id)}
+                                                className="p-2 text-slate-400 hover:text-danger-400"
+                                                title="Eliminar horario"
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
+                                        </div>
                                     </div>
                                 ))}
                                 {horarios.length === 0 && (
@@ -494,8 +621,112 @@ export default function ClaseDetailModal({
                             )}
                         </div>
                     )}
+
+                    {activeTab === 'ejercicios' && (
+                        <div className="space-y-4">
+                            <div className="flex flex-col sm:flex-row sm:items-end gap-2">
+                                <div className="flex-1">
+                                    <div className="text-xs text-slate-500 mb-1">Buscar</div>
+                                    <input
+                                        className="input w-full"
+                                        value={ejerciciosSearch}
+                                        onChange={(e) => setEjerciciosSearch(e.target.value)}
+                                        placeholder="Buscar ejercicio..."
+                                    />
+                                </div>
+                                <Button onClick={saveEjercicios} isLoading={savingEjercicios}>
+                                    Guardar
+                                </Button>
+                            </div>
+
+                            <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                                <div className="text-xs text-slate-500">Seleccionados: {selectedEjercicioIds.length}</div>
+                                <div className="mt-3 space-y-2 max-h-[340px] overflow-y-auto pr-1">
+                                    {ejerciciosLoading ? (
+                                        <div className="text-sm text-slate-400">Cargando…</div>
+                                    ) : (
+                                        <>
+                                            {ejercicios.map((e) => (
+                                                <Checkbox
+                                                    key={String(e.id)}
+                                                    label={String(e.nombre || `Ejercicio #${e.id}`)}
+                                                    checked={selectedEjercicioIds.includes(Number(e.id))}
+                                                    onChange={(ev) => toggleEjercicio(Number(e.id), Boolean((ev.target as HTMLInputElement).checked))}
+                                                />
+                                            ))}
+                                            {!ejercicios.length ? <div className="text-sm text-slate-400">Sin resultados</div> : null}
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+
+                            {claseEjercicios.length ? (
+                                <div className="text-xs text-slate-500">
+                                    En la clase: {claseEjercicios.length} asignados
+                                </div>
+                            ) : (
+                                <div className="text-xs text-slate-500">En la clase: sin ejercicios asignados</div>
+                            )}
+                        </div>
+                    )}
                 </div>
             </div>
+
+            <ConfirmModal
+                isOpen={deleteHorarioOpen}
+                onClose={() => {
+                    setDeleteHorarioOpen(false);
+                    setHorarioToDelete(null);
+                }}
+                onConfirm={confirmDeleteHorario}
+                title="Eliminar horario"
+                message={`¿Eliminar el horario ${horarioToDelete?.dia || ''} ${horarioToDelete ? `${formatTime(horarioToDelete.hora_inicio)}-${formatTime(horarioToDelete.hora_fin)}` : ''}?`}
+                confirmText="Eliminar"
+                variant="danger"
+            />
+
+            <Modal
+                isOpen={editHorarioOpen}
+                onClose={() => {
+                    setEditHorarioOpen(false);
+                    setHorarioToEdit(null);
+                }}
+                title="Editar horario"
+                size="lg"
+                footer={
+                    <>
+                        <Button
+                            variant="secondary"
+                            onClick={() => {
+                                setEditHorarioOpen(false);
+                                setHorarioToEdit(null);
+                            }}
+                        >
+                            Cancelar
+                        </Button>
+                        <Button onClick={saveEditHorario}>Guardar</Button>
+                    </>
+                }
+            >
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <Select value={editHorarioForm.dia} onChange={(e) => setEditHorarioForm({ ...editHorarioForm, dia: e.target.value })} options={diasSemana} />
+                    <Select
+                        value={editHorarioForm.profesor_id?.toString() || ''}
+                        onChange={(e) => setEditHorarioForm({ ...editHorarioForm, profesor_id: e.target.value ? Number(e.target.value) : undefined })}
+                        placeholder="Profesor"
+                        options={profesores.map((p) => ({ value: p.id.toString(), label: p.nombre }))}
+                    />
+                    <Input type="time" value={editHorarioForm.hora_inicio} onChange={(e) => setEditHorarioForm({ ...editHorarioForm, hora_inicio: e.target.value })} />
+                    <Input type="time" value={editHorarioForm.hora_fin} onChange={(e) => setEditHorarioForm({ ...editHorarioForm, hora_fin: e.target.value })} />
+                    <Input
+                        type="number"
+                        value={editHorarioForm.cupo || ''}
+                        onChange={(e) => setEditHorarioForm({ ...editHorarioForm, cupo: e.target.value ? Number(e.target.value) : undefined })}
+                        placeholder="Cupo"
+                        min={1}
+                    />
+                </div>
+            </Modal>
         </Modal>
     );
 }

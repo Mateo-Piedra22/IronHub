@@ -78,6 +78,18 @@
     @apply active:scale-[0.98];
   }
 
+  .input {
+    @apply w-full px-4 py-3 rounded-xl;
+    @apply bg-slate-950/40 border border-slate-800;
+    @apply text-white placeholder-slate-500;
+    @apply focus:outline-none focus:ring-2 focus:ring-primary-500/40 focus:border-primary-500;
+    @apply transition-colors duration-200;
+  }
+
+  .label {
+    @apply block text-sm font-medium text-slate-300 mb-2;
+  }
+
   /* Secondary button */
   .btn-secondary {
     @apply px-8 py-4 rounded-xl font-semibold;

@@ -173,6 +173,7 @@ app.add_middleware(
     https_only=not is_dev,
     same_site=same_site,
     domain=cookie_domain,
+    session_cookie=os.getenv("SESSION_COOKIE", "ironhub_tenant_session"),
 )
 
 

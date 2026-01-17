@@ -1910,6 +1910,7 @@ class AdminService:
                 # Branding config keys
                 config_keys = {
                     "logo_url": branding.get("logo_url", ""),
+                    "gym_logo_url": branding.get("logo_url", ""),
                     "nombre_publico": branding.get("nombre_publico", ""),
                     "direccion": branding.get("direccion", ""),
                     "color_primario": branding.get("color_primario", "#6366f1"),

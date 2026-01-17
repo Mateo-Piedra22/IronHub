@@ -2,10 +2,6 @@
  * API Service for fetching data from admin-api
  */
 
-const ADMIN_API_URL = typeof window !== 'undefined'
-    ? (window as typeof globalThis & { ENV?: { ADMIN_API_URL?: string } }).ENV?.ADMIN_API_URL || 'https://api-admin.ironhub.motiona.xyz'
-    : 'https://api-admin.ironhub.motiona.xyz';
-
 export interface Gym {
     id: number;
     nombre: string;
@@ -41,7 +37,7 @@ export interface PublicMetrics {
  */
 export async function fetchPublicGyms(): Promise<Gym[]> {
     try {
-        const response = await fetch(`${ADMIN_API_URL}/gyms/public`, {
+        const response = await fetch(`/api/public/gyms`, {
             method: 'GET',
             headers: {
                 'Accept': 'application/json',
@@ -70,7 +66,7 @@ export async function fetchPublicGyms(): Promise<Gym[]> {
 
 export async function fetchPublicMetrics(): Promise<PublicMetrics | null> {
     try {
-        const response = await fetch(`${ADMIN_API_URL}/gyms/public/metrics`, {
+        const response = await fetch(`/api/public/metrics`, {
             method: 'GET',
             headers: {
                 'Accept': 'application/json',

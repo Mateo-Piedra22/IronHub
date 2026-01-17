@@ -357,6 +357,12 @@ def _resolve_logo_url() -> str:
             # Fallback: tabla configuracion
             if hasattr(db, 'obtener_configuracion'):
                 try:
+                    url = db.obtener_configuracion('logo_url')  # type: ignore
+                except Exception:
+                    url = None
+                if isinstance(url, str) and url.strip():
+                    return _normalize_public_url(url.strip())
+                try:
                     url = db.obtener_configuracion('gym_logo_url')  # type: ignore
                 except Exception:
                     url = None

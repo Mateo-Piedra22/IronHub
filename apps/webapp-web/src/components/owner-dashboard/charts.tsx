@@ -41,6 +41,7 @@ export function LineChart({
     strokeClassName?: string;
     fillClassName?: string;
 }) {
+    const hasValues = useMemo(() => (data || []).some((n) => Number.isFinite(n)), [data]);
     const { dLine, dArea } = useMemo(() => {
         const values = (data || []).filter((n) => Number.isFinite(n)) as number[];
         if (!values.length) return { dLine: '', dArea: '' };
@@ -60,8 +61,14 @@ export function LineChart({
     return (
         <div className="w-full">
             <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="w-full" style={{ height }}>
+                <path d="M 0 100 L 100 100" className="stroke-slate-800/60" fill="none" strokeWidth="1" />
                 {dArea ? <path d={dArea} className={cn(fillClassName)} /> : null}
                 {dLine ? <path d={dLine} className={cn(strokeClassName)} fill="none" strokeWidth="2" /> : null}
+                {!hasValues ? (
+                    <text x="50" y="52" textAnchor="middle" className="fill-slate-500" fontSize="10">
+                        Sin datos
+                    </text>
+                ) : null}
             </svg>
         </div>
     );
@@ -76,6 +83,7 @@ export function BarChart({
     height?: number;
     barClassName?: string;
 }) {
+    const hasValues = useMemo(() => (values || []).length > 0, [values]);
     const bars = useMemo(() => {
         const vals = (values || []).map((v) => (Number.isFinite(v) ? Number(v) : 0));
         const max = Math.max(1, ...vals);
@@ -96,6 +104,11 @@ export function BarChart({
                 {bars.map((b, i) => (
                     <rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} className={cn(barClassName)} rx="1" ry="1" />
                 ))}
+                {!hasValues ? (
+                    <text x="50" y="52" textAnchor="middle" className="fill-slate-500" fontSize="10">
+                        Sin datos
+                    </text>
+                ) : null}
             </svg>
         </div>
     );
@@ -112,13 +125,19 @@ export function DonutChart({
 }) {
     const radius = (size - thickness) / 2;
     const circumference = 2 * Math.PI * radius;
-    const total = segments.reduce((acc, s) => acc + (Number.isFinite(s.value) ? s.value : 0), 0) || 1;
+    const totalRaw = segments.reduce((acc, s) => acc + (Number.isFinite(s.value) ? s.value : 0), 0);
+    const total = totalRaw || 1;
     let offset = 0;
 
     return (
         <div className="flex items-center gap-4">
             <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
                 <circle cx={size / 2} cy={size / 2} r={radius} stroke="rgba(148,163,184,0.25)" strokeWidth={thickness} fill="none" />
+                {!segments.length || totalRaw <= 0 ? (
+                    <text x={size / 2} y={size / 2 + 4} textAnchor="middle" className="fill-slate-500" fontSize="10">
+                        Sin datos
+                    </text>
+                ) : null}
                 {segments.map((s) => {
                     const v = Number.isFinite(s.value) ? s.value : 0;
                     const dash = (v / total) * circumference;
@@ -167,6 +186,9 @@ export function HeatmapTable({
         }
         return maxCols;
     }, [cohorts]);
+    if (!(cohorts || []).length || cols <= 0) {
+        return <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 text-sm text-slate-400">Sin datos</div>;
+    }
 
     const cellClass = (v: number) => {
         if (!Number.isFinite(v)) return 'bg-slate-900/50 text-slate-500';
@@ -210,4 +232,3 @@ export function HeatmapTable({
         </div>
     );
 }
-

@@ -7,6 +7,7 @@ import os
 import logging
 import time
 import uuid
+import re
 from datetime import datetime, date
 from dotenv import load_dotenv
 
@@ -44,9 +45,19 @@ app.include_router(payments_router)
 origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
 _origins = [o.strip() for o in (origins or []) if o and o.strip()]
 _allow_all = (len(_origins) == 0)
+_origin_regex = os.getenv("ALLOWED_ORIGIN_REGEX", "").strip()
+if not _origin_regex:
+    base_domain = str(os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz") or "").strip().lstrip(".")
+    base_domain_escaped = re.escape(base_domain)
+    _origin_regex = (
+        rf"^https?://([a-z0-9-]+\.)?{base_domain_escaped}$"
+        r"|^http://localhost(:\d+)?$"
+        r"|^http://127\.0\.0\.1(:\d+)?$"
+    )
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins if not _allow_all else ["*"],
+    allow_origin_regex=None if _allow_all else _origin_regex,
     allow_credentials=(not _allow_all),
     allow_methods=["*"],
     allow_headers=["*"],
@@ -58,6 +69,7 @@ app.add_middleware(
     secret_key=os.getenv("ADMIN_SESSION_SECRET", "admin-session-secret-change-me"),
     https_only=os.getenv("ENV", "production") == "production",
     same_site="lax",
+    session_cookie=os.getenv("ADMIN_SESSION_COOKIE", "ironhub_admin_session"),
     domain=f".{os.getenv('TENANT_BASE_DOMAIN', 'ironhub.motiona.xyz')}"  # Allow cookie sharing
 )
 
