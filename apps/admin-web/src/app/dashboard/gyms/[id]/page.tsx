@@ -404,10 +404,12 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         setProvisioningTemplates(true);
         setProvisionTemplatesMsg('');
         try {
+            await api.syncWhatsAppTemplateDefaults(true);
             const res = await api.provisionGymWhatsAppTemplates(gymId);
             if (res.ok && res.data) {
                 const failed = (res.data.failed || []).length;
-                setProvisionTemplatesMsg(`OK: created=${(res.data.created || []).length}, failed=${failed}, existing=${res.data.existing_count}`);
+                const bumped = (res.data.created_bumped || []).length;
+                setProvisionTemplatesMsg(`OK: created=${(res.data.created || []).length}, bumped=${bumped}, failed=${failed}, existing=${res.data.existing_count}`);
             } else {
                 setProvisionTemplatesMsg(res.error || 'Error provisionando plantillas');
             }

@@ -569,7 +569,13 @@ export const api = {
         ),
 
     provisionGymWhatsAppTemplates: (gymId: number) =>
-        request<{ ok: boolean; existing_count: number; created: string[]; failed: Array<{ name: string; error: string }> }>(
+        request<{
+            ok: boolean;
+            existing_count: number;
+            created: string[];
+            created_bumped?: Array<{ from: string; to: string; reason: string }>;
+            failed: Array<{ name: string; error: string }>;
+        }>(
             `/gyms/${gymId}/whatsapp/provision-templates`,
             { method: 'POST' }
         ),

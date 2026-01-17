@@ -2369,9 +2369,9 @@ class AdminService:
             ("ih_membership_reactivated_v1", "UTILITY", "Hola {{1}}. Tu acceso fue reactivado. ¡Gracias!", ["Mateo"]),
             ("ih_class_booking_confirmed_v1", "UTILITY", "Confirmación de reserva: clase {{1}} el {{2}} a las {{3}} hs.", ["Funcional", "16 de enero", "19:00"]),
             ("ih_class_booking_cancelled_v1", "UTILITY", "Tu reserva fue cancelada para la clase {{1}}. Si necesitás ayuda, respondé a este mensaje.", ["Funcional"]),
-            ("ih_class_reminder_v1", "UTILITY", "Hola {{1}}. Te recordamos tu clase de {{2}} el {{3}} a las {{4}} hs. Si no podés asistir, avisá por este medio.", ["Mateo", "Funcional", "viernes", "19:00"]),
+            ("ih_class_reminder_v1", "UTILITY", "Hola {{1}}. Te recordamos que tenés la clase de {{2}} programada para el día {{3}} a las {{4}} hs. Si no podés asistir, respondé a este mensaje para ayudarte.", ["Mateo", "Funcional", "viernes", "19:00"]),
             ("ih_waitlist_spot_available_v1", "UTILITY", "Hola {{1}}. Se liberó un cupo para {{2}} el {{3}} a las {{4}} hs. Respondé “SI” para tomarlo.", ["Mateo", "Funcional", "viernes", "19:00"]),
-            ("ih_waitlist_confirmed_v1", "UTILITY", "Listo {{1}}. Quedaste anotado en {{2}} el {{3}} a las {{4}} hs.", ["Mateo", "Funcional", "viernes", "19:00"]),
+            ("ih_waitlist_confirmed_v1", "UTILITY", "Listo {{1}}. Te confirmamos tu lugar en la clase de {{2}} para el día {{3}} a las {{4}} hs. Si necesitás cambiarlo, respondé a este mensaje.", ["Mateo", "Funcional", "viernes", "19:00"]),
             ("ih_schedule_change_v1", "UTILITY", "Aviso: hubo un cambio en {{1}}. Nuevo horario: {{2}} a las {{3}} hs. Gracias.", ["Funcional", "viernes", "20:00"]),
             ("ih_auth_code_v1", "AUTHENTICATION", "Tu código de verificación es {{1}}. Vence en {{2}} minutos. No lo compartas con nadie.", ["928314", "10"]),
             ("ih_marketing_promo_v1", "MARKETING", "Hola {{1}}. Esta semana tenemos {{2}}. Si querés más info, respondé a este mensaje.", ["Mateo", "descuento del 10% en el plan trimestral"]),
@@ -2818,6 +2818,26 @@ class AdminService:
                 except Exception:
                     return "Error"
 
+            def _bump_template_name(n: str) -> str:
+                s = str(n or "").strip()
+                m = re.match(r"^(?P<base>.+)_v(?P<v>\d+)$", s)
+                if m:
+                    base = m.group("base")
+                    v = int(m.group("v"))
+                    return f"{base}_v{v + 1}"
+                return f"{s}_v2"
+
+            def _is_meta_name_locked(err: str) -> bool:
+                e = str(err or "").lower()
+                return (
+                    "se está eliminando el idioma" in e
+                    or "mientras se está eliminando el contenido" in e
+                    or "vuelve a intentarlo dentro de 4 weeks" in e
+                    or "no es posible añadir contenido nuevo" in e
+                    or "no puedes cambiar la categoría" in e
+                )
+
+            created_bumped: List[Dict[str, Any]] = []
             for t in templates:
                 name = str(t.get("template_name") or "").strip()
                 if not name or name in existing:
@@ -2825,6 +2845,8 @@ class AdminService:
                 body_text = str(t.get("body_text") or "").strip()
                 lang = str(t.get("language") or "es_AR").strip()
                 cat = str(t.get("category") or "UTILITY").strip().upper()
+                if cat == "AUTHENTICATION" or name == "ih_auth_code_v1":
+                    continue
                 examples = t.get("example_params") or []
                 payload = {
                     "name": name,
@@ -2845,9 +2867,50 @@ class AdminService:
                     d2 = r2.json() if r2.content else {}
                     if r2.status_code >= 400:
                         err_obj = (d2 or {}).get("error") or d2 or r2.text
-                        failed.append({"name": name, "error": _try_parse_meta_error(err_obj), "raw": err_obj})
+                        err_str = _try_parse_meta_error(err_obj)
+                        if _is_meta_name_locked(err_str):
+                            new_name = name
+                            for _ in range(10):
+                                new_name = _bump_template_name(new_name)
+                                if new_name not in existing:
+                                    break
+                            bumped_payload = {**payload, "name": new_name}
+                            r3 = requests.post(create_url, headers={**headers, "Content-Type": "application/json"}, json=bumped_payload, timeout=30)
+                            d3 = r3.json() if r3.content else {}
+                            if r3.status_code >= 400:
+                                err_obj2 = (d3 or {}).get("error") or d3 or r3.text
+                                failed.append({"name": name, "error": err_str, "raw": err_obj, "bumped_to": new_name, "bumped_error": _try_parse_meta_error(err_obj2)})
+                            else:
+                                created.append(new_name)
+                                existing.add(new_name)
+                                created_bumped.append({"from": name, "to": new_name, "reason": "meta_name_locked"})
+                                try:
+                                    with self.db.get_connection_context() as aconn:
+                                        acur = aconn.cursor()
+                                        acur.execute(
+                                            """
+                                            INSERT INTO whatsapp_template_catalog (template_name, category, language, body_text, example_params, active, version, updated_at)
+                                            VALUES (%s,%s,%s,%s,%s,%s,%s,NOW())
+                                            ON CONFLICT (template_name) DO NOTHING
+                                            """,
+                                            (
+                                                new_name,
+                                                cat,
+                                                lang,
+                                                body_text,
+                                                psycopg2.extras.Json(examples) if examples is not None else None,
+                                                True,
+                                                int(t.get("version") or 1),
+                                            ),
+                                        )
+                                        aconn.commit()
+                                except Exception:
+                                    pass
+                        else:
+                            failed.append({"name": name, "error": err_str, "raw": err_obj})
                     else:
                         created.append(name)
+                        existing.add(name)
                 except Exception as e:
                     failed.append({"name": name, "error": str(e)})
 
@@ -2868,15 +2931,64 @@ class AdminService:
             try:
                 with psycopg2.connect(**pg_params) as t_conn2:
                     with t_conn2.cursor() as t_cur2:
+                        alias_map: Dict[str, str] = {}
+                        try:
+                            t_cur2.execute("SELECT clave, valor FROM configuracion WHERE clave LIKE %s", ("wa_template_alias_%",))
+                            for r in (t_cur2.fetchall() or []):
+                                try:
+                                    k0 = str((r or [None, None])[0] or "")
+                                    v0 = str((r or [None, None])[1] or "")
+                                except Exception:
+                                    k0, v0 = "", ""
+                                if k0.startswith("wa_template_alias_") and v0:
+                                    alias_map[k0.replace("wa_template_alias_", "")] = v0
+                        except Exception:
+                            alias_map = {}
+
+                        alias_written = 0
+                        for m in created_bumped:
+                            old_n = str(m.get("from") or "").strip()
+                            new_n = str(m.get("to") or "").strip()
+                            if not old_n or not new_n:
+                                continue
+                            alias_map[old_n] = new_n
+                            try:
+                                t_cur2.execute(
+                                    """
+                                    INSERT INTO configuracion (clave, valor, tipo, descripcion)
+                                    VALUES (%s,%s,%s,%s)
+                                    ON CONFLICT (clave) DO UPDATE SET
+                                        valor = EXCLUDED.valor,
+                                        tipo = EXCLUDED.tipo,
+                                        descripcion = EXCLUDED.descripcion
+                                    """,
+                                    (f"wa_template_alias_{old_n}", new_n, "string", "Alias auto-generado por Meta (bump por bloqueo de nombre/idioma)"),
+                                )
+                                alias_written += 1
+                            except Exception:
+                                pass
+
+                        def _resolve_alias(n: str) -> str:
+                            cur = str(n or "").strip()
+                            for _ in range(10):
+                                nxt = str(alias_map.get(cur) or "").strip()
+                                if not nxt or nxt == cur:
+                                    break
+                                cur = nxt
+                            return cur
+
                         for k, tname in (bindings or {}).items():
                             key = f"wa_meta_template_{str(k).strip()}"
                             chosen = str(tname or "").strip()
                             if not chosen:
                                 continue
                             st = str(template_status_by_name.get(chosen) or "")
-                            if not st:
-                                continue
-                            if st.upper() != "APPROVED":
+                            if not st or st.upper() != "APPROVED":
+                                alt = _resolve_alias(chosen)
+                                if alt and alt != chosen:
+                                    chosen = alt
+                                    st = str(template_status_by_name.get(chosen) or "")
+                            if not st or st.upper() != "APPROVED":
                                 continue
                             t_cur2.execute(
                                 """
@@ -2894,7 +3006,7 @@ class AdminService:
                 pass
 
             self.log_action("owner", "whatsapp_templates_provisioned", gid, f"created={len(created)} failed={len(failed)}")
-            return {"ok": True, "existing_count": len(existing), "created": created, "skipped": skipped, "failed": failed}
+            return {"ok": True, "existing_count": len(existing), "created": created, "created_bumped": created_bumped, "skipped": skipped, "failed": failed}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
