@@ -5,6 +5,9 @@ FastAPI backend for admin panel - Self-contained deployment
 
 import os
 import logging
+import time
+import uuid
+from datetime import datetime, date
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,6 +16,8 @@ from fastapi import FastAPI, Request, HTTPException, Form, Query, UploadFile, Fi
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+import psycopg2
+import psycopg2.extras
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -58,6 +63,7 @@ app.add_middleware(
 
 # Service instance (lazy loaded)
 _admin_service = None
+_public_metrics_cache = {"ts": 0.0, "value": None}
 
 def get_admin_service() -> AdminService:
     """Get or initialize the AdminService singleton."""
@@ -206,17 +212,118 @@ async def list_public_gyms():
         # Return only public-safe fields
         public_gyms = []
         for gym in items:
+            logo_url = ""
+            nombre_publico = ""
+            try:
+                branding = adm.get_gym_branding(int(gym.get("id")))
+                logo_url = str((branding or {}).get("logo_url") or "").strip()
+                nombre_publico = str((branding or {}).get("nombre_publico") or "").strip()
+            except Exception:
+                pass
             public_gyms.append({
                 "id": gym.get("id"),
-                "nombre": gym.get("nombre"),
+                "nombre": nombre_publico or gym.get("nombre"),
                 "subdominio": gym.get("subdominio"),
                 "status": gym.get("status", "active"),
+                "logo_url": logo_url or None,
             })
         
         return {"items": public_gyms, "total": len(public_gyms)}
     except Exception as e:
         logger.error(f"Error fetching public gyms: {e}")
         return {"items": [], "total": 0}
+
+
+@app.get("/gyms/public/metrics")
+async def get_public_metrics(ttl_seconds: int = Query(600, ge=60, le=3600)):
+    adm = get_admin_service()
+    now = time.time()
+    cached = _public_metrics_cache.get("value")
+    cached_ts = float(_public_metrics_cache.get("ts") or 0.0)
+    if cached and (now - cached_ts) < float(ttl_seconds):
+        return cached
+
+    try:
+        result = adm.listar_gimnasios_avanzado(1, 200, None, "active", "nombre", "ASC")
+        gyms = result.get("items", []) or []
+
+        paying_count = 0
+        try:
+            with adm.db.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT COUNT(DISTINCT gym_id) FROM gym_subscriptions WHERE status = 'active' AND next_due_date >= CURRENT_DATE"
+                )
+                paying_count = int((cur.fetchone() or [0])[0] or 0)
+        except Exception:
+            paying_count = 0
+
+        admin_params = AdminService.resolve_admin_db_params()
+        base_pg_params = {
+            "host": admin_params.get("host"),
+            "port": admin_params.get("port"),
+            "user": admin_params.get("user"),
+            "password": admin_params.get("password"),
+            "sslmode": admin_params.get("sslmode"),
+            "connect_timeout": admin_params.get("connect_timeout"),
+        }
+
+        gyms_metrics = []
+        total_users = 0
+        total_active_users = 0
+        for g in gyms:
+            gid = int(g.get("id"))
+            db_name = str(g.get("db_name") or "").strip()
+            users_total = None
+            users_active = None
+            if db_name:
+                try:
+                    pg_params = {
+                        **base_pg_params,
+                        "dbname": db_name,
+                        "application_name": "landing_public_metrics",
+                    }
+                    with psycopg2.connect(**pg_params) as t_conn:
+                        with t_conn.cursor() as t_cur:
+                            t_cur.execute("SELECT COUNT(*) FROM usuarios")
+                            users_total = int((t_cur.fetchone() or [0])[0] or 0)
+                            t_cur.execute("SELECT COUNT(*) FROM usuarios WHERE activo = TRUE")
+                            users_active = int((t_cur.fetchone() or [0])[0] or 0)
+                except Exception:
+                    users_total = None
+                    users_active = None
+
+            if isinstance(users_total, int):
+                total_users += users_total
+            if isinstance(users_active, int):
+                total_active_users += users_active
+
+            gyms_metrics.append(
+                {
+                    "id": gid,
+                    "subdominio": str(g.get("subdominio") or ""),
+                    "users_total": users_total,
+                    "users_active": users_active,
+                }
+            )
+
+        value = {
+            "ok": True,
+            "generated_at": datetime.utcnow().isoformat(),
+            "totals": {
+                "active_gyms": int(len(gyms)),
+                "paying_gyms": int(paying_count),
+                "total_users": int(total_users),
+                "total_active_users": int(total_active_users),
+            },
+            "gyms": gyms_metrics,
+        }
+        _public_metrics_cache["ts"] = now
+        _public_metrics_cache["value"] = value
+        return value
+    except Exception as e:
+        logger.error(f"Error fetching public metrics: {e}")
+        return {"ok": False, "error": "error_fetching_public_metrics"}
 
 
 @app.get("/gyms/summary")
@@ -314,7 +421,8 @@ async def get_gym(request: Request, gym_id: int):
         raise HTTPException(status_code=404, detail="Gym not found")
 
     try:
-        gym["wa_configured"] = bool((gym.get("whatsapp_phone_id") or "").strip()) and bool((gym.get("whatsapp_access_token") or "").strip())
+        phone_id = str((gym.get("whatsapp_phone_id") or "")).strip()
+        gym["wa_configured"] = bool(phone_id)
     except Exception:
         pass
 
@@ -502,17 +610,47 @@ async def register_payment(
     request: Request,
     gym_id: int,
     plan: str = Form(None),
+    plan_id: str = Form(None),
     amount: float = Form(...),
     currency: str = Form("ARS"),
     valid_until: str = Form(None),
     status: str = Form("paid"),
-    notes: str = Form(None)
+    notes: str = Form(None),
+    provider: str = Form(None),
+    external_reference: str = Form(None),
+    idempotency_key: str = Form(None),
+    apply_to_subscription: str = Form("true"),
+    periods: str = Form("1"),
 ):
     """Register a payment for a gym."""
     require_admin(request)
     adm = get_admin_service()
     
-    ok = adm.registrar_pago(gym_id, plan, amount, currency, valid_until, status, notes)
+    try:
+        pid = int(plan_id) if plan_id is not None and str(plan_id).strip() != "" else None
+    except Exception:
+        pid = None
+    try:
+        per = int(periods) if periods is not None and str(periods).strip() != "" else 1
+    except Exception:
+        per = 1
+    apply_flag = str(apply_to_subscription or "true").strip().lower() in ("true", "1", "yes", "y", "on")
+
+    ok = adm.registrar_pago(
+        gym_id,
+        plan,
+        amount,
+        currency,
+        valid_until,
+        status,
+        notes,
+        plan_id=pid,
+        provider=provider,
+        external_reference=external_reference,
+        idempotency_key=idempotency_key,
+        apply_to_subscription=apply_flag,
+        periods=per,
+    )
     if ok:
         adm.log_action("owner", "register_payment", gym_id, f"{amount} {currency}")
     return {"ok": ok}
@@ -526,6 +664,48 @@ async def get_recent_payments(request: Request, limit: int = Query(10, ge=1, le=
     
     payments = adm.listar_pagos_recientes(limit)
     return {"payments": payments}
+
+
+@app.get("/payments")
+async def list_payments_advanced(
+    request: Request,
+    gym_id: int = Query(None),
+    status: str = Query(None),
+    q: str = Query(None),
+    desde: str = Query(None),
+    hasta: str = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+):
+    require_admin(request)
+    adm = get_admin_service()
+    return adm.listar_pagos_avanzado(gym_id=gym_id, status=status, q=q, desde=desde, hasta=hasta, page=page, page_size=page_size)
+
+
+@app.put("/gyms/{gym_id}/payments/{payment_id}")
+async def update_gym_payment(request: Request, gym_id: int, payment_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    result = adm.actualizar_pago_gym(int(gym_id), int(payment_id), payload)
+    if result.get("ok"):
+        adm.log_action("owner", "update_payment", int(gym_id), f"payment_id={payment_id}")
+    return result
+
+
+@app.delete("/gyms/{gym_id}/payments/{payment_id}")
+async def delete_gym_payment(request: Request, gym_id: int, payment_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    result = adm.eliminar_pago_gym(int(gym_id), int(payment_id))
+    if result.get("ok") and int(result.get("deleted") or 0) > 0:
+        adm.log_action("owner", "delete_payment", int(gym_id), f"payment_id={payment_id}")
+    return result
 
 
 # ========== AUDIT ROUTES ==========
@@ -746,6 +926,41 @@ async def set_gym_reminder_message(request: Request, gym_id: int):
     return result
 
 
+# ========== GYM ATTENDANCE POLICY (used by admin-web) ==========
+
+@app.get("/gyms/{gym_id}/attendance-policy")
+async def get_gym_attendance_policy(request: Request, gym_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    return adm.get_gym_attendance_policy(gym_id)
+
+
+@app.post("/gyms/{gym_id}/attendance-policy")
+async def set_gym_attendance_policy(request: Request, gym_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    raw = data.get("attendance_allow_multiple_per_day")
+    if isinstance(raw, bool):
+        allow = raw
+    elif isinstance(raw, (int, float)):
+        allow = bool(raw)
+    else:
+        s = str(raw or "").strip().lower()
+        allow = s in ("1", "true", "yes", "y", "on")
+    return adm.set_gym_attendance_policy(gym_id, allow)
+
+
+@app.get("/gyms/{gym_id}/audit")
+async def get_gym_audit(request: Request, gym_id: int, limit: int = 50):
+    require_admin(request)
+    adm = get_admin_service()
+    return adm.list_audit(gym_id, limit=limit)
+
+
 # ========== BRANDING ROUTES ==========
 
 @app.get("/gyms/{gym_id}/branding")
@@ -925,10 +1140,203 @@ async def delete_plan(request: Request, plan_id: int):
     return result
 
 
+# ========== SETTINGS ROUTES ==========
+
+@app.get("/settings")
+async def get_settings(request: Request):
+    require_admin(request)
+    adm = get_admin_service()
+    return adm.obtener_settings()
+
+
+@app.put("/settings")
+async def put_settings(request: Request):
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    result = adm.upsert_settings(payload, actor_username="owner")
+    if result.get("ok"):
+        adm.log_action("owner", "update_settings", None, f"keys={','.join(payload.keys())}")
+    return result
+
+
+# ========== SUBSCRIPTIONS ROUTES ==========
+
+@app.get("/gyms/{gym_id}/subscription")
+async def get_gym_subscription(request: Request, gym_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    return adm.obtener_suscripcion_gym(gym_id)
+
+
+@app.put("/gyms/{gym_id}/subscription")
+async def put_gym_subscription(request: Request, gym_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    plan_id = payload.get("plan_id")
+    if plan_id is None:
+        raise HTTPException(status_code=400, detail="plan_id requerido")
+    result = adm.upsert_suscripcion_gym(
+        int(gym_id),
+        int(plan_id),
+        start_date=payload.get("start_date"),
+        next_due_date=payload.get("next_due_date"),
+        status=payload.get("status") or "active",
+    )
+    if result.get("ok"):
+        adm.log_action("owner", "upsert_subscription", int(gym_id), f"plan_id={plan_id}")
+    return result
+
+
+@app.post("/gyms/{gym_id}/subscription/renew")
+async def renew_gym_subscription(
+    request: Request,
+    gym_id: int,
+    periods: str = Form("1"),
+):
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        per = int(periods) if periods is not None and str(periods).strip() != "" else 1
+    except Exception:
+        per = 1
+    result = adm.renovar_suscripcion_gym(int(gym_id), periods=per)
+    if result.get("ok"):
+        adm.log_action("owner", "renew_subscription", int(gym_id), f"periods={per}")
+    return result
+
+
+@app.get("/subscriptions")
+async def list_subscriptions(
+    request: Request,
+    q: str = Query(None),
+    status: str = Query(None),
+    due_before_days: int = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+):
+    require_admin(request)
+    adm = get_admin_service()
+    return adm.listar_suscripciones_avanzado(q=q, status=status, due_before_days=due_before_days, page=page, page_size=page_size)
+
+
+@app.post("/subscriptions/maintenance/run")
+async def run_subscriptions_maintenance(
+    request: Request,
+    days: str = Form(None),
+    grace_days: str = Form(None),
+):
+    require_admin(request)
+    adm = get_admin_service()
+    cfg = {}
+    try:
+        st = adm.obtener_settings()
+        rows = (st or {}).get("settings") or []
+        for r in rows:
+            k = (r or {}).get("key")
+            if k:
+                cfg[str(k)] = (r or {}).get("value")
+    except Exception:
+        cfg = {}
+    subs = cfg.get("subscriptions") or {}
+
+    try:
+        eff_days = int(days) if days is not None and str(days).strip() != "" else None
+    except Exception:
+        eff_days = None
+    if eff_days is None:
+        eff_days = int((subs or {}).get("reminder_days_before", 7) or 7)
+
+    try:
+        eff_grace = int(grace_days) if grace_days is not None and str(grace_days).strip() != "" else None
+    except Exception:
+        eff_grace = None
+    if eff_grace is None:
+        eff_grace = int((subs or {}).get("grace_days", 0) or 0)
+
+    run_id = str(uuid.uuid4())
+    result = adm.ejecutar_mantenimiento_suscripciones(reminder_days=eff_days, grace_days=eff_grace, run_id=run_id)
+    if result.get("ok"):
+        adm.log_action("owner", "subscriptions_maintenance_run", None, f"run_id={run_id}")
+    return result
+
+
+@app.get("/jobs/runs")
+async def list_job_runs(request: Request, job_key: str = Query(...), limit: int = Query(25, ge=1, le=200)):
+    require_admin(request)
+    adm = get_admin_service()
+    return adm.listar_job_runs(job_key, limit=int(limit))
+
+
+@app.get("/jobs/runs/{run_id}")
+async def get_job_run(request: Request, run_id: str):
+    require_admin(request)
+    adm = get_admin_service()
+    return adm.obtener_job_run(run_id)
+
+
 # ========== CRON & AUTOMATION ROUTES ==========
 
+@app.post("/cron/subscriptions/maintenance")
+async def cron_subscriptions_maintenance(
+    request: Request,
+    token: str = Query(None),
+    days: str = Query(None),
+    grace_days: str = Query(None),
+    run_id: str = Query(None),
+):
+    import os
+    expected_token = os.getenv("CRON_TOKEN", "").strip()
+    header_token = request.headers.get("x-cron-token", "")
+    if not expected_token or (token != expected_token and header_token != expected_token):
+        raise HTTPException(status_code=403, detail="Invalid cron token")
+
+    adm = get_admin_service()
+    cfg = {}
+    try:
+        st = adm.obtener_settings()
+        rows = (st or {}).get("settings") or []
+        for r in rows:
+            k = (r or {}).get("key")
+            if k:
+                cfg[str(k)] = (r or {}).get("value")
+    except Exception:
+        cfg = {}
+
+    subs = cfg.get("subscriptions") or {}
+    try:
+        eff_days = int(days) if days is not None and str(days).strip() != "" else None
+    except Exception:
+        eff_days = None
+    if eff_days is None:
+        eff_days = int((subs or {}).get("reminder_days_before", 7) or 7)
+
+    try:
+        eff_grace = int(grace_days) if grace_days is not None and str(grace_days).strip() != "" else None
+    except Exception:
+        eff_grace = None
+    if eff_grace is None:
+        eff_grace = int((subs or {}).get("grace_days", 0) or 0)
+
+    effective_run_id = (str(run_id).strip() if run_id is not None and str(run_id).strip() != "" else None)
+    if effective_run_id is None:
+        effective_run_id = f"subscriptions_maintenance:{date.today().isoformat()}:{int(eff_days)}:{int(eff_grace)}"
+
+    result = adm.ejecutar_mantenimiento_suscripciones(reminder_days=eff_days, grace_days=eff_grace, run_id=effective_run_id)
+    return result
+
+
 @app.post("/cron/reminders")
-async def cron_daily_reminders(request: Request, token: str = Query(None), days: int = Query(7)):
+async def cron_daily_reminders(request: Request, token: str = Query(None), days: str = Query(None)):
     """Cron endpoint for daily subscription reminders. Requires CRON_TOKEN."""
     import os
     expected_token = os.getenv("CRON_TOKEN", "").strip()
@@ -939,22 +1347,63 @@ async def cron_daily_reminders(request: Request, token: str = Query(None), days:
         raise HTTPException(status_code=403, detail="Invalid cron token")
     
     adm = get_admin_service()
-    result = adm.enviar_recordatorios_vencimiento(days)
-    return {"ok": True, "sent": result.get("sent", 0)}
+    cfg = {}
+    try:
+        st = adm.obtener_settings()
+        rows = (st or {}).get("settings") or []
+        for r in rows:
+            k = (r or {}).get("key")
+            if k:
+                cfg[str(k)] = (r or {}).get("value")
+    except Exception:
+        cfg = {}
+    subs = cfg.get("subscriptions") or {}
+    enabled = bool((subs or {}).get("reminders_enabled", True))
+    try:
+        eff_days = int(days) if days is not None and str(days).strip() != "" else None
+    except Exception:
+        eff_days = None
+    if eff_days is None:
+        eff_days = int((subs or {}).get("reminder_days_before", 7) or 7)
+    if not enabled:
+        return {"ok": True, "sent": 0, "disabled": True}
+    result = adm.enviar_recordatorios_vencimiento(eff_days)
+    return {"ok": True, "sent": result.get("sent", 0), "days": eff_days}
 
 
 @app.post("/gyms/batch/auto-suspend")
 async def auto_suspend_overdue(
     request: Request,
-    grace_days: int = Form(0)
+    grace_days: str = Form(None)
 ):
     """Automatically suspend gyms that are overdue by more than grace_days."""
     require_admin(request)
     adm = get_admin_service()
-    
-    result = adm.auto_suspender_vencidos(grace_days)
+
+    cfg = {}
+    try:
+        st = adm.obtener_settings()
+        rows = (st or {}).get("settings") or []
+        for r in rows:
+            k = (r or {}).get("key")
+            if k:
+                cfg[str(k)] = (r or {}).get("value")
+    except Exception:
+        cfg = {}
+    subs = cfg.get("subscriptions") or {}
+    enabled = bool((subs or {}).get("auto_suspend_enabled", True))
+    try:
+        eff_grace = int(grace_days) if grace_days is not None and str(grace_days).strip() != "" else None
+    except Exception:
+        eff_grace = None
+    if eff_grace is None:
+        eff_grace = int((subs or {}).get("grace_days", 0) or 0)
+    if not enabled:
+        return {"ok": True, "suspended": 0, "disabled": True}
+
+    result = adm.auto_suspender_vencidos(eff_grace)
     if result.get("suspended"):
-        adm.log_action("owner", "auto_suspend_overdue", None, f"Suspended: {result.get('suspended')}, Grace: {grace_days}")
+        adm.log_action("owner", "auto_suspend_overdue", None, f"Suspended: {result.get('suspended')}, Grace: {eff_grace}")
     return result
 
 
@@ -1126,6 +1575,13 @@ async def sync_whatsapp_bindings_defaults(request: Request, overwrite: bool = Tr
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
     return result
+
+
+@app.get("/whatsapp/actions/specs")
+async def list_whatsapp_action_specs(request: Request):
+    require_admin(request)
+    adm = get_admin_service()
+    return {"ok": True, "items": adm.list_whatsapp_action_specs()}
 
 
 @app.get("/gyms/{gym_id}/whatsapp/actions")

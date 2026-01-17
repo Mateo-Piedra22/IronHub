@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
     Settings, Shield, Database, Bell, Palette,
-    Loader2, Check, AlertTriangle, Lock, Key
+    Loader2, Check, AlertTriangle, Lock, Key, Save
 } from 'lucide-react';
 import { api } from '@/lib/api';
 
@@ -17,6 +17,21 @@ export default function SettingsPage() {
     const [confirmPassword, setConfirmPassword] = useState('');
     const [passwordLoading, setPasswordLoading] = useState(false);
     const [passwordMessage, setPasswordMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+    const [settingsLoading, setSettingsLoading] = useState(true);
+    const [settingsSaving, setSettingsSaving] = useState(false);
+    const [subscriptionSettings, setSubscriptionSettings] = useState({
+        reminder_days_before: 7,
+        grace_days: 0,
+        auto_suspend_enabled: true,
+        reminders_enabled: true,
+    });
+    const [maintenanceSettings, setMaintenanceSettings] = useState({
+        default_message: 'Gimnasio en mantenimiento. Volvemos pronto.',
+    });
+    const [jobRunsLoading, setJobRunsLoading] = useState(true);
+    const [jobRuns, setJobRuns] = useState<any[]>([]);
+    const [maintenanceRunning, setMaintenanceRunning] = useState(false);
 
     const tabs = [
         { id: 'security', name: 'Seguridad', icon: Shield },
@@ -58,6 +73,78 @@ export default function SettingsPage() {
             setPasswordMessage({ type: 'error', text: 'Error de conexión' });
         } finally {
             setPasswordLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        const run = async () => {
+            setSettingsLoading(true);
+            try {
+                const res = await api.getSettings();
+                if (res.ok && res.data?.ok && Array.isArray((res.data as any).settings)) {
+                    const rows = (res.data as any).settings as Array<{ key: string; value: any }>;
+                    const subs = rows.find((r) => r.key === 'subscriptions')?.value;
+                    if (subs && typeof subs === 'object') {
+                        setSubscriptionSettings({
+                            reminder_days_before: Number(subs.reminder_days_before ?? 7),
+                            grace_days: Number(subs.grace_days ?? 0),
+                            auto_suspend_enabled: Boolean(subs.auto_suspend_enabled ?? true),
+                            reminders_enabled: Boolean(subs.reminders_enabled ?? true),
+                        });
+                    }
+                    const maint = rows.find((r) => r.key === 'maintenance')?.value;
+                    if (maint && typeof maint === 'object') {
+                        setMaintenanceSettings({
+                            default_message: String(maint.default_message || 'Gimnasio en mantenimiento. Volvemos pronto.'),
+                        });
+                    }
+                }
+                const jr = await api.listJobRuns('subscriptions_maintenance', 20);
+                if (jr.ok && jr.data?.ok && Array.isArray((jr.data as any).items)) {
+                    setJobRuns((jr.data as any).items || []);
+                }
+            } finally {
+                setSettingsLoading(false);
+                setJobRunsLoading(false);
+            }
+        };
+        run();
+    }, []);
+
+    const saveSettings = async () => {
+        setSettingsSaving(true);
+        try {
+            await api.updateSettings({
+                subscriptions: subscriptionSettings,
+                maintenance: maintenanceSettings,
+            });
+        } finally {
+            setSettingsSaving(false);
+        }
+    };
+
+    const refreshJobRuns = async () => {
+        setJobRunsLoading(true);
+        try {
+            const jr = await api.listJobRuns('subscriptions_maintenance', 20);
+            if (jr.ok && jr.data?.ok && Array.isArray((jr.data as any).items)) {
+                setJobRuns((jr.data as any).items || []);
+            }
+        } finally {
+            setJobRunsLoading(false);
+        }
+    };
+
+    const runMaintenanceNow = async () => {
+        setMaintenanceRunning(true);
+        try {
+            await api.runSubscriptionsMaintenance({
+                days: subscriptionSettings.reminder_days_before,
+                grace_days: subscriptionSettings.grace_days,
+            });
+            await refreshJobRuns();
+        } finally {
+            setMaintenanceRunning(false);
         }
     };
 
@@ -185,32 +272,34 @@ export default function SettingsPage() {
 
                 {activeTab === 'general' && (
                     <div className="space-y-6">
-                        <h2 className="text-lg font-semibold text-white">Configuración General</h2>
-                        <div className="grid gap-4 max-w-lg">
-                            <div>
-                                <label className="label">Nombre del sistema</label>
-                                <input type="text" className="input" defaultValue="IronHub" />
-                            </div>
-                            <div>
-                                <label className="label">Dominio de tenants</label>
-                                <input
-                                    type="text"
-                                    className="input"
-                                    defaultValue={process.env.NEXT_PUBLIC_TENANT_DOMAIN || 'ironhub.motiona.xyz'}
-                                    disabled
-                                />
-                                <p className="text-xs text-slate-500 mt-1">Configurado via variable de entorno</p>
-                            </div>
-                            <div>
-                                <label className="label">Zona horaria</label>
-                                <select className="input" defaultValue="America/Argentina/Buenos_Aires">
-                                    <option value="America/Argentina/Buenos_Aires">Argentina (Buenos Aires)</option>
-                                    <option value="America/Mexico_City">México (Ciudad de México)</option>
-                                    <option value="America/Bogota">Colombia (Bogotá)</option>
-                                    <option value="Europe/Madrid">España (Madrid)</option>
-                                </select>
-                            </div>
+                        <div className="flex items-center justify-between">
+                            <h2 className="text-lg font-semibold text-white">Configuración General</h2>
+                            <button
+                                onClick={saveSettings}
+                                disabled={settingsSaving || settingsLoading}
+                                className="btn-primary flex items-center gap-2"
+                            >
+                                {settingsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                Guardar
+                            </button>
                         </div>
+                        {settingsLoading ? (
+                            <div className="flex items-center justify-center py-10">
+                                <Loader2 className="w-8 h-8 animate-spin text-primary-400" />
+                            </div>
+                        ) : (
+                            <div className="grid gap-4 max-w-lg">
+                                <div>
+                                    <label className="label">Mensaje por defecto de mantenimiento</label>
+                                    <input
+                                        type="text"
+                                        className="input"
+                                        value={maintenanceSettings.default_message}
+                                        onChange={(e) => setMaintenanceSettings({ ...maintenanceSettings, default_message: e.target.value })}
+                                    />
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -237,21 +326,141 @@ export default function SettingsPage() {
 
                 {activeTab === 'notifications' && (
                     <div className="space-y-6">
-                        <h2 className="text-lg font-semibold text-white">Notificaciones</h2>
-                        <div className="space-y-4">
-                            <label className="flex items-center gap-3">
-                                <input type="checkbox" defaultChecked className="w-4 h-4" />
-                                <span className="text-slate-300">Notificar vencimientos próximos</span>
-                            </label>
-                            <label className="flex items-center gap-3">
-                                <input type="checkbox" defaultChecked className="w-4 h-4" />
-                                <span className="text-slate-300">Notificar nuevos gimnasios</span>
-                            </label>
-                            <label className="flex items-center gap-3">
-                                <input type="checkbox" className="w-4 h-4" />
-                                <span className="text-slate-300">Notificar errores críticos por email</span>
-                            </label>
+                        <div className="flex items-center justify-between">
+                            <h2 className="text-lg font-semibold text-white">Notificaciones</h2>
+                            <button
+                                onClick={saveSettings}
+                                disabled={settingsSaving || settingsLoading}
+                                className="btn-primary flex items-center gap-2"
+                            >
+                                {settingsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                Guardar
+                            </button>
                         </div>
+                        {settingsLoading ? (
+                            <div className="flex items-center justify-center py-10">
+                                <Loader2 className="w-8 h-8 animate-spin text-primary-400" />
+                            </div>
+                        ) : (
+                            <div className="space-y-6 max-w-3xl">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="label">Días antes para recordar</label>
+                                        <input
+                                            type="number"
+                                            className="input"
+                                            value={subscriptionSettings.reminder_days_before}
+                                            min={1}
+                                            max={90}
+                                            onChange={(e) =>
+                                                setSubscriptionSettings({ ...subscriptionSettings, reminder_days_before: Number(e.target.value) })
+                                            }
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="label">Grace period (días)</label>
+                                        <input
+                                            type="number"
+                                            className="input"
+                                            value={subscriptionSettings.grace_days}
+                                            min={0}
+                                            max={60}
+                                            onChange={(e) => setSubscriptionSettings({ ...subscriptionSettings, grace_days: Number(e.target.value) })}
+                                        />
+                                    </div>
+                                    <label className="flex items-center gap-3">
+                                        <input
+                                            type="checkbox"
+                                            checked={subscriptionSettings.reminders_enabled}
+                                            onChange={(e) =>
+                                                setSubscriptionSettings({ ...subscriptionSettings, reminders_enabled: e.target.checked })
+                                            }
+                                            className="w-4 h-4"
+                                        />
+                                        <span className="text-slate-300">Habilitar recordatorios de vencimiento</span>
+                                    </label>
+                                    <label className="flex items-center gap-3">
+                                        <input
+                                            type="checkbox"
+                                            checked={subscriptionSettings.auto_suspend_enabled}
+                                            onChange={(e) =>
+                                                setSubscriptionSettings({ ...subscriptionSettings, auto_suspend_enabled: e.target.checked })
+                                            }
+                                            className="w-4 h-4"
+                                        />
+                                        <span className="text-slate-300">Auto-suspender vencidos</span>
+                                    </label>
+                                </div>
+
+                                <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <div className="text-white font-medium">Mantenimiento de suscripciones</div>
+                                            <div className="text-slate-500 text-sm">Marca overdue → envía recordatorios → auto-suspende</div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={refreshJobRuns}
+                                                disabled={jobRunsLoading}
+                                                className="btn-secondary px-3 py-2"
+                                            >
+                                                {jobRunsLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Refrescar'}
+                                            </button>
+                                            <button
+                                                onClick={runMaintenanceNow}
+                                                disabled={maintenanceRunning}
+                                                className="btn-primary px-3 py-2 flex items-center gap-2"
+                                            >
+                                                {maintenanceRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Bell className="w-4 h-4" />}
+                                                Ejecutar ahora
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {jobRunsLoading ? (
+                                        <div className="flex items-center justify-center py-6">
+                                            <Loader2 className="w-6 h-6 animate-spin text-primary-400" />
+                                        </div>
+                                    ) : jobRuns.length === 0 ? (
+                                        <div className="text-slate-500 text-sm">Sin ejecuciones registradas.</div>
+                                    ) : (
+                                        <div className="overflow-x-auto">
+                                            <table className="data-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Run</th>
+                                                        <th>Estado</th>
+                                                        <th>Inicio</th>
+                                                        <th>Fin</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {jobRuns.map((r) => (
+                                                        <tr key={String(r.run_id)}>
+                                                            <td className="font-mono text-slate-300">{String(r.run_id).slice(0, 32)}</td>
+                                                            <td>
+                                                                <span
+                                                                    className={`badge ${String(r.status).toLowerCase() === 'success'
+                                                                            ? 'badge-success'
+                                                                            : String(r.status).toLowerCase() === 'failed'
+                                                                                ? 'badge-danger'
+                                                                                : 'badge-warning'
+                                                                        }`}
+                                                                >
+                                                                    {String(r.status)}
+                                                                </span>
+                                                            </td>
+                                                            <td className="text-slate-400">{String(r.started_at || '').slice(0, 19).replace('T', ' ')}</td>
+                                                            <td className="text-slate-400">{String(r.finished_at || '').slice(0, 19).replace('T', ' ') || '—'}</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
 

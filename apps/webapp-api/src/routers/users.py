@@ -3,15 +3,16 @@ from datetime import datetime, timezone, date
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 
-from fastapi import APIRouter, Request, Depends, HTTPException, status
+from fastapi import APIRouter, Request, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from src.dependencies import (
     get_user_service, get_profesor_service, 
-    require_gestion_access, require_owner
+    require_gestion_access, require_owner, get_whatsapp_dispatch_service
 )
 from src.services import UserService, ProfesorService
+from src.services.whatsapp_dispatch_service import WhatsAppDispatchService
 from src.utils import _resolve_theme_vars, _resolve_logo_url, get_gym_name
 
 # Fallback for UsuarioEstado if not imported correctly or available
@@ -215,7 +216,9 @@ async def api_usuario_get(
 @router.post("/api/usuarios")
 async def api_usuario_create(
     request: Request, 
+    background_tasks: BackgroundTasks,
     user_service: UserService = Depends(get_user_service),
+    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service),
     _=Depends(require_gestion_access)
 ):
     payload = await request.json()
@@ -242,6 +245,13 @@ async def api_usuario_create(
             raise HTTPException(status_code=400, detail="'nombre' y 'dni' son obligatorios")
             
         new_id = user_service.create_user(data, is_owner=is_owner)
+        try:
+            if background_tasks is not None:
+                background_tasks.add_task(wa.send_welcome, int(new_id))
+            else:
+                wa.send_welcome(int(new_id))
+        except Exception:
+            pass
         return {"id": new_id}
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
@@ -314,7 +324,9 @@ async def api_usuario_delete(
 async def api_usuario_toggle_activo(
     usuario_id: int,
     request: Request,
+    background_tasks: BackgroundTasks,
     user_service: UserService = Depends(get_user_service),
+    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service),
     _=Depends(require_gestion_access)
 ):
     """Toggle user active status"""
@@ -323,6 +335,20 @@ async def api_usuario_toggle_activo(
         result = user_service.toggle_activo(usuario_id, is_owner=is_owner)
         if result.get('error') == 'not_found':
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        try:
+            active = bool(result.get("activo"))
+            if not active:
+                if background_tasks is not None:
+                    background_tasks.add_task(wa.send_deactivation, int(usuario_id), "Desactivación manual")
+                else:
+                    wa.send_deactivation(int(usuario_id), "Desactivación manual")
+            else:
+                if background_tasks is not None:
+                    background_tasks.add_task(wa.send_membership_reactivated, int(usuario_id))
+                else:
+                    wa.send_membership_reactivated(int(usuario_id))
+        except Exception:
+            pass
         return result
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))

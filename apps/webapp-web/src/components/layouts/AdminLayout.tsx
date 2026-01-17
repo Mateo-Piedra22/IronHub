@@ -18,7 +18,6 @@ import {
     ChevronRight,
     Home,
     MessageSquare,
-    ShieldCheck,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ToastContainer } from '@/components/ui';
@@ -35,7 +34,6 @@ const navigation = [
     { name: 'Clases', href: '/gestion/clases', icon: CalendarDays, description: 'Horarios grupales' },
     { name: 'Asistencias', href: '/gestion/asistencias', icon: ScanLine, description: 'Check-in y registro' },
     { name: 'WhatsApp', href: '/gestion/whatsapp', icon: MessageSquare, description: 'Mensajes y API' },
-    { name: 'Meta Review', href: '/gestion/meta-review', icon: ShieldCheck, description: 'Videos y permisos' },
     { name: 'Configuración', href: '/gestion/configuracion', icon: Settings, description: 'Cuotas, métodos, tema' },
 ];
 

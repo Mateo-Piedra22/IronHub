@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import Link from 'next/link';
 import {
     ScanLine,
     CheckCircle2,
@@ -62,6 +63,13 @@ export default function CheckinPage() {
 
     const scannerRef = useRef<Html5Qrcode | null>(null);
     const scannerContainerRef = useRef<HTMLDivElement>(null);
+    const makeIdempotencyKey = () => {
+        try {
+            const c = (globalThis as any).crypto;
+            if (c?.randomUUID) return String(c.randomUUID());
+        } catch { }
+        return `${Date.now()}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;
+    };
 
     // Restore saved credentials
     useEffect(() => {
@@ -173,6 +181,7 @@ export default function CheckinPage() {
 
     // Handle QR scan
     const handleQRScanned = async (token: string) => {
+        const idemKey = makeIdempotencyKey();
         let raw = String(token || '').trim();
         try {
             if (raw.includes('token=')) {
@@ -191,7 +200,7 @@ export default function CheckinPage() {
 
         // Validate the token
         try {
-            const resCheckin = await api.checkIn(raw);
+            const resCheckin = await api.checkIn(raw, idemKey);
 
             if (resCheckin.ok && resCheckin.data?.ok) {
                 setLastResult({
@@ -200,7 +209,7 @@ export default function CheckinPage() {
                 });
                 playSuccessSound();
             } else {
-                const res = await api.scanStationQR(raw);
+                const res = await api.scanStationQR(raw, idemKey);
 
                 if (res.ok && res.data?.ok) {
                     const timestamp = new Date().toLocaleTimeString('es-AR');
@@ -349,12 +358,9 @@ export default function CheckinPage() {
                             </button>
 
                             {/* Back button */}
-                            <a
-                                href="/"
-                                className="block w-full py-3 rounded-xl font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 text-center transition-all"
-                            >
+                            <Link href="/" className="block w-full py-3 rounded-xl font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 text-center transition-all">
                                 ← Volver al inicio
-                            </a>
+                            </Link>
                         </form>
                     </div>
                 </motion.div>

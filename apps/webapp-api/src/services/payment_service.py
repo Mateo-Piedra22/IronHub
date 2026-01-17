@@ -26,6 +26,7 @@ from src.database.orm_models import (
     Pago, Usuario, MetodoPago, ConceptoPago, PagoDetalle, TipoCuota,
     NumeracionComprobante, ComprobantePago
 )
+from src.services.whatsapp_dispatch_service import WhatsAppDispatchService
 
 logger = logging.getLogger(__name__)
 
@@ -149,11 +150,12 @@ class PaymentService(BaseService):
             total = subtotal + comision
 
             # Update payment
-            now = fecha_pago or self._now_local_naive()
+            now = fecha_pago or getattr(pago, "fecha_pago", None) or self._now_local_naive()
             pago.usuario_id = usuario_id
             pago.monto = total
-            pago.mes = now.month
-            pago.año = now.year
+            if fecha_pago is not None:
+                pago.mes = now.month
+                pago.año = now.year
             pago.metodo_pago_id = metodo_pago_id
             pago.fecha_pago = now
 
@@ -592,7 +594,25 @@ class PaymentService(BaseService):
 
         usuario.cuotas_vencidas = cuotas_vencidas
 
+        if (not exento) and cuotas_vencidas >= 3 and cuotas_previas < 3:
+            try:
+                motivo = f"{cuotas_vencidas} cuotas vencidas"
+                self.desactivar_usuario_por_cuotas_vencidas(int(usuario_id), motivo=motivo)
+                usuario = self.db.get(Usuario, usuario_id) or usuario
+                return {
+                    'usuario_id': usuario_id,
+                    'fecha_proximo_vencimiento': usuario.fecha_proximo_vencimiento,
+                    'cuotas_vencidas': cuotas_vencidas,
+                    'cuotas_previas': cuotas_previas,
+                    'activo': False,
+                    'desactivado': True,
+                }
+            except Exception:
+                pass
+
+        desactivado = False
         if (not exento) and cuotas_vencidas >= 3:
+            desactivado = True
             if usuario.activo:
                 usuario.activo = False
                 logger.warning(f"Usuario {usuario_id} desactivado por {cuotas_vencidas} cuotas vencidas")
@@ -605,7 +625,7 @@ class PaymentService(BaseService):
             'cuotas_vencidas': cuotas_vencidas,
             'cuotas_previas': cuotas_previas,
             'activo': usuario.activo,
-            'desactivado': cuotas_vencidas >= 3 and not exento
+            'desactivado': desactivado,
         }
 
     def _verificar_y_procesar_morosidad(
@@ -697,6 +717,10 @@ class PaymentService(BaseService):
         )
         
         self.db.commit()
+        try:
+            WhatsAppDispatchService(self.db).send_deactivation(int(usuario_id), str(motivo or "cuotas vencidas"))
+        except Exception:
+            pass
         return True
 
     # =========================================================================

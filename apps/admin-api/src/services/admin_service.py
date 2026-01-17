@@ -7,6 +7,7 @@ import secrets
 import hashlib
 import base64
 import json
+from datetime import datetime, date, timedelta
 from typing import Any, Dict, List, Optional, Set
 import psycopg2
 import psycopg2.extras
@@ -174,6 +175,30 @@ class AdminService:
                 cur.execute(
                     "CREATE TABLE IF NOT EXISTS gym_payments (id BIGSERIAL PRIMARY KEY, gym_id BIGINT NOT NULL REFERENCES gyms(id) ON DELETE CASCADE, plan TEXT, amount NUMERIC(12,2), currency TEXT, paid_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(), valid_until TIMESTAMP WITHOUT TIME ZONE NULL, status TEXT, notes TEXT)"
                 )
+                try:
+                    cur.execute("ALTER TABLE gym_payments ADD COLUMN IF NOT EXISTS plan_id BIGINT NULL REFERENCES plans(id) ON DELETE SET NULL")
+                except Exception:
+                    pass
+                try:
+                    cur.execute("ALTER TABLE gym_payments ADD COLUMN IF NOT EXISTS provider TEXT NULL")
+                except Exception:
+                    pass
+                try:
+                    cur.execute("ALTER TABLE gym_payments ADD COLUMN IF NOT EXISTS external_reference TEXT NULL")
+                except Exception:
+                    pass
+                try:
+                    cur.execute("ALTER TABLE gym_payments ADD COLUMN IF NOT EXISTS idempotency_key TEXT NULL")
+                except Exception:
+                    pass
+                try:
+                    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_gym_payments_idempotency_key ON gym_payments(idempotency_key) WHERE idempotency_key IS NOT NULL AND TRIM(idempotency_key) <> ''")
+                except Exception:
+                    pass
+                try:
+                    cur.execute("CREATE INDEX IF NOT EXISTS idx_gym_payments_gym_paid_at_desc ON gym_payments(gym_id, paid_at DESC)")
+                except Exception:
+                    pass
                 cur.execute(
                     "CREATE TABLE IF NOT EXISTS admin_users (id BIGSERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW())"
                 )
@@ -190,6 +215,70 @@ class AdminService:
                 cur.execute(
                     "CREATE TABLE IF NOT EXISTS gym_subscriptions (id BIGSERIAL PRIMARY KEY, gym_id BIGINT NOT NULL REFERENCES gyms(id) ON DELETE CASCADE, plan_id BIGINT NOT NULL REFERENCES plans(id) ON DELETE RESTRICT, start_date DATE NOT NULL, next_due_date DATE NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW())"
                 )
+                try:
+                    cur.execute("CREATE INDEX IF NOT EXISTS idx_gym_subscriptions_gym_status ON gym_subscriptions(gym_id, status)")
+                except Exception:
+                    pass
+                try:
+                    cur.execute("CREATE INDEX IF NOT EXISTS idx_gym_subscriptions_due_date ON gym_subscriptions(next_due_date)")
+                except Exception:
+                    pass
+                try:
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS gym_reminder_logs (
+                            id BIGSERIAL PRIMARY KEY,
+                            gym_id BIGINT NOT NULL REFERENCES gyms(id) ON DELETE CASCADE,
+                            dedupe_key TEXT NOT NULL UNIQUE,
+                            reminder_type TEXT NOT NULL,
+                            channel TEXT NOT NULL DEFAULT 'whatsapp',
+                            status TEXT NOT NULL DEFAULT 'sent',
+                            error TEXT NULL,
+                            payload JSONB,
+                            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                        )
+                        """
+                    )
+                except Exception:
+                    pass
+                try:
+                    cur.execute("CREATE INDEX IF NOT EXISTS idx_gym_reminder_logs_gym_created_at_desc ON gym_reminder_logs(gym_id, created_at DESC)")
+                except Exception:
+                    pass
+                try:
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS admin_settings (
+                            key TEXT PRIMARY KEY,
+                            value JSONB NOT NULL,
+                            updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+                            updated_by TEXT NULL
+                        )
+                        """
+                    )
+                except Exception:
+                    pass
+                try:
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS admin_job_runs (
+                            id BIGSERIAL PRIMARY KEY,
+                            run_id TEXT NOT NULL UNIQUE,
+                            job_key TEXT NOT NULL,
+                            status TEXT NOT NULL DEFAULT 'running',
+                            started_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+                            finished_at TIMESTAMP WITHOUT TIME ZONE NULL,
+                            result JSONB NULL,
+                            error TEXT NULL
+                        )
+                        """
+                    )
+                except Exception:
+                    pass
+                try:
+                    cur.execute("CREATE INDEX IF NOT EXISTS idx_admin_job_runs_job_key_started_at_desc ON admin_job_runs(job_key, started_at DESC)")
+                except Exception:
+                    pass
                 cur.execute(
                     """
                     CREATE TABLE IF NOT EXISTS whatsapp_template_catalog (
@@ -379,14 +468,15 @@ class AdminService:
             with self.db.get_connection_context() as conn:
                 cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                 cur.execute(
-                    f"SELECT id, nombre, subdominio, db_name, owner_phone, status, hard_suspend, suspended_until, b2_bucket_name, b2_bucket_id, whatsapp_phone_id, whatsapp_access_token, created_at FROM gyms{where_sql} ORDER BY {ob} {od} LIMIT %s OFFSET %s",
+                    f"SELECT id, nombre, subdominio, db_name, owner_phone, status, hard_suspend, suspended_until, b2_bucket_name, b2_bucket_id, whatsapp_phone_id, whatsapp_business_account_id, whatsapp_access_token, created_at FROM gyms{where_sql} ORDER BY {ob} {od} LIMIT %s OFFSET %s",
                     params + [ps, (p - 1) * ps]
                 )
                 rows = cur.fetchall()
             items: List[Dict[str, Any]] = []
             for r in rows:
                 dct = dict(r)
-                dct["wa_configured"] = bool((dct.get("whatsapp_phone_id") or "").strip()) and bool((dct.get("whatsapp_access_token") or "").strip())
+                phone_id = str(dct.get("whatsapp_phone_id") or "").strip()
+                dct["wa_configured"] = bool(phone_id)
                 items.append(dct)
             return {"items": items, "total": total, "page": p, "page_size": ps}
         except Exception as e:
@@ -427,7 +517,7 @@ class AdminService:
                 cur.execute(
                     f"""
                     SELECT g.id, g.nombre, g.subdominio, g.db_name, g.owner_phone, g.status, g.hard_suspend, g.suspended_until,
-                           g.whatsapp_phone_id, g.whatsapp_access_token,
+                           g.whatsapp_phone_id, g.whatsapp_business_account_id, g.whatsapp_access_token,
                            g.b2_bucket_name, g.b2_bucket_id, g.created_at,
                            gs.next_due_date, gs.status AS sub_status,
                            (SELECT amount FROM gym_payments WHERE gym_id = g.id ORDER BY paid_at DESC LIMIT 1) AS last_payment_amount,
@@ -445,7 +535,8 @@ class AdminService:
             items: List[Dict[str, Any]] = []
             for r in rows:
                 dct = dict(r)
-                dct["wa_configured"] = bool((dct.get("whatsapp_phone_id") or "").strip()) and bool((dct.get("whatsapp_access_token") or "").strip())
+                phone_id = str(dct.get("whatsapp_phone_id") or "").strip()
+                dct["wa_configured"] = bool(phone_id)
                 items.append(dct)
             return {"items": items, "total": total, "page": p, "page_size": ps}
         except Exception as e:
@@ -474,11 +565,96 @@ class AdminService:
             logger.error(f"Error setting gym status {gym_id}: {e}")
             return False
 
-    def registrar_pago(self, gym_id: int, plan: Optional[str], amount: Optional[float], currency: Optional[str], valid_until: Optional[str], status: Optional[str], notes: Optional[str]) -> bool:
+    def registrar_pago(
+        self,
+        gym_id: int,
+        plan: Optional[str],
+        amount: Optional[float],
+        currency: Optional[str],
+        valid_until: Optional[str],
+        status: Optional[str],
+        notes: Optional[str],
+        *,
+        plan_id: Optional[int] = None,
+        provider: Optional[str] = None,
+        external_reference: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+        apply_to_subscription: bool = True,
+        periods: int = 1,
+    ) -> bool:
         try:
             with self.db.get_connection_context() as conn:
                 cur = conn.cursor()
-                cur.execute("INSERT INTO gym_payments (gym_id, plan, amount, currency, valid_until, status, notes) VALUES (%s, %s, %s, %s, %s, %s, %s)", (int(gym_id), plan, amount, currency, valid_until, status, notes))
+                pid = int(plan_id) if plan_id is not None and str(plan_id).strip() != "" else None
+                if pid is None and plan:
+                    try:
+                        cur.execute("SELECT id FROM plans WHERE name = %s", (str(plan).strip(),))
+                        prow = cur.fetchone()
+                        pid = int(prow[0]) if prow else None
+                    except Exception:
+                        pid = None
+
+                cur.execute(
+                    """
+                    INSERT INTO gym_payments (gym_id, plan, plan_id, amount, currency, valid_until, status, notes, provider, external_reference, idempotency_key)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        int(gym_id),
+                        plan,
+                        pid,
+                        amount,
+                        currency,
+                        valid_until,
+                        status,
+                        notes,
+                        provider,
+                        external_reference,
+                        idempotency_key,
+                    ),
+                )
+
+                st = str(status or "").strip().lower()
+                should_apply = bool(apply_to_subscription) and (st in ("paid", "pagado", "ok", "success", "succeeded", "completed", "complete", "applied", "approved", "confirmado"))
+                if should_apply and pid:
+                    per = max(int(periods or 1), 1)
+                    plan_row = self._get_plan(cur, int(pid))
+                    if plan_row:
+                        period_days = int(plan_row.get("period_days") or 0) or 30
+                        today = date.today()
+                        cur.execute(
+                            "SELECT id, plan_id, start_date, next_due_date, status FROM gym_subscriptions WHERE gym_id = %s ORDER BY id DESC LIMIT 1",
+                            (int(gym_id),),
+                        )
+                        srow = cur.fetchone()
+                        if not srow:
+                            sd = today
+                            nd = sd + timedelta(days=period_days * per)
+                            cur.execute(
+                                "INSERT INTO gym_subscriptions (gym_id, plan_id, start_date, next_due_date, status) VALUES (%s,%s,%s,%s,'active')",
+                                (int(gym_id), int(pid), sd, nd),
+                            )
+                        else:
+                            sub_id = int(srow[0])
+                            next_due = srow[3]
+                            base = next_due if next_due and next_due >= today else today
+                            nd = base + timedelta(days=period_days * per)
+                            cur.execute(
+                                "UPDATE gym_subscriptions SET plan_id = %s, next_due_date = %s, status = 'active' WHERE id = %s",
+                                (int(pid), nd, sub_id),
+                            )
+
+                        cur.execute(
+                            """
+                            UPDATE gyms
+                            SET status = 'active',
+                                hard_suspend = FALSE,
+                                suspended_until = NULL,
+                                suspended_reason = NULL
+                            WHERE id = %s AND status = 'suspended' AND hard_suspend = FALSE
+                            """,
+                            (int(gym_id),),
+                        )
                 conn.commit()
                 return True
         except Exception as e:
@@ -510,6 +686,127 @@ class AdminService:
         except Exception as e:
             logger.error(f"Error listing recent payments: {e}")
             return []
+
+    def listar_pagos_avanzado(
+        self,
+        *,
+        gym_id: Optional[int] = None,
+        status: Optional[str] = None,
+        q: Optional[str] = None,
+        desde: Optional[str] = None,
+        hasta: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> Dict[str, Any]:
+        try:
+            p = max(int(page or 1), 1)
+            ps = max(int(page_size or 50), 1)
+            where_terms: List[str] = []
+            params: List[Any] = []
+
+            if gym_id is not None:
+                where_terms.append("gp.gym_id = %s")
+                params.append(int(gym_id))
+
+            sv = str(status or "").strip().lower()
+            if sv:
+                where_terms.append("LOWER(COALESCE(gp.status,'')) = %s")
+                params.append(sv)
+
+            qv = str(q or "").strip().lower()
+            if qv:
+                like = f"%{qv}%"
+                where_terms.append("(LOWER(COALESCE(g.nombre,'')) LIKE %s OR LOWER(COALESCE(g.subdominio,'')) LIKE %s OR LOWER(COALESCE(gp.plan,'')) LIKE %s)")
+                params.extend([like, like, like])
+
+            if desde:
+                where_terms.append("gp.paid_at >= %s")
+                params.append(str(desde))
+            if hasta:
+                where_terms.append("gp.paid_at <= %s")
+                params.append(str(hasta))
+
+            where_sql = (" WHERE " + " AND ".join(where_terms)) if where_terms else ""
+
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute(f"SELECT COUNT(*) FROM gym_payments gp JOIN gyms g ON g.id = gp.gym_id{where_sql}", params)
+                total_row = cur.fetchone()
+                total = int(total_row[0]) if total_row else 0
+
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute(
+                    f"""
+                    SELECT
+                        gp.id,
+                        gp.gym_id,
+                        g.nombre,
+                        g.subdominio,
+                        gp.plan,
+                        gp.plan_id,
+                        gp.amount,
+                        gp.currency,
+                        gp.paid_at,
+                        gp.valid_until,
+                        gp.status,
+                        gp.notes,
+                        gp.provider,
+                        gp.external_reference
+                    FROM gym_payments gp
+                    JOIN gyms g ON g.id = gp.gym_id
+                    {where_sql}
+                    ORDER BY gp.paid_at DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    params + [ps, (p - 1) * ps],
+                )
+                rows = cur.fetchall()
+                return {"ok": True, "items": [dict(r) for r in rows], "total": total, "page": p, "page_size": ps}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "items": [], "total": 0, "page": int(page or 1), "page_size": int(page_size or 50)}
+
+    def actualizar_pago_gym(self, gym_id: int, payment_id: int, updates: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            if not updates:
+                return {"ok": False, "error": "no_updates"}
+            gid = int(gym_id)
+            pid = int(payment_id)
+            allowed = {"plan", "plan_id", "amount", "currency", "paid_at", "valid_until", "status", "notes", "provider", "external_reference"}
+            sets: List[str] = []
+            params: List[Any] = []
+            for k, v in updates.items():
+                if k not in allowed:
+                    continue
+                sets.append(f"{k} = %s")
+                if k in ("plan_id",):
+                    try:
+                        params.append(int(v) if v is not None and str(v).strip() != "" else None)
+                    except Exception:
+                        params.append(None)
+                else:
+                    params.append(v)
+            if not sets:
+                return {"ok": False, "error": "no_valid_fields"}
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute(f"UPDATE gym_payments SET {', '.join(sets)} WHERE id = %s AND gym_id = %s", params + [pid, gid])
+                conn.commit()
+                return {"ok": True, "updated": int(cur.rowcount or 0)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def eliminar_pago_gym(self, gym_id: int, payment_id: int) -> Dict[str, Any]:
+        try:
+            gid = int(gym_id)
+            pid = int(payment_id)
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute("DELETE FROM gym_payments WHERE id = %s AND gym_id = %s", (pid, gid))
+                conn.commit()
+                return {"ok": True, "deleted": int(cur.rowcount or 0)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     def subdominio_disponible(self, subdominio: str) -> bool:
         try:
@@ -568,6 +865,36 @@ class AdminService:
         except Exception as e:
             logger.error(f"Error logging action: {e}")
             return False
+
+    def list_audit(self, gym_id: int, limit: int = 50) -> Dict[str, Any]:
+        try:
+            gid = int(gym_id)
+            lim = max(1, min(500, int(limit)))
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute(
+                    """
+                    SELECT id, actor_username, action, gym_id, details, created_at
+                    FROM admin_audit
+                    WHERE gym_id = %s
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                    """,
+                    (gid, lim),
+                )
+                rows = cur.fetchall() or []
+            items: List[Dict[str, Any]] = []
+            for r in rows:
+                d = dict(r)
+                if d.get("created_at"):
+                    try:
+                        d["created_at"] = d["created_at"].isoformat()
+                    except Exception:
+                        d["created_at"] = str(d["created_at"])
+                items.append(d)
+            return {"ok": True, "items": items}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     # --- Additional Methods from AdminDatabaseManager ---
 
@@ -700,6 +1027,24 @@ class AdminService:
                     except Exception:
                         return True
                 try:
+                    cur.execute(
+                        """
+                        SELECT gs.next_due_date, gs.status
+                        FROM gym_subscriptions gs
+                        JOIN gyms g ON g.id = gs.gym_id
+                        WHERE g.subdominio = %s
+                        ORDER BY gs.id DESC
+                        LIMIT 1
+                        """,
+                        (subdominio.strip().lower(),),
+                    )
+                    srow = cur.fetchone()
+                    if srow and srow[0] is not None and str(srow[1] or "").lower() != "canceled":
+                        nd = srow[0]
+                        try:
+                            return date.today() > nd
+                        except Exception:
+                            return True
                     cur.execute("SELECT valid_until FROM gym_payments gp JOIN gyms g ON gp.gym_id = g.id WHERE g.subdominio = %s ORDER BY gp.paid_at DESC LIMIT 1", (subdominio.strip().lower(),))
                     prow = cur.fetchone()
                     if not prow:
@@ -1627,6 +1972,70 @@ class AdminService:
             logger.error(f"Error getting branding for gym {gym_id}: {e}")
             return {}
 
+    def get_gym_attendance_policy(self, gym_id: int) -> Dict[str, Any]:
+        try:
+            gym = self.obtener_gimnasio(gym_id)
+            if not gym:
+                return {"ok": False, "error": "gym_not_found"}
+            db_name = gym.get("db_name")
+            if not db_name:
+                return {"ok": False, "error": "no_tenant_db"}
+            engine = self._get_tenant_engine(db_name)
+            if not engine:
+                return {"ok": False, "error": "could_not_connect_tenant"}
+
+            Session = sessionmaker(bind=engine)
+            session = Session()
+            try:
+                row = session.query(Configuracion).filter_by(clave="attendance_allow_multiple_per_day").first()
+                raw = str(row.valor) if row and row.valor is not None else ""
+                v = raw.strip().lower()
+                allow = v in ("1", "true", "yes", "y", "on")
+                return {"ok": True, "attendance_allow_multiple_per_day": bool(allow)}
+            finally:
+                session.close()
+                engine.dispose()
+        except Exception as e:
+            logger.error(f"Error getting attendance policy for gym {gym_id}: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def set_gym_attendance_policy(self, gym_id: int, allow_multiple_per_day: bool) -> Dict[str, Any]:
+        try:
+            gym = self.obtener_gimnasio(gym_id)
+            if not gym:
+                return {"ok": False, "error": "gym_not_found"}
+            db_name = gym.get("db_name")
+            if not db_name:
+                return {"ok": False, "error": "no_tenant_db"}
+            engine = self._get_tenant_engine(db_name)
+            if not engine:
+                return {"ok": False, "error": "could_not_connect_tenant"}
+
+            Session = sessionmaker(bind=engine)
+            session = Session()
+            try:
+                key = "attendance_allow_multiple_per_day"
+                val = "true" if bool(allow_multiple_per_day) else "false"
+                existing = session.query(Configuracion).filter_by(clave=key).first()
+                if existing:
+                    existing.valor = val
+                else:
+                    session.add(Configuracion(clave=key, valor=val))
+                session.commit()
+            finally:
+                session.close()
+                engine.dispose()
+
+            try:
+                self.log_action("owner", "set_attendance_policy", gym_id, f"allow_multiple_per_day={bool(allow_multiple_per_day)}")
+            except Exception:
+                pass
+
+            return {"ok": True, "attendance_allow_multiple_per_day": bool(allow_multiple_per_day)}
+        except Exception as e:
+            logger.error(f"Error setting attendance policy for gym {gym_id}: {e}")
+            return {"ok": False, "error": str(e)}
+
     def get_gym_reminder_message(self, gym_id: int) -> Optional[str]:
         try:
             gym = self.obtener_gimnasio(gym_id)
@@ -2156,11 +2565,116 @@ class AdminService:
         try:
             with self.db.get_connection_context() as conn:
                 cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                cur.execute("SELECT g.id as gym_id, g.nombre, g.subdominio, gs.next_due_date FROM gym_subscriptions gs JOIN gyms g ON g.id = gs.gym_id WHERE gs.status = 'active' AND gs.next_due_date <= (CURRENT_DATE + (%s || ' days')::interval) ORDER BY gs.next_due_date ASC", (int(days),))
+                cur.execute(
+                    """
+                    SELECT
+                        g.id as gym_id,
+                        g.nombre,
+                        g.subdominio,
+                        gs.next_due_date
+                    FROM gyms g
+                    JOIN LATERAL (
+                        SELECT * FROM gym_subscriptions s WHERE s.gym_id = g.id ORDER BY s.id DESC LIMIT 1
+                    ) gs ON TRUE
+                    WHERE g.status = 'active'
+                      AND g.hard_suspend = FALSE
+                      AND gs.status = 'active'
+                      AND gs.next_due_date >= CURRENT_DATE
+                      AND gs.next_due_date <= (CURRENT_DATE + (%s || ' days')::interval)
+                    ORDER BY gs.next_due_date ASC
+                    """,
+                    (int(days),),
+                )
                 rows = cur.fetchall()
                 return [dict(r) for r in rows]
         except Exception:
             return []
+
+    def listar_suscripciones_avanzado(
+        self,
+        *,
+        q: Optional[str] = None,
+        status: Optional[str] = None,
+        due_before_days: Optional[int] = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> Dict[str, Any]:
+        try:
+            p = max(int(page or 1), 1)
+            ps = max(int(page_size or 50), 1)
+            where_terms: List[str] = []
+            params: List[Any] = []
+
+            qv = str(q or "").strip().lower()
+            if qv:
+                like = f"%{qv}%"
+                where_terms.append("(LOWER(COALESCE(g.nombre,'')) LIKE %s OR LOWER(COALESCE(g.subdominio,'')) LIKE %s)")
+                params.extend([like, like])
+
+            sv = str(status or "").strip().lower()
+            if sv:
+                where_terms.append("LOWER(COALESCE(gs.status,'')) = %s")
+                params.append(sv)
+
+            if due_before_days is not None:
+                where_terms.append("gs.next_due_date <= (CURRENT_DATE + (%s || ' days')::interval)")
+                params.append(int(due_before_days))
+
+            where_sql = (" WHERE " + " AND ".join(where_terms)) if where_terms else ""
+
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    f"""
+                    SELECT COUNT(*)
+                    FROM gyms g
+                    LEFT JOIN LATERAL (
+                        SELECT * FROM gym_subscriptions s WHERE s.gym_id = g.id ORDER BY s.id DESC LIMIT 1
+                    ) gs ON TRUE
+                    {where_sql}
+                    """,
+                    params,
+                )
+                total_row = cur.fetchone()
+                total = int(total_row[0]) if total_row else 0
+
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute(
+                    f"""
+                    SELECT
+                        g.id AS gym_id,
+                        g.nombre,
+                        g.subdominio,
+                        g.status AS gym_status,
+                        g.hard_suspend,
+                        g.suspended_until,
+                        g.suspended_reason,
+                        gs.id AS subscription_id,
+                        gs.plan_id,
+                        gs.start_date,
+                        gs.next_due_date,
+                        gs.status AS subscription_status,
+                        p.name AS plan_name,
+                        p.amount AS plan_amount,
+                        p.currency AS plan_currency,
+                        p.period_days AS plan_period_days,
+                        p.active AS plan_active
+                    FROM gyms g
+                    LEFT JOIN LATERAL (
+                        SELECT * FROM gym_subscriptions s WHERE s.gym_id = g.id ORDER BY s.id DESC LIMIT 1
+                    ) gs ON TRUE
+                    LEFT JOIN plans p ON p.id = gs.plan_id
+                    {where_sql}
+                    ORDER BY gs.next_due_date ASC NULLS LAST, g.id ASC
+                    LIMIT %s OFFSET %s
+                    """,
+                    params + [ps, (p - 1) * ps],
+                )
+                rows = cur.fetchall()
+                return {"ok": True, "items": [dict(r) for r in rows], "total": total, "page": p, "page_size": ps}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "items": [], "total": 0, "page": int(page or 1), "page_size": int(page_size or 50)}
 
     def obtener_auditoria_gym(self, gym_id: int, limit: int = 50) -> List[Dict[str, Any]]:
         try:
@@ -2262,23 +2776,395 @@ class AdminService:
             logger.error(f"Error deleting plan {plan_id}: {e}")
             return {"ok": False, "error": str(e)}
 
+    def obtener_settings(self) -> Dict[str, Any]:
+        try:
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute("SELECT key, value, updated_at, updated_by FROM admin_settings ORDER BY key ASC")
+                rows = cur.fetchall()
+                return {"ok": True, "settings": [dict(r) for r in rows]}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "settings": []}
+
+    def upsert_settings(self, updates: Dict[str, Any], actor_username: Optional[str] = None) -> Dict[str, Any]:
+        try:
+            if not updates:
+                return {"ok": False, "error": "no_updates"}
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor()
+                for k, v in updates.items():
+                    key = str(k or "").strip()
+                    if not key:
+                        continue
+                    cur.execute(
+                        """
+                        INSERT INTO admin_settings (key, value, updated_at, updated_by)
+                        VALUES (%s, %s::jsonb, NOW(), %s)
+                        ON CONFLICT (key) DO UPDATE
+                        SET value = EXCLUDED.value,
+                            updated_at = EXCLUDED.updated_at,
+                            updated_by = EXCLUDED.updated_by
+                        """,
+                        (key, json.dumps(v), actor_username),
+                    )
+                conn.commit()
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def _settings_map(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {}
+        try:
+            st = self.obtener_settings()
+            rows = (st or {}).get("settings") or []
+            for r in rows:
+                k = (r or {}).get("key")
+                if k:
+                    out[str(k)] = (r or {}).get("value")
+        except Exception:
+            return {}
+        return out
+
+    def _job_run_start(self, job_key: str, run_id: str) -> None:
+        with self.db.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO admin_job_runs (run_id, job_key, status) VALUES (%s, %s, 'running') ON CONFLICT (run_id) DO NOTHING",
+                (str(run_id), str(job_key)),
+            )
+            conn.commit()
+
+    def _job_run_finish(self, run_id: str, *, status: str, result: Optional[Dict[str, Any]] = None, error: Optional[str] = None) -> None:
+        with self.db.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE admin_job_runs SET status = %s, finished_at = NOW(), result = %s::jsonb, error = %s WHERE run_id = %s",
+                (str(status), json.dumps(result) if result is not None else None, error, str(run_id)),
+            )
+            conn.commit()
+
+    def obtener_job_run(self, run_id: str) -> Dict[str, Any]:
+        try:
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute(
+                    "SELECT run_id, job_key, status, started_at, finished_at, result, error FROM admin_job_runs WHERE run_id = %s",
+                    (str(run_id),),
+                )
+                row = cur.fetchone()
+                return {"ok": True, "job_run": dict(row) if row else None}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "job_run": None}
+
+    def listar_job_runs(self, job_key: str, limit: int = 25) -> Dict[str, Any]:
+        try:
+            lim = max(int(limit or 25), 1)
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute(
+                    """
+                    SELECT run_id, job_key, status, started_at, finished_at, error
+                    FROM admin_job_runs
+                    WHERE job_key = %s
+                    ORDER BY started_at DESC
+                    LIMIT %s
+                    """,
+                    (str(job_key), lim),
+                )
+                rows = cur.fetchall()
+                return {"ok": True, "items": [dict(r) for r in rows], "job_key": str(job_key)}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "items": [], "job_key": str(job_key)}
+
+    def marcar_suscripciones_overdue(self) -> Dict[str, Any]:
+        try:
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute(
+                    """
+                    WITH latest AS (
+                        SELECT DISTINCT ON (gym_id) id, gym_id, next_due_date, status
+                        FROM gym_subscriptions
+                        ORDER BY gym_id, id DESC
+                    ),
+                    upd AS (
+                        UPDATE gym_subscriptions s
+                        SET status = 'overdue'
+                        FROM latest l
+                        WHERE s.id = l.id
+                          AND s.status = 'active'
+                          AND l.next_due_date < CURRENT_DATE
+                        RETURNING s.gym_id, s.id AS subscription_id, l.next_due_date
+                    )
+                    SELECT * FROM upd
+                    """
+                )
+                rows = cur.fetchall()
+                conn.commit()
+                return {"ok": True, "updated": len(rows), "items": [dict(r) for r in rows]}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "updated": 0, "items": []}
+
+    def ejecutar_mantenimiento_suscripciones(self, *, reminder_days: int, grace_days: int, run_id: str) -> Dict[str, Any]:
+        job_key = "subscriptions_maintenance"
+        try:
+            existing = self.obtener_job_run(str(run_id))
+            jr = (existing or {}).get("job_run")
+            if jr and str(jr.get("status") or "").lower() == "success" and jr.get("result") is not None:
+                result = jr.get("result")
+                if isinstance(result, dict):
+                    return {"ok": True, **result}
+                return {"ok": True, "run_id": str(run_id), "job_key": job_key, "result": result}
+        except Exception:
+            pass
+
+        self._job_run_start(job_key, run_id)
+        try:
+            cfg = self._settings_map()
+            subs = cfg.get("subscriptions") or {}
+            reminders_enabled = bool((subs or {}).get("reminders_enabled", True))
+            auto_suspend_enabled = bool((subs or {}).get("auto_suspend_enabled", True))
+
+            stats: Dict[str, Any] = {
+                "run_id": str(run_id),
+                "job_key": job_key,
+                "reminder_days": int(reminder_days),
+                "grace_days": int(grace_days),
+                "steps": {},
+            }
+
+            step_overdue = self.marcar_suscripciones_overdue()
+            stats["steps"]["mark_overdue"] = step_overdue
+
+            if reminders_enabled:
+                step_reminders = self.enviar_recordatorios_vencimiento(int(reminder_days))
+            else:
+                step_reminders = {"ok": True, "sent": 0, "disabled": True}
+            stats["steps"]["reminders"] = step_reminders
+
+            if auto_suspend_enabled:
+                step_suspend = self.auto_suspender_vencidos(int(grace_days))
+            else:
+                step_suspend = {"ok": True, "suspended": 0, "disabled": True}
+            stats["steps"]["auto_suspend"] = step_suspend
+
+            try:
+                self.log_action("system", "subscriptions_maintenance", None, json.dumps({"run_id": run_id, "steps": {k: v.get("ok") for k, v in stats["steps"].items()}}))
+            except Exception:
+                pass
+
+            self._job_run_finish(run_id, status="success", result=stats, error=None)
+            return {"ok": True, **stats}
+        except Exception as e:
+            err = str(e)
+            try:
+                self._job_run_finish(run_id, status="failed", result=None, error=err)
+            except Exception:
+                pass
+            return {"ok": False, "run_id": str(run_id), "error": err}
+
+    def obtener_suscripcion_gym(self, gym_id: int) -> Dict[str, Any]:
+        try:
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute(
+                    """
+                    SELECT
+                        gs.id,
+                        gs.gym_id,
+                        gs.plan_id,
+                        gs.start_date,
+                        gs.next_due_date,
+                        gs.status,
+                        gs.created_at,
+                        p.name AS plan_name,
+                        p.amount AS plan_amount,
+                        p.currency AS plan_currency,
+                        p.period_days AS plan_period_days,
+                        p.active AS plan_active
+                    FROM gym_subscriptions gs
+                    JOIN plans p ON p.id = gs.plan_id
+                    WHERE gs.gym_id = %s
+                    ORDER BY gs.id DESC
+                    LIMIT 1
+                    """,
+                    (int(gym_id),),
+                )
+                row = cur.fetchone()
+                return {"ok": True, "subscription": dict(row) if row else None}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "subscription": None}
+
+    def _get_plan(self, cur, plan_id: int) -> Optional[Dict[str, Any]]:
+        cur.execute("SELECT id, name, amount, currency, period_days, active FROM plans WHERE id = %s", (int(plan_id),))
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "name": row[1],
+            "amount": float(row[2] or 0),
+            "currency": row[3],
+            "period_days": int(row[4] or 0),
+            "active": bool(row[5]),
+        }
+
+    def upsert_suscripcion_gym(
+        self,
+        gym_id: int,
+        plan_id: int,
+        start_date: Optional[str] = None,
+        next_due_date: Optional[str] = None,
+        status: str = "active",
+    ) -> Dict[str, Any]:
+        try:
+            gid = int(gym_id)
+            pid = int(plan_id)
+            st = str(status or "active").strip().lower() or "active"
+            if st not in ("active", "overdue", "canceled"):
+                st = "active"
+
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor()
+                plan = self._get_plan(cur, pid)
+                if not plan:
+                    return {"ok": False, "error": "plan_not_found"}
+
+                cur.execute("SELECT id, start_date, next_due_date, status FROM gym_subscriptions WHERE gym_id = %s ORDER BY id DESC LIMIT 1", (gid,))
+                existing = cur.fetchone()
+
+                try:
+                    sd = datetime.fromisoformat(str(start_date)).date() if start_date else date.today()
+                except Exception:
+                    sd = date.today()
+
+                if next_due_date:
+                    try:
+                        nd = datetime.fromisoformat(str(next_due_date)).date()
+                    except Exception:
+                        nd = sd + timedelta(days=int(plan.get("period_days") or 0) or 30)
+                else:
+                    nd = sd + timedelta(days=int(plan.get("period_days") or 0) or 30)
+
+                if existing:
+                    sub_id = int(existing[0])
+                    cur.execute(
+                        "UPDATE gym_subscriptions SET plan_id = %s, start_date = %s, next_due_date = %s, status = %s WHERE id = %s",
+                        (pid, sd, nd, st, sub_id),
+                    )
+                else:
+                    cur.execute(
+                        "INSERT INTO gym_subscriptions (gym_id, plan_id, start_date, next_due_date, status) VALUES (%s,%s,%s,%s,%s) RETURNING id",
+                        (gid, pid, sd, nd, st),
+                    )
+                    sub_id = int((cur.fetchone() or [0])[0] or 0)
+
+                if st == "active":
+                    cur.execute(
+                        """
+                        UPDATE gyms
+                        SET status = 'active',
+                            hard_suspend = FALSE,
+                            suspended_until = NULL,
+                            suspended_reason = NULL
+                        WHERE id = %s AND status = 'suspended' AND hard_suspend = FALSE
+                        """,
+                        (gid,),
+                    )
+
+                conn.commit()
+                return {"ok": True, "subscription_id": sub_id}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def renovar_suscripcion_gym(self, gym_id: int, periods: int = 1) -> Dict[str, Any]:
+        try:
+            gid = int(gym_id)
+            per = max(int(periods or 1), 1)
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT id, plan_id, next_due_date, status FROM gym_subscriptions WHERE gym_id = %s ORDER BY id DESC LIMIT 1", (gid,))
+                row = cur.fetchone()
+                if not row:
+                    return {"ok": False, "error": "no_subscription"}
+                sub_id, plan_id, next_due_date, st = int(row[0]), int(row[1]), row[2], str(row[3] or "")
+                plan = self._get_plan(cur, int(plan_id))
+                if not plan:
+                    return {"ok": False, "error": "plan_not_found"}
+
+                today = date.today()
+                base = next_due_date if next_due_date and next_due_date >= today else today
+                nd = base + timedelta(days=(int(plan.get("period_days") or 0) or 30) * per)
+
+                cur.execute("UPDATE gym_subscriptions SET next_due_date = %s, status = 'active' WHERE id = %s", (nd, sub_id))
+                cur.execute(
+                    """
+                    UPDATE gyms
+                    SET status = 'active',
+                        hard_suspend = FALSE,
+                        suspended_until = NULL,
+                        suspended_reason = NULL
+                    WHERE id = %s AND status = 'suspended' AND hard_suspend = FALSE
+                    """,
+                    (gid,),
+                )
+                conn.commit()
+                return {"ok": True, "subscription_id": sub_id, "next_due_date": nd.isoformat()}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def enviar_recordatorios_vencimiento(self, days: int = 7) -> Dict[str, Any]:
         """Send reminder to gyms expiring in the next N days."""
         try:
             sent = 0
             upcoming = self.listar_proximos_vencimientos(days)
-            
-            for gym in upcoming:
-                gym_id = gym.get("gym_id") or gym.get("id")
-                if gym_id:
-                    # Try to send WhatsApp reminder
+
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor()
+                for gym in upcoming:
+                    gym_id = gym.get("gym_id") or gym.get("id")
+                    due = gym.get("next_due_date")
+                    if not gym_id or not due:
+                        continue
+                    due_txt = str(due)
+                    dedupe_key = f"subscription_expiring:{int(gym_id)}:{due_txt}"
+                    cur.execute(
+                        """
+                        INSERT INTO gym_reminder_logs (gym_id, dedupe_key, reminder_type, channel, status, payload)
+                        VALUES (%s, %s, 'subscription_expiring', 'whatsapp', 'pending', %s::jsonb)
+                        ON CONFLICT (dedupe_key) DO NOTHING
+                        RETURNING id
+                        """,
+                        (int(gym_id), dedupe_key, json.dumps({"next_due_date": due_txt, "window_days": int(days)})),
+                    )
+                    row = cur.fetchone()
+                    if not row:
+                        conn.commit()
+                        continue
+                    log_id = int(row[0])
+                    conn.commit()
+
+                    ok = False
+                    err = None
                     try:
-                        msg = f"Recordatorio: Su suscripción a IronHub vence el {gym.get('valid_until', 'pronto')}. Por favor renueve para evitar interrupciones."
-                        self._enviar_whatsapp_a_owner(gym_id, msg)
-                        sent += 1
+                        msg = f"Recordatorio: Su suscripción a IronHub vence el {due_txt}. Por favor renueve para evitar interrupciones."
+                        ok = bool(self._enviar_whatsapp_a_owner(int(gym_id), msg))
+                    except Exception as e:
+                        ok = False
+                        err = str(e)
+
+                    try:
+                        cur.execute(
+                            "UPDATE gym_reminder_logs SET status = %s, error = %s WHERE id = %s",
+                            ("sent" if ok else "failed", err, log_id),
+                        )
+                        conn.commit()
                     except Exception:
-                        pass
-            
+                        conn.commit()
+
+                    if ok:
+                        sent += 1
+
             return {"ok": True, "sent": sent, "total": len(upcoming)}
         except Exception as e:
             logger.error(f"Error sending reminders: {e}")
@@ -2287,36 +3173,58 @@ class AdminService:
     def auto_suspender_vencidos(self, grace_days: int = 0) -> Dict[str, Any]:
         """Automatically suspend gyms that are past their due date by grace_days."""
         try:
-            suspended = 0
             with self.db.get_connection_context() as conn:
-                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                # Find gyms with expired subscriptions
-                cur.execute("""
-                    SELECT g.id, g.nombre, gs.next_due_date
-                    FROM gyms g
-                    JOIN gym_subscriptions gs ON gs.gym_id = g.id
-                    WHERE g.status = 'active' 
-                    AND gs.next_due_date < CURRENT_DATE - INTERVAL '%s days'
-                """, (grace_days,))
-                rows = cur.fetchall()
-                
-                for row in rows:
-                    gym_id = row["id"]
+                cur = conn.cursor()
+                reason = f"Subscription expired (auto-suspended after {int(grace_days)} grace days)"
+                cur.execute(
+                    """
+                    WITH latest AS (
+                        SELECT DISTINCT ON (gym_id) id, gym_id, next_due_date, status
+                        FROM gym_subscriptions
+                        ORDER BY gym_id, id DESC
+                    ),
+                    candidates AS (
+                        SELECT g.id AS gym_id, l.id AS subscription_id, l.next_due_date
+                        FROM gyms g
+                        JOIN latest l ON l.gym_id = g.id
+                        WHERE g.status = 'active'
+                          AND g.hard_suspend = FALSE
+                          AND l.status <> 'canceled'
+                          AND l.next_due_date < CURRENT_DATE - (%s || ' days')::interval
+                    ),
+                    upd_sub AS (
+                        UPDATE gym_subscriptions s
+                        SET status = 'overdue'
+                        FROM candidates c
+                        WHERE s.id = c.subscription_id
+                          AND s.status <> 'canceled'
+                        RETURNING s.gym_id
+                    ),
+                    upd_gym AS (
+                        UPDATE gyms g
+                        SET status = 'suspended',
+                            suspended_until = NULL,
+                            suspended_reason = %s
+                        FROM candidates c
+                        WHERE g.id = c.gym_id
+                          AND g.status = 'active'
+                        RETURNING g.id
+                    )
+                    SELECT id FROM upd_gym
+                    """,
+                    (int(grace_days), reason),
+                )
+                ids = [int(r[0]) for r in (cur.fetchall() or []) if r and r[0] is not None]
+                conn.commit()
+                if ids:
                     try:
-                        self.set_estado_gimnasio(
-                            gym_id, 
-                            "suspended", 
-                            hard_suspend=False, 
-                            reason=f"Subscription expired (auto-suspended after {grace_days} grace days)"
-                        )
-                        suspended += 1
+                        self.log_action("system", "auto_suspend_overdue", None, json.dumps({"count": len(ids), "gym_ids": ids, "grace_days": int(grace_days)}))
                     except Exception:
                         pass
-                
-            return {"ok": True, "suspended": suspended}
+                return {"ok": True, "suspended": len(ids), "gym_ids": ids, "grace_days": int(grace_days)}
         except Exception as e:
             logger.error(f"Error auto-suspending: {e}")
-            return {"ok": False, "error": str(e), "suspended": 0}
+            return {"ok": False, "error": str(e), "suspended": 0, "gym_ids": [], "grace_days": int(grace_days)}
 
     def _enviar_whatsapp_a_owner(self, gym_id: int, message: str) -> bool:
         """Send WhatsApp message to gym owner phone."""
@@ -2475,6 +3383,29 @@ class AdminService:
             return merged
         except Exception:
             return self._default_whatsapp_bindings()
+
+    def list_whatsapp_action_specs(self) -> List[Dict[str, Any]]:
+        try:
+            specs = self._action_specs() or []
+            bindings = self.list_whatsapp_template_bindings()
+            out: List[Dict[str, Any]] = []
+            for s in specs:
+                k = str((s or {}).get("key") or "").strip()
+                if not k:
+                    continue
+                required_params = (s or {}).get("required_params") or []
+                out.append(
+                    {
+                        "action_key": k,
+                        "label": str((s or {}).get("name") or k),
+                        "required_params": int(len(required_params)),
+                        "default_enabled": bool((s or {}).get("default_enabled") is True),
+                        "default_template_name": str((bindings or {}).get(k) or "").strip(),
+                    }
+                )
+            return out
+        except Exception:
+            return []
 
     def upsert_whatsapp_template_binding(self, binding_key: str, template_name: str) -> Dict[str, Any]:
         k = str(binding_key or "").strip()
@@ -3130,6 +4061,7 @@ class AdminService:
             errors: list[str] = []
             phone_info: Dict[str, Any] = {}
             templates = {"count": 0, "approved": 0, "pending": 0, "rejected": 0}
+            templates_list: list[dict[str, Any]] = []
 
             try:
                 r = requests.get(
@@ -3150,7 +4082,7 @@ class AdminService:
                 r = requests.get(
                     f"https://graph.facebook.com/{api_version}/{waba_id}/message_templates",
                     headers=headers,
-                    params={"fields": "name,status", "limit": "200"},
+                    params={"fields": "name,status,category,language", "limit": "200"},
                     timeout=timeout,
                 )
                 data = r.json() if r.content else {}
@@ -3159,6 +4091,16 @@ class AdminService:
                 else:
                     items = data.get("data") or []
                     templates["count"] = int(len(items))
+                    templates_list = [
+                        {
+                            "name": str((it or {}).get("name") or ""),
+                            "status": str((it or {}).get("status") or ""),
+                            "category": str((it or {}).get("category") or ""),
+                            "language": str((it or {}).get("language") or ""),
+                        }
+                        for it in items
+                        if str((it or {}).get("name") or "").strip()
+                    ]
                     for it in items:
                         st = str((it or {}).get("status") or "").upper()
                         if st == "APPROVED":
@@ -3193,6 +4135,7 @@ class AdminService:
                 "waba_id": waba_id,
                 "phone": phone_info,
                 "templates": templates,
+                "templates_list": templates_list,
                 "subscribed_apps": {"app_id": app_id or None, "subscribed": subscribed},
                 "errors": errors,
             }
@@ -3460,7 +4403,9 @@ class AdminService:
             "application_name": "admin_set_tenant_whatsapp_action",
         }
         meta_status = None
+        meta_language = None
         meta_list_ok = False
+        r_lang = None
         try:
             with psycopg2.connect(**pg_params) as t_conn0:
                 with t_conn0.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as t_cur0:
@@ -3468,28 +4413,40 @@ class AdminService:
                         "SELECT phone_id, waba_id, access_token FROM whatsapp_config WHERE active = TRUE ORDER BY created_at DESC LIMIT 1"
                     )
                     cfg = t_cur0.fetchone() or {}
+                    try:
+                        t_cur0.execute("SELECT valor FROM configuracion WHERE clave = %s LIMIT 1", ("wa_template_language",))
+                        r_lang = t_cur0.fetchone()
+                    except Exception:
+                        r_lang = None
+            if requests is None:
+                return {"ok": False, "error": "requests_not_available"}
             waba_id = str((cfg or {}).get("waba_id") or "").strip()
+            phone_id = str((cfg or {}).get("phone_id") or "").strip()
             token_raw = str((cfg or {}).get("access_token") or "").strip()
             token = SecureConfig.decrypt_waba_secret(token_raw) if token_raw else ""
             if not token and (token_raw.startswith("EAA") or token_raw.startswith("EAAB") or token_raw.startswith("EAAJ")):
                 token = token_raw
+            if phone_id and (not waba_id or not token):
+                return {"ok": False, "error": "tenant_whatsapp_missing_meta_credentials"}
             if waba_id and token:
                 api_v = (os.getenv("META_GRAPH_API_VERSION") or os.getenv("WHATSAPP_API_VERSION") or "v19.0").strip()
                 url = f"https://graph.facebook.com/{api_v}/{waba_id}/message_templates"
                 headers = {"Authorization": f"Bearer {token}"}
                 after = None
                 for _ in range(10):
-                    q = {"fields": "name,status", "limit": "200"}
+                    q = {"fields": "name,status,language", "limit": "200"}
                     if after:
                         q["after"] = after
                     resp = requests.get(url, headers=headers, params=q, timeout=20)
                     data = resp.json() if resp.content else {}
                     if resp.status_code >= 400:
-                        break
+                        meta_list_ok = True
+                        return {"ok": False, "error": f"meta_list_failed:{str((data or {}).get('error') or data or resp.status_code)}"}
                     meta_list_ok = True
                     for item in (data.get("data") or []):
                         if str((item or {}).get("name") or "") == tname:
                             meta_status = str((item or {}).get("status") or "")
+                            meta_language = str((item or {}).get("language") or "")
                             break
                     if meta_status:
                         break
@@ -3503,6 +4460,21 @@ class AdminService:
             return {"ok": False, "error": "template_not_found_in_meta"}
         if meta_status and meta_status.upper() != "APPROVED":
             return {"ok": False, "error": f"template_not_approved_in_meta:{meta_status}"}
+        try:
+            tenant_lang = ""
+            try:
+                if isinstance(r_lang, dict):
+                    tenant_lang = str(r_lang.get("valor") or "").strip()
+                elif isinstance(r_lang, (list, tuple)) and len(r_lang) > 0:
+                    tenant_lang = str(r_lang[0] or "").strip()
+            except Exception:
+                tenant_lang = ""
+            if not tenant_lang:
+                tenant_lang = str(os.getenv("WHATSAPP_TEMPLATE_LANGUAGE") or "es_AR").strip()
+            if meta_language and tenant_lang and meta_language.strip() != tenant_lang.strip():
+                return {"ok": False, "error": f"template_language_mismatch_meta:{meta_language}_tenant:{tenant_lang}"}
+        except Exception:
+            pass
         try:
             with psycopg2.connect(**pg_params) as t_conn:
                 with t_conn.cursor() as t_cur:

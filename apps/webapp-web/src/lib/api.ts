@@ -116,6 +116,7 @@ export interface Usuario {
     rol: 'user' | 'admin' | 'profesor' | 'owner';
     tipo_cuota_id?: number;
     tipo_cuota_nombre?: string;
+    tipo_cuota_duracion_dias?: number;
     fecha_registro?: string;
     fecha_proximo_vencimiento?: string;
     dias_restantes?: number;
@@ -308,6 +309,7 @@ export interface Asistencia {
     id: number;
     usuario_id: number;
     usuario_nombre?: string;
+    usuario_dni?: string;
     fecha: string;
     hora?: string;
     hora_entrada?: string;
@@ -509,12 +511,22 @@ export interface WhatsAppMensaje {
     usuario_id: number;
     usuario_nombre?: string;
     telefono?: string;
-    tipo: 'welcome' | 'payment' | 'deactivation' | 'overdue' | 'class_reminder';
-    estado: 'pending' | 'sent' | 'failed';
+    tipo: string;
+    estado: string;
     contenido?: string;
     error_detail?: string;
     fecha_envio?: string;
     created_at?: string;
+}
+
+export interface WhatsAppMensajesTotals {
+    by_estado: Record<string, number>;
+    by_tipo: Record<string, number>;
+}
+
+export interface WhatsAppMensajesResponse {
+    mensajes: WhatsAppMensaje[];
+    totals?: WhatsAppMensajesTotals;
 }
 
 export interface WhatsAppStatus {
@@ -743,6 +755,8 @@ class ApiClient {
             dias_restantes?: number;
             fecha_proximo_vencimiento?: string;
             exento?: boolean;
+            tipo_cuota_nombre?: string | null;
+            tipo_cuota_duracion_dias?: number;
         }>('/api/usuario/login', {
             method: 'POST',
             body: JSON.stringify(credentials),
@@ -782,6 +796,8 @@ class ApiClient {
             fecha_proximo_vencimiento?: string;
             exento?: boolean;
             activo?: boolean;
+            tipo_cuota_nombre?: string | null;
+            tipo_cuota_duracion_dias?: number;
         }>('/api/checkin/auth', {
             method: 'POST',
             body: JSON.stringify(credentials),
@@ -789,7 +805,7 @@ class ApiClient {
     }
 
     // Scan station QR
-    async scanStationQR(token: string) {
+    async scanStationQR(token: string, idempotencyKey?: string) {
         return this.request<{
             ok: boolean;
             mensaje: string;
@@ -799,7 +815,7 @@ class ApiClient {
             };
         }>('/api/checkin/qr', {
             method: 'POST',
-            body: JSON.stringify({ token }),
+            body: JSON.stringify({ token, ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}) }),
         });
     }
 
@@ -1314,15 +1330,18 @@ class ApiClient {
     }
 
     // === Asistencias ===
-    async getAsistencias(params?: { usuario_id?: number; desde?: string; hasta?: string; limit?: number }) {
+    async getAsistencias(params?: { usuario_id?: number; desde?: string; hasta?: string; q?: string; limit?: number; offset?: number; page?: number }) {
         const searchParams = new URLSearchParams();
         if (params?.usuario_id) searchParams.set('usuario_id', String(params.usuario_id));
         if (params?.desde) searchParams.set('desde', params.desde);
         if (params?.hasta) searchParams.set('hasta', params.hasta);
+        if (params?.q) searchParams.set('q', params.q);
         if (params?.limit) searchParams.set('limit', String(params.limit));
+        if (params?.offset !== undefined) searchParams.set('offset', String(params.offset));
+        if (params?.page !== undefined) searchParams.set('page', String(params.page));
 
         const query = searchParams.toString();
-        return this.request<{ asistencias: Asistencia[] }>(
+        return this.request<{ asistencias: Asistencia[]; total?: number }>(
             `/api/asistencias${query ? `?${query}` : ''}`
         );
     }
@@ -1341,6 +1360,36 @@ class ApiClient {
     }
 
     // === KPIs / Statistics ===
+    async getOwnerDashboardOverview() {
+        return this.request<any>('/api/owner_dashboard/overview');
+    }
+
+    async getOwnerAttendanceAudit(params?: { dias?: number; desde?: string; hasta?: string; umbral_multiples?: number; umbral_repeticion_minutos?: number }) {
+        const searchParams = new URLSearchParams();
+        if (params?.dias !== undefined) searchParams.set('dias', String(params.dias));
+        if (params?.desde) searchParams.set('desde', params.desde);
+        if (params?.hasta) searchParams.set('hasta', params.hasta);
+        if (params?.umbral_multiples !== undefined) searchParams.set('umbral_multiples', String(params.umbral_multiples));
+        if (params?.umbral_repeticion_minutos !== undefined) searchParams.set('umbral_repeticion_minutos', String(params.umbral_repeticion_minutos));
+        const q = searchParams.toString();
+        return this.request<any>(`/api/owner_dashboard/attendance_audit${q ? `?${q}` : ''}`);
+    }
+
+    async getOwnerGymSettings() {
+        return this.request<{ ok: boolean; settings: Record<string, any> }>('/api/owner/gym/settings');
+    }
+
+    async updateOwnerGymSettings(updates: Record<string, any>) {
+        return this.request<{ ok: boolean; settings?: Record<string, any>; error?: string }>('/api/owner/gym/settings', {
+            method: 'POST',
+            body: JSON.stringify(updates),
+        });
+    }
+
+    async getOwnerGymBilling() {
+        return this.request<any>('/api/owner/gym/billing');
+    }
+
     async getKPIs() {
         return this.request<{
             total_activos: number;
@@ -1349,6 +1398,54 @@ class ApiClient {
             asistencias_hoy: number;
             nuevos_30_dias: number;
         }>('/api/kpis');
+    }
+
+    async getKPIsAvanzados() {
+        return this.request<{
+            churn_rate?: number;
+            avg_pago?: number;
+            churned_30d?: number;
+        }>('/api/kpis_avanzados');
+    }
+
+    async getActivosInactivos() {
+        return this.request<{ activos: number; inactivos: number }>('/api/activos_inactivos');
+    }
+
+    async getARPU12m() {
+        return this.request<{ data: Array<{ mes: string; arpu: number }> }>('/api/arpu12m');
+    }
+
+    async getCohortRetencionHeatmap() {
+        return this.request<{ cohorts: any[] }>('/api/cohort_retencion_heatmap');
+    }
+
+    async getARPAByTipoCuota() {
+        return this.request<{ data: Array<{ tipo: string; arpa: number }> }>('/api/arpa_por_tipo_cuota');
+    }
+
+    async getPaymentStatusDist() {
+        return this.request<any>('/api/payment_status_dist');
+    }
+
+    async getWaitlistEvents() {
+        return this.request<{ events: any[] }>('/api/waitlist_events');
+    }
+
+    async getGymSubscription() {
+        return this.request<any>('/api/gym/subscription');
+    }
+
+    async getWhatsAppStats() {
+        return this.request<any>('/api/whatsapp/stats');
+    }
+
+    async getWhatsAppPendientes(params?: { dias?: number; limit?: number }) {
+        const searchParams = new URLSearchParams();
+        if (params?.dias) searchParams.set('dias', String(params.dias));
+        if (params?.limit) searchParams.set('limit', String(params.limit));
+        const query = searchParams.toString();
+        return this.request<{ mensajes: any[] }>(`/api/whatsapp/pendientes${query ? `?${query}` : ''}`);
     }
 
     // === Profesores CRUD ===
@@ -1485,17 +1582,17 @@ class ApiClient {
     }
 
     // === Check-in ===
-    async checkIn(token: string) {
+    async checkIn(token: string, idempotencyKey?: string) {
         return this.request<{ ok: boolean; usuario_nombre?: string; mensaje?: string }>('/api/checkin', {
             method: 'POST',
-            body: JSON.stringify({ token }),
+            body: JSON.stringify({ token, ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}) }),
         });
     }
 
-    async checkInByDni(dni: string, pin?: string) {
+    async checkInByDni(dni: string, pin?: string, idempotencyKey?: string) {
         return this.request<{ ok: boolean; usuario_nombre?: string; mensaje?: string; require_pin?: boolean }>('/api/checkin/dni', {
             method: 'POST',
-            body: JSON.stringify({ dni, ...(pin ? { pin } : {}) }),
+            body: JSON.stringify({ dni, ...(pin ? { pin } : {}), ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}) }),
         });
     }
 
@@ -1516,6 +1613,15 @@ class ApiClient {
             body: JSON.stringify({
                 usuario_id: usuarioId,
                 fecha: fecha || new Date().toISOString().split('T')[0]
+            }),
+        });
+    }
+
+    async deleteAsistenciaById(asistenciaId: number) {
+        return this.request<{ success: boolean }>('/api/asistencias/eliminar', {
+            method: 'DELETE',
+            body: JSON.stringify({
+                asistencia_id: asistenciaId,
             }),
         });
     }
@@ -1785,7 +1891,7 @@ class ApiClient {
     }
 
     async getWhatsAppMensajesPendientes() {
-        return this.request<{ mensajes: WhatsAppMensaje[] }>('/api/whatsapp/pendientes');
+        return this.request<WhatsAppMensajesResponse>('/api/whatsapp/pendientes');
     }
 
     async getWhatsAppEmbeddedSignupConfig() {
@@ -1927,7 +2033,7 @@ class ApiClient {
         return this.request<{ alerts: Array<{ usuario_id: number; usuario_nombre: string; ultimo_pago: string | null }> }>('/api/delinquency_alerts_recent');
     }
 
-    async exportToCsv(type: 'usuarios' | 'pagos' | 'asistencias', params?: { desde?: string; hasta?: string }) {
+    async exportToCsv(type: 'usuarios' | 'pagos' | 'asistencias' | 'asistencias_audit', params?: { desde?: string; hasta?: string }) {
         const searchParams = new URLSearchParams();
         if (params?.desde) searchParams.set('desde', params.desde);
         if (params?.hasta) searchParams.set('hasta', params.hasta);

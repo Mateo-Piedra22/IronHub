@@ -6,8 +6,8 @@ export async function POST(request: Request) {
     try {
         const contentType = request.headers.get('content-type') || '';
         if (contentType.includes('application/json')) {
-            const body = await request.json().catch(() => ({}));
-            signedRequest = String((body as any)?.signed_request || '');
+            const body = (await request.json().catch(() => ({}))) as { signed_request?: unknown };
+            signedRequest = String(body?.signed_request || '');
         } else {
             const form = await request.formData().catch(() => null);
             if (form) {

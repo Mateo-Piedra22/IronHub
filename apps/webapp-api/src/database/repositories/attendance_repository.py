@@ -36,7 +36,7 @@ class AttendanceRepository(BaseRepository):
     def _today_local_date(self) -> date:
         return self._now_local().date()
     
-    def registrar_asistencia_comun(self, usuario_id: int, fecha: date) -> int:
+    def registrar_asistencia_comun(self, usuario_id: int, fecha: date, *, allow_multiple: bool = False) -> int:
         user = self.db.get(Usuario, usuario_id)
         if not user:
             raise PermissionError("El usuario está inactivo: no se puede registrar asistencia")
@@ -47,11 +47,29 @@ class AttendanceRepository(BaseRepository):
         if (not exento) and (not activo):
             raise PermissionError("El usuario está inactivo: no se puede registrar asistencia")
             
-        existing = self.db.scalar(
-            select(Asistencia).where(Asistencia.usuario_id == usuario_id, Asistencia.fecha == fecha)
-        )
-        if existing:
-            raise ValueError(f"Ya existe una asistencia registrada para este usuario en la fecha {fecha}")
+        if not bool(allow_multiple):
+            try:
+                lock = self.db.execute(
+                    text(
+                        """
+                        INSERT INTO asistencias_diarias (usuario_id, fecha)
+                        VALUES (:uid, :f)
+                        ON CONFLICT DO NOTHING
+                        RETURNING 1
+                        """
+                    ),
+                    {"uid": int(usuario_id), "f": fecha},
+                ).fetchone()
+                if not lock:
+                    raise ValueError(f"Ya existe una asistencia registrada para este usuario en la fecha {fecha}")
+            except ValueError:
+                raise
+            except Exception:
+                existing = self.db.scalar(
+                    select(Asistencia).where(Asistencia.usuario_id == usuario_id, Asistencia.fecha == fecha)
+                )
+                if existing:
+                    raise ValueError(f"Ya existe una asistencia registrada para este usuario en la fecha {fecha}")
             
         asistencia = Asistencia(usuario_id=usuario_id, fecha=fecha, hora_registro=self._now_utc_naive())
         self.db.add(asistencia)
@@ -83,12 +101,12 @@ class AttendanceRepository(BaseRepository):
             for a, u in results
         ]
 
-    def registrar_asistencia(self, usuario_id: int, fecha: date = None) -> int:
+    def registrar_asistencia(self, usuario_id: int, fecha: date = None, *, allow_multiple: bool = False) -> int:
         if fecha is None:
             fecha = self._today_local_date()
-        return self.registrar_asistencia_comun(usuario_id, fecha)
+        return self.registrar_asistencia_comun(usuario_id, fecha, allow_multiple=allow_multiple)
 
-    def registrar_asistencias_batch(self, asistencias: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def registrar_asistencias_batch(self, asistencias: List[Dict[str, Any]], *, allow_multiple: bool = False) -> Dict[str, Any]:
         result = {'insertados': [], 'omitidos': [], 'count': 0}
         now = self._now_utc_naive()
         
@@ -104,10 +122,27 @@ class AttendanceRepository(BaseRepository):
                     result['omitidos'].append({'usuario_id': uid, 'fecha': f, 'motivo': 'usuario inactivo'})
                     continue
                     
-                existing = self.db.scalar(select(Asistencia).where(Asistencia.usuario_id == uid, Asistencia.fecha == f))
-                if existing:
-                    result['omitidos'].append({'usuario_id': uid, 'fecha': f, 'motivo': 'duplicado'})
-                    continue
+                if not bool(allow_multiple):
+                    try:
+                        lock = self.db.execute(
+                            text(
+                                """
+                                INSERT INTO asistencias_diarias (usuario_id, fecha)
+                                VALUES (:uid, :f)
+                                ON CONFLICT DO NOTHING
+                                RETURNING 1
+                                """
+                            ),
+                            {"uid": int(uid), "f": f},
+                        ).fetchone()
+                        if not lock:
+                            result['omitidos'].append({'usuario_id': uid, 'fecha': f, 'motivo': 'duplicado'})
+                            continue
+                    except Exception:
+                        existing = self.db.scalar(select(Asistencia).where(Asistencia.usuario_id == uid, Asistencia.fecha == f))
+                        if existing:
+                            result['omitidos'].append({'usuario_id': uid, 'fecha': f, 'motivo': 'duplicado'})
+                            continue
                     
                 new_a = Asistencia(usuario_id=uid, fecha=f, hora_registro=now)
                 self.db.add(new_a)

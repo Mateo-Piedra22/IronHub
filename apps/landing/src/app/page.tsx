@@ -1,12 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import {
     Dumbbell, Users, CreditCard, BarChart3, Shield, Zap,
     ChevronRight, ExternalLink, Mail, MapPin, Phone
 } from 'lucide-react';
+import type { Gym, PublicMetrics } from '@/lib/api';
+import { fetchPublicGyms, fetchPublicMetrics } from '@/lib/api';
 
 // Animation variants
 const fadeInUp = {
@@ -180,29 +182,15 @@ function FeaturesSection() {
 }
 
 // Gyms Showcase Section - Premium Horizontal Carousel
-function GymsSection() {
-    const [gyms, setGyms] = useState<Array<{
-        id: number;
-        nombre: string;
-        subdominio: string;
-        status: string;
-    }>>([]);
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-        async function loadGyms() {
-            try {
-                const { fetchPublicGyms } = await import('@/lib/api');
-                const data = await fetchPublicGyms();
-                setGyms(data);
-            } catch {
-                setGyms([]);
-            } finally {
-                setLoading(false);
-            }
+function GymsSection({ gyms, loading, metrics }: { gyms: Gym[]; loading: boolean; metrics: PublicMetrics | null }) {
+    const metricsByGymId = useMemo(() => {
+        const out = new Map<number, { users_total: number | null; users_active: number | null }>();
+        const list = metrics?.gyms || [];
+        for (const g of list) {
+            out.set(Number(g.id), { users_total: g.users_total ?? null, users_active: g.users_active ?? null });
         }
-        loadGyms();
-    }, []);
+        return out;
+    }, [metrics]);
 
     // Premium gradient colors for gym cards
     const gradients = [
@@ -266,12 +254,14 @@ function GymsSection() {
                                 {/* Spacer for left padding */}
                                 <div className="flex-shrink-0 w-4" />
 
-                                {gyms.map((gym, index) => (
+                                {gyms.map((gym, index) => {
+                                    const gm = metricsByGymId.get(Number(gym.id));
+                                    const usersTotal = gm?.users_total ?? null;
+                                    const usersActive = gm?.users_active ?? null;
+                                    return (
                                     <motion.a
                                         key={gym.id}
-                                        href={`https://${gym.subdominio}.ironhub.motiona.xyz`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
+                                        href={`https://${gym.subdominio}.ironhub.motiona.xyz/`}
                                         initial={{ opacity: 0, scale: 0.9 }}
                                         whileInView={{ opacity: 1, scale: 1 }}
                                         viewport={{ once: true }}
@@ -282,9 +272,18 @@ function GymsSection() {
                                         <div className="card h-full p-6 group cursor-pointer hover:border-primary-500/50 transition-all duration-300">
                                             {/* Gym Avatar with gradient */}
                                             <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${gradients[index % gradients.length]} flex items-center justify-center mb-5 shadow-lg group-hover:shadow-xl transition-shadow`}>
-                                                <span className="text-2xl font-display font-bold text-white drop-shadow-sm">
-                                                    {gym.nombre.charAt(0).toUpperCase()}
-                                                </span>
+                                                {gym.logo_url ? (
+                                                    <img
+                                                        src={gym.logo_url}
+                                                        alt={gym.nombre}
+                                                        className="w-12 h-12 object-contain"
+                                                        loading="lazy"
+                                                    />
+                                                ) : (
+                                                    <span className="text-2xl font-display font-bold text-white drop-shadow-sm">
+                                                        {gym.nombre.charAt(0).toUpperCase()}
+                                                    </span>
+                                                )}
                                             </div>
 
                                             {/* Gym Name */}
@@ -303,13 +302,21 @@ function GymsSection() {
                                                     <div className="w-2 h-2 rounded-full bg-success-500 animate-pulse" />
                                                     <span className="text-xs text-success-400 font-medium">Online</span>
                                                 </div>
-                                                <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <ExternalLink className="w-4 h-4 text-primary-400" />
+                                                <div className="text-xs text-slate-500">
+                                                    {usersTotal === null ? (
+                                                        <span>Usuarios: —</span>
+                                                    ) : (
+                                                        <span>
+                                                            Usuarios: {usersTotal}
+                                                            {typeof usersActive === 'number' ? ` · activos: ${usersActive}` : ''}
+                                                        </span>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>
                                     </motion.a>
-                                ))}
+                                    );
+                                })}
 
                                 {/* Spacer for right padding */}
                                 <div className="flex-shrink-0 w-4" />
@@ -348,12 +355,179 @@ function GymsSection() {
                                     ))}
                                 </div>
                                 <span className="text-slate-300 text-sm font-medium">
-                                    {gyms.length} gimnasios activos
+                                    {metrics?.totals?.active_gyms ?? gyms.length} gimnasios activos · {metrics?.totals?.paying_gyms ?? '—'} pagando
                                 </span>
                             </div>
                         </motion.div>
                     </>
                 )}
+            </div>
+        </section>
+    );
+}
+
+function LeadSection({ metrics }: { metrics: PublicMetrics | null }) {
+    const [ownerName, setOwnerName] = useState('');
+    const [gymName, setGymName] = useState('');
+    const [city, setCity] = useState('');
+    const [phone, setPhone] = useState('');
+    const [email, setEmail] = useState('');
+    const [usersCount, setUsersCount] = useState('');
+    const [notes, setNotes] = useState('');
+
+    const isComplete = Boolean(ownerName.trim() && gymName.trim() && city.trim() && phone.trim() && email.trim());
+
+    const leadText = useMemo(() => {
+        const lines = [
+            'Solicitud de acceso a IronHub',
+            '',
+            `Responsable: ${ownerName.trim()}`,
+            `Gimnasio: ${gymName.trim()}`,
+            `Ciudad: ${city.trim()}`,
+            `Teléfono: ${phone.trim()}`,
+            `Email: ${email.trim()}`,
+            usersCount.trim() ? `Cantidad de alumnos (aprox): ${usersCount.trim()}` : '',
+            notes.trim() ? `Notas: ${notes.trim()}` : '',
+        ].filter(Boolean);
+        return lines.join('\n');
+    }, [ownerName, gymName, city, phone, email, usersCount, notes]);
+
+    const waUrl = useMemo(() => {
+        if (!isComplete) return '';
+        return `https://wa.me/5493434473599?text=${encodeURIComponent(leadText)}`;
+    }, [isComplete, leadText]);
+
+    const mailtoUrl = useMemo(() => {
+        if (!isComplete) return '';
+        const subject = `Solicitud IronHub - ${gymName.trim()}`;
+        return `mailto:noreply@motiona.xyz?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(leadText)}`;
+    }, [isComplete, leadText, gymName]);
+
+    return (
+        <section id="lead" className="py-24 relative">
+            <div className="max-w-7xl mx-auto px-6">
+                <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="text-center mb-12">
+                    <h2 className="section-heading mb-4">
+                        Métricas <span className="gradient-text">y Acceso</span>
+                    </h2>
+                    <p className="text-slate-400 text-lg max-w-2xl mx-auto">
+                        Si querés sumarte, completá el formulario y enviá la solicitud lista para WhatsApp o email.
+                    </p>
+                </motion.div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+                    <div className="space-y-4">
+                        <div className="card p-6">
+                            <h3 className="text-white font-semibold mb-4">Impacto en números</h3>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+                                    <div className="text-xs text-slate-500">Gimnasios activos</div>
+                                    <div className="text-2xl font-bold text-white mt-1">{metrics?.totals?.active_gyms ?? '—'}</div>
+                                </div>
+                                <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+                                    <div className="text-xs text-slate-500">Gimnasios pagando</div>
+                                    <div className="text-2xl font-bold text-white mt-1">{metrics?.totals?.paying_gyms ?? '—'}</div>
+                                </div>
+                                <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+                                    <div className="text-xs text-slate-500">Usuarios totales</div>
+                                    <div className="text-2xl font-bold text-white mt-1">{metrics?.totals?.total_users ?? '—'}</div>
+                                </div>
+                                <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+                                    <div className="text-xs text-slate-500">Usuarios activos</div>
+                                    <div className="text-2xl font-bold text-white mt-1">{metrics?.totals?.total_active_users ?? '—'}</div>
+                                </div>
+                            </div>
+                            <div className="text-xs text-slate-500 mt-4">
+                                Datos agregados a partir de gimnasios activos (caché pública).
+                            </div>
+                        </div>
+
+                        <div className="card p-6">
+                            <h3 className="text-white font-semibold mb-2">Incluye</h3>
+                            <div className="space-y-3 text-sm">
+                                <div className="flex items-start gap-3">
+                                    <BarChart3 className="w-5 h-5 text-primary-400 mt-0.5" />
+                                    <div>
+                                        <div className="text-white font-medium">Dashboard ejecutivo</div>
+                                        <div className="text-slate-400">KPIs reales, reportes y exportaciones</div>
+                                    </div>
+                                </div>
+                                <div className="flex items-start gap-3">
+                                    <CreditCard className="w-5 h-5 text-primary-400 mt-0.5" />
+                                    <div>
+                                        <div className="text-white font-medium">Pagos y cobranzas</div>
+                                        <div className="text-slate-400">Vencimientos, mora y trazabilidad</div>
+                                    </div>
+                                </div>
+                                <div className="flex items-start gap-3">
+                                    <Users className="w-5 h-5 text-primary-400 mt-0.5" />
+                                    <div>
+                                        <div className="text-white font-medium">Usuarios y asistencia</div>
+                                        <div className="text-slate-400">Altas, control de acceso y reportes</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="card p-6">
+                        <h3 className="text-white font-semibold mb-4">Solicitar acceso</h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label className="label">Tu nombre</label>
+                                <input className="input w-full" value={ownerName} onChange={(e) => setOwnerName(e.target.value)} placeholder="Nombre y apellido" />
+                            </div>
+                            <div>
+                                <label className="label">Nombre del gimnasio</label>
+                                <input className="input w-full" value={gymName} onChange={(e) => setGymName(e.target.value)} placeholder="Mi Gym" />
+                            </div>
+                            <div>
+                                <label className="label">Ciudad</label>
+                                <input className="input w-full" value={city} onChange={(e) => setCity(e.target.value)} placeholder="Santa Fe" />
+                            </div>
+                            <div>
+                                <label className="label">Cantidad de alumnos</label>
+                                <input className="input w-full" value={usersCount} onChange={(e) => setUsersCount(e.target.value)} placeholder="Ej: 250" />
+                            </div>
+                            <div>
+                                <label className="label">Teléfono</label>
+                                <input className="input w-full" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+54 9 ..." />
+                            </div>
+                            <div>
+                                <label className="label">Email</label>
+                                <input className="input w-full" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tu@email.com" />
+                            </div>
+                        </div>
+                        <div className="mt-4">
+                            <label className="label">Notas</label>
+                            <textarea className="input w-full min-h-[110px]" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Contanos qué necesitás..." />
+                        </div>
+
+                        {!isComplete ? (
+                            <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/40 p-4 text-sm text-slate-300">
+                                Completá nombre, gimnasio, ciudad, teléfono y email para habilitar el envío.
+                            </div>
+                        ) : (
+                            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <a className="btn-primary w-full flex items-center justify-center gap-2" href={waUrl} target="_blank" rel="noopener noreferrer">
+                                    <Phone className="w-4 h-4" />
+                                    Enviar a WhatsApp
+                                </a>
+                                <a className="btn-secondary w-full flex items-center justify-center gap-2" href={mailtoUrl}>
+                                    <Mail className="w-4 h-4" />
+                                    Enviar por Email
+                                </a>
+                            </div>
+                        )}
+
+                        <div className="mt-4">
+                            <div className="text-xs text-slate-500">Vista previa del mensaje</div>
+                            <pre className="mt-2 text-xs text-slate-300 rounded-xl border border-slate-800 bg-slate-950/40 p-4 whitespace-pre-wrap">
+                                {leadText}
+                            </pre>
+                        </div>
+                    </div>
+                </div>
             </div>
         </section>
     );
@@ -416,9 +590,13 @@ function AboutSection() {
                         className="relative"
                     >
                         <div className="card p-8 relative overflow-hidden">
-                            {/* MotionA Logo placeholder */}
                             <div className="w-32 h-32 mx-auto rounded-3xl bg-gradient-to-br from-primary-600 via-primary-500 to-gold-500 flex items-center justify-center mb-6 shadow-lg animate-float">
-                                <span className="text-4xl font-display font-black text-white">M</span>
+                                <img
+                                    src="/images/logo-motiona.png"
+                                    alt="MotionA"
+                                    className="w-20 h-20 object-contain"
+                                    loading="lazy"
+                                />
                             </div>
                             <div className="text-center">
                                 <h3 className="text-2xl font-display font-bold text-white mb-2">MotionA</h3>
@@ -512,11 +690,52 @@ function ContactSection() {
 
 // Main Page Component
 export default function LandingPage() {
+    const [gyms, setGyms] = useState<Gym[]>([]);
+    const [metrics, setMetrics] = useState<PublicMetrics | null>(null);
+    const [loading, setLoading] = useState(true);
+    const schema = useMemo(() => {
+        return {
+            '@context': 'https://schema.org',
+            '@type': 'SoftwareApplication',
+            name: 'IronHub',
+            applicationCategory: 'BusinessApplication',
+            operatingSystem: 'Web',
+            description: 'Plataforma profesional de gestión de gimnasios. Usuarios, pagos, asistencias, WhatsApp y reportes.',
+            url: 'https://ironhub.motiona.xyz/',
+            offers: {
+                '@type': 'Offer',
+                price: '0',
+                priceCurrency: 'ARS',
+            },
+            provider: {
+                '@type': 'Organization',
+                name: 'MotionA',
+                url: 'https://motiona.xyz/',
+            },
+        };
+    }, []);
+
+    useEffect(() => {
+        const load = async () => {
+            setLoading(true);
+            try {
+                const [g, m] = await Promise.all([fetchPublicGyms(), fetchPublicMetrics()]);
+                setGyms(g);
+                setMetrics(m);
+            } finally {
+                setLoading(false);
+            }
+        };
+        load();
+    }, []);
+
     return (
         <main className="pt-20">
+            <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(schema) }} />
             <HeroSection />
             <FeaturesSection />
-            <GymsSection />
+            <GymsSection gyms={gyms} loading={loading} metrics={metrics} />
+            <LeadSection metrics={metrics} />
             <AboutSection />
             <ContactSection />
         </main>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, use, useRef } from 'react';
+import { useState, useEffect, use, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
     Loader2, ArrowLeft, MessageSquare, Wrench, Palette, CreditCard,
@@ -9,7 +9,7 @@ import {
 import Link from 'next/link';
 import { api, type Gym, type GymDetails, type WhatsAppConfig, type Payment, type WhatsAppTemplateCatalogItem } from '@/lib/api';
 
-type Section = 'subscription' | 'payments' | 'whatsapp' | 'maintenance' | 'branding' | 'health' | 'password';
+type Section = 'subscription' | 'payments' | 'whatsapp' | 'maintenance' | 'attendance' | 'branding' | 'health' | 'password';
 
 interface BrandingConfig {
     nombre_publico: string;
@@ -44,6 +44,11 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     // Reminder
     const [reminderMessage, setReminderMessage] = useState('');
     const [webappReminderMessage, setWebappReminderMessage] = useState('');
+    const [attendanceAllowMultiple, setAttendanceAllowMultiple] = useState(false);
+    const [attendancePolicyLoading, setAttendancePolicyLoading] = useState(false);
+    const [attendancePolicySaving, setAttendancePolicySaving] = useState(false);
+    const [auditItems, setAuditItems] = useState<any[]>([]);
+    const [auditLoading, setAuditLoading] = useState(false);
 
     // WhatsApp test
     const [waTestPhone, setWaTestPhone] = useState('');
@@ -53,9 +58,20 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     const [waHealthLoading, setWaHealthLoading] = useState(false);
     const [waHealthMsg, setWaHealthMsg] = useState('');
     const [waActionsLoading, setWaActionsLoading] = useState(false);
-    const [waActions, setWaActions] = useState<Array<{ action_key: string; enabled: boolean; template_name: string; required_params: number }>>([]);
+    const [waActions, setWaActions] = useState<
+        Array<{
+            action_key: string;
+            enabled: boolean;
+            template_name: string;
+            required_params: number;
+            default_enabled?: boolean;
+            default_template_name?: string;
+        }>
+    >([]);
     const [waCatalog, setWaCatalog] = useState<WhatsAppTemplateCatalogItem[]>([]);
+    const [waMetaTemplates, setWaMetaTemplates] = useState<Array<{ name: string; status: string; category: string; language: string }>>([]);
     const [savingWaAction, setSavingWaAction] = useState<string>('');
+    const [savingAllWaActions, setSavingAllWaActions] = useState(false);
     const [waEventsLoading, setWaEventsLoading] = useState(false);
     const [waEvents, setWaEvents] = useState<Array<{ event_type: string; severity: string; message: string; details: any; created_at: string }>>([]);
 
@@ -110,6 +126,14 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                 if (reminderRes.ok && reminderRes.data) {
                     setWebappReminderMessage(reminderRes.data.message || '');
                 }
+                const policyRes = await api.getGymAttendancePolicy(gymId);
+                if (policyRes.ok && policyRes.data?.ok) {
+                    setAttendanceAllowMultiple(Boolean(policyRes.data.attendance_allow_multiple_per_day));
+                }
+                const auditRes = await api.getGymAudit(gymId, 80);
+                if (auditRes.ok && auditRes.data?.ok) {
+                    setAuditItems((auditRes.data.items || []) as any[]);
+                }
                 // Load branding
                 const brandRes = await api.getGymBranding(gymId);
                 if (brandRes.ok && brandRes.data?.branding) {
@@ -131,6 +155,14 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                 const actRes = await api.getGymWhatsAppActions(gymId);
                 if (actRes.ok && actRes.data) {
                     setWaActions(actRes.data.actions || []);
+                }
+                try {
+                    const hRes = await api.getGymWhatsAppHealth(gymId);
+                    if (hRes.ok && hRes.data?.templates_list) {
+                        setWaMetaTemplates(hRes.data.templates_list || []);
+                    }
+                } catch {
+                    // Ignore
                 }
             } catch {
                 // Ignore
@@ -193,6 +225,104 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         return nums.length ? Math.max(...nums) : 0;
     };
 
+    const splitTemplateVersion = (templateName: string) => {
+        const s = String(templateName || '').trim();
+        const m = s.match(/^(.+)_v(\d+)$/);
+        if (!m || !m[1]) return { base: s, v: null as number | null };
+        const base = String(m[1]);
+        const vRaw = m[2];
+        const v = vRaw ? Number(vRaw) : NaN;
+        return { base, v: Number.isFinite(v) ? v : null };
+    };
+
+    const waMetaByName = useMemo(() => {
+        const m = new Map<string, { name: string; status: string; category: string; language: string }>();
+        for (const t of waMetaTemplates) {
+            const n = String(t?.name || '').trim();
+            if (!n) continue;
+            m.set(n, {
+                name: n,
+                status: String((t as any)?.status || ''),
+                category: String((t as any)?.category || ''),
+                language: String((t as any)?.language || ''),
+            });
+        }
+        return m;
+    }, [waMetaTemplates]);
+
+    const waCatalogActiveByName = useMemo(() => {
+        const m = new Map<string, WhatsAppTemplateCatalogItem>();
+        for (const t of waCatalog || []) {
+            const n = String((t as any)?.template_name || '').trim();
+            if (!n) continue;
+            if ((t as any)?.active) {
+                m.set(n, t);
+            }
+        }
+        return m;
+    }, [waCatalog]);
+
+    const buildActionTemplateOptions = (action: { required_params: number; template_name: string; default_template_name?: string }) => {
+        const required = Number(action?.required_params || 0);
+        const catalogCandidates = (waCatalog || [])
+            .filter((t) => Boolean((t as any)?.active))
+            .filter((t) => countMetaParams(String((t as any)?.body_text || '')) === required)
+            .map((t) => String((t as any)?.template_name || '').trim())
+            .filter(Boolean);
+
+        const bases = new Set<string>();
+        for (const n of catalogCandidates) {
+            bases.add(splitTemplateVersion(n).base);
+        }
+
+        const metaCandidates = (waMetaTemplates || [])
+            .map((t) => String((t as any)?.name || '').trim())
+            .filter(Boolean)
+            .filter((n) => bases.has(splitTemplateVersion(n).base));
+
+        const current = String(action?.template_name || '').trim();
+        const fallback = String(action?.default_template_name || '').trim();
+
+        const names = Array.from(new Set<string>([...catalogCandidates, ...metaCandidates, current, fallback].filter(Boolean)));
+
+        const scored = names.map((name) => {
+            const meta = waMetaByName.get(name);
+            const status = String(meta?.status || '').toUpperCase();
+            const inCatalog = waCatalogActiveByName.has(name);
+            const isApproved = !status ? true : status === 'APPROVED';
+            const disabled = !inCatalog || !isApproved;
+            const notes = [
+                !inCatalog ? 'NO_CATÁLOGO' : null,
+                status && status !== 'APPROVED' ? `NO_APROBADO:${status}` : null,
+            ]
+                .filter(Boolean)
+                .join(' · ');
+            const extra = [
+                status ? status : null,
+                meta?.category ? String(meta.category).toUpperCase() : null,
+                meta?.language ? String(meta.language) : null,
+                notes ? notes : null,
+            ]
+                .filter(Boolean)
+                .join(' · ');
+            const label = extra ? `${name} — ${extra}` : name;
+            const { base, v } = splitTemplateVersion(name);
+            return { name, label, disabled, base, v: v ?? 0, status, inCatalog };
+        });
+
+        scored.sort((a, b) => {
+            if (a.base !== b.base) return a.base.localeCompare(b.base);
+            if (a.v !== b.v) return b.v - a.v;
+            if (a.status !== b.status) {
+                if (a.status === 'APPROVED') return -1;
+                if (b.status === 'APPROVED') return 1;
+            }
+            return a.name.localeCompare(b.name);
+        });
+
+        return scored;
+    };
+
     const actionLabel: Record<string, string> = {
         welcome: 'Bienvenida',
         payment: 'Confirmación de pago',
@@ -233,6 +363,59 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
             } finally {
                 setWaEventsLoading(false);
             }
+        }
+    };
+
+    const autoPickWaActionTemplates = () => {
+        setWaActions((prev) =>
+            prev.map((a) => {
+                const opts = buildActionTemplateOptions(a);
+                const baseWanted = splitTemplateVersion(String(a.default_template_name || a.template_name || '')).base;
+                const preferred = opts.filter((o) => !o.disabled && o.base === baseWanted);
+                const fallback = opts.filter((o) => !o.disabled);
+                const chosen = (preferred[0] || fallback[0])?.name;
+                if (!chosen) return a;
+                if (String(a.template_name || '').trim() === chosen) return a;
+                return { ...a, template_name: chosen };
+            })
+        );
+        showMessage('Auto-selección aplicada (solo APPROVED + activo en catálogo)');
+    };
+
+    const saveAllWaActions = async () => {
+        if (savingAllWaActions) return;
+        setSavingAllWaActions(true);
+        const failed: Array<{ action_key: string; error: string }> = [];
+        let saved = 0;
+        try {
+            for (const a of waActions) {
+                try {
+                    const res = await api.setGymWhatsAppAction(gymId, a.action_key, Boolean(a.enabled), String(a.template_name || ''));
+                    if (res.ok) {
+                        saved += 1;
+                    } else {
+                        failed.push({ action_key: a.action_key, error: res.error || 'Error' });
+                    }
+                } catch (e: any) {
+                    failed.push({ action_key: a.action_key, error: e?.message || 'Error' });
+                }
+            }
+        } finally {
+            setSavingAllWaActions(false);
+        }
+        if (failed.length) {
+            showMessage(`Guardado parcial: ok=${saved}, fallidos=${failed.length}`);
+        } else {
+            showMessage(`Guardado OK: ${saved} acciones`);
+        }
+        try {
+            setWaEventsLoading(true);
+            const evRes = await api.getGymWhatsAppOnboardingEvents(gymId, 20);
+            if (evRes.ok && evRes.data) {
+                setWaEvents(evRes.data.events || []);
+            }
+        } finally {
+            setWaEventsLoading(false);
         }
     };
 
@@ -433,6 +616,25 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         } finally {
             setProvisioningTemplates(false);
             try {
+                const tplRes = await api.getWhatsAppTemplateCatalog(false);
+                if (tplRes.ok && tplRes.data) {
+                    setWaCatalog(tplRes.data.templates || []);
+                }
+                setWaActionsLoading(true);
+                const actRes = await api.getGymWhatsAppActions(gymId);
+                if (actRes.ok && actRes.data) {
+                    setWaActions(actRes.data.actions || []);
+                }
+                const hRes = await api.getGymWhatsAppHealth(gymId);
+                if (hRes.ok && hRes.data?.templates_list) {
+                    setWaMetaTemplates(hRes.data.templates_list || []);
+                }
+            } catch {
+                // Ignore
+            } finally {
+                setWaActionsLoading(false);
+            }
+            try {
                 setWaEventsLoading(true);
                 const evRes = await api.getGymWhatsAppOnboardingEvents(gymId, 20);
                 if (evRes.ok && evRes.data) {
@@ -449,15 +651,22 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         setWaHealthMsg('');
         try {
             const res = await api.getGymWhatsAppHealth(gymId);
-            if (res.ok && res.data) {
+            const data = res.data;
+            if (res.ok && data && data.ok) {
                 const t = res.data.templates || {};
                 const phone = res.data.phone || {};
                 const sub = res.data.subscribed_apps || {};
+                if (data.templates_list) {
+                    setWaMetaTemplates(data.templates_list || []);
+                }
                 setWaHealthMsg(
                     `OK: phone=${phone.display_phone_number || '—'} quality=${phone.quality_rating || '—'} templates=${t.count || 0} approved=${t.approved || 0} pending=${t.pending || 0} subscribed=${String(sub.subscribed)}`
                 );
             } else {
-                setWaHealthMsg(res.error || 'Error en health-check');
+                if (res.ok && data?.templates_list) {
+                    setWaMetaTemplates(data.templates_list || []);
+                }
+                setWaHealthMsg(data?.error || res.error || 'Error en health-check');
             }
         } finally {
             setWaHealthLoading(false);
@@ -478,8 +687,9 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         { id: 'payments', name: 'Pagos', icon: CreditCard },
         { id: 'whatsapp', name: 'WhatsApp', icon: MessageSquare },
         { id: 'maintenance', name: 'Mantenimiento', icon: Wrench },
+        { id: 'attendance', name: 'Asistencias', icon: Activity },
         { id: 'branding', name: 'Branding', icon: Palette },
-        { id: 'health', name: 'Salud', icon: Activity },
+        { id: 'health', name: 'Salud', icon: FileText },
         { id: 'password', name: 'Contraseña dueño', icon: Key },
     ];
 
@@ -772,7 +982,17 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                             )}
                         </div>
                         <div className="pt-4 border-t border-slate-800">
-                            <h3 className="font-medium text-white mb-3">Acciones y versiones (por gimnasio)</h3>
+                            <div className="flex items-center justify-between gap-3 mb-3">
+                                <h3 className="font-medium text-white">Acciones y versiones (por gimnasio)</h3>
+                                <div className="flex items-center gap-2">
+                                    <button onClick={autoPickWaActionTemplates} disabled={waActionsLoading || savingAllWaActions} className="btn-secondary">
+                                        Auto (mejor APPROVED)
+                                    </button>
+                                    <button onClick={saveAllWaActions} disabled={waActionsLoading || savingAllWaActions} className="btn-primary">
+                                        {savingAllWaActions ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Guardar todo'}
+                                    </button>
+                                </div>
+                            </div>
                             {waActionsLoading ? (
                                 <div className="text-slate-400 flex items-center gap-2">
                                     <Loader2 className="w-4 h-4 animate-spin" /> Cargando...
@@ -801,14 +1021,21 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                                     )
                                                 }
                                             >
-                                                {waCatalog
-                                                    .filter((t) => Boolean(t.active))
-                                                    .filter((t) => countMetaParams(String(t.body_text || '')) === Number(a.required_params || 0))
-                                                    .map((t) => (
-                                                        <option key={t.template_name} value={t.template_name}>
-                                                            {t.template_name}
+                                                {(() => {
+                                                    const opts = buildActionTemplateOptions(a);
+                                                    if (!opts.length) {
+                                                        return (
+                                                            <option value="" disabled>
+                                                                No hay templates compatibles en el catálogo
+                                                            </option>
+                                                        );
+                                                    }
+                                                    return opts.map((opt) => (
+                                                        <option key={opt.name} value={opt.name} disabled={opt.disabled}>
+                                                            {opt.label}
                                                         </option>
-                                                    ))}
+                                                    ));
+                                                })()}
                                             </select>
                                             <button
                                                 className="btn-primary"
@@ -998,6 +1225,132 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                             Guardar branding
                         </button>
+                    </div>
+                )}
+
+                {activeSection === 'attendance' && (
+                    <div className="space-y-6">
+                        <div className="flex items-center justify-between gap-3">
+                            <h2 className="text-lg font-semibold text-white">Política de asistencias</h2>
+                            <button
+                                className="btn-secondary flex items-center gap-2"
+                                onClick={async () => {
+                                    setAttendancePolicyLoading(true);
+                                    try {
+                                        const res = await api.getGymAttendancePolicy(gymId);
+                                        if (res.ok && res.data?.ok) {
+                                            setAttendanceAllowMultiple(Boolean(res.data.attendance_allow_multiple_per_day));
+                                        }
+                                    } finally {
+                                        setAttendancePolicyLoading(false);
+                                    }
+                                }}
+                                disabled={attendancePolicyLoading || attendancePolicySaving}
+                            >
+                                {attendancePolicyLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                                Recargar
+                            </button>
+                        </div>
+
+                        <div className="p-4 rounded-xl bg-slate-800/40 border border-slate-700 space-y-3">
+                            <div className="text-sm text-slate-200">
+                                Múltiples asistencias por día por usuario
+                            </div>
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="text-xs text-slate-400">
+                                    Si está activado, el gym puede registrar múltiples check-ins en el mismo día (útil para salidas/entradas). Si está desactivado, queda limitado a 1/día.
+                                </div>
+                                <span className={`badge ${attendanceAllowMultiple ? 'badge-success' : 'badge-warning'}`}>
+                                    {attendanceAllowMultiple ? 'Activado' : 'Desactivado'}
+                                </span>
+                            </div>
+                            <button
+                                className={`btn-primary w-full flex items-center justify-center gap-2 ${attendanceAllowMultiple ? 'bg-danger-600 hover:bg-danger-500' : ''}`}
+                                disabled={attendancePolicySaving}
+                                onClick={async () => {
+                                    const next = !attendanceAllowMultiple;
+                                    const ok = window.confirm(
+                                        next
+                                            ? 'Habilitar múltiples asistencias por día: impacta gestión/QR/estación. ¿Confirmar?'
+                                            : 'Limitar a 1 asistencia por día: los check-ins extra del día quedarán “ya registrado”. ¿Confirmar?'
+                                    );
+                                    if (!ok) return;
+                                    setAttendancePolicySaving(true);
+                                    try {
+                                        const res = await api.setGymAttendancePolicy(gymId, next);
+                                        if (res.ok && res.data?.ok) {
+                                            setAttendanceAllowMultiple(Boolean(res.data.attendance_allow_multiple_per_day));
+                                            showMessage('Política actualizada');
+                                        } else {
+                                            showMessage(res.error || res.data?.error || 'Error al actualizar');
+                                        }
+                                    } finally {
+                                        setAttendancePolicySaving(false);
+                                    }
+                                }}
+                            >
+                                {attendancePolicySaving ? <Loader2 className="w-4 h-4 animate-spin" /> : attendanceAllowMultiple ? <X className="w-4 h-4" /> : <Check className="w-4 h-4" />}
+                                {attendanceAllowMultiple ? 'Desactivar' : 'Activar'}
+                            </button>
+                        </div>
+
+                        <div className="p-4 rounded-xl bg-slate-800/40 border border-slate-700 space-y-3">
+                            <div className="flex items-center justify-between gap-3">
+                                <div>
+                                    <div className="text-sm text-slate-200">Auditoría</div>
+                                    <div className="text-xs text-slate-400">Cambios recientes (admin/owner) para este gym.</div>
+                                </div>
+                                <button
+                                    className="btn-secondary flex items-center gap-2"
+                                    onClick={async () => {
+                                        setAuditLoading(true);
+                                        try {
+                                            const res = await api.getGymAudit(gymId, 200);
+                                            if (res.ok && res.data?.ok) {
+                                                setAuditItems((res.data.items || []) as any[]);
+                                            }
+                                        } finally {
+                                            setAuditLoading(false);
+                                        }
+                                    }}
+                                    disabled={auditLoading}
+                                >
+                                    {auditLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                                    Recargar
+                                </button>
+                            </div>
+
+                            <div className="overflow-x-auto rounded-xl border border-slate-700 bg-slate-900/40">
+                                <table className="min-w-full text-sm">
+                                    <thead className="bg-slate-900/60">
+                                        <tr className="text-left text-slate-400">
+                                            <th className="px-4 py-3">Fecha</th>
+                                            <th className="px-4 py-3">Actor</th>
+                                            <th className="px-4 py-3">Acción</th>
+                                            <th className="px-4 py-3">Detalles</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-800">
+                                        {auditItems.length === 0 ? (
+                                            <tr>
+                                                <td className="px-4 py-6 text-slate-400" colSpan={4}>
+                                                    Sin eventos.
+                                                </td>
+                                            </tr>
+                                        ) : (
+                                            auditItems.slice(0, 50).map((it: any) => (
+                                                <tr key={String(it.id)} className="text-slate-200">
+                                                    <td className="px-4 py-3 text-slate-300">{String(it.created_at || '').slice(0, 19).replace('T', ' ')}</td>
+                                                    <td className="px-4 py-3">{it.actor_username || '—'}</td>
+                                                    <td className="px-4 py-3">{it.action || '—'}</td>
+                                                    <td className="px-4 py-3 text-slate-400 max-w-xl truncate">{it.details || '—'}</td>
+                                                </tr>
+                                            ))
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
                 )}
 

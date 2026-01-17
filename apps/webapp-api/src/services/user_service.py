@@ -59,8 +59,14 @@ class UserService(BaseService):
         try:
             tipos = self.payment_repo.obtener_tipos_cuota_activos()
             map_nombre_a_id = {str(t.nombre): int(t.id) for t in tipos if getattr(t, 'nombre', None) is not None}
+            map_nombre_a_duracion = {
+                str(t.nombre): int(getattr(t, 'duracion_dias', 30) or 30)
+                for t in tipos
+                if getattr(t, 'nombre', None) is not None
+            }
         except Exception:
             map_nombre_a_id = {}
+            map_nombre_a_duracion = {}
 
         for it in items:
             nombre = it.get('tipo_cuota')
@@ -68,6 +74,8 @@ class UserService(BaseService):
                 it['tipo_cuota_nombre'] = nombre
             if 'tipo_cuota_id' not in it:
                 it['tipo_cuota_id'] = map_nombre_a_id.get(nombre)
+            if 'tipo_cuota_duracion_dias' not in it:
+                it['tipo_cuota_duracion_dias'] = map_nombre_a_duracion.get(nombre) or 30
 
             try:
                 fpv = it.get('fecha_proximo_vencimiento')
@@ -90,8 +98,14 @@ class UserService(BaseService):
         try:
             tipos = self.payment_repo.obtener_tipos_cuota_activos()
             map_nombre_a_id = {str(t.nombre): int(t.id) for t in tipos if getattr(t, 'nombre', None) is not None}
+            map_nombre_a_duracion = {
+                str(t.nombre): int(getattr(t, 'duracion_dias', 30) or 30)
+                for t in tipos
+                if getattr(t, 'nombre', None) is not None
+            }
         except Exception:
             map_nombre_a_id = {}
+            map_nombre_a_duracion = {}
 
         for it in items:
             nombre = it.get('tipo_cuota')
@@ -99,6 +113,8 @@ class UserService(BaseService):
                 it['tipo_cuota_nombre'] = nombre
             if 'tipo_cuota_id' not in it:
                 it['tipo_cuota_id'] = map_nombre_a_id.get(nombre)
+            if 'tipo_cuota_duracion_dias' not in it:
+                it['tipo_cuota_duracion_dias'] = map_nombre_a_duracion.get(nombre) or 30
 
             try:
                 fpv = it.get('fecha_proximo_vencimiento')

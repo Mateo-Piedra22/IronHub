@@ -94,13 +94,13 @@ class WhatsAppService(BaseService):
             since = self._now_utc_naive() - timedelta(days=int(dias or 0))
             result = self.db.execute(
                 text("""
-                    SELECT DISTINCT ON (wm.phone_number) wm.id, wm.user_id,
+                    SELECT wm.id, wm.user_id,
                            COALESCE(u.nombre,'') AS usuario_nombre, COALESCE(u.telefono,'') AS usuario_telefono,
                            wm.phone_number, wm.message_type, wm.template_name, wm.message_content,
                            wm.status, wm.message_id, wm.sent_at AS fecha_envio
                     FROM whatsapp_messages wm LEFT JOIN usuarios u ON u.id = wm.user_id
                     WHERE wm.status = 'failed' AND wm.sent_at >= :since
-                    ORDER BY wm.phone_number, wm.sent_at DESC LIMIT :limite
+                    ORDER BY wm.sent_at DESC LIMIT :limite
                 """),
                 {'since': since, 'limite': limite}
             )
@@ -154,13 +154,15 @@ class WhatsAppService(BaseService):
                     WHERE status = 'failed' AND sent_at >= :since
                 """), {'since': since})
                 phones = [r[0] for r in ph_result.fetchall() if r[0]]
-                
-                for ph in phones:
-                    r = self.db.execute(text("""
-                        DELETE FROM whatsapp_messages WHERE phone_number = :tel AND status = 'failed'
-                        AND sent_at >= :since
-                    """), {'tel': ph, 'since': since})
-                    deleted += r.rowcount or 0
+                r = self.db.execute(
+                    text("""
+                        DELETE FROM whatsapp_messages
+                        WHERE status = 'failed'
+                          AND sent_at >= :since
+                    """),
+                    {'since': since},
+                )
+                deleted = r.rowcount or 0
             
             self.db.commit()
             return {'deleted': deleted, 'phones': phones}

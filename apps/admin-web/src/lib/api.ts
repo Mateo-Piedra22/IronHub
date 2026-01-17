@@ -42,12 +42,19 @@ export interface Metrics {
 export interface Payment {
     id: number;
     gym_id: number;
+    nombre?: string;
+    subdominio?: string;
+    plan?: string;
+    plan_id?: number | null;
     amount: number;
     currency: string;
     status: string;
     created_at?: string;
+    paid_at?: string;
     valid_until?: string;
     notes?: string;
+    provider?: string;
+    external_reference?: string;
 }
 
 // Payment Management Types (Restored from deprecated)
@@ -330,12 +337,31 @@ export const api = {
 
     registerPayment: async (
         gymId: number,
-        data: { amount: number; plan?: string; valid_until?: string; notes?: string; currency?: string; status?: string }
+        data: {
+            amount: number;
+            plan?: string;
+            plan_id?: number;
+            valid_until?: string;
+            notes?: string;
+            currency?: string;
+            status?: string;
+            provider?: string;
+            external_reference?: string;
+            idempotency_key?: string;
+            apply_to_subscription?: boolean;
+            periods?: number;
+        }
     ) => {
+        const bodyPairs: Array<[string, string]> = [];
+        for (const [k, v] of Object.entries(data)) {
+            if (v === undefined || v === null) continue;
+            if (k === 'apply_to_subscription') bodyPairs.push([k, String(Boolean(v))]);
+            else bodyPairs.push([k, String(v)]);
+        }
         const res = await request<{ ok: boolean; error?: string }>(`/gyms/${gymId}/payments`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams(data as unknown as Record<string, string>),
+            body: new URLSearchParams(bodyPairs),
         });
         if (!res.ok) return res;
         if (res.data && (res.data as any).ok === false) {
@@ -353,6 +379,30 @@ export const api = {
         }));
         return { ok: true, data: { payments } };
     },
+
+    listPayments: async (params: { gym_id?: number; status?: string; q?: string; desde?: string; hasta?: string; page?: number; page_size?: number }) => {
+        const qs = new URLSearchParams();
+        for (const [k, v] of Object.entries(params || {})) {
+            if (v === undefined || v === null || String(v).trim() === '') continue;
+            qs.set(k, String(v));
+        }
+        const res = await request<any>(`/payments?${qs.toString()}`);
+        if (!res.ok || !res.data) return res as ApiResponse<{ items: Payment[]; total: number; page: number; page_size: number }>;
+        const items = (res.data.items || []).map((p: any) => ({ ...p, created_at: p.created_at || p.paid_at }));
+        return { ok: true, data: { ...res.data, items } };
+    },
+
+    updateGymPayment: (gymId: number, paymentId: number, updates: Partial<Payment>) =>
+        request<{ ok: boolean; updated?: number; error?: string }>(`/gyms/${gymId}/payments/${paymentId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updates),
+        }),
+
+    deleteGymPayment: (gymId: number, paymentId: number) =>
+        request<{ ok: boolean; deleted?: number; error?: string }>(`/gyms/${gymId}/payments/${paymentId}`, {
+            method: 'DELETE',
+        }),
 
     // Branding
     getGymBranding: (gymId: number) =>
@@ -430,6 +480,56 @@ export const api = {
     deletePlan: (id: number) =>
         request<{ ok: boolean }>(`/plans/${id}`, { method: 'DELETE' }),
 
+    // Settings
+    getSettings: () => request<{ ok: boolean; settings: Array<{ key: string; value: any; updated_at?: string; updated_by?: string }> }>('/settings'),
+
+    updateSettings: (updates: Record<string, any>) =>
+        request<{ ok: boolean; error?: string }>('/settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updates),
+        }),
+
+    // Subscriptions
+    getGymSubscription: (gymId: number) => request<any>(`/gyms/${gymId}/subscription`),
+
+    upsertGymSubscription: (gymId: number, payload: { plan_id: number; start_date?: string; next_due_date?: string; status?: string }) =>
+        request<any>(`/gyms/${gymId}/subscription`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        }),
+
+    renewGymSubscription: (gymId: number, periods = 1) =>
+        request<any>(`/gyms/${gymId}/subscription/renew`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ periods: String(periods) }),
+        }),
+
+    listSubscriptions: async (params: { q?: string; status?: string; due_before_days?: number; page?: number; page_size?: number }) => {
+        const qs = new URLSearchParams();
+        for (const [k, v] of Object.entries(params || {})) {
+            if (v === undefined || v === null || String(v).trim() === '') continue;
+            qs.set(k, String(v));
+        }
+        return request<any>(`/subscriptions?${qs.toString()}`);
+    },
+
+    runSubscriptionsMaintenance: (params: { days?: number; grace_days?: number } = {}) =>
+        request<any>('/subscriptions/maintenance/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams(
+                Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]))
+            ),
+        }),
+
+    listJobRuns: (job_key: string, limit = 25) =>
+        request<any>(`/jobs/runs?job_key=${encodeURIComponent(job_key)}&limit=${encodeURIComponent(String(limit))}`),
+
+    getJobRun: (run_id: string) => request<any>(`/jobs/runs/${encodeURIComponent(run_id)}`),
+
     // Subdomain
     checkSubdomain: (subdomain: string) =>
         request<{ available: boolean }>(`/subdomain/check?subdomain=${subdomain}`),
@@ -442,7 +542,7 @@ export const api = {
         request<any>(`/audit?days=${days}`),
 
     getGymAudit: (gymId: number, limit = 50) =>
-        request<{ audit: any[] }>(`/gyms/${gymId}/audit?limit=${limit}`),
+        request<{ ok: boolean; items?: any[]; error?: string }>(`/gyms/${gymId}/audit?limit=${encodeURIComponent(String(limit))}`),
 
     // Batch Operations
     batchProvision: (ids: number[]) =>
@@ -508,6 +608,16 @@ export const api = {
             body: JSON.stringify({ message }),
         }),
 
+    getGymAttendancePolicy: (id: number) =>
+        request<{ ok: boolean; attendance_allow_multiple_per_day?: boolean; error?: string }>(`/gyms/${id}/attendance-policy`),
+
+    setGymAttendancePolicy: (id: number, attendance_allow_multiple_per_day: boolean) =>
+        request<{ ok: boolean; attendance_allow_multiple_per_day?: boolean; error?: string }>(`/gyms/${id}/attendance-policy`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ attendance_allow_multiple_per_day }),
+        }),
+
     updateGymWhatsApp: (id: number, config: WhatsAppConfig) =>
         request<{ ok: boolean }>(`/gyms/${id}/whatsapp`, {
             method: 'POST',
@@ -568,6 +678,18 @@ export const api = {
             { method: 'POST' }
         ),
 
+    getWhatsAppActionSpecs: () =>
+        request<{
+            ok: boolean;
+            items: Array<{
+                action_key: string;
+                label: string;
+                required_params: number;
+                default_enabled?: boolean;
+                default_template_name?: string;
+            }>;
+        }>(`/whatsapp/actions/specs`),
+
     provisionGymWhatsAppTemplates: (gymId: number) =>
         request<{
             ok: boolean;
@@ -581,7 +703,17 @@ export const api = {
         ),
 
     getGymWhatsAppActions: (gymId: number) =>
-        request<{ ok: boolean; actions: Array<{ action_key: string; enabled: boolean; template_name: string; required_params: number }> }>(
+        request<{
+            ok: boolean;
+            actions: Array<{
+                action_key: string;
+                enabled: boolean;
+                template_name: string;
+                required_params: number;
+                default_enabled?: boolean;
+                default_template_name?: string;
+            }>;
+        }>(
             `/gyms/${gymId}/whatsapp/actions`
         ),
 

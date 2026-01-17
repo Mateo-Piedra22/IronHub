@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { Dumbbell, LogIn, Eye, EyeOff, Shield, Users, KeyRound, Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -289,12 +290,9 @@ export default function GestionLoginPage() {
                             <span>Acceso restringido a personal autorizado</span>
                         </div>
                         {/* Back button */}
-                        <a
-                            href="/"
-                            className="block w-full py-3 mt-4 rounded-xl font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 text-center transition-all text-sm"
-                        >
+                        <Link href="/" className="block w-full py-3 mt-4 rounded-xl font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 text-center transition-all text-sm">
                             ← Volver al inicio
-                        </a>
+                        </Link>
                     </div>
                 </motion.div>
             </motion.div>

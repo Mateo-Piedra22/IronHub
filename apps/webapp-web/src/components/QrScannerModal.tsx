@@ -170,139 +170,92 @@ export function QRScannerModal({ isOpen, onClose, onScan, description }: QRScann
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+                className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md"
             >
-                <motion.div
-                    initial={{ scale: 0.9, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    className="bg-slate-900 rounded-2xl w-full max-w-md overflow-hidden border border-slate-800"
-                >
-                    <div className="p-4 border-b border-slate-800 flex justify-between items-center">
-                        <h3 className="font-semibold text-white">Escanear Rutina</h3>
-                        <button onClick={onClose} className="p-2 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white">
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.12),transparent_55%)]" />
+                <div className="relative z-10 flex flex-col h-full">
+                    <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+                        <div>
+                            <div className="text-white font-semibold">Escanear QR</div>
+                            <div className="text-xs text-slate-400">{description || 'Apuntá tu cámara al código QR de la rutina'}</div>
+                        </div>
+                        <button
+                            onClick={onClose}
+                            className="p-2 rounded-xl bg-white/5 border border-white/10 text-slate-200 hover:bg-white/10"
+                        >
                             <X className="w-5 h-5" />
                         </button>
                     </div>
 
-                    <div className="p-4 bg-black space-y-3">
-                        <div className="flex items-center justify-between gap-2">
-                            <div className="text-xs text-slate-400">
-                                {description || 'Apuntá tu cámara al código QR de la rutina'}
+                    <div className="flex-1 flex flex-col items-center justify-center gap-4 px-5 py-6">
+                        <div className="w-full max-w-md">
+                            <div className="relative w-full aspect-square rounded-3xl overflow-hidden border border-slate-800 bg-black shadow-elevated">
+                                <div id={readerId} className="absolute inset-0" />
+                                <div className="absolute inset-0 pointer-events-none">
+                                    <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/40" />
+                                    <div className="absolute left-1/2 top-1/2 w-[80%] h-[80%] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-white/20" />
+                                    <div className="absolute left-1/2 top-1/2 w-[80%] h-[80%] -translate-x-1/2 -translate-y-1/2">
+                                        <div className="absolute -left-1 -top-1 w-8 h-8 border-l-2 border-t-2 border-primary-400 rounded-tl-2xl" />
+                                        <div className="absolute -right-1 -top-1 w-8 h-8 border-r-2 border-t-2 border-primary-400 rounded-tr-2xl" />
+                                        <div className="absolute -left-1 -bottom-1 w-8 h-8 border-l-2 border-b-2 border-primary-400 rounded-bl-2xl" />
+                                        <div className="absolute -right-1 -bottom-1 w-8 h-8 border-r-2 border-b-2 border-primary-400 rounded-br-2xl" />
+                                        <motion.div
+                                            className="absolute left-3 right-3 h-px bg-gradient-to-r from-transparent via-primary-300 to-transparent opacity-80"
+                                            animate={{ top: ['16%', '84%', '16%'] }}
+                                            transition={{ duration: 2.1, repeat: Infinity, ease: 'easeInOut' }}
+                                        />
+                                    </div>
+                                    {pulse ? (
+                                        <div className="absolute inset-0 bg-emerald-500/10" />
+                                    ) : null}
+                                </div>
                             </div>
-                            <div className="flex items-center gap-2">
+
+                            {scanError ? (
+                                <div className="mt-3 text-xs text-red-200 bg-red-500/10 border border-red-500/20 rounded-xl p-3">
+                                    {scanError}
+                                </div>
+                            ) : (
+                                <div className="mt-3 text-xs text-slate-400">
+                                    El escaneo es automático. Si no inicia, seleccioná la cámara e iniciá.
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
+                            {cameras.length > 0 ? (
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs text-slate-500 w-14">Cámara</span>
+                                    <select
+                                        className="bg-slate-950/30 border border-slate-800 text-slate-200 text-xs rounded-xl px-3 py-2 flex-1"
+                                        value={selectedCameraId}
+                                        onChange={(e) => setSelectedCameraId(e.target.value)}
+                                        disabled={running}
+                                    >
+                                        {cameras.map((c) => (
+                                            <option key={c.id} value={c.id}>
+                                                {c.label || c.id}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            ) : null}
+
+                            <div className="flex items-center justify-between gap-2">
                                 {!running ? (
-                                    <Button size="sm" onClick={start} isLoading={starting}>
+                                    <Button onClick={start} isLoading={starting} className="w-full">
                                         Iniciar cámara
                                     </Button>
                                 ) : (
-                                    <Button size="sm" variant="secondary" onClick={stop}>
+                                    <Button variant="secondary" onClick={stop} className="w-full">
                                         Detener
                                     </Button>
                                 )}
                             </div>
                         </div>
-
-                        {cameras.length > 0 && (
-                            <div className="flex items-center gap-2">
-                                <span className="text-xs text-slate-500">Cámara</span>
-                                <select
-                                    className="bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-lg px-2 py-1 flex-1"
-                                    value={selectedCameraId}
-                                    onChange={(e) => setSelectedCameraId(e.target.value)}
-                                    disabled={running}
-                                >
-                                    {cameras.map((c) => (
-                                        <option key={c.id} value={c.id}>
-                                            {c.label || c.id}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-                        )}
-
-                        <div className="rounded-xl overflow-hidden border border-slate-800 bg-black">
-                            <div className="relative w-full">
-                                <div id={readerId} className="w-full" />
-                                <div className="pointer-events-none absolute inset-0">
-                                    <div className="absolute inset-0 qr-mask" />
-                                    <div className="absolute inset-0 flex items-center justify-center">
-                                        <div className={`qr-frame ${pulse ? 'qr-pulse' : ''}`}>
-                                            <span className="qr-corner tl" />
-                                            <span className="qr-corner tr" />
-                                            <span className="qr-corner bl" />
-                                            <span className="qr-corner br" />
-                                            <span className="qr-line" />
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        {scanError && (
-                            <div className="text-xs text-red-300 bg-red-500/10 border border-red-500/20 rounded-lg p-2">
-                                {scanError}
-                            </div>
-                        )}
                     </div>
-                </motion.div>
+                </div>
             </motion.div>
-            <style jsx>{`
-                .qr-mask {
-                    background:
-                        radial-gradient(circle at center,
-                            rgba(0,0,0,0) 0,
-                            rgba(0,0,0,0) 34%,
-                            rgba(0,0,0,0.55) 35%,
-                            rgba(0,0,0,0.72) 100%);
-                }
-                .qr-frame {
-                    position: relative;
-                    width: 78%;
-                    max-width: 320px;
-                    aspect-ratio: 1 / 1;
-                    border-radius: 18px;
-                    border: 1px solid rgba(148, 163, 184, 0.35);
-                    box-shadow: 0 0 0 1px rgba(2, 132, 199, 0.15) inset, 0 0 30px rgba(2, 132, 199, 0.08);
-                }
-                .qr-corner {
-                    position: absolute;
-                    width: 34px;
-                    height: 34px;
-                    border-color: rgba(34, 211, 238, 0.95);
-                }
-                .qr-corner.tl { top: -1px; left: -1px; border-top: 3px solid; border-left: 3px solid; border-top-left-radius: 18px; }
-                .qr-corner.tr { top: -1px; right: -1px; border-top: 3px solid; border-right: 3px solid; border-top-right-radius: 18px; }
-                .qr-corner.bl { bottom: -1px; left: -1px; border-bottom: 3px solid; border-left: 3px solid; border-bottom-left-radius: 18px; }
-                .qr-corner.br { bottom: -1px; right: -1px; border-bottom: 3px solid; border-right: 3px solid; border-bottom-right-radius: 18px; }
-                .qr-line {
-                    position: absolute;
-                    left: 12px;
-                    right: 12px;
-                    top: 18%;
-                    height: 2px;
-                    background: linear-gradient(90deg, rgba(34,211,238,0), rgba(34,211,238,0.9), rgba(34,211,238,0));
-                    filter: drop-shadow(0 0 8px rgba(34,211,238,0.55));
-                    animation: qr-scan 1.55s ease-in-out infinite;
-                }
-                .qr-pulse {
-                    box-shadow:
-                        0 0 0 2px rgba(34, 197, 94, 0.45) inset,
-                        0 0 0 1px rgba(34, 197, 94, 0.35),
-                        0 0 42px rgba(34, 197, 94, 0.22);
-                    border-color: rgba(34, 197, 94, 0.55);
-                    animation: qr-pulse 0.45s ease-out 1;
-                }
-                @keyframes qr-scan {
-                    0% { transform: translateY(0); opacity: 0.75; }
-                    50% { opacity: 1; }
-                    100% { transform: translateY(260%); opacity: 0.75; }
-                }
-                @keyframes qr-pulse {
-                    0% { transform: scale(1); }
-                    50% { transform: scale(1.02); }
-                    100% { transform: scale(1); }
-                }
-            `}</style>
         </AnimatePresence>
     );
 }

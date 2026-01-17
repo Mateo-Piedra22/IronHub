@@ -7,7 +7,6 @@ import {
     Settings,
     RefreshCw,
     Trash2,
-    Send,
     CheckCircle2,
     XCircle,
     Clock,
@@ -37,6 +36,9 @@ const tipoLabels: Record<string, string> = {
     deactivation: 'Desactivación',
     overdue: 'Morosidad',
     class_reminder: 'Recordatorio Clase',
+    membership_due_today: 'Vence Hoy',
+    membership_due_soon: 'Vence Pronto',
+    membership_reactivated: 'Reactivación',
 };
 
 // Status badges
@@ -45,6 +47,13 @@ const statusBadge = {
     sent: { icon: CheckCircle2, className: 'bg-success-500/20 text-success-400', label: 'Enviado' },
     failed: { icon: XCircle, className: 'bg-danger-500/20 text-danger-400', label: 'Fallido' },
 };
+
+function normalizeEstado(raw: string): 'pending' | 'sent' | 'failed' {
+    const s = String(raw || '').toLowerCase().trim();
+    if (s === 'failed') return 'failed';
+    if (s === 'sent' || s === 'delivered' || s === 'read' || s === 'received') return 'sent';
+    return 'pending';
+}
 
 export default function WhatsAppPage() {
     const { success, error } = useToast();
@@ -76,7 +85,8 @@ export default function WhatsAppPage() {
     // Messages
     const [mensajes, setMensajes] = useState<WhatsAppMensaje[]>([]);
     const [mensajesLoading, setMensajesLoading] = useState(false);
-    const [filter, setFilter] = useState<'all' | 'pending' | 'failed'>('all');
+    const [mensajesTotals, setMensajesTotals] = useState<{ by_estado: Record<string, number>; by_tipo: Record<string, number> } | null>(null);
+    const [filter, setFilter] = useState<'all' | 'pending' | 'failed' | 'sent'>('all');
 
     // Templates
     const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
@@ -91,11 +101,17 @@ export default function WhatsAppPage() {
     const [triggers, setTriggers] = useState<WhatsAppTrigger[]>([]);
     const [triggersLoading, setTriggersLoading] = useState(false);
     const [automationLoading, setAutomationLoading] = useState(false);
-    const [automationLastResult, setAutomationLastResult] = useState<{ scanned: number; sent: number; dry_run: boolean } | null>(null);
+    const [automationLastResult, setAutomationLastResult] = useState<{ scanned: number; sent: number; dry_run: boolean; skipped?: Record<string, string> } | null>(null);
 
     // Bulk actions
     const [bulkLoading, setBulkLoading] = useState(false);
     const [confirmClearOpen, setConfirmClearOpen] = useState(false);
+    const [advancedUnlocked, setAdvancedUnlocked] = useState(false);
+    const [confirmUnlockOpen, setConfirmUnlockOpen] = useState(false);
+    const [confirmDeleteTemplateOpen, setConfirmDeleteTemplateOpen] = useState(false);
+    const [templateToDelete, setTemplateToDelete] = useState<string>('');
+    const [confirmAutomationOpen, setConfirmAutomationOpen] = useState(false);
+    const [confirmInitTriggersOpen, setConfirmInitTriggersOpen] = useState(false);
 
     // Load
     const loadStatus = useCallback(async () => {
@@ -127,6 +143,7 @@ export default function WhatsAppPage() {
         const res = await api.getWhatsAppMensajesPendientes();
         if (res.ok && res.data) {
             setMensajes(res.data.mensajes);
+            setMensajesTotals(res.data.totals || null);
         }
         setMensajesLoading(false);
     }, []);
@@ -492,14 +509,8 @@ export default function WhatsAppPage() {
     };
 
     const handleDeleteTemplate = async (name: string) => {
-        if (!confirm(`¿Eliminar la plantilla "${name}"?`)) return;
-        const res = await api.deleteWhatsAppTemplate(name);
-        if (res.ok) {
-            success('Plantilla eliminada');
-            loadTemplates();
-        } else {
-            error(res.error || 'Error al eliminar plantilla');
-        }
+        setTemplateToDelete(String(name || '').trim());
+        setConfirmDeleteTemplateOpen(true);
     };
 
     const handleUpdateTrigger = async (t: WhatsAppTrigger) => {
@@ -517,21 +528,21 @@ export default function WhatsAppPage() {
     };
 
     const handleInitDefaultTriggers = async () => {
-        const res = await api.updateWhatsAppTrigger('overdue_daily', { enabled: false, cooldown_minutes: 1440 });
-        if (res.ok) {
-            success('Triggers inicializados');
-            loadTriggers();
-        } else {
-            error(res.error || 'Error al inicializar triggers');
-        }
+        setConfirmInitTriggersOpen(true);
     };
 
     const handleRunAutomation = async (dryRun: boolean) => {
+        if (!dryRun) {
+            setConfirmAutomationOpen(true);
+            return;
+        }
+        const enabledKeys = triggers.filter((t) => t.enabled).map((t) => t.trigger_key);
+        const trigger_keys = enabledKeys.length ? enabledKeys : ['overdue_daily', 'due_today_daily', 'due_soon_daily'];
         setAutomationLoading(true);
-        const res = await api.runWhatsAppAutomation({ dry_run: dryRun, trigger_keys: ['overdue_daily'] });
+        const res = await api.runWhatsAppAutomation({ dry_run: dryRun, trigger_keys });
         setAutomationLoading(false);
         if (res.ok && res.data) {
-            setAutomationLastResult({ scanned: res.data.scanned, sent: res.data.sent, dry_run: res.data.dry_run });
+            setAutomationLastResult({ scanned: res.data.scanned, sent: res.data.sent, dry_run: res.data.dry_run, skipped: (res.data as any).skipped });
             success(dryRun ? 'Dry-run ejecutado' : 'Automatización ejecutada');
         } else {
             error(res.error || 'Error al ejecutar automatización');
@@ -540,15 +551,17 @@ export default function WhatsAppPage() {
 
     // Filter messages
     const filteredMensajes = mensajes.filter(m => {
-        if (filter === 'pending') return m.estado === 'pending';
-        if (filter === 'failed') return m.estado === 'failed';
+        const st = normalizeEstado(m.estado);
+        if (filter === 'pending') return st === 'pending';
+        if (filter === 'failed') return st === 'failed';
+        if (filter === 'sent') return st === 'sent';
         return true;
     });
 
     // Stats
-    const pendingCount = mensajes.filter(m => m.estado === 'pending').length;
-    const failedCount = mensajes.filter(m => m.estado === 'failed').length;
-    const sentCount = mensajes.filter(m => m.estado === 'sent').length;
+    const pendingCount = mensajesTotals?.by_estado?.pending ?? mensajes.filter((m) => normalizeEstado(m.estado) === 'pending').length;
+    const failedCount = mensajesTotals?.by_estado?.failed ?? mensajes.filter((m) => normalizeEstado(m.estado) === 'failed').length;
+    const sentCount = mensajesTotals?.by_estado?.sent ?? mensajes.filter((m) => normalizeEstado(m.estado) === 'sent').length;
 
     // Columns
     const columns: Column<WhatsAppMensaje>[] = [
@@ -576,7 +589,7 @@ export default function WhatsAppPage() {
             key: 'estado',
             header: 'Estado',
             render: (row) => {
-                const badge = statusBadge[row.estado];
+                const badge = statusBadge[normalizeEstado(row.estado)] || statusBadge.pending;
                 const Icon = badge.icon;
                 return (
                     <span className={cn('inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs', badge.className)}>
@@ -766,7 +779,10 @@ export default function WhatsAppPage() {
                         <div className="text-sm text-slate-400">Onboarding WhatsApp</div>
                         <div className="text-white font-semibold mt-1">Checklist automático</div>
                         <div className="text-slate-400 text-sm mt-1">
-                            Ejecuta auto-fixes: suscripción de webhooks, provisionado y sincronización de acciones.
+                            Ejecuta auto-fixes seguros e idempotentes: suscripción de webhooks, provisionado y sincronización de acciones.
+                        </div>
+                        <div className="mt-2 text-xs text-slate-500">
+                            Recomendado: usalo cuando conectás WhatsApp, cuando Meta aprueba plantillas, o si ves errores de delivery.
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -820,6 +836,39 @@ export default function WhatsAppPage() {
                         <div className="text-xs text-slate-400 mt-1">{onboarding?.actions?.template_keys ?? 0} bindings</div>
                     </div>
                 </div>
+            </motion.div>
+
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.09 }}
+                className="card p-4"
+            >
+                <div className="flex items-start justify-between gap-4">
+                    <div>
+                        <div className="text-sm text-slate-400">Seguridad</div>
+                        <div className="text-white font-semibold mt-1">Modo avanzado</div>
+                        <div className="text-slate-400 text-sm mt-1">
+                            Plantillas internas, automatizaciones y configuración manual pueden afectar envíos reales.
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        {advancedUnlocked ? (
+                            <Button variant="secondary" onClick={() => setAdvancedUnlocked(false)}>
+                                Desactivar
+                            </Button>
+                        ) : (
+                            <Button variant="secondary" onClick={() => setConfirmUnlockOpen(true)}>
+                                Activar
+                            </Button>
+                        )}
+                    </div>
+                </div>
+                {!advancedUnlocked ? (
+                    <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/40 p-3 text-xs text-slate-400">
+                        Recomendación: dejalo desactivado para evitar cambios accidentales. Para la operación normal, usá “Conectar con Meta” y “Reconciliar ahora”.
+                    </div>
+                ) : null}
             </motion.div>
 
             {/* Status Cards */}
@@ -898,6 +947,7 @@ export default function WhatsAppPage() {
                         { value: 'all', label: 'Todos' },
                         { value: 'pending', label: 'Pendientes' },
                         { value: 'failed', label: 'Fallidos' },
+                        { value: 'sent', label: 'Enviados' },
                     ].map((opt) => (
                         <button
                             key={opt.value}
@@ -960,12 +1010,24 @@ export default function WhatsAppPage() {
                     <div className="flex items-center justify-between gap-3">
                         <div>
                             <div className="text-white font-semibold">Plantillas (Internas)</div>
-                            <div className="text-xs text-slate-500">Biblioteca interna (útil para fallback a texto)</div>
+                            <div className="text-xs text-slate-500">
+                                Biblioteca interna para fallback a texto. No son plantillas de Meta.
+                            </div>
                         </div>
-                        <Button size="sm" variant="secondary" onClick={openNewTemplate} leftIcon={<Bell className="w-4 h-4" />}>
+                        <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => (advancedUnlocked ? openNewTemplate() : setConfirmUnlockOpen(true))}
+                            leftIcon={<Bell className="w-4 h-4" />}
+                        >
                             Nueva
                         </Button>
                     </div>
+                    {!advancedUnlocked ? (
+                        <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/40 p-3 text-xs text-slate-400">
+                            En modo normal es solo lectura. Editar esto puede cambiar el texto que sale si Meta rechaza/falla el envío por plantilla.
+                        </div>
+                    ) : null}
                     <div className="mt-4 space-y-2">
                         {templatesLoading ? (
                             <div className="text-sm text-slate-400">Cargando...</div>
@@ -984,10 +1046,18 @@ export default function WhatsAppPage() {
                                         <div className="text-xs text-slate-500 mt-1 truncate">{t.body_text}</div>
                                     </div>
                                     <div className="flex items-center gap-2">
-                                        <Button size="sm" variant="ghost" onClick={() => openEditTemplate(t)}>
+                                        <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            onClick={() => (advancedUnlocked ? openEditTemplate(t) : setConfirmUnlockOpen(true))}
+                                        >
                                             Editar
                                         </Button>
-                                        <Button size="sm" variant="danger" onClick={() => handleDeleteTemplate(t.template_name)}>
+                                        <Button
+                                            size="sm"
+                                            variant="danger"
+                                            onClick={() => (advancedUnlocked ? handleDeleteTemplate(t.template_name) : setConfirmUnlockOpen(true))}
+                                        >
                                             Borrar
                                         </Button>
                                     </div>
@@ -1001,10 +1071,17 @@ export default function WhatsAppPage() {
                     <div className="flex items-center justify-between gap-3">
                         <div>
                             <div className="text-white font-semibold">Automatizaciones</div>
-                            <div className="text-xs text-slate-500">Switches por gimnasio (tenant)</div>
+                            <div className="text-xs text-slate-500">
+                                Triggers del gimnasio. “Ejecutar” puede enviar mensajes reales.
+                            </div>
                         </div>
                         <div className="flex items-center gap-2">
-                            <Button size="sm" variant="secondary" onClick={handleInitDefaultTriggers} disabled={triggersLoading}>
+                            <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => (advancedUnlocked ? handleInitDefaultTriggers() : setConfirmUnlockOpen(true))}
+                                disabled={triggersLoading}
+                            >
                                 Inicializar
                             </Button>
                             <Button size="sm" variant="secondary" onClick={() => loadTriggers()} disabled={triggersLoading}>
@@ -1033,7 +1110,13 @@ export default function WhatsAppPage() {
                                                 <input
                                                     type="checkbox"
                                                     checked={!!t.enabled}
-                                                    onChange={(e) => setTriggers((prev) => prev.map((x) => x.trigger_key === t.trigger_key ? { ...x, enabled: e.target.checked } : x))}
+                                                    onChange={(e) =>
+                                                        advancedUnlocked
+                                                            ? setTriggers((prev) =>
+                                                                  prev.map((x) => (x.trigger_key === t.trigger_key ? { ...x, enabled: e.target.checked } : x))
+                                                              )
+                                                            : setConfirmUnlockOpen(true)
+                                                    }
                                                 />
                                                 Habilitado
                                             </label>
@@ -1045,11 +1128,21 @@ export default function WhatsAppPage() {
                                                     value={t.cooldown_minutes ?? 0}
                                                     onChange={(e) => {
                                                         const v = Number(e.target.value);
-                                                        setTriggers((prev) => prev.map((x) => x.trigger_key === t.trigger_key ? { ...x, cooldown_minutes: Number.isFinite(v) ? v : 0 } : x));
+                                                        if (!advancedUnlocked) {
+                                                            setConfirmUnlockOpen(true);
+                                                            return;
+                                                        }
+                                                        setTriggers((prev) =>
+                                                            prev.map((x) => (x.trigger_key === t.trigger_key ? { ...x, cooldown_minutes: Number.isFinite(v) ? v : 0 } : x))
+                                                        );
                                                     }}
                                                 />
                                             </div>
-                                            <Button size="sm" variant="secondary" onClick={() => handleUpdateTrigger(t)}>
+                                            <Button
+                                                size="sm"
+                                                variant="secondary"
+                                                onClick={() => (advancedUnlocked ? handleUpdateTrigger(t) : setConfirmUnlockOpen(true))}
+                                            >
                                                 Guardar
                                             </Button>
                                         </div>
@@ -1067,7 +1160,11 @@ export default function WhatsAppPage() {
                             <Button size="sm" variant="secondary" onClick={() => handleRunAutomation(true)} isLoading={automationLoading}>
                                 Dry-run
                             </Button>
-                            <Button size="sm" onClick={() => handleRunAutomation(false)} isLoading={automationLoading}>
+                            <Button
+                                size="sm"
+                                onClick={() => (advancedUnlocked ? handleRunAutomation(false) : setConfirmUnlockOpen(true))}
+                                isLoading={automationLoading}
+                            >
                                 Ejecutar
                             </Button>
                         </div>
@@ -1129,8 +1226,11 @@ export default function WhatsAppPage() {
                             value={config.webhook_verify_token || ''}
                             onChange={(e) => setConfig({ ...config, webhook_verify_token: e.target.value })}
                             placeholder="mi_token_secreto"
+                            disabled={!advancedUnlocked}
                         />
-                        <p className="text-xs text-slate-500 mt-1">Token para verificar webhooks entrantes</p>
+                        <p className="text-xs text-slate-500 mt-1">
+                            Solo para casos especiales. Normalmente lo maneja el sistema.
+                        </p>
                     </div>
                     <div className="grid grid-cols-2 gap-4 pt-4">
                         <label className="flex items-center gap-3 p-3 rounded-lg border border-slate-700 cursor-pointer hover:bg-slate-800">
@@ -1210,6 +1310,83 @@ export default function WhatsAppPage() {
                 message={`¿Estás seguro de eliminar ${failedCount} mensajes fallidos? Esta acción no se puede deshacer.`}
                 confirmText="Eliminar"
                 variant="danger"
+            />
+            <ConfirmModal
+                isOpen={confirmUnlockOpen}
+                onClose={() => setConfirmUnlockOpen(false)}
+                onConfirm={() => {
+                    setAdvancedUnlocked(true);
+                    setConfirmUnlockOpen(false);
+                }}
+                title="Habilitar modo avanzado"
+                message="Esto habilita configuración manual, automatizaciones y edición/borrado. Si no estás seguro, no lo actives."
+                confirmText="Habilitar"
+                variant="warning"
+            />
+            <ConfirmModal
+                isOpen={confirmDeleteTemplateOpen}
+                onClose={() => setConfirmDeleteTemplateOpen(false)}
+                onConfirm={async () => {
+                    const name = String(templateToDelete || '').trim();
+                    setConfirmDeleteTemplateOpen(false);
+                    if (!name) return;
+                    const res = await api.deleteWhatsAppTemplate(name);
+                    if (res.ok) {
+                        success('Plantilla eliminada');
+                        loadTemplates();
+                    } else {
+                        error(res.error || 'Error al eliminar plantilla');
+                    }
+                }}
+                title="Eliminar plantilla interna"
+                message={`¿Eliminar la plantilla "${templateToDelete}"? Esto puede afectar los mensajes de fallback a texto.`}
+                confirmText="Eliminar"
+                variant="danger"
+            />
+            <ConfirmModal
+                isOpen={confirmAutomationOpen}
+                onClose={() => setConfirmAutomationOpen(false)}
+                onConfirm={async () => {
+                    setConfirmAutomationOpen(false);
+                    setAutomationLoading(true);
+                    const enabledKeys = triggers.filter((t) => t.enabled).map((t) => t.trigger_key);
+                    const trigger_keys = enabledKeys.length ? enabledKeys : ['overdue_daily', 'due_today_daily', 'due_soon_daily'];
+                    const res = await api.runWhatsAppAutomation({ dry_run: false, trigger_keys });
+                    setAutomationLoading(false);
+                    if (res.ok && res.data) {
+                        setAutomationLastResult({ scanned: res.data.scanned, sent: res.data.sent, dry_run: res.data.dry_run, skipped: (res.data as any).skipped });
+                        success('Automatización ejecutada');
+                    } else {
+                        error(res.error || 'Error al ejecutar automatización');
+                    }
+                }}
+                title="Ejecutar automatización (real)"
+                message="Esto puede enviar mensajes reales a usuarios. Recomendación: ejecutá primero Dry-run y verificá el conteo."
+                confirmText="Ejecutar"
+                variant="warning"
+                isLoading={automationLoading}
+            />
+            <ConfirmModal
+                isOpen={confirmInitTriggersOpen}
+                onClose={() => setConfirmInitTriggersOpen(false)}
+                onConfirm={async () => {
+                    setConfirmInitTriggersOpen(false);
+                    const resAll = await Promise.all([
+                        api.updateWhatsAppTrigger('overdue_daily', { enabled: false, cooldown_minutes: 1440 }),
+                        api.updateWhatsAppTrigger('due_today_daily', { enabled: false, cooldown_minutes: 1440 }),
+                        api.updateWhatsAppTrigger('due_soon_daily', { enabled: false, cooldown_minutes: 1440 }),
+                    ]);
+                    if (resAll.every((r) => r.ok)) {
+                        success('Triggers inicializados');
+                        loadTriggers();
+                    } else {
+                        error('Error al inicializar triggers');
+                    }
+                }}
+                title="Inicializar automatizaciones"
+                message="Esto ajusta los triggers del gimnasio. Si ya los configuraste, podría sobrescribir valores."
+                confirmText="Inicializar"
+                variant="warning"
             />
         </div>
     );

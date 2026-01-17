@@ -2,57 +2,58 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Calendar, Clock, TrendingUp, CheckCircle, Loader2 } from 'lucide-react';
+import { Calendar, TrendingUp, Loader2 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { api, type Asistencia } from '@/lib/api';
+import { Button, Input } from '@/components/ui';
+import { formatDate } from '@/lib/utils';
 
 export default function AttendancePage() {
     const { user } = useAuth();
     const [attendance, setAttendance] = useState<Asistencia[]>([]);
     const [loading, setLoading] = useState(true);
+    const [desde, setDesde] = useState('');
+    const [hasta, setHasta] = useState('');
+    const [page, setPage] = useState(1);
+    const pageSize = 50;
+    const [total, setTotal] = useState(0);
+    const [monthCount, setMonthCount] = useState(0);
+    const [lastMonthCount, setLastMonthCount] = useState(0);
 
     const loadAttendance = useCallback(async () => {
         if (!user?.id) return;
         setLoading(true);
         try {
-            const res = await api.getAsistencias({ usuario_id: user.id, limit: 50 });
+            const res = await api.getAsistencias({ usuario_id: user.id, desde: desde || undefined, hasta: hasta || undefined, page, limit: pageSize });
             if (res.ok && res.data) {
                 setAttendance(res.data.asistencias || []);
+                setTotal(Number(res.data.total || 0));
             }
-        } catch (error) {
-            console.error('Error loading attendance:', error);
         } finally {
             setLoading(false);
         }
-    }, [user?.id]);
+    }, [user?.id, desde, hasta, page]);
 
     useEffect(() => {
         loadAttendance();
     }, [loadAttendance]);
 
-    // Calculate stats
-    const now = new Date();
-    const thisMonthAttendance = attendance.filter(a => {
-        const date = new Date(a.fecha);
-        return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
-    });
-
-    const lastMonth = new Date(now);
-    lastMonth.setMonth(lastMonth.getMonth() - 1);
-    const lastMonthAttendance = attendance.filter(a => {
-        const date = new Date(a.fecha);
-        return date.getMonth() === lastMonth.getMonth() && date.getFullYear() === lastMonth.getFullYear();
-    });
-
-    const avgDuration = attendance.length > 0
-        ? Math.round(attendance.reduce((sum, a) => sum + (a.duracion_minutos || 60), 0) / attendance.length)
-        : 0;
-
-    const stats = {
-        thisMonth: thisMonthAttendance.length,
-        lastMonth: lastMonthAttendance.length,
-        avgDuration,
-    };
+    useEffect(() => {
+        if (!user?.id) return;
+        (async () => {
+            const now = new Date();
+            const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+            const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+            const lastMonthFirst = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 10);
+            const lastMonthLast = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().slice(0, 10);
+            const [r1, r2] = await Promise.all([
+                api.getAsistencias({ usuario_id: user.id, desde: firstDay, hasta: lastDay, limit: 1 }),
+                api.getAsistencias({ usuario_id: user.id, desde: lastMonthFirst, hasta: lastMonthLast, limit: 1 }),
+            ]);
+            if (r1.ok && r1.data) setMonthCount(Number(r1.data.total || 0));
+            if (r2.ok && r2.data) setLastMonthCount(Number(r2.data.total || 0));
+        })();
+    }, [user?.id]);
 
     if (loading) {
         return (
@@ -81,7 +82,7 @@ export default function AttendancePage() {
                             <Calendar className="w-5 h-5 text-primary-400" />
                         </div>
                         <div>
-                            <div className="stat-value text-xl">{stats.thisMonth}</div>
+                            <div className="stat-value text-xl">{monthCount}</div>
                             <div className="stat-label text-xs">Este mes</div>
                         </div>
                     </div>
@@ -99,8 +100,8 @@ export default function AttendancePage() {
                         </div>
                         <div>
                             <div className="stat-value text-xl">
-                                {stats.thisMonth >= stats.lastMonth ? '+' : ''}
-                                {stats.thisMonth - stats.lastMonth}
+                                {monthCount >= lastMonthCount ? '+' : ''}
+                                {monthCount - lastMonthCount}
                             </div>
                             <div className="stat-label text-xs">vs. mes anterior</div>
                         </div>
@@ -114,17 +115,35 @@ export default function AttendancePage() {
                     className="stat-card"
                 >
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-gold-500/20 flex items-center justify-center">
-                            <Clock className="w-5 h-5 text-gold-400" />
-                        </div>
                         <div>
                             <div className="stat-value text-xl">
-                                {stats.avgDuration > 0 ? `${Math.floor(stats.avgDuration / 60)}h ${stats.avgDuration % 60}m` : '-'}
+                                {total}
                             </div>
-                            <div className="stat-label text-xs">Promedio</div>
+                            <div className="stat-label text-xs">Total (filtro)</div>
                         </div>
                     </div>
                 </motion.div>
+            </div>
+
+            <div className="card p-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <Input label="Desde" type="date" value={desde} onChange={(e) => { setPage(1); setDesde(e.target.value); }} />
+                    <Input label="Hasta" type="date" value={hasta} onChange={(e) => { setPage(1); setHasta(e.target.value); }} />
+                    <div className="flex items-end gap-2">
+                        <Button variant="secondary" onClick={() => loadAttendance()} isLoading={loading}>
+                            Refrescar
+                        </Button>
+                    </div>
+                    <div className="flex items-end justify-end gap-2">
+                        <Button variant="ghost" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
+                            Anterior
+                        </Button>
+                        <div className="text-xs text-slate-500">Página {page}</div>
+                        <Button variant="ghost" onClick={() => setPage((p) => p + 1)} disabled={page * pageSize >= total}>
+                            Siguiente
+                        </Button>
+                    </div>
+                </div>
             </div>
 
             {/* Attendance List */}
@@ -153,29 +172,17 @@ export default function AttendancePage() {
                             >
                                 <div className="flex items-center gap-4">
                                     <div className="w-12 h-12 rounded-xl bg-slate-800 flex flex-col items-center justify-center">
-                                        <span className="text-xs text-slate-500">
-                                            {new Date(a.fecha).toLocaleDateString('es-AR', { weekday: 'short' }).toUpperCase()}
-                                        </span>
-                                        <span className="text-lg font-bold text-white">
-                                            {new Date(a.fecha).getDate()}
-                                        </span>
+                                        <span className="text-xs text-slate-500">{String(a.fecha).slice(0, 10)}</span>
+                                        <span className="text-lg font-bold text-white">{a.hora ? String(a.hora).slice(0, 5) : '—'}</span>
                                     </div>
                                     <div>
                                         <div className="text-sm font-medium text-white">
-                                            {new Date(a.fecha).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })}
+                                            {formatDate(a.fecha)}
                                         </div>
                                         <div className="text-xs text-slate-500">
-                                            Entrada: {a.hora_entrada || '-'}
-                                            {a.hora_salida && ` • Salida: ${a.hora_salida}`}
+                                            Check-in {a.hora ? `a las ${String(a.hora).slice(0, 8)}` : ''}
                                         </div>
                                     </div>
-                                </div>
-                                <div className="text-right">
-                                    {a.duracion_minutos && (
-                                        <span className="badge badge-success">
-                                            {Math.floor(a.duracion_minutos / 60)}h {a.duracion_minutos % 60}m
-                                        </span>
-                                    )}
                                 </div>
                             </motion.div>
                         ))

@@ -90,7 +90,20 @@ export default function UserSidebar({
     // Asistencia state
     const [asistencias30d, setAsistencias30d] = useState<number>(0);
     const [hasAsistenciaHoy, setHasAsistenciaHoy] = useState(false);
+    const [asistenciasHoyCount, setAsistenciasHoyCount] = useState(0);
     const [asistenciaLoading, setAsistenciaLoading] = useState(false);
+    const [allowMultipleAsistenciasDia, setAllowMultipleAsistenciasDia] = useState(false);
+
+    const [asistenciasModalOpen, setAsistenciasModalOpen] = useState(false);
+    const [asistenciasModalLoading, setAsistenciasModalLoading] = useState(false);
+    const [asistenciasModalItems, setAsistenciasModalItems] = useState<Asistencia[]>([]);
+    const [asistenciasModalTotal, setAsistenciasModalTotal] = useState(0);
+    const [asistenciasModalPage, setAsistenciasModalPage] = useState(1);
+    const asistenciasModalPageSize = 50;
+    const [asistenciasModalDesde, setAsistenciasModalDesde] = useState('');
+    const [asistenciasModalHasta, setAsistenciasModalHasta] = useState('');
+    const [asistenciasModalQ, setAsistenciasModalQ] = useState('');
+    const [asistenciaDeleteConfirm, setAsistenciaDeleteConfirm] = useState<{ open: boolean; asistencia_id?: number }>({ open: false });
 
     // QR Modal
     const [qrModalOpen, setQrModalOpen] = useState(false);
@@ -111,6 +124,15 @@ export default function UserSidebar({
             loadPagos();
             loadSuggestions();
             loadEstadoTemplates();
+            void (async () => {
+                try {
+                    const res = await api.getGymData();
+                    if (res.ok && res.data) {
+                        setAllowMultipleAsistenciasDia(Boolean((res.data as any).attendance_allow_multiple_per_day));
+                    }
+                } catch {
+                }
+            })();
             loadAsistenciaStatus();
             loadRutinaActiva();
         }
@@ -158,10 +180,12 @@ export default function UserSidebar({
     const loadAsistenciaStatus = async () => {
         if (!usuario) return;
         try {
-            // Check if user has attendance today
-            const hoyRes = await api.getAsistenciasHoyIds();
-            if (hoyRes.ok && hoyRes.data) {
-                setHasAsistenciaHoy(hoyRes.data.includes(usuario.id));
+            const hoy = new Date().toISOString().split('T')[0];
+            const todayRes = await api.getAsistencias({ usuario_id: usuario.id, desde: hoy, hasta: hoy, limit: 1 });
+            if (todayRes.ok && todayRes.data) {
+                const c = Number(todayRes.data.total || todayRes.data.asistencias?.length || 0);
+                setAsistenciasHoyCount(c);
+                setHasAsistenciaHoy(c > 0);
             }
             // Load recent 30d attendance count
             const recentRes = await api.getUserAsistencias(usuario.id, 200);
@@ -341,32 +365,74 @@ export default function UserSidebar({
         if (!usuario) return;
         setAsistenciaLoading(true);
 
-        if (hasAsistenciaHoy) {
-            // Remove attendance
-            const res = await api.deleteAsistencia(usuario.id);
-            if (res.ok) {
-                success('Asistencia de hoy eliminada');
-                setHasAsistenciaHoy(false);
-                onRefresh();
-                loadAsistenciaStatus();
-            } else {
-                error(res.error || 'Error al eliminar asistencia');
+        try {
+            if (allowMultipleAsistenciasDia) {
+                const res = await api.createAsistencia(usuario.id);
+                if (res.ok) {
+                    success('Asistencia registrada');
+                    onRefresh();
+                    loadAsistenciaStatus();
+                } else {
+                    error(res.error || 'Error al registrar asistencia');
+                }
+                return;
             }
-        } else {
-            // Register attendance
-            const res = await api.createAsistencia(usuario.id);
-            if (res.ok) {
-                success('Asistencia registrada');
-                setHasAsistenciaHoy(true);
-                onRefresh();
-                loadAsistenciaStatus();
+
+            if (hasAsistenciaHoy) {
+                const res = await api.deleteAsistencia(usuario.id);
+                if (res.ok) {
+                    success('Asistencia de hoy eliminada');
+                    setHasAsistenciaHoy(false);
+                    onRefresh();
+                    loadAsistenciaStatus();
+                } else {
+                    error(res.error || 'Error al eliminar asistencia');
+                }
             } else {
-                error(res.error || 'Error al registrar asistencia');
+                const res = await api.createAsistencia(usuario.id);
+                if (res.ok) {
+                    success('Asistencia registrada');
+                    setHasAsistenciaHoy(true);
+                    onRefresh();
+                    loadAsistenciaStatus();
+                } else {
+                    error(res.error || 'Error al registrar asistencia');
+                }
             }
+        } finally {
+            setAsistenciaLoading(false);
         }
 
-        setAsistenciaLoading(false);
     };
+
+    const loadAsistenciasModal = useCallback(async () => {
+        if (!usuario) return;
+        setAsistenciasModalLoading(true);
+        try {
+            const today = new Date().toISOString().split('T')[0];
+            const desde = asistenciasModalDesde || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+            const hasta = asistenciasModalHasta || today;
+            const res = await api.getAsistencias({
+                usuario_id: usuario.id,
+                desde,
+                hasta,
+                q: asistenciasModalQ || undefined,
+                page: asistenciasModalPage,
+                limit: asistenciasModalPageSize,
+            });
+            if (res.ok && res.data) {
+                setAsistenciasModalItems(res.data.asistencias || []);
+                setAsistenciasModalTotal(Number(res.data.total || 0));
+            }
+        } finally {
+            setAsistenciasModalLoading(false);
+        }
+    }, [usuario?.id, asistenciasModalDesde, asistenciasModalHasta, asistenciasModalQ, asistenciasModalPage]);
+
+    useEffect(() => {
+        if (!asistenciasModalOpen) return;
+        loadAsistenciasModal();
+    }, [asistenciasModalOpen, loadAsistenciasModal]);
 
     // Filter etiquetas
     const filteredEtiquetas = etiquetas.filter(e =>
@@ -396,7 +462,7 @@ export default function UserSidebar({
                 initial={{ opacity: 0, x: 300 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: 300 }}
-                className="fixed right-0 top-0 h-full w-[400px] max-w-full bg-slate-900 border-l border-slate-800 z-50 flex flex-col min-h-0 overflow-hidden"
+                className="fixed right-0 top-0 h-full w-[480px] max-w-full bg-slate-900 border-l border-slate-800 z-50 flex flex-col min-h-0 overflow-hidden"
             >
                 {/* Header */}
                 <div className="p-4 border-b border-slate-800 flex items-center justify-between">
@@ -618,6 +684,10 @@ export default function UserSidebar({
 
                         <div>
                             <div className="text-[11px] font-medium text-slate-500 uppercase tracking-wide mb-2">Asistencia</div>
+                            <div className="text-xs text-slate-500 mb-2">
+                                Hoy: <span className="text-slate-300 font-medium">{asistenciasHoyCount}</span> · Últ. 30d:{' '}
+                                <span className="text-slate-300 font-medium">{asistencias30d}</span>
+                            </div>
                             <div className="flex flex-wrap gap-2">
                                 <Button size="sm" variant="secondary" onClick={handleGenerateQR} isLoading={qrLoading}>
                                     <QrCode className="w-3 h-3 mr-1" />
@@ -625,12 +695,43 @@ export default function UserSidebar({
                                 </Button>
                                 <Button
                                     size="sm"
-                                    variant={hasAsistenciaHoy ? 'danger' : 'primary'}
+                                    variant={allowMultipleAsistenciasDia ? 'primary' : hasAsistenciaHoy ? 'danger' : 'primary'}
                                     onClick={handleToggleAsistencia}
                                     isLoading={asistenciaLoading}
                                 >
-                                    {hasAsistenciaHoy ? <UserMinus className="w-3 h-3 mr-1" /> : <UserCheck className="w-3 h-3 mr-1" />}
-                                    {hasAsistenciaHoy ? 'Quitar asistencia' : 'Registrar asistencia'}
+                                    {allowMultipleAsistenciasDia ? (
+                                        <>
+                                            <UserCheck className="w-3 h-3 mr-1" />
+                                            Registrar asistencia
+                                        </>
+                                    ) : hasAsistenciaHoy ? (
+                                        <>
+                                            <UserMinus className="w-3 h-3 mr-1" />
+                                            Quitar asistencia
+                                        </>
+                                    ) : (
+                                        <>
+                                            <UserCheck className="w-3 h-3 mr-1" />
+                                            Registrar asistencia
+                                        </>
+                                    )}
+                                </Button>
+                                <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() => {
+                                        const today = new Date().toISOString().split('T')[0];
+                                        const thirtyDaysAgo = new Date();
+                                        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                                        setAsistenciasModalDesde(thirtyDaysAgo.toISOString().slice(0, 10));
+                                        setAsistenciasModalHasta(today);
+                                        setAsistenciasModalQ('');
+                                        setAsistenciasModalPage(1);
+                                        setAsistenciasModalOpen(true);
+                                    }}
+                                >
+                                    <History className="w-3 h-3 mr-1" />
+                                    Ver asistencias
                                 </Button>
                             </div>
                         </div>
@@ -1035,6 +1136,151 @@ export default function UserSidebar({
                     )}
                 </div>
             </Modal>
+
+            <Modal
+                isOpen={asistenciasModalOpen}
+                onClose={() => setAsistenciasModalOpen(false)}
+                title={`Asistencias - ${usuario?.nombre || ''}`}
+                size="xl"
+                footer={
+                    <div className="flex items-center justify-between w-full">
+                        <div className="text-sm text-slate-400">
+                            Total: <span className="text-slate-200 font-medium">{asistenciasModalTotal}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Button
+                                variant="ghost"
+                                onClick={() => setAsistenciasModalPage((p) => Math.max(1, p - 1))}
+                                disabled={asistenciasModalPage <= 1}
+                            >
+                                Anterior
+                            </Button>
+                            <div className="text-xs text-slate-500">Página {asistenciasModalPage}</div>
+                            <Button
+                                variant="ghost"
+                                onClick={() => setAsistenciasModalPage((p) => p + 1)}
+                                disabled={asistenciasModalPage * asistenciasModalPageSize >= asistenciasModalTotal}
+                            >
+                                Siguiente
+                            </Button>
+                        </div>
+                    </div>
+                }
+            >
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                        <Input
+                            label="Desde"
+                            type="date"
+                            value={asistenciasModalDesde}
+                            onChange={(e) => {
+                                setAsistenciasModalPage(1);
+                                setAsistenciasModalDesde(e.target.value);
+                            }}
+                        />
+                        <Input
+                            label="Hasta"
+                            type="date"
+                            value={asistenciasModalHasta}
+                            onChange={(e) => {
+                                setAsistenciasModalPage(1);
+                                setAsistenciasModalHasta(e.target.value);
+                            }}
+                        />
+                        <Input
+                            label="Buscar"
+                            value={asistenciasModalQ}
+                            onChange={(e) => {
+                                setAsistenciasModalPage(1);
+                                setAsistenciasModalQ(e.target.value);
+                            }}
+                            placeholder="Nombre o DNI"
+                        />
+                        <div className="flex items-end gap-2">
+                            <Button variant="secondary" onClick={loadAsistenciasModal} isLoading={asistenciasModalLoading}>
+                                <RefreshCw className="w-4 h-4 mr-1" />
+                                Refrescar
+                            </Button>
+                        </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-800 overflow-hidden">
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full text-sm">
+                                <thead className="bg-slate-900/60">
+                                    <tr className="text-left text-slate-400">
+                                        <th className="px-4 py-3">Fecha</th>
+                                        <th className="px-4 py-3">Hora</th>
+                                        <th className="px-4 py-3">Usuario</th>
+                                        <th className="px-4 py-3 text-right"></th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-800">
+                                    {asistenciasModalLoading ? (
+                                        <tr>
+                                            <td className="px-4 py-6 text-slate-400" colSpan={4}>
+                                                Cargando...
+                                            </td>
+                                        </tr>
+                                    ) : asistenciasModalItems.length === 0 ? (
+                                        <tr>
+                                            <td className="px-4 py-6 text-slate-400" colSpan={4}>
+                                                Sin asistencias para el filtro actual.
+                                            </td>
+                                        </tr>
+                                    ) : (
+                                        asistenciasModalItems.map((a) => (
+                                            <tr key={a.id} className="text-slate-200">
+                                                <td className="px-4 py-3">{String(a.fecha).slice(0, 10)}</td>
+                                                <td className="px-4 py-3">{a.hora ? String(a.hora).slice(0, 8) : '—'}</td>
+                                                <td className="px-4 py-3">{a.usuario_nombre || usuario?.nombre || ''}</td>
+                                                <td className="px-4 py-3 text-right">
+                                                    <Button
+                                                        size="sm"
+                                                        variant="danger"
+                                                        onClick={() => setAsistenciaDeleteConfirm({ open: true, asistencia_id: a.id })}
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </Button>
+                                                </td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </Modal>
+
+            <ConfirmModal
+                isOpen={asistenciaDeleteConfirm.open}
+                onClose={() => setAsistenciaDeleteConfirm({ open: false })}
+                title="Eliminar asistencia"
+                message="Esta acción no se puede deshacer."
+                confirmText="Eliminar"
+                cancelText="Cancelar"
+                variant="danger"
+                isLoading={asistenciaLoading}
+                onConfirm={async () => {
+                    if (!asistenciaDeleteConfirm.asistencia_id) return;
+                    setAsistenciaLoading(true);
+                    try {
+                        const res = await api.deleteAsistenciaById(asistenciaDeleteConfirm.asistencia_id);
+                        if (res.ok) {
+                            success('Asistencia eliminada');
+                            setAsistenciaDeleteConfirm({ open: false });
+                            onRefresh();
+                            loadAsistenciaStatus();
+                            loadAsistenciasModal();
+                        } else {
+                            error(res.error || 'Error al eliminar asistencia');
+                        }
+                    } finally {
+                        setAsistenciaLoading(false);
+                    }
+                }}
+            />
 
             {/* Click outside to close */}
             <div

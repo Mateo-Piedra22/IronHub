@@ -84,11 +84,11 @@ Importante (seguridad):
 - En producción IronHub requiere `WABA_ENCRYPTION_KEY` fuerte para guardar tokens.
 - Evitá claves triviales (ej. solo números); usá una passphrase larga aleatoria.
 
-## 7) Operación en IronHub
+## 7) Operación en IronHub ESPERANDO APROBACIÓN PARA PODER LANZARLO - FUNCIONA
 - En el tenant: Gestión → WhatsApp → **Conectar con Meta**
 - Admin (dueño del sistema): Admin → WhatsApp → catálogo estándar de plantillas (Meta) y provisión por gimnasio.
 
-## 8) Videos para App Review (checklist IronHub)
+## 8) Videos para App Review (checklist IronHub) LISTO ENVIADO ESPERANDO APROBACION
 Meta suele pedir 2 videos separados:
 
 ### Video A — permiso whatsapp_business_messaging

@@ -63,6 +63,12 @@ class WhatsAppDispatchService(BaseService):
                 CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_phone ON whatsapp_messages(phone_number)
             """))
             self.db.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_status_sent_at ON whatsapp_messages(status, sent_at DESC)
+            """))
+            self.db.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_user_type_sent_at ON whatsapp_messages(user_id, message_type, sent_at DESC)
+            """))
+            self.db.execute(text("""
                 CREATE TABLE IF NOT EXISTS whatsapp_templates (
                     id SERIAL PRIMARY KEY,
                     template_name VARCHAR(255) UNIQUE NOT NULL,
@@ -94,7 +100,9 @@ class WhatsAppDispatchService(BaseService):
             return None
 
     def _is_enabled(self) -> bool:
-        v = self._get_cfg_value("enabled")
+        v = self._get_cfg_value("wa_enabled")
+        if v is None:
+            v = self._get_cfg_value("enabled")
         try:
             return str(v or "").strip().lower() in ("1", "true", "yes", "on")
         except Exception:
@@ -291,13 +299,13 @@ class WhatsAppDispatchService(BaseService):
             raise RuntimeError(str(data.get("error") or data or f"HTTP {resp.status_code}"))
         return data if isinstance(data, dict) else {}
 
-    def _log_outgoing(self, user_id: Optional[int], phone: str, message_type: str, body: str, status: str, message_id: Optional[str]) -> None:
+    def _log_outgoing(self, user_id: Optional[int], phone: str, message_type: str, template_name: str, body: str, status: str, message_id: Optional[str]) -> None:
         try:
             sent_at = self._now_utc_naive()
             row = WhatsappMessage(
                 user_id=int(user_id) if user_id is not None else None,
                 message_type=str(message_type or "custom"),
-                template_name=str(message_type or "custom"),
+                template_name=str(template_name or message_type or "custom"),
                 phone_number=self._normalize_phone(phone),
                 message_id=message_id,
                 sent_at=sent_at,
@@ -344,13 +352,13 @@ class WhatsAppDispatchService(BaseService):
         access_token = self._decrypt_token_best_effort(str(getattr(cfg, "access_token", "") or "")) if cfg else ""
 
         if not self._is_enabled():
-            self._log_outgoing(user_id, phone, message_type, body, "failed", None)
+            self._log_outgoing(user_id, phone, message_type, "text", body, "failed", None)
             return WhatsAppSendResult(ok=False, error="disabled")
         if not phone_id or not access_token:
-            self._log_outgoing(user_id, phone, message_type, body, "failed", None)
+            self._log_outgoing(user_id, phone, message_type, "text", body, "failed", None)
             return WhatsAppSendResult(ok=False, error="missing_config")
         if not self._allowlist_ok(phone):
-            self._log_outgoing(user_id, phone, message_type, body, "failed", None)
+            self._log_outgoing(user_id, phone, message_type, "text", body, "failed", None)
             return WhatsAppSendResult(ok=False, error="allowlist_blocked")
 
         to = self._normalize_phone(phone)
@@ -369,10 +377,10 @@ class WhatsAppDispatchService(BaseService):
                     mid = (msgs[0] or {}).get("id")
             except Exception:
                 mid = None
-            self._log_outgoing(user_id, phone, message_type, body, "sent", mid)
+            self._log_outgoing(user_id, phone, message_type, "text", body, "sent", mid)
             return WhatsAppSendResult(ok=True, message_id=mid)
         except Exception as e:
-            self._log_outgoing(user_id, phone, message_type, body, "failed", None)
+            self._log_outgoing(user_id, phone, message_type, "text", body, "failed", None)
             logger.error(f"WhatsApp send failed: {e}")
             return WhatsAppSendResult(ok=False, error=str(e))
 
@@ -382,13 +390,13 @@ class WhatsAppDispatchService(BaseService):
         access_token = self._decrypt_token_best_effort(str(getattr(cfg, "access_token", "") or "")) if cfg else ""
 
         if not self._is_enabled():
-            self._log_outgoing(user_id, phone, message_type, f"[template:{template_name}] {body_params}", "failed", None)
+            self._log_outgoing(user_id, phone, message_type, template_name, f"[template:{template_name}] {body_params}", "failed", None)
             return WhatsAppSendResult(ok=False, error="disabled")
         if not phone_id or not access_token:
-            self._log_outgoing(user_id, phone, message_type, f"[template:{template_name}] {body_params}", "failed", None)
+            self._log_outgoing(user_id, phone, message_type, template_name, f"[template:{template_name}] {body_params}", "failed", None)
             return WhatsAppSendResult(ok=False, error="missing_config")
         if not self._allowlist_ok(phone):
-            self._log_outgoing(user_id, phone, message_type, f"[template:{template_name}] {body_params}", "failed", None)
+            self._log_outgoing(user_id, phone, message_type, template_name, f"[template:{template_name}] {body_params}", "failed", None)
             return WhatsAppSendResult(ok=False, error="allowlist_blocked")
 
         to = self._normalize_phone(phone)
@@ -417,10 +425,10 @@ class WhatsAppDispatchService(BaseService):
                     mid = (msgs[0] or {}).get("id")
             except Exception:
                 mid = None
-            self._log_outgoing(user_id, phone, message_type, f"[template:{template_name}] {body_params}", "sent", mid)
+            self._log_outgoing(user_id, phone, message_type, template_name, f"[template:{template_name}] {body_params}", "sent", mid)
             return WhatsAppSendResult(ok=True, message_id=mid)
         except Exception as e:
-            self._log_outgoing(user_id, phone, message_type, f"[template:{template_name}] {body_params}", "failed", None)
+            self._log_outgoing(user_id, phone, message_type, template_name, f"[template:{template_name}] {body_params}", "failed", None)
             return WhatsAppSendResult(ok=False, error=str(e))
 
     def send_welcome(self, usuario_id: int) -> bool:

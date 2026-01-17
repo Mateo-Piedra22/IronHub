@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Dumbbell, LogIn, Eye, EyeOff, User, KeyRound, ChevronDown, ChevronUp, AlertCircle, CheckCircle } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -309,12 +310,9 @@ export default function UsuarioLoginPage() {
                             ¿Problemas para ingresar? Comunícate con tu gimnasio
                         </p>
                         {/* Back button */}
-                        <a
-                            href="/"
-                            className="block w-full py-3 mt-4 rounded-xl font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 text-center transition-all text-sm"
-                        >
+                        <Link href="/" className="block w-full py-3 mt-4 rounded-xl font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 text-center transition-all text-sm">
                             ← Volver al inicio
-                        </a>
+                        </Link>
                     </div>
                 </motion.div>
             </motion.div>

@@ -443,8 +443,8 @@ class WhatsAppSettingsService(BaseService):
     def get_ui_config(self) -> Dict[str, Any]:
         row = self._get_active_config_row()
         token_raw = getattr(row, "access_token", "") if row else ""
-        enabled = str(self._get_cfg_value("enabled") or "").strip().lower() in ("1", "true", "yes", "on")
-        webhook_enabled = str(self._get_cfg_value("webhook_enabled") or self._get_cfg_value("enable_webhook") or "").strip().lower() in ("1", "true", "yes", "on")
+        enabled = str(self._get_cfg_value("wa_enabled") or self._get_cfg_value("enabled") or "").strip().lower() in ("1", "true", "yes", "on")
+        webhook_enabled = str(self._get_cfg_value("wa_webhook_enabled") or self._get_cfg_value("webhook_enabled") or self._get_cfg_value("enable_webhook") or "").strip().lower() in ("1", "true", "yes", "on")
         return {
             "phone_number_id": getattr(row, "phone_id", "") if row else "",
             "whatsapp_business_account_id": getattr(row, "waba_id", "") if row else "",
@@ -481,9 +481,13 @@ class WhatsAppSettingsService(BaseService):
                     row.access_token = token_enc
 
             if "enabled" in payload:
-                self._set_cfg_value("enabled", "1" if bool(payload.get("enabled")) else "0")
+                val = "1" if bool(payload.get("enabled")) else "0"
+                self._set_cfg_value("wa_enabled", val)
+                self._set_cfg_value("enabled", val)
             if "webhook_enabled" in payload:
-                self._set_cfg_value("webhook_enabled", "1" if bool(payload.get("webhook_enabled")) else "0")
+                val = "1" if bool(payload.get("webhook_enabled")) else "0"
+                self._set_cfg_value("wa_webhook_enabled", val)
+                self._set_cfg_value("webhook_enabled", val)
             if "webhook_verify_token" in payload:
                 self._set_cfg_value("webhook_verify_token", str(payload.get("webhook_verify_token") or ""))
             if "allowlist_numbers" in payload:

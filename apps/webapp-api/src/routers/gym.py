@@ -39,6 +39,8 @@ from src.dependencies import (
 from src.models.orm_models import (
     Rutina, Usuario, RutinaEjercicio, Ejercicio, Clase, ClaseBloque, ClaseBloqueItem
 )
+from src.database.tenant_connection import get_current_tenant, get_current_tenant_gym_id, _get_tenant_info_from_admin
+from src.database.raw_manager import RawPostgresManager
 
 from src.database.tenant_connection import get_current_tenant, set_current_tenant, validate_tenant_name, get_tenant_session_factory
 from src.utils import get_gym_name, _resolve_logo_url, _resolve_existing_dir, get_webapp_base_url
@@ -50,6 +52,24 @@ from src.services.b2_storage import simple_upload as b2_upload
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+ATTENDANCE_ALLOW_MULTIPLE_KEY = "attendance_allow_multiple_per_day"
+
+def _parse_bool(v: Any) -> bool:
+    if isinstance(v, bool):
+        return v
+    if v is None:
+        return False
+    if isinstance(v, (int, float)):
+        return bool(v)
+    s = str(v).strip().lower()
+    if not s:
+        return False
+    if s in ("1", "true", "yes", "y", "on"):
+        return True
+    if s in ("0", "false", "no", "n", "off"):
+        return False
+    return False
 
 
 _MAX_PREVIEW_JSON_BYTES = int(os.environ.get("PREVIEW_MAX_JSON_BYTES", "300000"))  # ~300KB
@@ -223,6 +243,172 @@ async def api_gym_update(
     except Exception as e:
         logger.error(f"Error updating gym: {e}")
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.get("/api/owner/gym/settings")
+async def api_owner_gym_settings(
+    _=Depends(require_owner),
+    svc: GymConfigService = Depends(get_gym_config_service),
+):
+    try:
+        cfg = svc.obtener_configuracion_gimnasio() or {}
+        allow_multiple = _parse_bool(cfg.get(ATTENDANCE_ALLOW_MULTIPLE_KEY, False))
+        return {"ok": True, "settings": {ATTENDANCE_ALLOW_MULTIPLE_KEY: allow_multiple}}
+    except Exception as e:
+        logger.error(f"Error getting owner gym settings: {e}")
+        return JSONResponse({"ok": False, "error": str(e), "settings": {}}, status_code=500)
+
+
+@router.post("/api/owner/gym/settings")
+async def api_owner_update_gym_settings(
+    request: Request,
+    _=Depends(require_owner),
+    svc: GymConfigService = Depends(get_gym_config_service),
+):
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    if ATTENDANCE_ALLOW_MULTIPLE_KEY not in payload:
+        raise HTTPException(status_code=400, detail=f"{ATTENDANCE_ALLOW_MULTIPLE_KEY} requerido")
+    allow_multiple = _parse_bool(payload.get(ATTENDANCE_ALLOW_MULTIPLE_KEY))
+    ok = svc.actualizar_configuracion_gimnasio({ATTENDANCE_ALLOW_MULTIPLE_KEY: allow_multiple})
+    if not ok:
+        return JSONResponse({"ok": False, "error": "Error guardando"}, status_code=500)
+    try:
+        admin_params = {
+            "host": os.getenv("ADMIN_DB_HOST", os.getenv("DB_HOST", "localhost")),
+            "port": int(os.getenv("ADMIN_DB_PORT", os.getenv("DB_PORT", 5432))),
+            "database": os.getenv("ADMIN_DB_NAME", os.getenv("DB_NAME", "ironhub_admin")),
+            "user": os.getenv("ADMIN_DB_USER", os.getenv("DB_USER", "postgres")),
+            "password": os.getenv("ADMIN_DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
+            "sslmode": os.getenv("ADMIN_DB_SSLMODE", os.getenv("DB_SSLMODE", "require")),
+        }
+        gym_id = get_current_tenant_gym_id()
+        if gym_id:
+            db = RawPostgresManager(connection_params=admin_params)
+            with db.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO admin_audit (actor_username, action, gym_id, details) VALUES (%s, %s, %s, %s)",
+                    (
+                        f"owner:{request.session.get('user_id') or ''}",
+                        "owner_set_attendance_policy",
+                        int(gym_id),
+                        json.dumps({"attendance_allow_multiple_per_day": bool(allow_multiple)}, ensure_ascii=False),
+                    ),
+                )
+                conn.commit()
+    except Exception:
+        pass
+    return {"ok": True, "settings": {ATTENDANCE_ALLOW_MULTIPLE_KEY: allow_multiple}}
+
+
+@router.get("/api/owner/gym/billing")
+async def api_owner_gym_billing(_=Depends(require_owner)):
+    tenant = get_current_tenant() or ""
+    info = _get_tenant_info_from_admin(tenant.strip().lower())
+    if not info or not info.get("gym_id"):
+        raise HTTPException(status_code=404, detail="Gym not found")
+
+    admin_params = {
+        "host": os.getenv("ADMIN_DB_HOST", os.getenv("DB_HOST", "localhost")),
+        "port": int(os.getenv("ADMIN_DB_PORT", os.getenv("DB_PORT", 5432))),
+        "database": os.getenv("ADMIN_DB_NAME", os.getenv("DB_NAME", "ironhub_admin")),
+        "user": os.getenv("ADMIN_DB_USER", os.getenv("DB_USER", "postgres")),
+        "password": os.getenv("ADMIN_DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
+        "sslmode": os.getenv("ADMIN_DB_SSLMODE", os.getenv("DB_SSLMODE", "require")),
+    }
+
+    gym_id = int(info["gym_id"])
+    db = RawPostgresManager(connection_params=admin_params)
+    with db.get_connection_context() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT
+                gs.id,
+                gs.plan_id,
+                gs.start_date,
+                gs.next_due_date,
+                gs.status,
+                gs.created_at,
+                p.name AS plan_name,
+                p.amount AS plan_amount,
+                p.currency AS plan_currency,
+                p.period_days AS plan_period_days,
+                p.active AS plan_active
+            FROM gym_subscriptions gs
+            JOIN plans p ON p.id = gs.plan_id
+            WHERE gs.gym_id = %s
+            ORDER BY gs.id DESC
+            LIMIT 1
+            """,
+            (gym_id,),
+        )
+        srow = cur.fetchone()
+        subscription = None
+        if srow:
+            subscription = {
+                "id": srow[0],
+                "plan_id": srow[1],
+                "start_date": srow[2].isoformat() if srow[2] else None,
+                "next_due_date": srow[3].isoformat() if srow[3] else None,
+                "status": srow[4],
+                "created_at": srow[5].isoformat() if srow[5] else None,
+                "plan": {
+                    "id": srow[1],
+                    "name": srow[6],
+                    "amount": float(srow[7] or 0),
+                    "currency": srow[8],
+                    "period_days": int(srow[9] or 0),
+                    "active": bool(srow[10]),
+                },
+            }
+
+        cur.execute(
+            """
+            SELECT id, plan, plan_id, amount, currency, paid_at, valid_until, status, notes, provider, external_reference
+            FROM gym_payments
+            WHERE gym_id = %s
+            ORDER BY paid_at DESC
+            LIMIT 20
+            """,
+            (gym_id,),
+        )
+        payments = []
+        for r in cur.fetchall() or []:
+            payments.append(
+                {
+                    "id": r[0],
+                    "plan": r[1],
+                    "plan_id": r[2],
+                    "amount": float(r[3] or 0),
+                    "currency": r[4],
+                    "paid_at": r[5].isoformat() if r[5] else None,
+                    "valid_until": r[6].isoformat() if r[6] else None,
+                    "status": r[7],
+                    "notes": r[8],
+                    "provider": r[9],
+                    "external_reference": r[10],
+                }
+            )
+
+    return {
+        "ok": True,
+        "gym": {
+            "gym_id": gym_id,
+            "tenant": tenant,
+            "nombre": info.get("nombre"),
+            "status": info.get("status"),
+            "suspended_reason": info.get("suspended_reason"),
+            "suspended_until": info.get("suspended_until").isoformat() if info.get("suspended_until") else None,
+        },
+        "subscription": subscription,
+        "payments": payments,
+    }
 
 @router.post("/api/gym/logo")
 async def api_gym_logo(

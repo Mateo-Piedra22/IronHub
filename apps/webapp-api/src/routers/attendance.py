@@ -1,5 +1,6 @@
 import logging
 import secrets
+import hashlib
 from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict, Any
 
@@ -155,12 +156,22 @@ async def api_checkin_by_dni(
         data = await request.json()
         dni = str(data.get("dni", "")).strip()
         pin = str(data.get("pin", "")).strip() if require_pin else None
+        idempotency_key = str(request.headers.get("Idempotency-Key") or data.get("idempotency_key") or "").strip()
         
         if not dni:
             return JSONResponse({"ok": False, "mensaje": "DNI requerido"}, status_code=400)
         
         if require_pin and not pin:
             return JSONResponse({"ok": False, "mensaje": "PIN requerido", "require_pin": True}, status_code=400)
+
+        if idempotency_key:
+            rh = hashlib.sha256(f"dni:{dni}|require_pin:{bool(require_pin)}|pin:{pin or ''}".encode("utf-8")).hexdigest()
+            cached = svc.idempotency_get_response(idempotency_key, request_hash=rh)
+            if cached and not cached.get("pending"):
+                return JSONResponse(cached.get("body") or {}, status_code=int(cached.get("status_code") or 200))
+            if cached and cached.get("pending"):
+                return JSONResponse({"ok": False, "mensaje": "Solicitud en progreso, reintentar", "retry_after_ms": 250}, status_code=409)
+            svc.idempotency_reserve(idempotency_key, usuario_id=None, route="/api/checkin/dni", request_hash=rh, ttl_seconds=60)
         
         # Check-in with or without PIN verification
         if require_pin:
@@ -168,11 +179,15 @@ async def api_checkin_by_dni(
         else:
             ok, msg = svc.registrar_asistencia_por_dni(dni)
         
-        return JSONResponse({
+        payload = {
             "ok": ok,
             "usuario_nombre": msg if ok else None,
             "mensaje": msg if not ok else "Asistencia registrada"
-        }, status_code=200 if ok else 400)
+        }
+        status_code = 200 if ok else 400
+        if idempotency_key:
+            svc.idempotency_store_response(idempotency_key, status_code=status_code, body=payload)
+        return JSONResponse(payload, status_code=status_code)
     except Exception as e:
         logger.exception(f"Error en /api/checkin/dni rid={rid}")
         return JSONResponse({"ok": False, "mensaje": str(e)}, status_code=500)
@@ -414,11 +429,17 @@ async def api_asistencias_eliminar(
     """Delete attendance for a user."""
     rid = getattr(getattr(request, 'state', object()), 'request_id', '-')
     payload = await request.json()
+    asistencia_id = payload.get("asistencia_id")
+    try:
+        asistencia_id = int(asistencia_id) if asistencia_id is not None and str(asistencia_id).strip() != "" else None
+    except Exception:
+        asistencia_id = None
+
     usuario_id = int(payload.get("usuario_id") or 0)
     fecha_str = str(payload.get("fecha") or "").strip()
     
-    if not usuario_id:
-        raise HTTPException(status_code=400, detail="usuario_id es requerido")
+    if asistencia_id is None and (not usuario_id):
+        raise HTTPException(status_code=400, detail="usuario_id o asistencia_id es requerido")
     
     fecha: Optional[date] = None
     if fecha_str:
@@ -432,8 +453,8 @@ async def api_asistencias_eliminar(
         fecha = None
     
     try:
-        svc.eliminar_asistencia(usuario_id, fecha)
-        logger.info(f"/api/asistencias/eliminar: usuario_id={usuario_id} fecha={fecha} rid={rid}")
+        svc.eliminar_asistencia(usuario_id=usuario_id if usuario_id else None, fecha=fecha, asistencia_id=asistencia_id)
+        logger.info(f"/api/asistencias/eliminar: usuario_id={usuario_id} asistencia_id={asistencia_id} fecha={fecha} rid={rid}")
         return JSONResponse(
             {"ok": True, "mensaje": "OK", "success": True, "message": "OK"},
             status_code=200,
@@ -699,6 +720,7 @@ async def api_station_scan(
     try:
         data = await request.json()
         token = str(data.get("token", "")).strip()
+        idempotency_key = str(request.headers.get("Idempotency-Key") or data.get("idempotency_key") or "").strip()
         
         if not token:
             return JSONResponse({"ok": False, "mensaje": "Token requerido"}, status_code=400)
@@ -707,15 +729,28 @@ async def api_station_scan(
         usuario_id = request.session.get("checkin_user_id") or request.session.get("user_id")
         if not usuario_id:
             return JSONResponse({"ok": False, "mensaje": "Debes iniciar sesión primero"}, status_code=401)
+
+        if idempotency_key:
+            rh = hashlib.sha256(f"user:{int(usuario_id)}|token:{token}".encode("utf-8")).hexdigest()
+            cached = svc.idempotency_get_response(idempotency_key, request_hash=rh)
+            if cached and not cached.get("pending"):
+                return JSONResponse(cached.get("body") or {}, status_code=int(cached.get("status_code") or 200))
+            if cached and cached.get("pending"):
+                return JSONResponse({"ok": False, "mensaje": "Solicitud en progreso, reintentar", "retry_after_ms": 250}, status_code=409)
+            svc.idempotency_reserve(idempotency_key, usuario_id=int(usuario_id), route="/api/checkin/qr", request_hash=rh, ttl_seconds=60)
         
         # Validate and register
         ok, msg, user_data = svc.validar_station_scan(token, int(usuario_id))
         
-        return JSONResponse({
+        payload = {
             "ok": ok,
             "mensaje": msg,
             "usuario": user_data
-        }, status_code=200 if ok else 400)
+        }
+        status_code = 200 if ok else 400
+        if idempotency_key:
+            svc.idempotency_store_response(idempotency_key, status_code=status_code, body=payload)
+        return JSONResponse(payload, status_code=status_code)
     except Exception as e:
         logger.error(f"Error in station scan: {e}")
         return JSONResponse({"ok": False, "mensaje": str(e)}, status_code=500)

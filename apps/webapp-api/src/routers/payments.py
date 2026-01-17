@@ -9,17 +9,22 @@ try:
 except Exception:
     ZoneInfo = None
 
-from fastapi import APIRouter, Request, Depends, HTTPException, status
+from fastapi import APIRouter, Request, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import JSONResponse, FileResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import select, or_
 
 from src.dependencies import (
     get_db_session, 
     get_payment_service, 
     require_gestion_access, 
+    get_whatsapp_dispatch_service,
+    require_owner,
 )
 from src.services.payment_service import PaymentService
+from src.services.whatsapp_dispatch_service import WhatsAppDispatchService
 from src.models import MetodoPago, Pago
+from src.database.orm_models import Usuario
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -1415,8 +1420,10 @@ async def api_recibos_config_put(
 @router.post("/api/pagos")
 async def api_pagos_create(
     request: Request, 
+    background_tasks: BackgroundTasks,
     _=Depends(require_gestion_access),
-    svc: PaymentService = Depends(get_payment_service)
+    svc: PaymentService = Depends(get_payment_service),
+    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service),
 ):
     """Create a payment using SQLAlchemy - supports both simple and multi-concept."""
     payload = await request.json()
@@ -1442,6 +1449,13 @@ async def api_pagos_create(
             metodo_pago_id_int = int(metodo_pago_id) if metodo_pago_id is not None else None
         except Exception:
             raise HTTPException(status_code=400, detail="Tipos inválidos en payload")
+
+        was_active_before = None
+        try:
+            u = svc.db.get(Usuario, int(usuario_id))
+            was_active_before = bool(getattr(u, "activo", False)) if u else None
+        except Exception:
+            was_active_before = None
 
         # Multi-concept payment
         if isinstance(conceptos_raw, list) and len(conceptos_raw) > 0:
@@ -1487,6 +1501,21 @@ async def api_pagos_create(
                 raise HTTPException(status_code=400, detail=str(ve))
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
+            try:
+                total = sum(float(x.get("cantidad") or 0) * float(x.get("precio_unitario") or 0) for x in conceptos)
+                dt = fecha_dt or datetime.now()
+                mes_env = int(dt.month)
+                anio_env = int(dt.year)
+                if background_tasks is not None:
+                    background_tasks.add_task(wa.send_payment_confirmation, int(usuario_id), float(total), mes_env, anio_env)
+                    if was_active_before is False:
+                        background_tasks.add_task(wa.send_membership_reactivated, int(usuario_id))
+                else:
+                    wa.send_payment_confirmation(int(usuario_id), float(total), mes_env, anio_env)
+                    if was_active_before is False:
+                        wa.send_membership_reactivated(int(usuario_id))
+            except Exception:
+                pass
             return {"ok": True, "id": int(pago_id)}
 
         # Simple payment
@@ -1509,6 +1538,18 @@ async def api_pagos_create(
             raise HTTPException(status_code=400, detail=str(ve))
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+
+        try:
+            if background_tasks is not None:
+                background_tasks.add_task(wa.send_payment_confirmation, int(usuario_id), float(monto), int(mes), int(año))
+                if was_active_before is False:
+                    background_tasks.add_task(wa.send_membership_reactivated, int(usuario_id))
+            else:
+                wa.send_payment_confirmation(int(usuario_id), float(monto), int(mes), int(año))
+                if was_active_before is False:
+                    wa.send_membership_reactivated(int(usuario_id))
+        except Exception:
+            pass
 
         return {"ok": True, "id": int(pago_id)}
     except HTTPException:
@@ -1712,3 +1753,67 @@ async def api_usuario_pagos(
     except Exception as e:
         logger.error(f"Error obteniendo usuario_pagos: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/api/pagos/recalcular-estado")
+async def api_pagos_recalcular_estado(
+    request: Request,
+    _=Depends(require_owner),
+    svc: PaymentService = Depends(get_payment_service),
+):
+    try:
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
+        usuario_id = payload.get("usuario_id")
+        limit = payload.get("limit")
+        modo = str(payload.get("mode") or "candidatos").strip().lower()
+
+        try:
+            lim = int(limit) if limit is not None else 300
+        except Exception:
+            lim = 300
+        if lim <= 0:
+            lim = 300
+
+        if usuario_id is not None and str(usuario_id).strip() != "":
+            try:
+                uid = int(usuario_id)
+            except Exception:
+                raise HTTPException(status_code=400, detail="usuario_id inválido")
+            res = svc._recalcular_estado_usuario(uid)
+            return {"ok": True, "processed": 1, "result": res}
+
+        hoy = svc._today_local_date()
+        stmt = select(Usuario.id).where(Usuario.rol == 'socio')
+        if modo == "overdue_only":
+            stmt = stmt.where(Usuario.activo == True, Usuario.fecha_proximo_vencimiento != None, Usuario.fecha_proximo_vencimiento < hoy)
+        else:
+            stmt = stmt.where(
+                Usuario.activo == True,
+                or_(
+                    Usuario.fecha_proximo_vencimiento == None,
+                    Usuario.fecha_proximo_vencimiento < hoy,
+                    Usuario.cuotas_vencidas == None,
+                ),
+            )
+
+        ids = list(svc.db.execute(stmt.order_by(Usuario.id.asc()).limit(lim)).scalars().all())
+        processed = 0
+        desactivados = 0
+        for uid in ids:
+            try:
+                out = svc._recalcular_estado_usuario(int(uid))
+                processed += 1
+                if out.get("desactivado"):
+                    desactivados += 1
+            except Exception:
+                continue
+
+        return {"ok": True, "processed": processed, "desactivados": desactivados, "limit": lim, "mode": modo}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)

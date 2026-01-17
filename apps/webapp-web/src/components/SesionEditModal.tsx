@@ -212,7 +212,7 @@ export function SesionEditModal({ isOpen, onClose, sesion, profesorId, onSuccess
                     {typeWarning && (
                         <div className="mt-2 p-2 rounded-lg bg-warning-500/10 border border-warning-500/20 text-xs text-warning-400 flex items-center gap-2">
                             <AlertTriangle className="w-4 h-4" />
-                            La selección "En horario" no coincide con el cálculo y se corregirá al guardar.
+                            La selección &quot;En horario&quot; no coincide con el cálculo y se corregirá al guardar.
                         </div>
                     )}
                 </div>

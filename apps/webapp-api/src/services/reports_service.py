@@ -1,12 +1,13 @@
 """Reports Service - SQLAlchemy ORM for KPIs, statistics, and exports."""
 from typing import Optional, Dict, Any, List
-from datetime import date
+from datetime import date, datetime, timedelta
 import logging
 
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func, desc, or_, exists
 
 from src.services.base import BaseService
+from src.models.orm_models import Usuario, Pago, Asistencia, MetodoPago
 
 logger = logging.getLogger(__name__)
 
@@ -211,38 +212,39 @@ class ReportsService(BaseService):
     def obtener_estado_pagos(self) -> Dict[str, int]:
         """Get payment status distribution."""
         try:
-            limit_date = date.today() - timedelta(days=35)
-            
-            # Al dia: Users active with payment in last 35 days
-            al_dia = self.db.query(func.count(func.distinct(Usuario.id))).join(
-                Pago, Usuario.id == Pago.usuario_id
-            ).filter(
-                Usuario.activo == True,
-                Pago.fecha_pago >= limit_date
-            ).scalar() or 0
-            
-            # Vencido: Max payment < 35 days
-            subq = self.db.query(
-                Pago.usuario_id,
-                func.max(Pago.fecha_pago).label('max_fecha')
-            ).group_by(Pago.usuario_id).subquery()
-            
-            vencido = self.db.query(func.count(Usuario.id)).join(
-                subq, Usuario.id == subq.c.usuario_id
-            ).filter(
-                Usuario.activo == True,
-                subq.c.max_fecha < limit_date
-            ).scalar() or 0
-            
-            # Sin pagos
-            sin_pagos = self.db.query(func.count(Usuario.id)).outerjoin(
-                Pago, Usuario.id == Pago.usuario_id
-            ).filter(
-                Usuario.activo == True,
-                Pago.id == None
-            ).scalar() or 0
-            
-            return {"al_dia": al_dia, "vencido": vencido, "sin_pagos": sin_pagos}
+            today = date.today()
+
+            has_pago = exists().where(Pago.usuario_id == Usuario.id)
+
+            sin_pagos = (
+                self.db.query(func.count(Usuario.id))
+                .filter(Usuario.activo == True)
+                .filter(~has_pago)
+                .scalar()
+                or 0
+            )
+
+            al_dia = (
+                self.db.query(func.count(Usuario.id))
+                .filter(Usuario.activo == True)
+                .filter(has_pago)
+                .filter(Usuario.fecha_proximo_vencimiento != None)
+                .filter(Usuario.fecha_proximo_vencimiento >= today)
+                .scalar()
+                or 0
+            )
+
+            vencido = (
+                self.db.query(func.count(Usuario.id))
+                .filter(Usuario.activo == True)
+                .filter(has_pago)
+                .filter(Usuario.fecha_proximo_vencimiento != None)
+                .filter(Usuario.fecha_proximo_vencimiento < today)
+                .scalar()
+                or 0
+            )
+
+            return {"al_dia": int(al_dia), "vencido": int(vencido), "sin_pagos": int(sin_pagos)}
         except Exception as e:
             logger.error(f"Error getting payment status: {e}")
             return {"al_dia": 0, "vencido": 0, "sin_pagos": 0}
@@ -268,32 +270,48 @@ class ReportsService(BaseService):
             return []
 
     def obtener_alertas_morosidad(self) -> List[Dict[str, Any]]:
-        """Get recent delinquency alerts (Active users with overdue payments > 35 days)."""
+        """Get recent delinquency alerts (Active users with overdue status)."""
         try:
-            limit_date = date.today() - timedelta(days=35)
-            
-            # Subquery for last payment
-            subq = self.db.query(
-                Pago.usuario_id,
-                func.max(Pago.fecha_pago).label('last_payment')
-            ).group_by(Pago.usuario_id).subquery()
-            
-            # Main query
-            q = self.db.query(Usuario, subq.c.last_payment).outerjoin(
-                subq, Usuario.id == subq.c.usuario_id
-            ).filter(
-                Usuario.activo == True,
-                or_(
-                    subq.c.last_payment == None,
-                    subq.c.last_payment < limit_date
+            today = date.today()
+
+            subq = (
+                self.db.query(Pago.usuario_id, func.max(Pago.fecha_pago).label('last_payment'))
+                .group_by(Pago.usuario_id)
+                .subquery()
+            )
+
+            q = (
+                self.db.query(Usuario, subq.c.last_payment)
+                .outerjoin(subq, Usuario.id == subq.c.usuario_id)
+                .filter(Usuario.activo == True)
+                .filter(
+                    or_(
+                        Usuario.fecha_proximo_vencimiento == None,
+                        Usuario.fecha_proximo_vencimiento < today,
+                    )
                 )
-            ).order_by(Usuario.nombre).limit(20)
-            
-            return [{
-                "usuario_id": r.Usuario.id, 
-                "usuario_nombre": r.Usuario.nombre, 
-                "ultimo_pago": r.last_payment.isoformat() if r.last_payment else None
-            } for r in q.all()]
+                .order_by(Usuario.nombre)
+                .limit(20)
+            )
+
+            out: list[dict[str, Any]] = []
+            for r in q.all():
+                try:
+                    fpv = getattr(r.Usuario, "fecha_proximo_vencimiento", None)
+                    dias_restantes = (fpv - today).days if fpv else None
+                except Exception:
+                    dias_restantes = None
+                out.append(
+                    {
+                        "usuario_id": int(r.Usuario.id),
+                        "usuario_nombre": r.Usuario.nombre,
+                        "ultimo_pago": r.last_payment.isoformat() if r.last_payment else None,
+                        "fecha_proximo_vencimiento": fpv.isoformat() if fpv else None,
+                        "dias_restantes": dias_restantes,
+                        "cuotas_vencidas": int(getattr(r.Usuario, "cuotas_vencidas", 0) or 0),
+                    }
+                )
+            return out
         except Exception as e:
             logger.error(f"Error getting delinquency alerts: {e}")
             return []
@@ -373,5 +391,189 @@ class ReportsService(BaseService):
             } for r in items]
         except Exception as e:
             logger.error(f"Error exporting attendance: {e}")
+            return []
+
+    def obtener_auditoria_asistencias(
+        self,
+        *,
+        desde: Optional[date] = None,
+        hasta: Optional[date] = None,
+        dias: int = 35,
+        umbral_multiples: int = 3,
+        umbral_repeticion_minutos: int = 5,
+    ) -> Dict[str, Any]:
+        try:
+            hoy = date.today()
+            if hasta is None:
+                hasta = hoy
+            if desde is None:
+                desde = hasta - timedelta(days=max(0, int(dias) - 1))
+
+            daily_rows = (
+                self.db.query(
+                    Asistencia.fecha.label("fecha"),
+                    func.count(Asistencia.id).label("total_checkins"),
+                    func.count(func.distinct(Asistencia.usuario_id)).label("unique_users"),
+                )
+                .filter(Asistencia.fecha >= desde, Asistencia.fecha <= hasta)
+                .group_by(Asistencia.fecha)
+                .order_by(Asistencia.fecha.asc())
+                .all()
+            )
+            daily = [
+                {
+                    "fecha": (r.fecha.isoformat() if getattr(r, "fecha", None) else None),
+                    "total_checkins": int(getattr(r, "total_checkins", 0) or 0),
+                    "unique_users": int(getattr(r, "unique_users", 0) or 0),
+                }
+                for r in daily_rows
+            ]
+
+            total_checkins = int(sum(d.get("total_checkins", 0) for d in daily))
+            unique_users_total = int(
+                self.db.query(func.count(func.distinct(Asistencia.usuario_id)))
+                .filter(Asistencia.fecha >= desde, Asistencia.fecha <= hasta)
+                .scalar()
+                or 0
+            )
+            avg_checkins_per_user = round(total_checkins / max(1, unique_users_total), 3)
+            max_day_total = max([0] + [int(d.get("total_checkins", 0) or 0) for d in daily])
+            max_day_unique = max([0] + [int(d.get("unique_users", 0) or 0) for d in daily])
+
+            frecuentes_rows = (
+                self.db.query(
+                    Asistencia.fecha.label("fecha"),
+                    Asistencia.usuario_id.label("usuario_id"),
+                    func.count(Asistencia.id).label("count"),
+                    Usuario.nombre.label("usuario_nombre"),
+                    Usuario.dni.label("usuario_dni"),
+                )
+                .outerjoin(Usuario, Usuario.id == Asistencia.usuario_id)
+                .filter(Asistencia.fecha >= desde, Asistencia.fecha <= hasta)
+                .group_by(Asistencia.fecha, Asistencia.usuario_id, Usuario.nombre, Usuario.dni)
+                .having(func.count(Asistencia.id) >= int(umbral_multiples))
+                .order_by(desc(func.count(Asistencia.id)))
+                .limit(100)
+                .all()
+            )
+            multiples_en_dia = [
+                {
+                    "fecha": r.fecha.isoformat() if r.fecha else None,
+                    "usuario_id": int(r.usuario_id or 0),
+                    "usuario_nombre": r.usuario_nombre,
+                    "usuario_dni": r.usuario_dni,
+                    "count": int(r.count or 0),
+                }
+                for r in frecuentes_rows
+            ]
+
+            rapid = []
+            try:
+                rapid_sql = text(
+                    """
+                    WITH t AS (
+                      SELECT
+                        a.usuario_id,
+                        a.fecha,
+                        a.hora_registro,
+                        LAG(a.hora_registro) OVER (PARTITION BY a.usuario_id, a.fecha ORDER BY a.hora_registro) AS prev_hora
+                      FROM asistencias a
+                      WHERE a.fecha BETWEEN :desde AND :hasta
+                    )
+                    SELECT
+                      t.usuario_id,
+                      t.fecha,
+                      t.hora_registro,
+                      t.prev_hora,
+                      EXTRACT(EPOCH FROM (t.hora_registro - t.prev_hora))::int AS delta_seconds,
+                      u.nombre AS usuario_nombre,
+                      u.dni AS usuario_dni
+                    FROM t
+                    LEFT JOIN usuarios u ON u.id = t.usuario_id
+                    WHERE t.prev_hora IS NOT NULL
+                      AND t.hora_registro IS NOT NULL
+                      AND (t.hora_registro - t.prev_hora) < (INTERVAL '1 minute' * :mins)
+                    ORDER BY t.fecha DESC, t.hora_registro DESC
+                    LIMIT 100
+                    """
+                )
+                rows = self.db.execute(rapid_sql, {"desde": desde, "hasta": hasta, "mins": int(umbral_repeticion_minutos)}).fetchall() or []
+                for r in rows:
+                    rapid.append(
+                        {
+                            "fecha": r.fecha.isoformat() if r.fecha else None,
+                            "usuario_id": int(r.usuario_id or 0),
+                            "usuario_nombre": getattr(r, "usuario_nombre", None),
+                            "usuario_dni": getattr(r, "usuario_dni", None),
+                            "hora": r.hora_registro.isoformat() if r.hora_registro else None,
+                            "prev_hora": r.prev_hora.isoformat() if r.prev_hora else None,
+                            "delta_seconds": int(getattr(r, "delta_seconds", 0) or 0),
+                        }
+                    )
+            except Exception:
+                rapid = []
+
+            spikes = []
+            try:
+                values = [(d["fecha"], int(d["total_checkins"] or 0)) for d in daily if d.get("fecha")]
+                for idx in range(len(values)):
+                    if idx < 7:
+                        continue
+                    prev = [v for _, v in values[max(0, idx - 7): idx]]
+                    base = sum(prev) / max(1, len(prev))
+                    cur = values[idx][1]
+                    if base >= 1 and cur >= max(20, int(base * 1.8)):
+                        spikes.append({"fecha": values[idx][0], "total_checkins": cur, "avg_prev_7d": round(base, 2)})
+            except Exception:
+                spikes = []
+
+            return {
+                "ok": True,
+                "range": {"desde": desde.isoformat(), "hasta": hasta.isoformat()},
+                "summary": {
+                    "total_checkins": total_checkins,
+                    "unique_users_total": unique_users_total,
+                    "avg_checkins_per_user": avg_checkins_per_user,
+                    "max_day_total": max_day_total,
+                    "max_day_unique": max_day_unique,
+                },
+                "daily": daily,
+                "anomalies": {
+                    "multiples_en_dia": multiples_en_dia,
+                    "repeticiones_rapidas": rapid,
+                    "spikes": spikes,
+                },
+                "params": {
+                    "dias": int(dias),
+                    "umbral_multiples": int(umbral_multiples),
+                    "umbral_repeticion_minutos": int(umbral_repeticion_minutos),
+                },
+            }
+        except Exception as e:
+            logger.error(f"Error attendance audit: {e}")
+            return {"ok": False, "error": str(e)}
+
+    def exportar_asistencias_audit(self, desde: Optional[str] = None, hasta: Optional[str] = None) -> List[Dict[str, Any]]:
+        try:
+            d = date.fromisoformat(desde) if desde else (date.today() - timedelta(days=34))
+            h = date.fromisoformat(hasta) if hasta else date.today()
+            audit = self.obtener_auditoria_asistencias(desde=d, hasta=h, dias=(h - d).days + 1)
+            if not audit.get("ok"):
+                return []
+            rows = []
+            for it in audit.get("daily", []) or []:
+                total = int(it.get("total_checkins", 0) or 0)
+                uniq = int(it.get("unique_users", 0) or 0)
+                rows.append(
+                    {
+                        "fecha": it.get("fecha"),
+                        "total_checkins": total,
+                        "unique_users": uniq,
+                        "avg_checkins_por_usuario": round(total / max(1, uniq), 3),
+                    }
+                )
+            return rows
+        except Exception as e:
+            logger.error(f"Error exporting attendance audit: {e}")
             return []
 

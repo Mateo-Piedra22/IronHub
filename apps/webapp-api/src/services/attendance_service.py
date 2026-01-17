@@ -10,6 +10,8 @@ from datetime import datetime, date, timedelta, timezone
 import logging
 import secrets
 import os
+import threading
+import json
 
 try:
     from zoneinfo import ZoneInfo
@@ -21,9 +23,16 @@ from sqlalchemy import select, update, delete, text
 
 from src.services.base import BaseService
 from src.database.repositories.attendance_repository import AttendanceRepository
-from src.database.orm_models import Usuario, Asistencia
+from src.database.orm_models import Usuario, Asistencia, Configuracion
+from src.database.tenant_connection import get_current_tenant
 
 logger = logging.getLogger(__name__)
+
+ATTENDANCE_ALLOW_MULTIPLE_KEY = "attendance_allow_multiple_per_day"
+_ATTENDANCE_SCHEMA_LOCK = threading.RLock()
+_ATTENDANCE_SCHEMA_DONE: set[str] = set()
+_IDEMPOTENCY_SCHEMA_LOCK = threading.RLock()
+_IDEMPOTENCY_SCHEMA_DONE: set[str] = set()
 
 
 class AttendanceService(BaseService):
@@ -32,6 +41,7 @@ class AttendanceService(BaseService):
     def __init__(self, db: Session):
         super().__init__(db)
         self.repo = AttendanceRepository(self.db, None, None)
+        self._ensure_attendance_schema()
 
     def _get_app_timezone(self):
         tz_name = (
@@ -68,7 +78,202 @@ class AttendanceService(BaseService):
             return dt.replace(tzinfo=None)
 
     def _registrar_asistencia_si_no_existe(self, usuario_id: int, fecha: date) -> Optional[int]:
-        return self.repo.registrar_asistencia_comun(usuario_id, fecha)
+        return self.repo.registrar_asistencia_comun(usuario_id, fecha, allow_multiple=self._allow_multiple_attendances_per_day())
+
+    def _allow_multiple_attendances_per_day(self) -> bool:
+        try:
+            row = self.db.scalar(select(Configuracion.valor).where(Configuracion.clave == ATTENDANCE_ALLOW_MULTIPLE_KEY).limit(1))
+            if row is None:
+                return False
+            s = str(row)
+            try:
+                import json as _json
+                v = _json.loads(s)
+                return bool(v)
+            except Exception:
+                return s.strip().lower() in ("1", "true", "yes", "y", "on")
+        except Exception:
+            return False
+
+    def _ensure_attendance_schema(self) -> None:
+        tenant = get_current_tenant() or "__default__"
+        with _ATTENDANCE_SCHEMA_LOCK:
+            if tenant in _ATTENDANCE_SCHEMA_DONE:
+                return
+        try:
+            self.db.execute(text("ALTER TABLE asistencias DROP CONSTRAINT IF EXISTS asistencias_usuario_id_fecha_key"))
+        except Exception:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+        try:
+            self.db.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS asistencias_diarias (
+                        usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+                        fecha DATE NOT NULL,
+                        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (usuario_id, fecha)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_asistencias_diarias_fecha ON asistencias_diarias(fecha);
+                    """
+                )
+            )
+            self.db.execute(
+                text(
+                    """
+                    INSERT INTO asistencias_diarias (usuario_id, fecha)
+                    SELECT usuario_id, fecha::date
+                    FROM asistencias
+                    GROUP BY usuario_id, fecha::date
+                    ON CONFLICT DO NOTHING
+                    """
+                )
+            )
+            self.db.commit()
+            with _ATTENDANCE_SCHEMA_LOCK:
+                _ATTENDANCE_SCHEMA_DONE.add(tenant)
+        except Exception:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+
+    def _ensure_idempotency_schema(self) -> None:
+        tenant = get_current_tenant() or "__default__"
+        with _IDEMPOTENCY_SCHEMA_LOCK:
+            if tenant in _IDEMPOTENCY_SCHEMA_DONE:
+                return
+        try:
+            self.db.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS checkin_idempotency (
+                        key TEXT PRIMARY KEY,
+                        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+                        expires_at TIMESTAMP WITHOUT TIME ZONE NULL,
+                        usuario_id INTEGER NULL,
+                        route TEXT NULL,
+                        request_hash TEXT NULL,
+                        response_status INTEGER NULL,
+                        response_body JSONB NULL
+                    )
+                    """
+                )
+            )
+            self.db.execute(text("ALTER TABLE checkin_idempotency ADD COLUMN IF NOT EXISTS request_hash TEXT NULL"))
+            self.db.execute(
+                text("CREATE INDEX IF NOT EXISTS idx_checkin_idempotency_expires_at ON checkin_idempotency(expires_at)")
+            )
+            self.db.commit()
+        except Exception:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+        with _IDEMPOTENCY_SCHEMA_LOCK:
+            _IDEMPOTENCY_SCHEMA_DONE.add(tenant)
+
+    def idempotency_get_response(self, key: str, request_hash: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        k = str(key or "").strip()
+        if not k:
+            return None
+        self._ensure_idempotency_schema()
+        params: Dict[str, Any] = {"k": k}
+        where = "key = :k AND (expires_at IS NULL OR expires_at > NOW())"
+        if request_hash:
+            where += " AND request_hash = :rh"
+            params["rh"] = str(request_hash)
+        row = self.db.execute(
+            text(
+                f"""
+                SELECT response_status, response_body, expires_at
+                FROM checkin_idempotency
+                WHERE {where}
+                LIMIT 1
+                """
+            ),
+            params,
+        ).fetchone()
+        if not row:
+            return None
+        status_code = row[0]
+        body = row[1]
+        if status_code is None or body is None:
+            return {"pending": True}
+        try:
+            parsed = body if isinstance(body, dict) else json.loads(body)
+        except Exception:
+            parsed = {"ok": False, "mensaje": "Respuesta inválida (idempotency)"}
+        return {"pending": False, "status_code": int(status_code), "body": parsed}
+
+    def idempotency_reserve(self, key: str, *, usuario_id: Optional[int], route: str, request_hash: Optional[str] = None, ttl_seconds: int = 60) -> bool:
+        k = str(key or "").strip()
+        if not k:
+            return False
+        self._ensure_idempotency_schema()
+        try:
+            self.db.execute(
+                text(
+                    """
+                    INSERT INTO checkin_idempotency(key, expires_at, usuario_id, route, request_hash, response_status, response_body)
+                    VALUES (:k, NOW() + (:ttl * INTERVAL '1 second'), :uid, :route, :rh, NULL, NULL)
+                    ON CONFLICT (key) DO NOTHING
+                    """
+                ),
+                {"k": k, "ttl": int(ttl_seconds), "uid": int(usuario_id) if usuario_id is not None else None, "route": str(route or ""), "rh": str(request_hash) if request_hash else None},
+            )
+            self.db.commit()
+            return True
+        except Exception:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+            return False
+
+    def idempotency_store_response(self, key: str, *, status_code: int, body: Dict[str, Any]) -> None:
+        k = str(key or "").strip()
+        if not k:
+            return
+        self._ensure_idempotency_schema()
+        try:
+            payload = json.dumps(body or {}, ensure_ascii=False)
+            self.db.execute(
+                text(
+                    """
+                    UPDATE checkin_idempotency
+                    SET response_status = :s, response_body = CAST(:b AS JSONB)
+                    WHERE key = :k
+                    """
+                ),
+                {"k": k, "s": int(status_code), "b": payload},
+            )
+            self.db.commit()
+        except Exception:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+        except Exception:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+
+    def _count_asistencias_usuario_fecha(self, usuario_id: int, fecha: date) -> int:
+        try:
+            return int(
+                self.db.execute(
+                    text("SELECT COUNT(*) FROM asistencias WHERE usuario_id = :uid AND fecha = :f"),
+                    {"uid": int(usuario_id), "f": fecha},
+                ).scalar()
+                or 0
+            )
+        except Exception:
+            return 0
 
     # ========== User Status Check ==========
 
@@ -140,7 +345,8 @@ class AttendanceService(BaseService):
                     is not None
                 )
 
-            used = used_flag or attended_today
+            allow_multiple = self._allow_multiple_attendances_per_day()
+            used = used_flag or (attended_today and (not allow_multiple))
             return {'exists': True, 'used': used, 'expired': expired, 'usuario_id': usuario_id}
         except Exception as e:
             logger.error(f"Error getting token status: {e}")
@@ -176,11 +382,14 @@ class AttendanceService(BaseService):
                 return False, "Token no corresponde al usuario"
 
             try:
-                self.repo.registrar_asistencia(int(usuario_id), self._today_local_date())
+                self.repo.registrar_asistencia(int(usuario_id), self._today_local_date(), allow_multiple=self._allow_multiple_attendances_per_day())
             except ValueError:
                 return False, "Token ya utilizado o asistencia ya registrada hoy"
 
             self.marcar_token_usado(token)
+            if self._allow_multiple_attendances_per_day():
+                n = self._count_asistencias_usuario_fecha(int(usuario_id), self._today_local_date())
+                return True, f"Asistencia registrada ({n} hoy)"
             return True, "Asistencia registrada correctamente"
         except Exception as e:
             logger.error(f"Error validating token: {e}")
@@ -213,7 +422,7 @@ class AttendanceService(BaseService):
             nombre = (user.nombre or "") if user else ""
 
             try:
-                self.repo.registrar_asistencia(int(usuario_id), self._today_local_date())
+                self.repo.registrar_asistencia(int(usuario_id), self._today_local_date(), allow_multiple=self._allow_multiple_attendances_per_day())
             except ValueError:
                 return False, "Token ya utilizado"
 
@@ -238,10 +447,32 @@ class AttendanceService(BaseService):
                 return False, reason or "Usuario inactivo"
 
             hoy = self._today_local_date()
-            if self.db.scalar(select(Asistencia.id).where(Asistencia.usuario_id == usuario_id, Asistencia.fecha == hoy).limit(1)) is not None:
-                return True, f"{nombre} - Ya registrado hoy"
+            allow_multiple = self._allow_multiple_attendances_per_day()
+            if allow_multiple:
+                try:
+                    threshold = int(os.getenv("CHECKIN_IDEMPOTENCY_WINDOW_SECONDS", "12") or 12)
+                except Exception:
+                    threshold = 12
+                if threshold > 0:
+                    last = self.db.execute(
+                        text(
+                            "SELECT hora_registro FROM asistencias WHERE usuario_id = :id AND fecha = :fecha ORDER BY hora_registro DESC LIMIT 1"
+                        ),
+                        {"id": usuario_id, "fecha": hoy},
+                    ).fetchone()
+                    if last and last[0]:
+                        dt = self._as_utc_naive(last[0])
+                        if dt and (self._now_utc_naive() - dt).total_seconds() < float(threshold):
+                            n = self._count_asistencias_usuario_fecha(int(usuario_id), hoy)
+                            return True, f"{nombre} - Registrado ({n} hoy)"
 
-            self.repo.registrar_asistencia(usuario_id, hoy)
+            if not allow_multiple:
+                if self.db.scalar(select(Asistencia.id).where(Asistencia.usuario_id == usuario_id, Asistencia.fecha == hoy).limit(1)) is not None:
+                    return True, f"{nombre} - Ya registrado hoy"
+            self.repo.registrar_asistencia(usuario_id, hoy, allow_multiple=allow_multiple)
+            if allow_multiple:
+                n = self._count_asistencias_usuario_fecha(int(usuario_id), hoy)
+                return True, f"{nombre} - Registrado ({n} hoy)"
             return True, nombre
         except Exception as e:
             logger.error(f"Error registering attendance by DNI: {e}")
@@ -279,10 +510,32 @@ class AttendanceService(BaseService):
                 return False, "PIN incorrecto"
 
             hoy = self._today_local_date()
-            if self.db.scalar(select(Asistencia.id).where(Asistencia.usuario_id == usuario_id, Asistencia.fecha == hoy).limit(1)) is not None:
-                return True, f"{nombre} - Ya registrado hoy"
+            allow_multiple = self._allow_multiple_attendances_per_day()
+            if allow_multiple:
+                try:
+                    threshold = int(os.getenv("CHECKIN_IDEMPOTENCY_WINDOW_SECONDS", "12") or 12)
+                except Exception:
+                    threshold = 12
+                if threshold > 0:
+                    last = self.db.execute(
+                        text(
+                            "SELECT hora_registro FROM asistencias WHERE usuario_id = :id AND fecha = :fecha ORDER BY hora_registro DESC LIMIT 1"
+                        ),
+                        {"id": usuario_id, "fecha": hoy},
+                    ).fetchone()
+                    if last and last[0]:
+                        dt = self._as_utc_naive(last[0])
+                        if dt and (self._now_utc_naive() - dt).total_seconds() < float(threshold):
+                            n = self._count_asistencias_usuario_fecha(int(usuario_id), hoy)
+                            return True, f"{nombre} - Registrado ({n} hoy)"
 
-            self.repo.registrar_asistencia(usuario_id, hoy)
+            if not allow_multiple:
+                if self.db.scalar(select(Asistencia.id).where(Asistencia.usuario_id == usuario_id, Asistencia.fecha == hoy).limit(1)) is not None:
+                    return True, f"{nombre} - Ya registrado hoy"
+            self.repo.registrar_asistencia(usuario_id, hoy, allow_multiple=allow_multiple)
+            if allow_multiple:
+                n = self._count_asistencias_usuario_fecha(int(usuario_id), hoy)
+                return True, f"{nombre} - Registrado ({n} hoy)"
             return True, nombre
         except Exception as e:
             logger.error(f"Error registering attendance by DNI+PIN: {e}")
@@ -301,18 +554,51 @@ class AttendanceService(BaseService):
             if not is_active:
                 raise PermissionError(reason or "Usuario inactivo")
 
-            return self.repo.registrar_asistencia(int(usuario_id), fecha)
+            return self.repo.registrar_asistencia(int(usuario_id), fecha, allow_multiple=self._allow_multiple_attendances_per_day())
         except Exception as e:
             logger.error(f"Error registering attendance: {e}")
             raise
 
-    def eliminar_asistencia(self, usuario_id: int, fecha: Optional[date] = None) -> bool:
+    def eliminar_asistencia(self, usuario_id: Optional[int] = None, fecha: Optional[date] = None, asistencia_id: Optional[int] = None) -> bool:
         """Delete attendance for a user on a specific date."""
         try:
+            if asistencia_id is not None:
+                a = self.db.get(Asistencia, int(asistencia_id))
+                uid = int(a.usuario_id) if a and a.usuario_id is not None else None
+                f = a.fecha if a else None
+                self.db.execute(delete(Asistencia).where(Asistencia.id == int(asistencia_id)))
+                if uid is not None and f is not None:
+                    try:
+                        remaining = int(
+                            self.db.execute(
+                                text("SELECT COUNT(*) FROM asistencias WHERE usuario_id = :uid AND fecha = :f"),
+                                {"uid": uid, "f": f},
+                            ).scalar()
+                            or 0
+                        )
+                        if remaining == 0:
+                            self.db.execute(
+                                text("DELETE FROM asistencias_diarias WHERE usuario_id = :uid AND fecha = :f"),
+                                {"uid": uid, "f": f},
+                            )
+                    except Exception:
+                        pass
+                self.db.commit()
+                return True
+
+            if usuario_id is None:
+                raise ValueError("usuario_id requerido")
             if fecha is None:
                 fecha = self._today_local_date()
 
             self.db.execute(delete(Asistencia).where(Asistencia.usuario_id == int(usuario_id), Asistencia.fecha == fecha))
+            try:
+                self.db.execute(
+                    text("DELETE FROM asistencias_diarias WHERE usuario_id = :uid AND fecha = :f"),
+                    {"uid": int(usuario_id), "f": fecha},
+                )
+            except Exception:
+                pass
             self.db.commit()
             return True
         except Exception as e:
@@ -523,7 +809,7 @@ class AttendanceService(BaseService):
 
             if q and str(q).strip():
                 params["q"] = f"%{q}%"
-                where_parts.append("(u.nombre ILIKE :q)")
+                where_parts.append("(u.nombre ILIKE :q OR u.dni ILIKE :q)")
 
             where_sql = " AND ".join(where_parts) if where_parts else "TRUE"
 
@@ -802,10 +1088,6 @@ class AttendanceService(BaseService):
             
             token_id, gym_id, expires_at, used_by = row
             
-            # Check if already used
-            if used_by:
-                return False, "Código QR ya utilizado", None
-            
             # Check expiration
             now = self._now_utc_naive()
             expires_at = self._as_utc_naive(expires_at)
@@ -824,25 +1106,39 @@ class AttendanceService(BaseService):
             
             nombre, dni, activo = user_row
 
+            if used_by:
+                try:
+                    if int(used_by) == int(usuario_id):
+                        return True, f"{nombre} - Ya registrado", {
+                            'nombre': nombre,
+                            'dni': dni,
+                            'already_checked': True
+                        }
+                except Exception:
+                    pass
+                return False, "Código QR ya utilizado", None
+
             is_active, reason = self.verificar_usuario_activo(int(usuario_id))
             if not is_active:
                 return False, reason or "Usuario inactivo", None
             
             # Check if already attended today
             hoy = self._today_local_date()
-            check = self.db.execute(
-                text("""
-                    SELECT 1 FROM asistencias 
-                    WHERE usuario_id = :id AND fecha = :fecha LIMIT 1
-                """),
-                {'id': usuario_id, 'fecha': hoy}
-            )
-            if check.fetchone():
-                return True, f"{nombre} - Ya registrado hoy", {
-                    'nombre': nombre,
-                    'dni': dni,
-                    'already_checked': True
-                }
+            allow_multiple = self._allow_multiple_attendances_per_day()
+            if not allow_multiple:
+                check = self.db.execute(
+                    text("""
+                        SELECT 1 FROM asistencias 
+                        WHERE usuario_id = :id AND fecha = :fecha LIMIT 1
+                    """),
+                    {'id': usuario_id, 'fecha': hoy}
+                )
+                if check.fetchone():
+                    return True, f"{nombre} - Ya registrado hoy", {
+                        'nombre': nombre,
+                        'dni': dni,
+                        'already_checked': True
+                    }
             
             try:
                 self._registrar_asistencia_si_no_existe(int(usuario_id), hoy)
@@ -863,6 +1159,14 @@ class AttendanceService(BaseService):
             self.db.commit()
             hora_local = self._now_local().time().isoformat(timespec='seconds')
             
+            if allow_multiple:
+                n = self._count_asistencias_usuario_fecha(int(usuario_id), hoy)
+                return True, f"Check-in exitoso ({n} hoy)", {
+                    'nombre': nombre,
+                    'dni': dni,
+                    'hora': hora_local,
+                    'already_checked': False
+                }
             return True, "Check-in exitoso", {
                 'nombre': nombre,
                 'dni': dni,

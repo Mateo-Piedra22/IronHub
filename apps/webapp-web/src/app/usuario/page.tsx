@@ -130,6 +130,7 @@ function UserDashboardContent() {
     const daysRemaining = userData.dias_restantes ?? 0;
     const isExpired = daysRemaining <= 0;
     const isExpiringSoon = daysRemaining > 0 && daysRemaining <= 7;
+    const cycleDays = Math.max(1, Number((userData as any).tipo_cuota_duracion_dias || 30));
 
     return (
         <div className="min-h-screen bg-slate-950 pb-20">
@@ -202,12 +203,12 @@ function UserDashboardContent() {
                         <div className="mt-4">
                             <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
                                 <span>Progreso del ciclo</span>
-                                <span>{Math.min(100, Math.round((daysRemaining / 30) * 100))}%</span>
+                                <span>{Math.min(100, Math.round((daysRemaining / cycleDays) * 100))}%</span>
                             </div>
                             <div className="h-2 rounded-full bg-slate-800 overflow-hidden">
                                 <motion.div
                                     initial={{ width: 0 }}
-                                    animate={{ width: `${Math.min(100, Math.round((daysRemaining / 30) * 100))}%` }}
+                                    animate={{ width: `${Math.min(100, Math.round((daysRemaining / cycleDays) * 100))}%` }}
                                     transition={{ duration: 0.8, ease: 'easeOut' }}
                                     className={cn(
                                         'h-full rounded-full',

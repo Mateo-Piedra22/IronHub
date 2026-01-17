@@ -173,7 +173,7 @@ function PlanFormModal({
 
 // ===== Main Page =====
 export default function SubscriptionsPage() {
-    const [activeTab, setActiveTab] = useState<'plans' | 'expirations'>('plans');
+    const [activeTab, setActiveTab] = useState<'plans' | 'expirations' | 'gyms'>('plans');
 
     // Plans state
     const [plans, setPlans] = useState<Plan[]>([]);
@@ -186,6 +186,18 @@ export default function SubscriptionsPage() {
     const [expirationsLoading, setExpirationsLoading] = useState(true);
     const [days, setDays] = useState(30);
     const [sending, setSending] = useState(false);
+
+    // Subscriptions by gym state
+    const [subsLoading, setSubsLoading] = useState(false);
+    const [subsItems, setSubsItems] = useState<any[]>([]);
+    const [subsTotal, setSubsTotal] = useState(0);
+    const [subsPage, setSubsPage] = useState(1);
+    const subsPageSize = 50;
+    const [subsQ, setSubsQ] = useState('');
+    const [subsStatus, setSubsStatus] = useState('');
+    const [subsDueBeforeDays, setSubsDueBeforeDays] = useState(30);
+    const [planDraft, setPlanDraft] = useState<Record<number, string>>({});
+    const [rowSaving, setRowSaving] = useState<Record<number, boolean>>({});
 
     // Load Plans
     const loadPlans = async () => {
@@ -217,15 +229,33 @@ export default function SubscriptionsPage() {
         }
     };
 
+    const loadSubs = async () => {
+        setSubsLoading(true);
+        try {
+            const res = await api.listSubscriptions({
+                q: subsQ || undefined,
+                status: subsStatus || undefined,
+                due_before_days: subsDueBeforeDays || undefined,
+                page: subsPage,
+                page_size: subsPageSize,
+            });
+            if (res.ok && res.data) {
+                setSubsItems((res.data as any).items || []);
+                setSubsTotal(Number((res.data as any).total || 0));
+            }
+        } finally {
+            setSubsLoading(false);
+        }
+    };
+
     useEffect(() => {
         loadPlans();
     }, []);
 
     useEffect(() => {
-        if (activeTab === 'expirations') {
-            loadExpirations();
-        }
-    }, [activeTab, days]);
+        if (activeTab === 'expirations') loadExpirations();
+        if (activeTab === 'gyms') loadSubs();
+    }, [activeTab, days, subsQ, subsStatus, subsDueBeforeDays, subsPage]);
 
     const handleTogglePlan = async (plan: Plan) => {
         try {
@@ -268,6 +298,28 @@ export default function SubscriptionsPage() {
         setShowPlanModal(true);
     };
 
+    const assignPlan = async (gymId: number) => {
+        const planId = planDraft[gymId];
+        if (!planId) return;
+        setRowSaving((s) => ({ ...s, [gymId]: true }));
+        try {
+            await api.upsertGymSubscription(gymId, { plan_id: Number(planId), status: 'active' });
+            loadSubs();
+        } finally {
+            setRowSaving((s) => ({ ...s, [gymId]: false }));
+        }
+    };
+
+    const renew = async (gymId: number, periods = 1) => {
+        setRowSaving((s) => ({ ...s, [gymId]: true }));
+        try {
+            await api.renewGymSubscription(gymId, periods);
+            loadSubs();
+        } finally {
+            setRowSaving((s) => ({ ...s, [gymId]: false }));
+        }
+    };
+
     return (
         <div className="space-y-6">
             {/* Header */}
@@ -299,6 +351,16 @@ export default function SubscriptionsPage() {
                 >
                     <Calendar className="w-4 h-4 inline-block mr-2" />
                     Vencimientos
+                </button>
+                <button
+                    onClick={() => setActiveTab('gyms')}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'gyms'
+                            ? 'bg-primary-600 text-white'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                >
+                    <Bell className="w-4 h-4 inline-block mr-2" />
+                    Gimnasios
                 </button>
             </div>
 
@@ -483,6 +545,131 @@ export default function SubscriptionsPage() {
                                             </td>
                                         </tr>
                                     ))}
+                                </tbody>
+                            </table>
+                        )}
+                    </div>
+                </motion.div>
+            )}
+
+            {activeTab === 'gyms' && (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+                    <div className="card p-4 flex flex-wrap items-center gap-3">
+                        <input
+                            value={subsQ}
+                            onChange={(e) => { setSubsPage(1); setSubsQ(e.target.value); }}
+                            className="input w-72"
+                            placeholder="Buscar gimnasio/subdominio"
+                        />
+                        <select
+                            value={subsStatus}
+                            onChange={(e) => { setSubsPage(1); setSubsStatus(e.target.value); }}
+                            className="input w-44"
+                        >
+                            <option value="">Todos</option>
+                            <option value="active">active</option>
+                            <option value="overdue">overdue</option>
+                            <option value="canceled">canceled</option>
+                        </select>
+                        <div className="flex items-center gap-2 text-sm text-slate-400">
+                            <Clock className="w-4 h-4" />
+                            <span>Vence en</span>
+                            <select
+                                value={subsDueBeforeDays}
+                                onChange={(e) => { setSubsPage(1); setSubsDueBeforeDays(Number(e.target.value)); }}
+                                className="input w-24"
+                            >
+                                <option value={7}>7</option>
+                                <option value={15}>15</option>
+                                <option value={30}>30</option>
+                                <option value={60}>60</option>
+                                <option value={90}>90</option>
+                            </select>
+                            <span>días</span>
+                        </div>
+                        <div className="ml-auto flex items-center gap-2 text-sm text-slate-400">
+                            <span>Total: {subsTotal}</span>
+                            <button className="btn-secondary px-3 py-2" disabled={subsPage <= 1} onClick={() => setSubsPage((p) => Math.max(1, p - 1))}>
+                                Anterior
+                            </button>
+                            <button className="btn-secondary px-3 py-2" disabled={subsPage * subsPageSize >= subsTotal} onClick={() => setSubsPage((p) => p + 1)}>
+                                Siguiente
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="card overflow-hidden">
+                        {subsLoading ? (
+                            <div className="flex items-center justify-center py-16">
+                                <Loader2 className="w-8 h-8 animate-spin text-primary-400" />
+                            </div>
+                        ) : subsItems.length === 0 ? (
+                            <div className="p-12 text-center">
+                                <AlertTriangle className="w-12 h-12 mx-auto text-slate-600 mb-4" />
+                                <p className="text-slate-400">No hay suscripciones para mostrar</p>
+                            </div>
+                        ) : (
+                            <table className="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Gimnasio</th>
+                                        <th>Subdominio</th>
+                                        <th>Plan</th>
+                                        <th>Vence</th>
+                                        <th>Estado</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {subsItems.map((row) => {
+                                        const gid = Number(row.gym_id);
+                                        const currentPlanId = row.plan_id ? String(row.plan_id) : '';
+                                        const selectedPlanId = planDraft[gid] ?? currentPlanId;
+                                        return (
+                                            <tr key={gid}>
+                                                <td className="font-medium text-white">{row.nombre}</td>
+                                                <td className="text-slate-400">{row.subdominio}</td>
+                                                <td>
+                                                    <select
+                                                        value={selectedPlanId}
+                                                        onChange={(e) => setPlanDraft((s) => ({ ...s, [gid]: e.target.value }))}
+                                                        className="input w-56"
+                                                    >
+                                                        <option value="">(Sin plan)</option>
+                                                        {plans.filter((p) => p.active).map((p) => (
+                                                            <option key={p.id} value={p.id}>
+                                                                {p.name} ({p.currency} {p.amount?.toLocaleString()})
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </td>
+                                                <td className="text-slate-400">{row.next_due_date ? String(row.next_due_date).slice(0, 10) : '—'}</td>
+                                                <td>
+                                                    <span className={`badge ${row.subscription_status === 'overdue' ? 'badge-danger' : row.subscription_status === 'active' ? 'badge-success' : 'badge-secondary'}`}>
+                                                        {row.subscription_status || '—'}
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <div className="flex items-center gap-2">
+                                                        <button
+                                                            onClick={() => assignPlan(gid)}
+                                                            disabled={!selectedPlanId || Boolean(rowSaving[gid])}
+                                                            className="btn-secondary px-3 py-2"
+                                                        >
+                                                            {rowSaving[gid] ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Asignar'}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => renew(gid, 1)}
+                                                            disabled={Boolean(rowSaving[gid])}
+                                                            className="btn-primary px-3 py-2"
+                                                        >
+                                                            Renovar +1
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         )}

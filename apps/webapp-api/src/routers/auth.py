@@ -788,6 +788,19 @@ async def api_usuario_login(
             dias_restantes = (venc - local_today).days
         except Exception:
             pass
+
+    tipo_cuota_nombre = getattr(user, "tipo_cuota", None)
+    tipo_cuota_duracion_dias = 30
+    try:
+        from sqlalchemy import select
+        from src.models.orm_models import TipoCuota
+
+        if tipo_cuota_nombre:
+            tc = svc.db.execute(select(TipoCuota).where(TipoCuota.nombre == str(tipo_cuota_nombre))).scalar_one_or_none()
+            if tc and getattr(tc, "duracion_dias", None):
+                tipo_cuota_duracion_dias = int(getattr(tc, "duracion_dias") or 30)
+    except Exception:
+        tipo_cuota_duracion_dias = 30
     
     return JSONResponse(
         {
@@ -802,6 +815,8 @@ async def api_usuario_login(
             "cuotas_vencidas": getattr(user, 'cuotas_vencidas', 0) or 0,
             "dias_restantes": dias_restantes,
             "fecha_proximo_vencimiento": str(user.fecha_proximo_vencimiento or ""),
+            "tipo_cuota_nombre": tipo_cuota_nombre,
+            "tipo_cuota_duracion_dias": int(tipo_cuota_duracion_dias or 30),
             "token": jwt_token,  # JWT for client-side use
         }
     )
@@ -931,6 +946,19 @@ async def api_checkin_auth(
             dias_restantes = (venc - local_today).days
         except Exception:
             pass
+
+    tipo_cuota_nombre = getattr(user, "tipo_cuota", None) if 'user' in locals() and user else None
+    tipo_cuota_duracion_dias = 30
+    try:
+        from sqlalchemy import select
+        from src.models.orm_models import TipoCuota
+
+        if tipo_cuota_nombre:
+            tc = svc.db.execute(select(TipoCuota).where(TipoCuota.nombre == str(tipo_cuota_nombre))).scalar_one_or_none()
+            if tc and getattr(tc, "duracion_dias", None):
+                tipo_cuota_duracion_dias = int(getattr(tc, "duracion_dias") or 30)
+    except Exception:
+        tipo_cuota_duracion_dias = 30
     
     return JSONResponse(
         {
@@ -944,6 +972,8 @@ async def api_checkin_auth(
             "cuotas_vencidas": user_data.get('cuotas_vencidas', 0) or 0,
             "dias_restantes": dias_restantes,
             "fecha_proximo_vencimiento": str(fecha_vencimiento or ""),
+            "tipo_cuota_nombre": tipo_cuota_nombre,
+            "tipo_cuota_duracion_dias": int(tipo_cuota_duracion_dias or 30),
             "token": jwt_token,
         }
     )

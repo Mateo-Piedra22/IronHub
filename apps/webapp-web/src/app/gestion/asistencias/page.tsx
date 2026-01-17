@@ -13,16 +13,18 @@ import {
     ExternalLink,
     Check,
     Monitor,
+    Trash2,
 } from 'lucide-react';
 import {
     Button,
     DataTable,
     useToast,
     Input,
+    ConfirmModal,
     type Column,
 } from '@/components/ui';
 import { api, type Asistencia } from '@/lib/api';
-import { formatDate, formatTime, cn } from '@/lib/utils';
+import { formatDate, formatTime } from '@/lib/utils';
 
 export default function AsistenciasPage() {
     const { success, error } = useToast();
@@ -32,6 +34,13 @@ export default function AsistenciasPage() {
     const [loading, setLoading] = useState(true);
     const [filterDesde, setFilterDesde] = useState('');
     const [filterHasta, setFilterHasta] = useState('');
+    const [filterQ, setFilterQ] = useState('');
+    const [page, setPage] = useState(1);
+    const pageSize = 50;
+    const [total, setTotal] = useState(0);
+    const [deleteState, setDeleteState] = useState<{ open: boolean; asistencia_id?: number }>({ open: false });
+    const [deleting, setDeleting] = useState(false);
+    const [allowMultipleAsistenciasDia, setAllowMultipleAsistenciasDia] = useState(false);
 
     // Station state
     const [stationKey, setStationKey] = useState<string | null>(null);
@@ -61,6 +70,18 @@ export default function AsistenciasPage() {
         loadStationKey();
     }, []);
 
+    useEffect(() => {
+        (async () => {
+            try {
+                const res = await api.getGymData();
+                if (res.ok && res.data) {
+                    setAllowMultipleAsistenciasDia(Boolean((res.data as any).attendance_allow_multiple_per_day));
+                }
+            } catch {
+            }
+        })();
+    }, []);
+
     // Load
     const loadAsistencias = useCallback(async () => {
         setLoading(true);
@@ -68,22 +89,26 @@ export default function AsistenciasPage() {
             const res = await api.getAsistencias({
                 desde: filterDesde || undefined,
                 hasta: filterHasta || undefined,
-                limit: 100,
+                q: filterQ || undefined,
+                page,
+                limit: pageSize,
             });
             if (res.ok && res.data) {
                 setAsistencias(res.data.asistencias);
+                setTotal(Number(res.data.total || 0));
 
-                // Count today
                 const today = new Date().toISOString().split('T')[0];
-                const todayItems = res.data.asistencias.filter((a) => a.fecha === today);
-                setTodayCount(todayItems.length);
+                const todayRes = await api.getAsistencias({ desde: today, hasta: today, limit: 1 });
+                if (todayRes.ok && todayRes.data) {
+                    setTodayCount(Number(todayRes.data.total || todayRes.data.asistencias?.length || 0));
+                }
             }
         } catch {
             error('Error al cargar asistencias');
         } finally {
             setLoading(false);
         }
-    }, [filterDesde, filterHasta, error]);
+    }, [filterDesde, filterHasta, filterQ, page, error]);
 
     useEffect(() => {
         loadAsistencias();
@@ -140,6 +165,24 @@ export default function AsistenciasPage() {
                 <span className="font-medium">{row.usuario_nombre || `ID: ${row.usuario_id}`}</span>
             ),
         },
+        {
+            key: 'usuario_dni',
+            header: 'DNI',
+            render: (row) => <span className="text-slate-400">{row.usuario_dni || '-'}</span>,
+        },
+        {
+            key: 'acciones',
+            header: '',
+            render: (row) => (
+                <button
+                    onClick={() => setDeleteState({ open: true, asistencia_id: row.id })}
+                    className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white"
+                    title="Eliminar"
+                >
+                    <Trash2 className="w-4 h-4" />
+                </button>
+            ),
+        },
     ];
 
     // Group by date for summary
@@ -168,6 +211,12 @@ export default function AsistenciasPage() {
                 >
                     Abrir Check-in
                 </Button>
+                <div className="text-sm text-slate-400">
+                    Modo:{' '}
+                    <span className="text-slate-200 font-medium">
+                        {allowMultipleAsistenciasDia ? 'Múltiples por día' : '1 por día'}
+                    </span>
+                </div>
             </motion.div>
 
             {/* Station QR Card */}
@@ -265,18 +314,33 @@ export default function AsistenciasPage() {
                 className="card p-4"
             >
                 <div className="flex flex-col sm:flex-row gap-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 flex-1">
                         <Input
                             label="Desde"
                             type="date"
                             value={filterDesde}
-                            onChange={(e) => setFilterDesde(e.target.value)}
+                            onChange={(e) => {
+                                setPage(1);
+                                setFilterDesde(e.target.value);
+                            }}
                         />
                         <Input
                             label="Hasta"
                             type="date"
                             value={filterHasta}
-                            onChange={(e) => setFilterHasta(e.target.value)}
+                            onChange={(e) => {
+                                setPage(1);
+                                setFilterHasta(e.target.value);
+                            }}
+                        />
+                        <Input
+                            label="Buscar"
+                            value={filterQ}
+                            onChange={(e) => {
+                                setPage(1);
+                                setFilterQ(e.target.value);
+                            }}
+                            placeholder="Nombre o DNI"
                         />
                     </div>
                     <div className="flex items-end gap-2">
@@ -293,6 +357,24 @@ export default function AsistenciasPage() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2 }}
             >
+                <div className="flex items-center justify-between mb-3">
+                    <div className="text-sm text-slate-400">
+                        Total: <span className="text-slate-200 font-medium">{total}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Button variant="ghost" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
+                            Anterior
+                        </Button>
+                        <div className="text-xs text-slate-500">Página {page}</div>
+                        <Button
+                            variant="ghost"
+                            onClick={() => setPage((p) => p + 1)}
+                            disabled={page * pageSize >= total}
+                        >
+                            Siguiente
+                        </Button>
+                    </div>
+                </div>
                 <DataTable
                     data={asistencias}
                     columns={columns}
@@ -300,6 +382,33 @@ export default function AsistenciasPage() {
                     emptyMessage="No se encontraron asistencias"
                 />
             </motion.div>
+
+            <ConfirmModal
+                isOpen={deleteState.open}
+                onClose={() => setDeleteState({ open: false })}
+                title="Eliminar asistencia"
+                message="Esta acción no se puede deshacer."
+                confirmText="Eliminar"
+                cancelText="Cancelar"
+                variant="danger"
+                isLoading={deleting}
+                onConfirm={async () => {
+                    if (!deleteState.asistencia_id) return;
+                    setDeleting(true);
+                    try {
+                        const res = await api.deleteAsistenciaById(deleteState.asistencia_id);
+                        if (res.ok) {
+                            success('Asistencia eliminada');
+                            setDeleteState({ open: false });
+                            loadAsistencias();
+                        } else {
+                            error(res.error || 'Error al eliminar asistencia');
+                        }
+                    } finally {
+                        setDeleting(false);
+                    }
+                }}
+            />
         </div>
     );
 }

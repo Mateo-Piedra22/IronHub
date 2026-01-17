@@ -1,11 +1,11 @@
 'use client';
 
-import AdminLayout from '@/components/layouts/AdminLayout';
+import OwnerLayout from '@/components/layouts/OwnerLayout';
 
 export default function DashboardLayout({
     children,
 }: {
     children: React.ReactNode;
 }) {
-    return <AdminLayout>{children}</AdminLayout>;
+    return <OwnerLayout>{children}</OwnerLayout>;
 }

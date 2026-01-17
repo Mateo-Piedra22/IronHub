@@ -17,7 +17,9 @@ from src.dependencies import (
 from src.services.whatsapp_service import WhatsAppService
 from src.services.whatsapp_dispatch_service import WhatsAppDispatchService
 from src.services.whatsapp_settings_service import WhatsAppSettingsService
+from src.services.payment_service import PaymentService
 from src.models.orm_models import Configuracion
+from src.database.orm_models import Usuario
 from src.database.tenant_connection import validate_tenant_name, set_current_tenant, tenant_session_scope
 
 router = APIRouter()
@@ -179,20 +181,26 @@ async def api_whatsapp_pendientes(
         return 'pending'
 
     mensajes = []
+    totals_by_estado: dict[str, int] = {"pending": 0, "sent": 0, "failed": 0}
+    totals_by_tipo: dict[str, int] = {}
     for m in items:
+        tipo = map_tipo(m.get('message_type') or '')
+        estado = map_estado(m.get('status') or '')
+        totals_by_estado[estado] = int(totals_by_estado.get(estado, 0) or 0) + 1
+        totals_by_tipo[tipo] = int(totals_by_tipo.get(tipo, 0) or 0) + 1
         mensajes.append({
             'id': m.get('id'),
             'usuario_id': m.get('user_id') or 0,
             'usuario_nombre': m.get('usuario_nombre') or '',
             'telefono': m.get('usuario_telefono') or m.get('phone_number') or '',
-            'tipo': map_tipo(m.get('message_type') or ''),
-            'estado': map_estado(m.get('status') or ''),
+            'tipo': tipo,
+            'estado': estado,
             'contenido': m.get('message_content') or '',
             'error_detail': None,
             'fecha_envio': m.get('sent_at'),
             'created_at': m.get('created_at'),
         })
-    return {"mensajes": mensajes}
+    return {"mensajes": mensajes, "totals": {"by_estado": totals_by_estado, "by_tipo": totals_by_tipo}}
 
 
 @router.get("/api/whatsapp/status")
@@ -582,55 +590,148 @@ async def api_whatsapp_automation_run(
         payload = {}
     trigger_keys = payload.get("trigger_keys")
     dry_run = bool(payload.get("dry_run", False))
+    ignore_last_run = bool(payload.get("ignore_last_run", False))
     if trigger_keys and not isinstance(trigger_keys, list):
         trigger_keys = None
 
     triggers = db.execute(text("""
-        SELECT trigger_key, enabled, cooldown_minutes
+        SELECT trigger_key, enabled, cooldown_minutes, last_run_at
         FROM whatsapp_triggers
     """)).fetchall()
-    trig_map = {r[0]: {"enabled": bool(r[1]), "cooldown_minutes": int(r[2] or 0)} for r in triggers}
+    trig_map = {r[0]: {"enabled": bool(r[1]), "cooldown_minutes": int(r[2] or 0), "last_run_at": r[3]} for r in triggers}
 
     def _selected(k: str) -> bool:
         return (trigger_keys is None) or (k in set(str(x) for x in trigger_keys))
 
     sent = 0
     scanned = 0
+    skipped: dict[str, str] = {}
+    morosity_processing = None
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     if _selected("overdue_daily") and trig_map.get("overdue_daily", {}).get("enabled"):
         cooldown = int(trig_map.get("overdue_daily", {}).get("cooldown_minutes") or 1440)
-        since = now - timedelta(minutes=cooldown)
-        users = db.execute(text("""
-            SELECT id, telefono
-            FROM usuarios
-            WHERE activo = TRUE
-              AND COALESCE(cuotas_vencidas, 0) > 0
-              AND fecha_proximo_vencimiento IS NOT NULL
-              AND fecha_proximo_vencimiento < CURRENT_DATE
-              AND TRIM(COALESCE(telefono,'')) <> ''
-        """)).fetchall()
-        for uid, _tel in users:
-            scanned += 1
-            already = db.execute(text("""
-                SELECT 1 FROM whatsapp_messages
-                WHERE user_id = :uid
-                  AND message_type = 'overdue'
-                  AND sent_at >= :since
-                LIMIT 1
-            """), {"uid": int(uid), "since": since}).fetchone()
-            if already:
-                continue
-            if dry_run:
-                sent += 1
-                continue
-            if wa.send_overdue_reminder(int(uid)):
-                sent += 1
-        if not dry_run:
-            db.execute(text("UPDATE whatsapp_triggers SET last_run_at = :now WHERE trigger_key = 'overdue_daily'"), {"now": now})
-            db.commit()
+        last_run_at = trig_map.get("overdue_daily", {}).get("last_run_at")
+        if (not ignore_last_run) and last_run_at:
+            try:
+                if isinstance(last_run_at, datetime) and last_run_at >= (now - timedelta(minutes=cooldown)):
+                    skipped["overdue_daily"] = "cooldown_global"
+            except Exception:
+                pass
+        if not skipped.get("overdue_daily"):
+            if not dry_run:
+                try:
+                    morosity_processing = PaymentService(db).procesar_usuarios_morosos()
+                except Exception:
+                    morosity_processing = {"error": "morosity_processing_failed"}
+            since = now - timedelta(minutes=cooldown)
+            users = db.execute(text("""
+            SELECT u.id, u.telefono
+            FROM usuarios u
+            WHERE u.activo = TRUE
+              AND COALESCE(u.cuotas_vencidas, 0) > 0
+              AND u.fecha_proximo_vencimiento IS NOT NULL
+              AND u.fecha_proximo_vencimiento < CURRENT_DATE
+              AND TRIM(COALESCE(u.telefono,'')) <> ''
+              AND NOT EXISTS (
+                SELECT 1 FROM whatsapp_messages wm
+                WHERE wm.user_id = u.id
+                  AND wm.message_type = 'overdue'
+                  AND wm.sent_at >= :since
+              )
+            """), {"since": since}).fetchall()
+            scanned += len(users)
+            for uid, _tel in users:
+                if dry_run:
+                    sent += 1
+                    continue
+                if wa.send_overdue_reminder(int(uid)):
+                    sent += 1
+            if not dry_run:
+                db.execute(text("UPDATE whatsapp_triggers SET last_run_at = :now WHERE trigger_key = 'overdue_daily'"), {"now": now})
+                db.commit()
 
-    return {"ok": True, "scanned": scanned, "sent": sent, "dry_run": dry_run}
+    if _selected("due_today_daily") and trig_map.get("due_today_daily", {}).get("enabled"):
+        cooldown = int(trig_map.get("due_today_daily", {}).get("cooldown_minutes") or 1440)
+        last_run_at = trig_map.get("due_today_daily", {}).get("last_run_at")
+        if (not ignore_last_run) and last_run_at:
+            try:
+                if isinstance(last_run_at, datetime) and last_run_at >= (now - timedelta(minutes=cooldown)):
+                    skipped["due_today_daily"] = "cooldown_global"
+            except Exception:
+                pass
+        if not skipped.get("due_today_daily"):
+            since = now - timedelta(minutes=cooldown)
+            users = db.execute(text("""
+                SELECT u.id, u.telefono, u.fecha_proximo_vencimiento
+                FROM usuarios u
+                WHERE u.activo = TRUE
+                  AND u.fecha_proximo_vencimiento = CURRENT_DATE
+                  AND TRIM(COALESCE(u.telefono,'')) <> ''
+                  AND NOT EXISTS (
+                    SELECT 1 FROM whatsapp_messages wm
+                    WHERE wm.user_id = u.id
+                      AND wm.message_type = 'membership_due_today'
+                      AND wm.sent_at >= :since
+                  )
+            """), {"since": since}).fetchall()
+            scanned += len(users)
+            for uid, _tel, f in users:
+                if dry_run:
+                    sent += 1
+                    continue
+                try:
+                    fecha_txt = f.isoformat() if hasattr(f, "isoformat") else str(f)
+                except Exception:
+                    fecha_txt = str(f)
+                if wa.send_membership_due_today(int(uid), str(fecha_txt or "")):
+                    sent += 1
+            if not dry_run:
+                db.execute(text("UPDATE whatsapp_triggers SET last_run_at = :now WHERE trigger_key = 'due_today_daily'"), {"now": now})
+                db.commit()
+
+    if _selected("due_soon_daily") and trig_map.get("due_soon_daily", {}).get("enabled"):
+        cooldown = int(trig_map.get("due_soon_daily", {}).get("cooldown_minutes") or 1440)
+        last_run_at = trig_map.get("due_soon_daily", {}).get("last_run_at")
+        if (not ignore_last_run) and last_run_at:
+            try:
+                if isinstance(last_run_at, datetime) and last_run_at >= (now - timedelta(minutes=cooldown)):
+                    skipped["due_soon_daily"] = "cooldown_global"
+            except Exception:
+                pass
+        if not skipped.get("due_soon_daily"):
+            since = now - timedelta(minutes=cooldown)
+            users = db.execute(text("""
+                SELECT u.id, u.telefono, u.fecha_proximo_vencimiento
+                FROM usuarios u
+                WHERE u.activo = TRUE
+                  AND u.fecha_proximo_vencimiento IS NOT NULL
+                  AND u.fecha_proximo_vencimiento > CURRENT_DATE
+                  AND u.fecha_proximo_vencimiento <= (CURRENT_DATE + INTERVAL '3 day')
+                  AND TRIM(COALESCE(u.telefono,'')) <> ''
+                  AND NOT EXISTS (
+                    SELECT 1 FROM whatsapp_messages wm
+                    WHERE wm.user_id = u.id
+                      AND wm.message_type = 'membership_due_soon'
+                      AND wm.sent_at >= :since
+                  )
+            """), {"since": since}).fetchall()
+            scanned += len(users)
+            for uid, _tel, f in users:
+                if dry_run:
+                    sent += 1
+                    continue
+                try:
+                    fecha_txt = f.isoformat() if hasattr(f, "isoformat") else str(f)
+                except Exception:
+                    fecha_txt = str(f)
+                if wa.send_membership_due_soon(int(uid), str(fecha_txt or "")):
+                    sent += 1
+            if not dry_run:
+                db.execute(text("UPDATE whatsapp_triggers SET last_run_at = :now WHERE trigger_key = 'due_soon_daily'"), {"now": now})
+                db.commit()
+
+    return {"ok": True, "scanned": scanned, "sent": sent, "dry_run": dry_run, "skipped": skipped, "morosity_processing": morosity_processing}
 
 
 @router.post("/api/whatsapp/retry-all")
@@ -643,49 +744,57 @@ async def api_whatsapp_retry_all(
     try:
         failed_messages = svc.obtener_mensajes_fallidos(30, 200)
         retried = 0
+        skipped = 0
+        errors: list[dict[str, Any]] = []
         for msg in failed_messages:
-            uid = msg.get('usuario_id') or msg.get('user_id')
+            uid = msg.get('user_id')
+            try:
+                uid_int = int(uid) if uid is not None else None
+            except Exception:
+                uid_int = None
+            if not uid_int:
+                skipped += 1
+                continue
+
             mtype = (msg.get('message_type') or '').strip().lower()
-            if uid:
-                try:
-                    ok = False
-                    if mtype in ("welcome", "bienvenida"):
-                        ok = wa.send_welcome(int(uid))
-                    elif mtype in ("payment", "pago", "payment_confirmation"):
-                        ok = wa.send_payment_confirmation(int(uid))
-                    elif mtype in ("deactivation", "desactivacion"):
-                        ok = wa.send_deactivation(int(uid), "Por decisión del administrador")
-                    elif mtype in ("overdue", "recordatorio_vencida", "payment_reminder"):
-                        ok = wa.send_overdue_reminder(int(uid))
-                    elif mtype in ("class_reminder", "recordatorio_clase"):
-                        ok = wa.send_class_reminder(int(uid), "", "", "")
-                    elif mtype in ("membership_due_today", "due_today"):
-                        ok = wa.send_membership_due_today(int(uid), "")
-                    elif mtype in ("membership_due_soon", "due_soon"):
-                        ok = wa.send_membership_due_soon(int(uid), "")
-                    elif mtype in ("membership_reactivated", "reactivated"):
-                        ok = wa.send_membership_reactivated(int(uid))
-                    elif mtype in ("class_booking_confirmed", "booking_confirmed"):
-                        ok = wa.send_class_booking_confirmed(int(uid), "", "", "")
-                    elif mtype in ("class_booking_cancelled", "booking_cancelled"):
-                        ok = wa.send_class_booking_cancelled(int(uid), "")
-                    elif mtype in ("waitlist", "waitlist_spot_available"):
-                        ok = wa.send_waitlist_promotion(int(uid), "", "", "")
-                    elif mtype in ("waitlist_confirmed",):
-                        ok = wa.send_waitlist_confirmed(int(uid), "", "", "")
-                    elif mtype in ("schedule_change",):
-                        ok = wa.send_schedule_change(int(uid), "", "", "")
-                    elif mtype in ("marketing_promo",):
-                        ok = wa.send_marketing_promo(int(uid), "")
-                    elif mtype in ("marketing_new_class",):
-                        ok = wa.send_marketing_new_class(int(uid), "", "", "")
-                    else:
-                        ok = wa.send_welcome(int(uid))
-                    if ok:
-                        retried += 1
-                except:
-                    pass
-        return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", "retried": retried}
+            try:
+                ok = False
+                if mtype in ("welcome", "bienvenida"):
+                    ok = wa.send_welcome(int(uid_int))
+                elif mtype in ("payment", "pago", "payment_confirmation"):
+                    ok = wa.send_payment_confirmation(int(uid_int))
+                elif mtype in ("deactivation", "desactivacion"):
+                    ok = wa.send_deactivation(int(uid_int), "Por decisión del administrador")
+                elif mtype in ("overdue", "recordatorio_vencida", "payment_reminder"):
+                    ok = wa.send_overdue_reminder(int(uid_int))
+                elif mtype in ("membership_due_today", "due_today"):
+                    u = wa.db.get(Usuario, int(uid_int))
+                    fecha = getattr(u, "fecha_proximo_vencimiento", None) if u else None
+                    if not fecha:
+                        skipped += 1
+                        continue
+                    fecha_txt = fecha.isoformat() if hasattr(fecha, "isoformat") else str(fecha)
+                    ok = wa.send_membership_due_today(int(uid_int), str(fecha_txt))
+                elif mtype in ("membership_due_soon", "due_soon"):
+                    u = wa.db.get(Usuario, int(uid_int))
+                    fecha = getattr(u, "fecha_proximo_vencimiento", None) if u else None
+                    if not fecha:
+                        skipped += 1
+                        continue
+                    fecha_txt = fecha.isoformat() if hasattr(fecha, "isoformat") else str(fecha)
+                    ok = wa.send_membership_due_soon(int(uid_int), str(fecha_txt))
+                elif mtype in ("membership_reactivated", "reactivated"):
+                    ok = wa.send_membership_reactivated(int(uid_int))
+                else:
+                    skipped += 1
+                    continue
+                if ok:
+                    retried += 1
+                else:
+                    errors.append({"user_id": uid_int, "message_type": mtype, "error": "send_failed"})
+            except Exception as e:
+                errors.append({"user_id": uid_int, "message_type": mtype, "error": str(e)})
+        return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", "retried": retried, "skipped": skipped, "errors": errors}
     except Exception as e:
         return JSONResponse(
             {"ok": False, "mensaje": str(e), "success": False, "message": str(e), "error": str(e)},
@@ -734,30 +843,33 @@ async def api_whatsapp_mensaje_retry(
         ok = wa.send_deactivation(int(uid), "Por decisión del administrador")
     elif mtype in ("overdue", "recordatorio_vencida", "payment_reminder"):
         ok = wa.send_overdue_reminder(int(uid))
-    elif mtype in ("class_reminder", "recordatorio_clase"):
-        ok = wa.send_class_reminder(int(uid), "", "", "")
     elif mtype in ("membership_due_today", "due_today"):
-        ok = wa.send_membership_due_today(int(uid), "")
+        try:
+            u = wa.db.get(Usuario, int(uid))
+            fecha = getattr(u, "fecha_proximo_vencimiento", None) if u else None
+            if not fecha:
+                return JSONResponse({"ok": False, "mensaje": "Sin fecha de vencimiento", "success": False, "message": "Sin fecha de vencimiento"}, status_code=400)
+            fecha_txt = fecha.isoformat() if hasattr(fecha, "isoformat") else str(fecha)
+        except Exception:
+            return JSONResponse({"ok": False, "mensaje": "No se pudo resolver la fecha", "success": False, "message": "No se pudo resolver la fecha"}, status_code=400)
+        ok = wa.send_membership_due_today(int(uid), str(fecha_txt))
     elif mtype in ("membership_due_soon", "due_soon"):
-        ok = wa.send_membership_due_soon(int(uid), "")
+        try:
+            u = wa.db.get(Usuario, int(uid))
+            fecha = getattr(u, "fecha_proximo_vencimiento", None) if u else None
+            if not fecha:
+                return JSONResponse({"ok": False, "mensaje": "Sin fecha de vencimiento", "success": False, "message": "Sin fecha de vencimiento"}, status_code=400)
+            fecha_txt = fecha.isoformat() if hasattr(fecha, "isoformat") else str(fecha)
+        except Exception:
+            return JSONResponse({"ok": False, "mensaje": "No se pudo resolver la fecha", "success": False, "message": "No se pudo resolver la fecha"}, status_code=400)
+        ok = wa.send_membership_due_soon(int(uid), str(fecha_txt))
     elif mtype in ("membership_reactivated", "reactivated"):
         ok = wa.send_membership_reactivated(int(uid))
-    elif mtype in ("class_booking_confirmed", "booking_confirmed"):
-        ok = wa.send_class_booking_confirmed(int(uid), "", "", "")
-    elif mtype in ("class_booking_cancelled", "booking_cancelled"):
-        ok = wa.send_class_booking_cancelled(int(uid), "")
-    elif mtype in ("waitlist", "waitlist_spot_available"):
-        ok = wa.send_waitlist_promotion(int(uid), "", "", "")
-    elif mtype in ("waitlist_confirmed",):
-        ok = wa.send_waitlist_confirmed(int(uid), "", "", "")
-    elif mtype in ("schedule_change",):
-        ok = wa.send_schedule_change(int(uid), "", "", "")
-    elif mtype in ("marketing_promo",):
-        ok = wa.send_marketing_promo(int(uid), "")
-    elif mtype in ("marketing_new_class",):
-        ok = wa.send_marketing_new_class(int(uid), "", "", "")
     else:
-        ok = wa.send_welcome(int(uid))
+        return JSONResponse(
+            {"ok": False, "mensaje": "Retry no soportado sin parámetros", "success": False, "message": "Retry no soportado sin parámetros"},
+            status_code=400,
+        )
     return {"ok": bool(ok), "success": bool(ok), "mensaje": "OK" if ok else "Error", "message": "OK" if ok else "Error"}
 
 
@@ -863,8 +975,10 @@ async def api_whatsapp_config(request: Request, _=Depends(require_owner), st: Wh
         data = await request.json() if request.headers.get("content-type", "").startswith("application/json") else await request.form()
     except:
         data = {}
-    allowed = {"phone_number_id", "whatsapp_business_account_id", "access_token", "allowlist_numbers", "allowlist_enabled", "enable_webhook", "max_retries", "retry_delay_seconds"}
+    allowed = {"phone_number_id", "whatsapp_business_account_id", "access_token", "allowlist_numbers", "allowlist_enabled", "enable_webhook", "webhook_enabled", "webhook_verify_token", "enabled", "wa_template_language"}
     cfg = {k: data.get(k) for k in allowed if k in data}
+    if "enable_webhook" in cfg and "webhook_enabled" not in cfg:
+        cfg["webhook_enabled"] = cfg.get("enable_webhook")
     _ = st.upsert_manual_config(cfg)
     return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", "applied_keys": list(cfg.keys())}
 
