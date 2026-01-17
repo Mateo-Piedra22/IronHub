@@ -595,6 +595,11 @@ export const api = {
     getGymWhatsAppHealth: (gymId: number) =>
         request<any>(`/gyms/${gymId}/whatsapp/health`),
 
+    getGymWhatsAppOnboardingEvents: (gymId: number, limit = 30) =>
+        request<{ ok: boolean; events: Array<{ event_type: string; severity: string; message: string; details: any; created_at: string }> }>(
+            `/gyms/${gymId}/whatsapp/onboarding-events?limit=${limit}`
+        ),
+
     // ========== PAYMENT MANAGEMENT (Restored from deprecated) ==========
 
     // Métodos de Pago

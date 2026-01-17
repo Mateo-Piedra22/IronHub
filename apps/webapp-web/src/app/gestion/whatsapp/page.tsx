@@ -27,7 +27,7 @@ import {
     Input,
     type Column,
 } from '@/components/ui';
-import { api, type WhatsAppConfig, type WhatsAppMensaje, type WhatsAppStatus, type WhatsAppTemplate, type WhatsAppTrigger, type WhatsAppEmbeddedSignupReadiness } from '@/lib/api';
+import { api, type WhatsAppConfig, type WhatsAppMensaje, type WhatsAppStatus, type WhatsAppTemplate, type WhatsAppTrigger, type WhatsAppEmbeddedSignupReadiness, type WhatsAppOnboardingStatus } from '@/lib/api';
 import { formatDate, formatTime, cn } from '@/lib/utils';
 
 // Message type labels
@@ -70,6 +70,8 @@ export default function WhatsAppPage() {
     const [readiness, setReadiness] = useState<WhatsAppEmbeddedSignupReadiness | null>(null);
     const [readinessLoading, setReadinessLoading] = useState(false);
     const [readinessError, setReadinessError] = useState<string>('');
+    const [onboarding, setOnboarding] = useState<WhatsAppOnboardingStatus | null>(null);
+    const [onboardingLoading, setOnboardingLoading] = useState(false);
 
     // Messages
     const [mensajes, setMensajes] = useState<WhatsAppMensaje[]>([]);
@@ -160,6 +162,17 @@ export default function WhatsAppPage() {
         setReadinessLoading(false);
     }, []);
 
+    const loadOnboarding = useCallback(async () => {
+        setOnboardingLoading(true);
+        const res = await api.getWhatsAppOnboardingStatus();
+        if (res.ok && res.data) {
+            setOnboarding(res.data);
+        } else {
+            setOnboarding(null);
+        }
+        setOnboardingLoading(false);
+    }, []);
+
     useEffect(() => {
         loadStatus();
         loadConfig();
@@ -167,7 +180,8 @@ export default function WhatsAppPage() {
         loadTemplates();
         loadTriggers();
         loadReadiness();
-    }, [loadStatus, loadConfig, loadMensajes, loadTemplates, loadTriggers, loadReadiness]);
+        loadOnboarding();
+    }, [loadStatus, loadConfig, loadMensajes, loadTemplates, loadTriggers, loadReadiness, loadOnboarding]);
 
     // Save config
     const handleSaveConfig = async () => {
@@ -384,6 +398,26 @@ export default function WhatsAppPage() {
                 if (listener) window.removeEventListener('message', listener);
             } catch {}
             setConnectLoading(false);
+        }
+    };
+
+    const handleOnboardingReconcile = async () => {
+        setOnboardingLoading(true);
+        try {
+            const res = await api.reconcileWhatsAppOnboarding();
+            if (res.ok) {
+                success('Reconciliación ejecutada');
+                await loadConfig();
+                await loadStatus();
+                await loadTemplates();
+                await loadTriggers();
+                await loadReadiness();
+                await loadOnboarding();
+            } else {
+                error(res.error || 'No se pudo reconciliar');
+            }
+        } finally {
+            setOnboardingLoading(false);
         }
     };
 
@@ -718,6 +752,73 @@ export default function WhatsAppPage() {
                             <XCircle className="w-4 h-4" /> {readinessError || 'No disponible'}
                         </div>
                     )}
+                </div>
+            </motion.div>
+
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.08 }}
+                className="card p-4"
+            >
+                <div className="flex items-start justify-between gap-4">
+                    <div>
+                        <div className="text-sm text-slate-400">Onboarding WhatsApp</div>
+                        <div className="text-white font-semibold mt-1">Checklist automático</div>
+                        <div className="text-slate-400 text-sm mt-1">
+                            Ejecuta auto-fixes: suscripción de webhooks, provisionado y sincronización de acciones.
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Button variant="ghost" onClick={loadOnboarding} title="Refrescar" disabled={onboardingLoading}>
+                            <RefreshCw className={cn('w-4 h-4', onboardingLoading ? 'animate-spin' : '')} />
+                        </Button>
+                        <Button variant="secondary" onClick={handleOnboardingReconcile} isLoading={onboardingLoading}>
+                            Reconciliar ahora
+                        </Button>
+                    </div>
+                </div>
+
+                <div className="mt-4 grid md:grid-cols-5 gap-3">
+                    <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                        <div className="text-slate-500 text-xs">1) Readiness</div>
+                        <div className={cn('mt-1 text-sm font-semibold', readiness?.ok ? 'text-success-400' : 'text-warning-400')}>
+                            {readiness?.ok ? 'OK' : 'Pendiente'}
+                        </div>
+                    </div>
+                    <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                        <div className="text-slate-500 text-xs">2) Conexión</div>
+                        <div className={cn('mt-1 text-sm font-semibold', onboarding?.connected ? 'text-success-400' : 'text-warning-400')}>
+                            {onboarding?.connected ? 'OK' : 'Pendiente'}
+                        </div>
+                    </div>
+                    <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                        <div className="text-slate-500 text-xs">3) Webhooks (WABA)</div>
+                        <div
+                            className={cn(
+                                'mt-1 text-sm font-semibold',
+                                onboarding?.health?.subscribed_apps?.subscribed ? 'text-success-400' : 'text-warning-400'
+                            )}
+                        >
+                            {onboarding?.health?.subscribed_apps?.subscribed ? 'Suscripto' : 'Pendiente'}
+                        </div>
+                    </div>
+                    <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                        <div className="text-slate-500 text-xs">4) Templates</div>
+                        <div className="mt-1 text-sm font-semibold text-white">
+                            {onboarding?.health?.templates?.approved ?? 0}/{onboarding?.health?.templates?.count ?? 0} aprobadas
+                        </div>
+                        {(onboarding?.health?.templates?.pending ?? 0) > 0 ? (
+                            <div className="text-xs text-slate-400 mt-1">{onboarding?.health?.templates?.pending} en revisión</div>
+                        ) : null}
+                    </div>
+                    <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                        <div className="text-slate-500 text-xs">5) Acciones</div>
+                        <div className="mt-1 text-sm font-semibold text-white">
+                            {onboarding?.actions?.enabled_keys ?? 0} switches
+                        </div>
+                        <div className="text-xs text-slate-400 mt-1">{onboarding?.actions?.template_keys ?? 0} bindings</div>
+                    </div>
                 </div>
             </motion.div>
 

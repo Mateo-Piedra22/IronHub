@@ -562,6 +562,12 @@ export interface WhatsAppTrigger {
     last_run_at?: string | null;
 }
 
+export interface WhatsAppOnboardingStatus {
+    connected: boolean;
+    health: any;
+    actions: { enabled_keys: number; template_keys: number };
+}
+
 // === Recibo Types ===
 export interface ReciboConfig {
     prefijo: string;
@@ -1816,6 +1822,14 @@ class ApiClient {
 
     async getWhatsAppTriggers() {
         return this.request<{ triggers: WhatsAppTrigger[] }>('/api/whatsapp/triggers');
+    }
+
+    async getWhatsAppOnboardingStatus() {
+        return this.request<WhatsAppOnboardingStatus>('/api/whatsapp/onboarding/status');
+    }
+
+    async reconcileWhatsAppOnboarding() {
+        return this.request<{ ok: boolean }>(`/api/whatsapp/onboarding/reconcile`, { method: 'POST' });
     }
 
     async updateWhatsAppTrigger(triggerKey: string, data: { enabled: boolean; template_name?: string | null; cooldown_minutes?: number }) {

@@ -1024,6 +1024,20 @@ async def send_whatsapp_test(
         return {"ok": False, "error": str(e)}
 
 
+@app.get("/gyms/{gym_id}/whatsapp/onboarding-events")
+async def gym_whatsapp_onboarding_events(
+    request: Request,
+    gym_id: int,
+    limit: int = Query(30, ge=1, le=200),
+):
+    require_admin(request)
+    adm = get_admin_service()
+    result = adm.get_gym_whatsapp_onboarding_events(int(gym_id), int(limit))
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
+    return result
+
+
 @app.get("/whatsapp/templates")
 async def list_whatsapp_template_catalog(request: Request, active_only: bool = False):
     require_admin(request)

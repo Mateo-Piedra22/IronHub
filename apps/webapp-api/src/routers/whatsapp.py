@@ -341,6 +341,39 @@ async def api_whatsapp_embedded_signup_complete(
     health = st.meta_health_check()
     return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", "provision": provision, "health": health}
 
+@router.get("/api/whatsapp/onboarding/status")
+async def api_whatsapp_onboarding_status(
+    _=Depends(require_owner),
+    st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service),
+    db: Session = Depends(get_db_session),
+):
+    health = st.meta_health_check()
+    try:
+        enabled_count = db.execute(text("SELECT COUNT(*) FROM configuracion WHERE clave LIKE 'wa_action_enabled_%'")).scalar() or 0
+    except Exception:
+        enabled_count = 0
+    try:
+        template_count = db.execute(text("SELECT COUNT(*) FROM configuracion WHERE clave LIKE 'wa_meta_template_%'")).scalar() or 0
+    except Exception:
+        template_count = 0
+    return {
+        "ok": True,
+        "connected": bool(health.get("ok")),
+        "health": health,
+        "actions": {"enabled_keys": int(enabled_count), "template_keys": int(template_count)},
+    }
+
+
+@router.post("/api/whatsapp/onboarding/reconcile")
+async def api_whatsapp_onboarding_reconcile(
+    _=Depends(require_owner),
+    st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service),
+):
+    result = st.reconcile_onboarding()
+    ok = bool(result.get("ok"))
+    msg = "OK" if ok else str(result.get("error") or "Error")
+    return {"ok": ok, "mensaje": msg, "success": ok, "message": msg, **result}
+
 
 @router.get("/api/whatsapp/health")
 async def api_whatsapp_health(
@@ -351,6 +384,78 @@ async def api_whatsapp_health(
     ok = bool(data.get("ok"))
     msg = "OK" if ok else str(data.get("error") or "Error")
     return {"ok": ok, "mensaje": msg, "success": ok, "message": msg, **data}
+
+
+@router.post("/internal/cron/whatsapp/reconcile")
+async def internal_cron_whatsapp_reconcile(
+    request: Request,
+):
+    secret = (os.getenv("INTERNAL_CRON_SECRET") or "").strip()
+    incoming = (request.headers.get("X-Internal-Cron-Secret") or "").strip()
+    if not secret:
+        return JSONResponse({"ok": False, "error": "INTERNAL_CRON_SECRET not configured"}, status_code=503)
+    if incoming != secret:
+        return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+
+    try:
+        limit = int(request.query_params.get("limit") or 10)
+    except Exception:
+        limit = 10
+    if limit < 1:
+        limit = 1
+    if limit > 50:
+        limit = 50
+
+    try:
+        cursor = int(request.query_params.get("cursor") or 0)
+    except Exception:
+        cursor = 0
+
+    from src.database.raw_manager import RawPostgresManager
+    from src.database.tenant_connection import tenant_session_scope, set_current_tenant
+
+    admin_params = {
+        "host": os.getenv("ADMIN_DB_HOST", os.getenv("DB_HOST", "localhost")),
+        "port": int(os.getenv("ADMIN_DB_PORT", os.getenv("DB_PORT", 5432))),
+        "database": os.getenv("ADMIN_DB_NAME", os.getenv("DB_NAME", "ironhub_admin")),
+        "user": os.getenv("ADMIN_DB_USER", os.getenv("DB_USER", "postgres")),
+        "password": os.getenv("ADMIN_DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
+        "sslmode": os.getenv("ADMIN_DB_SSLMODE", os.getenv("DB_SSLMODE", "require")),
+        "connect_timeout": int(os.getenv("ADMIN_DB_CONNECT_TIMEOUT", "10")),
+        "application_name": "cron_whatsapp_reconcile",
+    }
+
+    gyms = []
+    try:
+        adm = RawPostgresManager(connection_params=admin_params)
+        with adm.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, subdominio FROM gyms WHERE id > %s ORDER BY id ASC LIMIT %s",
+                (cursor, limit),
+            )
+            gyms = cur.fetchall() or []
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    results = []
+    next_cursor = None
+    for row in gyms:
+        try:
+            gid = int((row or [0, ""])[0] or 0)
+            tenant = str((row or [0, ""])[1] or "").strip().lower()
+            if not tenant:
+                continue
+            set_current_tenant(tenant)
+            with tenant_session_scope(tenant) as tdb:
+                st = WhatsAppSettingsService(tdb)
+                r = st.reconcile_onboarding()
+            results.append({"gym_id": gid, "tenant": tenant, "ok": bool(r.get("ok")), "error": r.get("error")})
+            next_cursor = gid
+        except Exception as e:
+            results.append({"gym_id": int((row or [0, ""])[0] or 0), "tenant": str((row or [0, ""])[1] or ""), "ok": False, "error": str(e)})
+
+    return {"ok": True, "processed": len(results), "results": results, "next_cursor": next_cursor}
 
 
 @router.get("/api/whatsapp/templates")
@@ -920,16 +1025,13 @@ async def api_usuario_whatsapp_delete_by_mid(usuario_id: int, message_id: str, _
 # --- Webhooks ---
 
 @router.get("/webhooks/whatsapp")
-async def whatsapp_verify(request: Request, st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service)):
+async def whatsapp_verify(request: Request):
     mode = request.query_params.get("hub.mode")
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
     expected = os.getenv("WHATSAPP_VERIFY_TOKEN", "").strip()
     if not expected:
-        try:
-            expected = str(st.get_webhook_verify_token() or "").strip()
-        except Exception:
-            expected = ""
+        raise HTTPException(status_code=503, detail="Verify token not configured")
     if mode == "subscribe" and expected and token == expected and challenge:
         return Response(content=str(challenge), media_type="text/plain")
     raise HTTPException(status_code=403, detail="Invalid verify token")

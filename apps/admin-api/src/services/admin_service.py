@@ -3357,6 +3357,58 @@ class AdminService:
             )
         return {"ok": True, "actions": items}
 
+    def get_gym_whatsapp_onboarding_events(self, gym_id: int, limit: int = 30) -> Dict[str, Any]:
+        try:
+            gid = int(gym_id)
+        except Exception:
+            return {"ok": False, "error": "invalid_gym_id"}
+        try:
+            lim = int(limit)
+        except Exception:
+            lim = 30
+        if lim < 1:
+            lim = 1
+        if lim > 200:
+            lim = 200
+
+        try:
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute("SELECT subdominio FROM gyms WHERE id = %s", (gid,))
+                row = cur.fetchone()
+                if not row:
+                    return {"ok": False, "error": "gym_not_found"}
+                sub = str(row.get("subdominio") or "").strip().lower()
+                if not sub:
+                    return {"ok": False, "error": "gym_subdomain_missing"}
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS whatsapp_onboarding_events (
+                        id BIGSERIAL PRIMARY KEY,
+                        subdominio TEXT NOT NULL,
+                        event_type TEXT NOT NULL,
+                        severity TEXT NOT NULL,
+                        message TEXT NOT NULL,
+                        details JSONB,
+                        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    SELECT event_type, severity, message, details, created_at
+                    FROM whatsapp_onboarding_events
+                    WHERE subdominio = %s
+                    ORDER BY id DESC
+                    LIMIT %s
+                    """,
+                    (sub, lim),
+                )
+                rows = cur.fetchall() or []
+            return {"ok": True, "events": rows}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def set_gym_whatsapp_action(self, gym_id: int, action_key: str, enabled: bool, template_name: str) -> Dict[str, Any]:
         try:
             gid = int(gym_id)

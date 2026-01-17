@@ -56,6 +56,8 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     const [waActions, setWaActions] = useState<Array<{ action_key: string; enabled: boolean; template_name: string; required_params: number }>>([]);
     const [waCatalog, setWaCatalog] = useState<WhatsAppTemplateCatalogItem[]>([]);
     const [savingWaAction, setSavingWaAction] = useState<string>('');
+    const [waEventsLoading, setWaEventsLoading] = useState(false);
+    const [waEvents, setWaEvents] = useState<Array<{ event_type: string; severity: string; message: string; details: any; created_at: string }>>([]);
 
     // Payment form
     const [paymentAmount, setPaymentAmount] = useState('');
@@ -120,6 +122,11 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                 if (tplRes.ok && tplRes.data) {
                     setWaCatalog(tplRes.data.templates || []);
                 }
+                setWaEventsLoading(true);
+                const evRes = await api.getGymWhatsAppOnboardingEvents(gymId, 20);
+                if (evRes.ok && evRes.data) {
+                    setWaEvents(evRes.data.events || []);
+                }
                 setWaActionsLoading(true);
                 const actRes = await api.getGymWhatsAppActions(gymId);
                 if (actRes.ok && actRes.data) {
@@ -128,6 +135,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
             } catch {
                 // Ignore
             } finally {
+                setWaEventsLoading(false);
                 setWaActionsLoading(false);
                 setLoading(false);
             }
@@ -216,6 +224,15 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
             }
         } finally {
             setSavingWaAction('');
+            try {
+                setWaEventsLoading(true);
+                const evRes = await api.getGymWhatsAppOnboardingEvents(gymId, 20);
+                if (evRes.ok && evRes.data) {
+                    setWaEvents(evRes.data.events || []);
+                }
+            } finally {
+                setWaEventsLoading(false);
+            }
         }
     };
 
@@ -415,6 +432,15 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
             }
         } finally {
             setProvisioningTemplates(false);
+            try {
+                setWaEventsLoading(true);
+                const evRes = await api.getGymWhatsAppOnboardingEvents(gymId, 20);
+                if (evRes.ok && evRes.data) {
+                    setWaEvents(evRes.data.events || []);
+                }
+            } finally {
+                setWaEventsLoading(false);
+            }
         }
     };
 
@@ -435,6 +461,15 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
             }
         } finally {
             setWaHealthLoading(false);
+            try {
+                setWaEventsLoading(true);
+                const evRes = await api.getGymWhatsAppOnboardingEvents(gymId, 20);
+                if (evRes.ok && evRes.data) {
+                    setWaEvents(evRes.data.events || []);
+                }
+            } finally {
+                setWaEventsLoading(false);
+            }
         }
     };
 
@@ -700,6 +735,42 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                         {waHealthMsg ? (
                             <div className="text-sm text-slate-300">{waHealthMsg}</div>
                         ) : null}
+                        <div className="pt-4 border-t border-slate-800">
+                            <h3 className="font-medium text-white mb-3">Eventos de onboarding</h3>
+                            {waEventsLoading ? (
+                                <div className="text-slate-400 flex items-center gap-2">
+                                    <Loader2 className="w-4 h-4 animate-spin" /> Cargando...
+                                </div>
+                            ) : waEvents.length ? (
+                                <div className="space-y-2 max-w-3xl">
+                                    {waEvents.slice(0, 12).map((ev, idx) => (
+                                        <div key={`${ev.created_at}-${idx}`} className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="text-slate-200 text-sm">
+                                                    <div className="text-slate-500 text-xs">{String(ev.created_at || '').replace('T', ' ').slice(0, 19)}</div>
+                                                    <div className="mt-1">
+                                                        <span className="text-slate-400">{ev.event_type}</span> — {ev.message}
+                                                    </div>
+                                                </div>
+                                                <span
+                                                    className={`badge ${
+                                                        String(ev.severity || '').toLowerCase() === 'error'
+                                                            ? 'badge-danger'
+                                                            : String(ev.severity || '').toLowerCase() === 'warning'
+                                                            ? 'badge-warning'
+                                                            : 'badge-success'
+                                                    }`}
+                                                >
+                                                    {String(ev.severity || 'info')}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-slate-400 text-sm">—</div>
+                            )}
+                        </div>
                         <div className="pt-4 border-t border-slate-800">
                             <h3 className="font-medium text-white mb-3">Acciones y versiones (por gimnasio)</h3>
                             {waActionsLoading ? (

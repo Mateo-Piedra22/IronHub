@@ -110,7 +110,7 @@ Notas:
 - Estos endpoints están protegidos (owner-only) y operan contra el Graph API real.
 - No “simulan” resultados: si Meta falla (tokens/roles/limitaciones), el error queda visible y grabable.
 
-## 9) Webhooks (recomendado para producción)
+## 9) Webhooks (recomendado para producción) LISTO
 Para enviar mensajes no es obligatorio, pero para un sistema “ultra pro” sí conviene:
 - Recibir mensajes entrantes
 - Recibir estados de entrega (sent/delivered/read/failed)
@@ -126,8 +126,7 @@ Notas:
 
 ### Verify Token
 En Meta “Verify token” debe coincidir con:
-- `WHATSAPP_VERIFY_TOKEN` (global en env) **o**
-- el valor configurado por tenant en IronHub (Gestión → WhatsApp → Webhook Verify Token)
+- `WHATSAPP_VERIFY_TOKEN` (global en env de `webapp-api`)
 
 ### App Secret (firma X-Hub-Signature-256)
 Para máxima seguridad, configurá el App Secret y dejá la validación de firma activa:

@@ -84,6 +84,300 @@ class WhatsAppSettingsService(BaseService):
         except Exception:
             return
 
+    def _admin_db_params(self) -> Dict[str, Any]:
+        return {
+            "host": os.getenv("ADMIN_DB_HOST", os.getenv("DB_HOST", "localhost")),
+            "port": int(os.getenv("ADMIN_DB_PORT", os.getenv("DB_PORT", 5432))),
+            "database": os.getenv("ADMIN_DB_NAME", os.getenv("DB_NAME", "ironhub_admin")),
+            "user": os.getenv("ADMIN_DB_USER", os.getenv("DB_USER", "postgres")),
+            "password": os.getenv("ADMIN_DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
+            "sslmode": os.getenv("ADMIN_DB_SSLMODE", os.getenv("DB_SSLMODE", "require")),
+            "connect_timeout": int(os.getenv("ADMIN_DB_CONNECT_TIMEOUT", "10")),
+            "application_name": "webapp_whatsapp_onboarding",
+        }
+
+    def _default_whatsapp_bindings(self) -> Dict[str, str]:
+        return {
+            "welcome": "ih_welcome_v1",
+            "payment": "ih_payment_confirmed_v1",
+            "membership_due_today": "ih_membership_due_today_v1",
+            "membership_due_soon": "ih_membership_due_soon_v1",
+            "overdue": "ih_membership_overdue_v1",
+            "deactivation": "ih_membership_deactivated_v1",
+            "membership_reactivated": "ih_membership_reactivated_v1",
+            "class_booking_confirmed": "ih_class_booking_confirmed_v1",
+            "class_booking_cancelled": "ih_class_booking_cancelled_v1",
+            "class_reminder": "ih_class_reminder_v1",
+            "waitlist": "ih_waitlist_spot_available_v1",
+            "waitlist_confirmed": "ih_waitlist_confirmed_v1",
+            "schedule_change": "ih_schedule_change_v1",
+            "marketing_promo": "ih_marketing_promo_v1",
+            "marketing_new_class": "ih_marketing_new_class_v1",
+        }
+
+    def _fetch_admin_bindings(self) -> Dict[str, str]:
+        try:
+            from src.database.raw_manager import RawPostgresManager
+
+            adm = RawPostgresManager(connection_params=self._admin_db_params())
+            with adm.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT binding_key, template_name
+                    FROM whatsapp_template_bindings
+                    ORDER BY binding_key ASC
+                    """
+                )
+                rows = cur.fetchall() or []
+            out: Dict[str, str] = {}
+            for r in rows:
+                try:
+                    k = str((r or [None, None])[0] or "").strip()
+                    v = str((r or [None, None])[1] or "").strip()
+                except Exception:
+                    k, v = "", ""
+                if k:
+                    out[k] = v
+            defaults = self._default_whatsapp_bindings()
+            return {**defaults, **{k: v for k, v in out.items() if k}}
+        except Exception:
+            return self._default_whatsapp_bindings()
+
+    def _log_admin_onboarding_event(self, event_type: str, severity: str, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        tenant = str(get_current_tenant() or "").strip().lower()
+        if not tenant:
+            return
+        try:
+            from src.database.raw_manager import RawPostgresManager
+            import psycopg2.extras
+
+            adm = RawPostgresManager(connection_params=self._admin_db_params())
+            with adm.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS whatsapp_onboarding_events (
+                        id BIGSERIAL PRIMARY KEY,
+                        subdominio TEXT NOT NULL,
+                        event_type TEXT NOT NULL,
+                        severity TEXT NOT NULL,
+                        message TEXT NOT NULL,
+                        details JSONB,
+                        created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    INSERT INTO whatsapp_onboarding_events (subdominio, event_type, severity, message, details)
+                    VALUES (%s,%s,%s,%s,%s)
+                    """,
+                    (tenant, str(event_type or "event"), str(severity or "info"), str(message or ""), psycopg2.extras.Json(details or {}) if details is not None else None),
+                )
+                conn.commit()
+        except Exception:
+            return
+
+    def _list_meta_templates_status_map(self, waba_id: str, access_token: str) -> Dict[str, str]:
+        api_version = self._api_version()
+        url = f"https://graph.facebook.com/{api_version}/{waba_id}/message_templates"
+        headers = {"Authorization": f"Bearer {access_token}"}
+        after: Optional[str] = None
+        out: Dict[str, str] = {}
+        for _ in range(10):
+            params: Dict[str, str] = {"fields": "name,status", "limit": "200"}
+            if after:
+                params["after"] = after
+            resp = requests.get(url, headers=headers, params=params, timeout=self._timeout_seconds())
+            data = resp.json() if resp.content else {}
+            if resp.status_code >= 400:
+                raise RuntimeError(str((data or {}).get("error") or data or f"HTTP {resp.status_code}"))
+            for item in (data.get("data") or []):
+                n = str((item or {}).get("name") or "").strip()
+                st = str((item or {}).get("status") or "").strip()
+                if n:
+                    out[n] = st
+            cursors = ((data.get("paging") or {}).get("cursors") or {})
+            after = cursors.get("after")
+            if not after:
+                break
+        return out
+
+    def ensure_waba_subscribed_apps(self) -> Dict[str, Any]:
+        row = self._get_active_config_row()
+        if not row:
+            return {"ok": False, "error": "WhatsApp no configurado"}
+        waba_id = str(getattr(row, "waba_id", "") or "").strip()
+        token = self._decrypt_token_best_effort(str(getattr(row, "access_token", "") or ""))
+        if not waba_id or not token:
+            return {"ok": False, "error": "Falta waba_id o access_token"}
+        api_version = self._api_version()
+        app_id = (os.getenv("META_APP_ID") or os.getenv("FACEBOOK_APP_ID") or "").strip()
+        if not app_id:
+            return {"ok": False, "error": "META_APP_ID no configurado"}
+        headers = {"Authorization": f"Bearer {token}"}
+        list_url = f"https://graph.facebook.com/{api_version}/{waba_id}/subscribed_apps"
+        resp = requests.get(list_url, headers=headers, timeout=self._timeout_seconds())
+        data = resp.json() if resp.content else {}
+        if resp.status_code >= 400:
+            return {"ok": False, "error": str((data or {}).get("error") or data or f"HTTP {resp.status_code}")}
+        subscribed = any(str((x or {}).get("id") or "") == str(app_id) for x in (data.get("data") or []))
+        if subscribed:
+            return {"ok": True, "subscribed": True, "waba_id": waba_id, "app_id": app_id}
+        post_url = list_url
+        resp2 = requests.post(post_url, headers=headers, json={}, timeout=self._timeout_seconds())
+        data2 = resp2.json() if resp2.content else {}
+        if resp2.status_code >= 400:
+            return {"ok": False, "error": str((data2 or {}).get("error") or data2 or f"HTTP {resp2.status_code}")}
+        resp3 = requests.get(list_url, headers=headers, timeout=self._timeout_seconds())
+        data3 = resp3.json() if resp3.content else {}
+        if resp3.status_code >= 400:
+            return {"ok": False, "error": str((data3 or {}).get("error") or data3 or f"HTTP {resp3.status_code}")}
+        subscribed2 = any(str((x or {}).get("id") or "") == str(app_id) for x in (data3.get("data") or []))
+        return {"ok": True, "subscribed": bool(subscribed2), "waba_id": waba_id, "app_id": app_id}
+
+    def reconcile_onboarding(self) -> Dict[str, Any]:
+        try:
+            row = self._get_active_config_row()
+            if not row:
+                self._log_admin_onboarding_event("reconcile", "warning", "WhatsApp no configurado")
+                return {"ok": False, "error": "WhatsApp no configurado"}
+
+            phone_id = str(getattr(row, "phone_id", "") or "").strip()
+            waba_id = str(getattr(row, "waba_id", "") or "").strip()
+            token = self._decrypt_token_best_effort(str(getattr(row, "access_token", "") or ""))
+            if not phone_id or not waba_id or not token:
+                self._log_admin_onboarding_event("reconcile", "warning", "Credenciales incompletas", {"phone_id": bool(phone_id), "waba_id": bool(waba_id), "token": bool(token)})
+                return {"ok": False, "error": "Credenciales incompletas"}
+
+            subscribe_res = self.ensure_waba_subscribed_apps()
+
+            provision_res: Dict[str, Any] = {}
+            try:
+                provision_res = self.provision_meta_templates_for_current_config()
+            except Exception as e:
+                provision_res = {"ok": False, "error": str(e)}
+
+            tmpl_status = {}
+            try:
+                tmpl_status = self._list_meta_templates_status_map(waba_id=waba_id, access_token=token)
+            except Exception as e:
+                tmpl_status = {"__error__": str(e)}
+
+            approved = {n for n, st in (tmpl_status or {}).items() if n and str(st).upper() == "APPROVED"}
+
+            bindings = self._fetch_admin_bindings()
+            core_enabled_default = {
+                "marketing_promo": False,
+                "marketing_new_class": False,
+            }
+
+            for k in (bindings or {}).keys():
+                key = str(k or "").strip()
+                if not key:
+                    continue
+                enabled_key = f"wa_action_enabled_{key}"
+                if self._get_cfg_value(enabled_key) is None:
+                    self._set_cfg_value(enabled_key, "1" if core_enabled_default.get(key, True) else "0")
+
+            alias_map: Dict[str, str] = {}
+            try:
+                rows = self.db.execute(select(Configuracion.clave, Configuracion.valor).where(Configuracion.clave.like("wa_template_alias_%"))).all()
+                for c, v in rows:
+                    ck = str(c or "")
+                    if ck.startswith("wa_template_alias_"):
+                        alias_map[ck.replace("wa_template_alias_", "", 1)] = str(v or "")
+            except Exception:
+                alias_map = {}
+
+            def resolve_alias(name: str) -> str:
+                cur = str(name or "").strip()
+                for _ in range(10):
+                    nxt = str(alias_map.get(cur) or "").strip()
+                    if not nxt or nxt == cur:
+                        break
+                    cur = nxt
+                return cur
+
+            def split_version(n: str) -> tuple[str, Optional[int]]:
+                import re
+                s = str(n or "").strip()
+                m = re.match(r"^(?P<base>.+)_v(?P<v>\d+)$", s)
+                if not m:
+                    return (s, None)
+                try:
+                    return (m.group("base"), int(m.group("v")))
+                except Exception:
+                    return (m.group("base"), None)
+
+            approved_versions: Dict[str, List[int]] = {}
+            for n in approved:
+                base, v = split_version(n)
+                if v:
+                    approved_versions.setdefault(base, []).append(int(v))
+
+            def best_approved(name: str) -> str:
+                cur = resolve_alias(name)
+                if cur in approved:
+                    return cur
+                base, _v = split_version(cur)
+                if base in approved_versions and approved_versions[base]:
+                    best_v = max(int(x) for x in approved_versions[base])
+                    cand = f"{base}_v{best_v}"
+                    if cand in approved:
+                        return cand
+                return cur
+
+            updated_templates = 0
+            for k, desired in (bindings or {}).items():
+                key = str(k or "").strip()
+                if not key:
+                    continue
+                dest_key = f"wa_meta_template_{key}"
+                current = str(self._get_cfg_value(dest_key) or "").strip()
+                candidate = best_approved(str(desired or ""))
+                if not candidate or candidate not in approved:
+                    continue
+                if current and current in approved:
+                    continue
+                if not current or current != candidate:
+                    self._set_cfg_value(dest_key, candidate)
+                    updated_templates += 1
+
+            self.db.commit()
+
+            tpl_counts = {"count": 0, "approved": 0, "pending": 0, "rejected": 0}
+            if isinstance(tmpl_status, dict) and "__error__" not in tmpl_status:
+                tpl_counts["count"] = int(len(tmpl_status))
+                for st in tmpl_status.values():
+                    s = str(st or "").upper()
+                    if s == "APPROVED":
+                        tpl_counts["approved"] += 1
+                    elif s in ("PENDING", "IN_APPEAL"):
+                        tpl_counts["pending"] += 1
+                    elif s == "REJECTED":
+                        tpl_counts["rejected"] += 1
+
+            ok = bool(subscribe_res.get("ok")) and not (isinstance(tmpl_status, dict) and "__error__" in tmpl_status)
+            self._log_admin_onboarding_event(
+                "reconcile",
+                "info" if ok else "warning",
+                "Reconciliación ejecutada",
+                {"subscribed": subscribe_res.get("subscribed"), "templates": tpl_counts, "updated_templates": updated_templates, "provision_ok": bool(provision_res.get("ok", True))},
+            )
+            return {"ok": True, "subscribed_apps": subscribe_res, "provision": provision_res, "templates": tpl_counts, "updated_templates": updated_templates}
+        except Exception as e:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+            try:
+                self._log_admin_onboarding_event("reconcile", "error", "Error en reconciliación", {"error": str(e)})
+            except Exception:
+                pass
+            return {"ok": False, "error": str(e)}
+
     def _now_utc_naive(self) -> datetime:
         return datetime.now(timezone.utc).replace(tzinfo=None)
 
