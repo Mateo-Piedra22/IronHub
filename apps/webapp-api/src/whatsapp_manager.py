@@ -100,6 +100,31 @@ class WhatsAppManager:
                 pass
         return timezone(timedelta(hours=-3))
 
+    def _get_meta_template_binding(self, binding_key: str, default_template: str) -> str:
+        key = f"wa_meta_template_{str(binding_key or '').strip()}"
+        try:
+            v = self.db.obtener_configuracion(key)  # type: ignore[attr-defined]
+        except Exception:
+            v = None
+        try:
+            vv = str(v or "").strip()
+        except Exception:
+            vv = ""
+        return vv or str(default_template or "")
+
+    def _is_action_enabled(self, binding_key: str, default_enabled: bool = True) -> bool:
+        k = f"wa_action_enabled_{str(binding_key or '').strip()}"
+        try:
+            v = self.db.obtener_configuracion(k)  # type: ignore[attr-defined]
+        except Exception:
+            v = None
+        if v is None:
+            return bool(default_enabled)
+        try:
+            return str(v or "").strip().lower() in ("1", "true", "yes", "on")
+        except Exception:
+            return bool(default_enabled)
+
     def _now_local_naive(self) -> datetime:
         tz = self._get_app_timezone()
         return datetime.now(timezone.utc).astimezone(tz).replace(tzinfo=None)
@@ -551,9 +576,7 @@ class WhatsAppManager:
                     pass
                 return False
             
-            # Plantilla 1 del archivo SISTEMA WHATSAPP.txt - EXACTA
-            # Nombre: aviso_de_confirmacion_de_pago_de_cuota_gimnasio_para_usuario_especifico_en_sistema_de_management_de_gimnasios_profesional
-            template_name = "aviso_de_confirmacion_de_pago_de_cuota_gimnasio_para_usuario_especifico_en_sistema_de_management_de_gimnasios_profesional"
+            template_name = self._get_meta_template_binding("payment", "ih_payment_confirmed_v1")
             
             # Usar PyWa para enviar plantilla con variables con política non-blocking/timeout
             try:
@@ -636,9 +659,7 @@ class WhatsAppManager:
                 logging.warning(f"No se encontró información de pago para usuario {usuario_id}")
                 return False
             
-            # Plantilla 2 del archivo SISTEMA WHATSAPP.txt - EXACTA
-            # Nombre: aviso_de_vencimiento_de_cuota_gimnasio_para_usuario_especifico_en_sistema_de_management_de_gimnasios_profesional
-            template_name = "aviso_de_vencimiento_de_cuota_gimnasio_para_usuario_especifico_en_sistema_de_management_de_gimnasios_profesional"
+            template_name = self._get_meta_template_binding("overdue", "ih_membership_overdue_v1")
             
             # Si no hay cliente, usar fallback HTTP directo
             if not self.wa_client:
@@ -647,9 +668,7 @@ class WhatsAppManager:
                     name=template_name,
                     language=TemplateLanguage.SPANISH_ARG,
                     body_params=[
-                        usuario.nombre,
-                        pago_actual.get('fecha_vencimiento', 'No disponible'),
-                        f"{(pago_actual.get('monto', 0) or 0):,.0f}"
+                        usuario.nombre
                     ]
                 )
                 if ok:
@@ -684,9 +703,7 @@ class WhatsAppManager:
                     language=TemplateLanguage.SPANISH_ARG,
                     params=[
                         BodyText.params(
-                            usuario.nombre,
-                            pago_actual.get('fecha_vencimiento', 'No disponible'),
-                            f"{pago_actual.get('monto', 0) or 0:,.0f}"
+                            usuario.nombre
                         )
                     ]
                 )
@@ -712,9 +729,7 @@ class WhatsAppManager:
                     name=template_name,
                     language=TemplateLanguage.SPANISH_ARG,
                     body_params=[
-                        usuario.nombre,
-                        pago_actual.get('fecha_vencimiento', 'No disponible'),
-                        f"{(pago_actual.get('monto', 0) or 0):,.0f}"
+                        usuario.nombre
                     ]
                 )
                 if ok:
@@ -766,9 +781,7 @@ class WhatsAppManager:
             gym_data = self.template_processor.obtener_datos_gimnasio()
             gym_name = gym_data.get('nombre_gimnasio', 'nuestro gimnasio')
             
-            # Plantilla 3 del archivo SISTEMA WHATSAPP.txt - ACTUALIZADA
-            # Nombre: aviso_de_confirmacion_de_ingreso_a_gimnasio_para_usuario_especifico_en_sistema_de_management_de_gimnasios_profesional
-            template_name = "aviso_de_confirmacion_de_ingreso_a_gimnasio_para_usuario_especifico_en_sistema_de_management_de_gimnasios_profesional"
+            template_name = self._get_meta_template_binding("welcome", "ih_welcome_v1")
             
             # Si no hay cliente, intentar fallback HTTP
             if not self.wa_client:
@@ -776,7 +789,7 @@ class WhatsAppManager:
                     to=usuario.telefono,
                     name=template_name,
                     language=TemplateLanguage.SPANISH_ARG,
-                    body_params=[usuario.nombre, gym_name]
+                    body_params=[usuario.nombre]
                 )
                 if ok:
                     try:
@@ -810,8 +823,7 @@ class WhatsAppManager:
                     language=TemplateLanguage.SPANISH_ARG,
                     params=[
                         BodyText.params(
-                            usuario.nombre,
-                            gym_name
+                            usuario.nombre
                         )
                     ]
                 )
@@ -835,7 +847,7 @@ class WhatsAppManager:
                     to=usuario.telefono,
                     name=template_name,
                     language=TemplateLanguage.SPANISH_ARG,
-                    body_params=[usuario.nombre, gym_name]
+                    body_params=[usuario.nombre]
                 )
                 if ok:
                     try:
@@ -914,8 +926,9 @@ class WhatsAppManager:
                     pass
                 return False
 
-            template_name = "aviso_de_desactivacion_por_falta_de_pago_para_usuario_especifico_en_sistema_de_management_de_gimnasios_profesional"
+            template_name = self._get_meta_template_binding("deactivation", "ih_membership_deactivated_v1")
             fecha = fecha_desactivacion or self._now_local_naive().strftime('%d/%m/%Y')
+            motivo_out = f"{str(motivo or '').strip()} ({fecha})".strip()
 
             try:
                 response = self.wa_client.send_template(
@@ -925,8 +938,7 @@ class WhatsAppManager:
                     params=[
                         BodyText.params(
                             usuario.nombre,  # {{1}}
-                            fecha,           # {{2}}
-                            motivo           # {{3}}
+                            motivo_out       # {{2}}
                         )
                     ]
                 )
@@ -1000,7 +1012,7 @@ class WhatsAppManager:
                 logging.warning(f"Mensaje bloqueado por anti-spam para {usuario.telefono}")
                 return False
 
-            template_name = "aviso_de_recordatorio_de_horario_de_clase_para_usuario_especifico_en_sistema_de_management_de_gimnasios_profesional"
+            template_name = self._get_meta_template_binding("class_reminder", "ih_class_reminder_v1")
 
             # Sanitización de parámetros para evitar MissingRequiredParameter
             def _safe_text(val, default):
@@ -1077,7 +1089,7 @@ class WhatsAppManager:
                 return False
 
             # Plantilla para avisar que hay cupo disponible al primero de la lista de espera
-            template_name = "aviso_de_promocion_de_lista_de_espera_para_clase_para_usuario_especifico_en_sistema_de_management_de_gimnasios_profesional"
+            template_name = self._get_meta_template_binding("waitlist", "ih_waitlist_spot_available_v1")
 
             # Sanitización de parámetros para evitar MissingRequiredParameter
             def _safe_text(val, default):
@@ -1155,7 +1167,7 @@ class WhatsAppManager:
                 return False
 
             # Plantilla para avisar promoción a lista principal
-            template_name = "aviso_de_promocion_a_lista_principal_para_clase_para_usuario_especifico_en_sistema_de_management_de_gimnasios_profesional"
+            template_name = self._get_meta_template_binding("waitlist", "ih_waitlist_spot_available_v1")
 
             # Sanitización de parámetros
             def _safe_text(val, default):
@@ -1239,7 +1251,7 @@ class WhatsAppManager:
                 logging.info(f"Mensaje anti-spam bloqueado para usuario {user_data.get('user_id')}")
                 return False
             
-            template_name = "aviso_de_vencimiento_de_cuota_gimnasio_para_usuario_especifico_en_sistema_de_management_de_gimnasios_profesional"
+            template_name = self._get_meta_template_binding("overdue", "ih_membership_overdue_v1")
             
             # Usar PyWa para enviar plantilla
             response = self.wa_client.send_template(
@@ -1249,8 +1261,6 @@ class WhatsAppManager:
                 params=[
                     BodyText.params(
                         user_data['name'],  # {{1}}
-                        user_data['due_date'],  # {{2}}
-                        f"{user_data['amount']:,.0f}"  # {{3}}
                     )
                 ]
             )
@@ -1289,7 +1299,7 @@ class WhatsAppManager:
             bool: True si el mensaje se envió correctamente
         """
         try:
-            template_name = "aviso_de_confirmacion_de_pago_de_cuota_gimnasio_para_usuario_especifico_en_sistema_de_management_de_gimnasios_profesional"
+            template_name = self._get_meta_template_binding("payment", "ih_payment_confirmed_v1")
             # Si no hay cliente, intentar fallback HTTP
             if not self.wa_client:
                 ok, resp = self._send_template_http_basic(
@@ -1404,8 +1414,9 @@ class WhatsAppManager:
             bool: True si el mensaje se envió correctamente
         """
         try:
-            template_name = "mensaje_de_bienvenida_a_gimnasio_para_usuario_especifico_en_sistema_de_management_de_gimnasios_profesional"
-            header_img = "https://scontent.whatsapp.net/v/t61.29466-34/534423186_1473851737199264_5735585923517038205_n.jpg?ccb=1-7&_nc_sid=8b1bef&_nc_eui2=AeFoE1d4rKfFrSN8BE7_b3tf3Y0fQUMBEBfdjR9BQwEQF8Ax0e3gytRS7qWnLKIi5oUH-QVMX592JK57XYymNeix&_nc_ohc=chf40SP38C8Q7kNvwEFl7nT&_nc_oc=AdmrcU6XgW2jmC-YWO7D1UiHeeCxuhGlR6EElDkYrPDAFG43PJ7eU0L02xt9QXDDItA&_nc_zt=3&_nc_ht=scontent.whatsapp.net&edm=AH51TzQEAAAA&_nc_gid=RGRikAJcMRz3oD800NMXOQ&oh=01_Q5Aa2gEnN1SVJBv_Df-egpMeF4jG_FmxGtFRkXy0zEZOkwtGow&oe=68EFCA3A"
+            if not self._is_action_enabled("welcome", True):
+                return True
+            template_name = self._get_meta_template_binding("welcome", "ih_welcome_v1")
 
             # Si no hay cliente, intentar fallback HTTP
             if not self.wa_client:
@@ -1413,8 +1424,7 @@ class WhatsAppManager:
                     to=user_data['phone'],
                     name=template_name,
                     language=TemplateLanguage.SPANISH_ARG,
-                    body_params=[user_data['name'], user_data['gym_name']],
-                    header_image_url=header_img
+                    body_params=[user_data['name']]
                 )
                 if ok:
                     try:
@@ -1446,8 +1456,7 @@ class WhatsAppManager:
                 name=template_name,
                 language=TemplateLanguage.SPANISH_ARG,
                 params=[
-                    HeaderImage.params(image=header_img),
-                    BodyText.params(user_data['name'], user_data['gym_name'])
+                    BodyText.params(user_data['name'])
                 ]
             )
             if not ok:

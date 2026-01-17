@@ -1055,6 +1055,91 @@ async def delete_whatsapp_template_catalog(request: Request, template_name: str)
     return {"ok": True}
 
 
+@app.post("/whatsapp/templates/sync-defaults")
+async def sync_whatsapp_template_defaults(request: Request, overwrite: bool = True):
+    require_admin(request)
+    adm = get_admin_service()
+    result = adm.sync_whatsapp_template_defaults(overwrite=bool(overwrite))
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
+    return result
+
+
+@app.post("/whatsapp/templates/bump-version")
+async def bump_whatsapp_template_version(request: Request, template_name: str = Form(None)):
+    require_admin(request)
+    name = str(template_name or "").strip()
+    if not name:
+        try:
+            payload = await request.json()
+            name = str((payload or {}).get("template_name") or "").strip()
+        except Exception:
+            name = ""
+    adm = get_admin_service()
+    result = adm.bump_whatsapp_template_version(name)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
+    return result
+
+
+@app.get("/whatsapp/bindings")
+async def list_whatsapp_bindings(request: Request):
+    require_admin(request)
+    adm = get_admin_service()
+    return {"ok": True, "bindings": adm.list_whatsapp_template_bindings()}
+
+
+@app.put("/whatsapp/bindings/{binding_key}")
+async def upsert_whatsapp_binding(request: Request, binding_key: str):
+    require_admin(request)
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    tname = str((payload or {}).get("template_name") or "").strip()
+    adm = get_admin_service()
+    result = adm.upsert_whatsapp_template_binding(binding_key, tname)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
+    return {"ok": True}
+
+
+@app.post("/whatsapp/bindings/sync-defaults")
+async def sync_whatsapp_bindings_defaults(request: Request, overwrite: bool = True):
+    require_admin(request)
+    adm = get_admin_service()
+    result = adm.sync_whatsapp_template_bindings_defaults(overwrite=bool(overwrite))
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
+    return result
+
+
+@app.get("/gyms/{gym_id}/whatsapp/actions")
+async def get_gym_whatsapp_actions(request: Request, gym_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    result = adm.get_gym_whatsapp_actions(int(gym_id))
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
+    return result
+
+
+@app.put("/gyms/{gym_id}/whatsapp/actions/{action_key}")
+async def set_gym_whatsapp_action(request: Request, gym_id: int, action_key: str):
+    require_admin(request)
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    enabled = bool((payload or {}).get("enabled") is True)
+    template_name = str((payload or {}).get("template_name") or "").strip()
+    adm = get_admin_service()
+    result = adm.set_gym_whatsapp_action(int(gym_id), action_key, enabled, template_name)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
+    return {"ok": True}
+
+
 @app.post("/gyms/{gym_id}/whatsapp/provision-templates")
 async def provision_whatsapp_templates_for_gym(request: Request, gym_id: int):
     require_admin(request)

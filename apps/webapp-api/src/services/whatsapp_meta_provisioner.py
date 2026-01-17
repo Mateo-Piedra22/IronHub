@@ -26,19 +26,18 @@ def standard_meta_templates(language_code: Optional[str] = None) -> List[Dict[st
 
     templates: List[Tuple[str, str, str, List[str]]] = [
         ("ih_welcome_v1", "UTILITY", "Hola {{1}}. ¡Bienvenido/a! Si necesitás ayuda, respondé a este mensaje.", ["Mateo"]),
-        ("ih_payment_confirmed_v1", "UTILITY", "Hola {{1}}. Confirmamos tu pago de ${{2}} correspondiente a {{3}}. ¡Gracias!", ["Mateo", "25000", "01/2026"]),
-        ("ih_membership_due_today_v1", "UTILITY", "Hola {{1}}. Recordatorio: tu cuota vence hoy ({{2}}). Si ya abonaste, ignorá este mensaje.", ["Mateo", "16/01"]),
-        ("ih_membership_due_soon_v1", "UTILITY", "Hola {{1}}. Tu cuota vence el {{2}}. Si querés, respondé a este mensaje y te ayudamos a regularizar.", ["Mateo", "20/01"]),
+        ("ih_payment_confirmed_v1", "UTILITY", "Hola {{1}}. Confirmamos tu pago de ${{2}} correspondiente a {{3}}. ¡Gracias!", ["Mateo", "25000", "enero 2026"]),
+        ("ih_membership_due_today_v1", "UTILITY", "Hola {{1}}. Recordatorio: tu cuota vence hoy ({{2}}). Si ya abonaste, ignorá este mensaje.", ["Mateo", "16 de enero"]),
+        ("ih_membership_due_soon_v1", "UTILITY", "Hola {{1}}. Tu cuota vence el {{2}}. Si querés, respondé a este mensaje y te ayudamos a regularizar.", ["Mateo", "20 de enero"]),
         ("ih_membership_overdue_v1", "UTILITY", "Hola {{1}}. Tu cuota está vencida. Si ya abonaste, ignorá este mensaje. Si necesitás ayuda, respondé “AYUDA”.", ["Mateo"]),
         ("ih_membership_deactivated_v1", "UTILITY", "Hola {{1}}. Tu acceso está temporalmente suspendido. Motivo: {{2}}. Respondé a este mensaje si necesitás asistencia.", ["Mateo", "cuotas vencidas"]),
         ("ih_membership_reactivated_v1", "UTILITY", "Hola {{1}}. Tu acceso fue reactivado. ¡Gracias!", ["Mateo"]),
-        ("ih_class_booking_confirmed_v1", "UTILITY", "Reserva confirmada: {{1}} el {{2}} a las {{3}}. Si no podés asistir, respondé “CANCELAR”.", ["Funcional", "16/01", "19:00"]),
-        ("ih_class_booking_cancelled_v1", "UTILITY", "Tu reserva para {{1}} ({{2}} {{3}}) fue cancelada.", ["Funcional", "16/01", "19:00"]),
-        ("ih_class_reminder_v1", "UTILITY", "Hola {{1}}. Recordatorio: {{2}} el {{3}} a las {{4}}.", ["Mateo", "Funcional", "16/01", "19:00"]),
+        ("ih_class_booking_confirmed_v1", "UTILITY", "Confirmación de reserva: clase {{1}} el {{2}} a las {{3}} hs.", ["Funcional", "16 de enero", "19:00"]),
+        ("ih_class_booking_cancelled_v1", "UTILITY", "Tu reserva fue cancelada para la clase {{1}}. Si necesitás ayuda, respondé a este mensaje.", ["Funcional"]),
+        ("ih_class_reminder_v1", "UTILITY", "Hola {{1}}. Te recordamos tu clase de {{2}} el {{3}} a las {{4}} hs. Si no podés asistir, avisá por este medio.", ["Mateo", "Funcional", "viernes", "19:00"]),
         ("ih_waitlist_spot_available_v1", "UTILITY", "Hola {{1}}. Se liberó un cupo para {{2}} ({{3}} {{4}}). Respondé “SI” para tomarlo.", ["Mateo", "Funcional", "viernes", "19:00"]),
         ("ih_waitlist_confirmed_v1", "UTILITY", "Listo {{1}}. Te anotamos en {{2}} ({{3}} {{4}}).", ["Mateo", "Funcional", "viernes", "19:00"]),
-        ("ih_schedule_change_v1", "UTILITY", "Aviso: hubo un cambio en {{1}}. Nuevo horario: {{2}} {{3}}.", ["Funcional", "viernes", "20:00"]),
-        ("ih_auth_code_v1", "AUTHENTICATION", "Tu código de verificación es {{1}}. Vence en {{2}} minutos. No lo compartas con nadie.", ["928314", "10"]),
+        ("ih_schedule_change_v1", "UTILITY", "Aviso: hubo un cambio en {{1}}. Nuevo horario: {{2}} a las {{3}} hs. Gracias.", ["Funcional", "viernes", "20:00"]),
         ("ih_marketing_promo_v1", "MARKETING", "Hola {{1}}. Esta semana tenemos {{2}}. Si querés más info, respondé a este mensaje.", ["Mateo", "descuento del 10% en el plan trimestral"]),
         ("ih_marketing_new_class_v1", "MARKETING", "Nueva clase disponible: {{1}}. Primer horario: {{2}} {{3}}. ¿Querés que te reservemos un lugar?", ["Movilidad", "miércoles", "18:00"]),
     ]
@@ -100,4 +99,3 @@ def provision_standard_meta_templates(waba_id: str, access_token: str, language_
         except Exception as e:
             failed.append({"name": name, "error": str(e)})
     return {"existing_count": len(existing), "created": created, "failed": failed}
-

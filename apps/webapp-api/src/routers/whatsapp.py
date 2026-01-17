@@ -515,6 +515,26 @@ async def api_whatsapp_retry_all(
                         ok = wa.send_overdue_reminder(int(uid))
                     elif mtype in ("class_reminder", "recordatorio_clase"):
                         ok = wa.send_class_reminder(int(uid), "", "", "")
+                    elif mtype in ("membership_due_today", "due_today"):
+                        ok = wa.send_membership_due_today(int(uid), "")
+                    elif mtype in ("membership_due_soon", "due_soon"):
+                        ok = wa.send_membership_due_soon(int(uid), "")
+                    elif mtype in ("membership_reactivated", "reactivated"):
+                        ok = wa.send_membership_reactivated(int(uid))
+                    elif mtype in ("class_booking_confirmed", "booking_confirmed"):
+                        ok = wa.send_class_booking_confirmed(int(uid), "", "", "")
+                    elif mtype in ("class_booking_cancelled", "booking_cancelled"):
+                        ok = wa.send_class_booking_cancelled(int(uid), "")
+                    elif mtype in ("waitlist", "waitlist_spot_available"):
+                        ok = wa.send_waitlist_promotion(int(uid), "", "", "")
+                    elif mtype in ("waitlist_confirmed",):
+                        ok = wa.send_waitlist_confirmed(int(uid), "", "", "")
+                    elif mtype in ("schedule_change",):
+                        ok = wa.send_schedule_change(int(uid), "", "", "")
+                    elif mtype in ("marketing_promo",):
+                        ok = wa.send_marketing_promo(int(uid), "")
+                    elif mtype in ("marketing_new_class",):
+                        ok = wa.send_marketing_new_class(int(uid), "", "", "")
                     else:
                         ok = wa.send_welcome(int(uid))
                     if ok:
@@ -572,6 +592,26 @@ async def api_whatsapp_mensaje_retry(
         ok = wa.send_overdue_reminder(int(uid))
     elif mtype in ("class_reminder", "recordatorio_clase"):
         ok = wa.send_class_reminder(int(uid), "", "", "")
+    elif mtype in ("membership_due_today", "due_today"):
+        ok = wa.send_membership_due_today(int(uid), "")
+    elif mtype in ("membership_due_soon", "due_soon"):
+        ok = wa.send_membership_due_soon(int(uid), "")
+    elif mtype in ("membership_reactivated", "reactivated"):
+        ok = wa.send_membership_reactivated(int(uid))
+    elif mtype in ("class_booking_confirmed", "booking_confirmed"):
+        ok = wa.send_class_booking_confirmed(int(uid), "", "", "")
+    elif mtype in ("class_booking_cancelled", "booking_cancelled"):
+        ok = wa.send_class_booking_cancelled(int(uid), "")
+    elif mtype in ("waitlist", "waitlist_spot_available"):
+        ok = wa.send_waitlist_promotion(int(uid), "", "", "")
+    elif mtype in ("waitlist_confirmed",):
+        ok = wa.send_waitlist_confirmed(int(uid), "", "", "")
+    elif mtype in ("schedule_change",):
+        ok = wa.send_schedule_change(int(uid), "", "", "")
+    elif mtype in ("marketing_promo",):
+        ok = wa.send_marketing_promo(int(uid), "")
+    elif mtype in ("marketing_new_class",):
+        ok = wa.send_marketing_new_class(int(uid), "", "", "")
     else:
         ok = wa.send_welcome(int(uid))
     return {"ok": bool(ok), "success": bool(ok), "mensaje": "OK" if ok else "Error", "message": "OK" if ok else "Error"}

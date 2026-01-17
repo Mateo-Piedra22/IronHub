@@ -100,6 +100,108 @@ class WhatsAppDispatchService(BaseService):
         except Exception:
             return False
 
+    def send_waitlist_confirmed(self, usuario_id: int, tipo_clase: str, dia: str, hora: str) -> bool:
+        if not self._is_action_enabled("waitlist_confirmed", True):
+            return True
+        u = self.db.get(Usuario, int(usuario_id))
+        if not u or not getattr(u, "telefono", None):
+            return False
+        vars = {
+            "name": str(getattr(u, "nombre", "") or ""),
+            "class": str(tipo_clase or "la clase"),
+            "day": str(dia or ""),
+            "time": str(hora or ""),
+        }
+        tpl = self._get_meta_template_binding("waitlist_confirmed", "ih_waitlist_confirmed_v1")
+        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [vars["name"], vars["class"], vars["day"], vars["time"]], "waitlist_confirmed")
+        if r.ok:
+            return True
+        return False
+
+    def send_membership_due_today(self, usuario_id: int, fecha: str) -> bool:
+        if not self._is_action_enabled("membership_due_today", True):
+            return True
+        u = self.db.get(Usuario, int(usuario_id))
+        if not u or not getattr(u, "telefono", None):
+            return False
+        name = str(getattr(u, "nombre", "") or "")
+        tpl = self._get_meta_template_binding("membership_due_today", "ih_membership_due_today_v1")
+        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [name, str(fecha or "")], "membership_due_today")
+        return bool(r.ok)
+
+    def send_membership_due_soon(self, usuario_id: int, fecha: str) -> bool:
+        if not self._is_action_enabled("membership_due_soon", True):
+            return True
+        u = self.db.get(Usuario, int(usuario_id))
+        if not u or not getattr(u, "telefono", None):
+            return False
+        name = str(getattr(u, "nombre", "") or "")
+        tpl = self._get_meta_template_binding("membership_due_soon", "ih_membership_due_soon_v1")
+        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [name, str(fecha or "")], "membership_due_soon")
+        return bool(r.ok)
+
+    def send_membership_reactivated(self, usuario_id: int) -> bool:
+        if not self._is_action_enabled("membership_reactivated", True):
+            return True
+        u = self.db.get(Usuario, int(usuario_id))
+        if not u or not getattr(u, "telefono", None):
+            return False
+        name = str(getattr(u, "nombre", "") or "")
+        tpl = self._get_meta_template_binding("membership_reactivated", "ih_membership_reactivated_v1")
+        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [name], "membership_reactivated")
+        return bool(r.ok)
+
+    def send_class_booking_confirmed(self, usuario_id: int, tipo_clase: str, fecha: str, hora: str) -> bool:
+        if not self._is_action_enabled("class_booking_confirmed", True):
+            return True
+        u = self.db.get(Usuario, int(usuario_id))
+        if not u or not getattr(u, "telefono", None):
+            return False
+        tpl = self._get_meta_template_binding("class_booking_confirmed", "ih_class_booking_confirmed_v1")
+        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [str(tipo_clase or "clase"), str(fecha or ""), str(hora or "")], "class_booking_confirmed")
+        return bool(r.ok)
+
+    def send_class_booking_cancelled(self, usuario_id: int, tipo_clase: str) -> bool:
+        if not self._is_action_enabled("class_booking_cancelled", True):
+            return True
+        u = self.db.get(Usuario, int(usuario_id))
+        if not u or not getattr(u, "telefono", None):
+            return False
+        tpl = self._get_meta_template_binding("class_booking_cancelled", "ih_class_booking_cancelled_v1")
+        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [str(tipo_clase or "clase")], "class_booking_cancelled")
+        return bool(r.ok)
+
+    def send_schedule_change(self, usuario_id: int, tipo_clase: str, dia: str, hora: str) -> bool:
+        if not self._is_action_enabled("schedule_change", True):
+            return True
+        u = self.db.get(Usuario, int(usuario_id))
+        if not u or not getattr(u, "telefono", None):
+            return False
+        tpl = self._get_meta_template_binding("schedule_change", "ih_schedule_change_v1")
+        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [str(tipo_clase or "clase"), str(dia or ""), str(hora or "")], "schedule_change")
+        return bool(r.ok)
+
+    def send_marketing_promo(self, usuario_id: int, promo: str) -> bool:
+        if not self._is_action_enabled("marketing_promo", False):
+            return True
+        u = self.db.get(Usuario, int(usuario_id))
+        if not u or not getattr(u, "telefono", None):
+            return False
+        name = str(getattr(u, "nombre", "") or "")
+        tpl = self._get_meta_template_binding("marketing_promo", "ih_marketing_promo_v1")
+        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [name, str(promo or "")], "marketing_promo")
+        return bool(r.ok)
+
+    def send_marketing_new_class(self, usuario_id: int, clase: str, dia: str, hora: str) -> bool:
+        if not self._is_action_enabled("marketing_new_class", False):
+            return True
+        u = self.db.get(Usuario, int(usuario_id))
+        if not u or not getattr(u, "telefono", None):
+            return False
+        tpl = self._get_meta_template_binding("marketing_new_class", "ih_marketing_new_class_v1")
+        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [str(clase or "clase"), str(dia or ""), str(hora or "")], "marketing_new_class")
+        return bool(r.ok)
+
     def _allowlist_ok(self, phone: str) -> bool:
         try:
             enabled = str(self._get_cfg_value("allowlist_enabled") or "").strip().lower() in ("1", "true", "yes", "on")
@@ -113,6 +215,15 @@ class WhatsAppDispatchService(BaseService):
         if not ph:
             return False
         return ph in set(a for a in allowed if a)
+
+    def _is_action_enabled(self, action_key: str, default_enabled: bool = True) -> bool:
+        v = self._get_cfg_value(f"wa_action_enabled_{str(action_key or '').strip()}")
+        if v is None:
+            return bool(default_enabled)
+        try:
+            return str(v or "").strip().lower() in ("1", "true", "yes", "on")
+        except Exception:
+            return bool(default_enabled)
 
     def _get_active_whatsapp_config(self) -> Optional[WhatsappConfig]:
         try:
@@ -146,6 +257,15 @@ class WhatsAppDispatchService(BaseService):
             return str(v).strip() or "es_AR"
         except Exception:
             return "es_AR"
+
+    def _get_meta_template_binding(self, binding_key: str, default_template: str) -> str:
+        key = f"wa_meta_template_{str(binding_key or '').strip()}"
+        v = self._get_cfg_value(key)
+        try:
+            vv = str(v or "").strip()
+        except Exception:
+            vv = ""
+        return vv or str(default_template or "")
 
     def _graph_post(self, phone_id: str, access_token: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         api_version = (os.getenv("WHATSAPP_API_VERSION") or "v19.0").strip()
@@ -305,10 +425,13 @@ class WhatsAppDispatchService(BaseService):
 
     def send_welcome(self, usuario_id: int) -> bool:
         u = self.db.get(Usuario, int(usuario_id))
+        if not self._is_action_enabled("welcome", True):
+            return True
         if not u or not getattr(u, "telefono", None):
             return False
         name = str(getattr(u, "nombre", "") or "")
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), "ih_welcome_v1", [name], "welcome")
+        tpl = self._get_meta_template_binding("welcome", "ih_welcome_v1")
+        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [name], "welcome")
         if r.ok:
             return True
         body = self._render_template("welcome", {"name": name}) or f"Hola {name}! Bienvenido/a."
@@ -316,6 +439,8 @@ class WhatsAppDispatchService(BaseService):
 
     def send_payment_confirmation(self, usuario_id: int, monto: Optional[float] = None, mes: Optional[int] = None, anio: Optional[int] = None) -> bool:
         u = self.db.get(Usuario, int(usuario_id))
+        if not self._is_action_enabled("payment", True):
+            return True
         if not u or not getattr(u, "telefono", None):
             return False
         if monto is None or mes is None or anio is None:
@@ -349,7 +474,8 @@ class WhatsAppDispatchService(BaseService):
             "amount": f"{float(monto):.2f}",
             "period": f"{int(mes):02d}/{int(anio)}",
         }
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), "ih_payment_confirmed_v1", [vars["name"], vars["amount"], vars["period"]], "payment")
+        tpl = self._get_meta_template_binding("payment", "ih_payment_confirmed_v1")
+        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [vars["name"], vars["amount"], vars["period"]], "payment")
         if r.ok:
             return True
         body = self._render_template("payment", vars) or f"Hola {vars['name']}! Confirmamos tu pago de ${vars['amount']} correspondiente a {vars['period']}. Gracias."
@@ -357,10 +483,13 @@ class WhatsAppDispatchService(BaseService):
 
     def send_overdue_reminder(self, usuario_id: int) -> bool:
         u = self.db.get(Usuario, int(usuario_id))
+        if not self._is_action_enabled("overdue", True):
+            return True
         if not u or not getattr(u, "telefono", None):
             return False
         vars = {"name": str(getattr(u, "nombre", "") or "")}
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), "ih_membership_overdue_v1", [vars["name"]], "overdue")
+        tpl = self._get_meta_template_binding("overdue", "ih_membership_overdue_v1")
+        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [vars["name"]], "overdue")
         if r.ok:
             return True
         body = self._render_template("overdue", vars) or f"Hola {vars['name']}. Te recordamos que tu cuota se encuentra vencida. Si ya abonaste, por favor ignora este mensaje."
@@ -368,10 +497,13 @@ class WhatsAppDispatchService(BaseService):
 
     def send_deactivation(self, usuario_id: int, motivo: str) -> bool:
         u = self.db.get(Usuario, int(usuario_id))
+        if not self._is_action_enabled("deactivation", True):
+            return True
         if not u or not getattr(u, "telefono", None):
             return False
         vars = {"name": str(getattr(u, "nombre", "") or ""), "reason": str(motivo or "cuotas vencidas")}
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), "ih_membership_deactivated_v1", [vars["name"], vars["reason"]], "deactivation")
+        tpl = self._get_meta_template_binding("deactivation", "ih_membership_deactivated_v1")
+        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [vars["name"], vars["reason"]], "deactivation")
         if r.ok:
             return True
         body = self._render_template("deactivation", vars) or f"Hola {vars['name']}. Tu acceso fue desactivado. Motivo: {vars['reason']}."
@@ -379,6 +511,8 @@ class WhatsAppDispatchService(BaseService):
 
     def send_class_reminder(self, usuario_id: int, tipo_clase: str, fecha: str, hora: str) -> bool:
         u = self.db.get(Usuario, int(usuario_id))
+        if not self._is_action_enabled("class_reminder", True):
+            return True
         if not u or not getattr(u, "telefono", None):
             return False
         vars = {
@@ -387,7 +521,8 @@ class WhatsAppDispatchService(BaseService):
             "date": str(fecha or ""),
             "time": str(hora or ""),
         }
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), "ih_class_reminder_v1", [vars["name"], vars["class"], vars["date"], vars["time"]], "class_reminder")
+        tpl = self._get_meta_template_binding("class_reminder", "ih_class_reminder_v1")
+        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [vars["name"], vars["class"], vars["date"], vars["time"]], "class_reminder")
         if r.ok:
             return True
         body = self._render_template("class_reminder", vars) or f"Hola {vars['name']}! Recordatorio: {vars['class']} el {vars['date']} a las {vars['time']}."
@@ -395,6 +530,8 @@ class WhatsAppDispatchService(BaseService):
 
     def send_waitlist_promotion(self, usuario_id: int, tipo_clase: str, dia: str, hora: str) -> bool:
         u = self.db.get(Usuario, int(usuario_id))
+        if not self._is_action_enabled("waitlist", True):
+            return True
         if not u or not getattr(u, "telefono", None):
             return False
         vars = {
@@ -403,7 +540,8 @@ class WhatsAppDispatchService(BaseService):
             "day": str(dia or ""),
             "time": str(hora or ""),
         }
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), "ih_waitlist_spot_available_v1", [vars["name"], vars["class"], vars["day"], vars["time"]], "waitlist")
+        tpl = self._get_meta_template_binding("waitlist", "ih_waitlist_spot_available_v1")
+        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [vars["name"], vars["class"], vars["day"], vars["time"]], "waitlist")
         if r.ok:
             return True
         body = self._render_template("waitlist", vars) or f"Hola {vars['name']}! Se liberó un cupo para {vars['class']}. Día: {vars['day']} {vars['time']}."

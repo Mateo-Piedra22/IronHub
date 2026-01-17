@@ -7,7 +7,7 @@ import {
     Key, Activity, FileText, Save, Send, Check, X, AlertCircle, Upload, Trash2
 } from 'lucide-react';
 import Link from 'next/link';
-import { api, type Gym, type GymDetails, type WhatsAppConfig, type Payment } from '@/lib/api';
+import { api, type Gym, type GymDetails, type WhatsAppConfig, type Payment, type WhatsAppTemplateCatalogItem } from '@/lib/api';
 
 type Section = 'subscription' | 'payments' | 'whatsapp' | 'maintenance' | 'branding' | 'health' | 'password';
 
@@ -52,6 +52,10 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     const [provisionTemplatesMsg, setProvisionTemplatesMsg] = useState('');
     const [waHealthLoading, setWaHealthLoading] = useState(false);
     const [waHealthMsg, setWaHealthMsg] = useState('');
+    const [waActionsLoading, setWaActionsLoading] = useState(false);
+    const [waActions, setWaActions] = useState<Array<{ action_key: string; enabled: boolean; template_name: string; required_params: number }>>([]);
+    const [waCatalog, setWaCatalog] = useState<WhatsAppTemplateCatalogItem[]>([]);
+    const [savingWaAction, setSavingWaAction] = useState<string>('');
 
     // Payment form
     const [paymentAmount, setPaymentAmount] = useState('');
@@ -112,9 +116,19 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                         ...brandRes.data!.branding
                     }));
                 }
+                const tplRes = await api.getWhatsAppTemplateCatalog(false);
+                if (tplRes.ok && tplRes.data) {
+                    setWaCatalog(tplRes.data.templates || []);
+                }
+                setWaActionsLoading(true);
+                const actRes = await api.getGymWhatsAppActions(gymId);
+                if (actRes.ok && actRes.data) {
+                    setWaActions(actRes.data.actions || []);
+                }
             } catch {
                 // Ignore
             } finally {
+                setWaActionsLoading(false);
                 setLoading(false);
             }
         }
@@ -158,6 +172,51 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     const showMessage = (msg: string) => {
         setMessage(msg);
         setTimeout(() => setMessage(''), 3000);
+    };
+
+    const countMetaParams = (bodyText: string) => {
+        const matches = String(bodyText || '').match(/\{\{(\d+)\}\}/g) || [];
+        const nums = matches
+            .map((m) => {
+                const n = m.replace(/[^\d]/g, '');
+                return Number(n);
+            })
+            .filter((n) => Number.isFinite(n) && n > 0);
+        return nums.length ? Math.max(...nums) : 0;
+    };
+
+    const actionLabel: Record<string, string> = {
+        welcome: 'Bienvenida',
+        payment: 'Confirmación de pago',
+        membership_due_today: 'Cuota vence hoy',
+        membership_due_soon: 'Cuota vence pronto',
+        overdue: 'Cuota vencida',
+        deactivation: 'Desactivación',
+        membership_reactivated: 'Reactivación',
+        class_booking_confirmed: 'Reserva confirmada',
+        class_booking_cancelled: 'Reserva cancelada',
+        class_reminder: 'Recordatorio de clase',
+        waitlist: 'Cupo disponible (waitlist)',
+        waitlist_confirmed: 'Confirmación waitlist',
+        schedule_change: 'Cambio de horario',
+        marketing_promo: 'Marketing promo',
+        marketing_new_class: 'Marketing nueva clase',
+    };
+
+    const saveWaAction = async (actionKey: string) => {
+        const item = waActions.find((a) => a.action_key === actionKey);
+        if (!item) return;
+        setSavingWaAction(actionKey);
+        try {
+            const res = await api.setGymWhatsAppAction(gymId, actionKey, Boolean(item.enabled), String(item.template_name || ''));
+            if (res.ok) {
+                showMessage('Acción WhatsApp guardada');
+            } else {
+                showMessage(res.error || 'Error');
+            }
+        } finally {
+            setSavingWaAction('');
+        }
     };
 
     const handleSaveWhatsApp = async () => {
@@ -639,6 +698,57 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                         {waHealthMsg ? (
                             <div className="text-sm text-slate-300">{waHealthMsg}</div>
                         ) : null}
+                        <div className="pt-4 border-t border-slate-800">
+                            <h3 className="font-medium text-white mb-3">Acciones y versiones (por gimnasio)</h3>
+                            {waActionsLoading ? (
+                                <div className="text-slate-400 flex items-center gap-2">
+                                    <Loader2 className="w-4 h-4 animate-spin" /> Cargando...
+                                </div>
+                            ) : (
+                                <div className="space-y-3 max-w-3xl">
+                                    {waActions.map((a) => (
+                                        <div key={a.action_key} className="flex flex-col md:flex-row md:items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                                            <div className="min-w-44 text-slate-200">{actionLabel[a.action_key] || a.action_key}</div>
+                                            <label className="flex items-center gap-2 text-slate-300">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={Boolean(a.enabled)}
+                                                    onChange={(e) =>
+                                                        setWaActions((prev) => prev.map((x) => (x.action_key === a.action_key ? { ...x, enabled: e.target.checked } : x)))
+                                                    }
+                                                />
+                                                Habilitado
+                                            </label>
+                                            <select
+                                                className="input flex-1"
+                                                value={a.template_name || ''}
+                                                onChange={(e) =>
+                                                    setWaActions((prev) =>
+                                                        prev.map((x) => (x.action_key === a.action_key ? { ...x, template_name: e.target.value } : x))
+                                                    )
+                                                }
+                                            >
+                                                {waCatalog
+                                                    .filter((t) => Boolean(t.active))
+                                                    .filter((t) => countMetaParams(String(t.body_text || '')) === Number(a.required_params || 0))
+                                                    .map((t) => (
+                                                        <option key={t.template_name} value={t.template_name}>
+                                                            {t.template_name}
+                                                        </option>
+                                                    ))}
+                                            </select>
+                                            <button
+                                                className="btn-primary"
+                                                disabled={savingWaAction === a.action_key}
+                                                onClick={() => saveWaAction(a.action_key)}
+                                            >
+                                                {savingWaAction === a.action_key ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Guardar'}
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                         <div className="pt-4 border-t border-slate-800">
                             <h3 className="font-medium text-white mb-3">Prueba de WhatsApp</h3>
                             <div className="flex gap-3">

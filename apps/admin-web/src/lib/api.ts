@@ -540,11 +540,51 @@ export const api = {
     deleteWhatsAppTemplateCatalog: (templateName: string) =>
         request<{ ok: boolean }>(`/whatsapp/templates/${encodeURIComponent(templateName)}`, { method: 'DELETE' }),
 
+    syncWhatsAppTemplateDefaults: (overwrite = true) =>
+        request<{ ok: boolean; overwrite: boolean; created: number; updated: number; failed: Array<{ name: string; error: string }> }>(
+            `/whatsapp/templates/sync-defaults?overwrite=${overwrite ? '1' : '0'}`,
+            { method: 'POST' }
+        ),
+
+    bumpWhatsAppTemplateVersion: (templateName: string) =>
+        request<{ ok: boolean; new_template_name: string }>(`/whatsapp/templates/bump-version`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ template_name: templateName }),
+        }),
+
+    getWhatsAppTemplateBindings: () => request<{ bindings: Record<string, string> }>(`/whatsapp/bindings`),
+
+    upsertWhatsAppTemplateBinding: (bindingKey: string, templateName: string) =>
+        request<{ ok: boolean }>(`/whatsapp/bindings/${encodeURIComponent(bindingKey)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ template_name: templateName }),
+        }),
+
+    syncWhatsAppTemplateBindings: (overwrite = true) =>
+        request<{ ok: boolean; overwrite: boolean; created: number; updated: number; failed: any[] }>(
+            `/whatsapp/bindings/sync-defaults?overwrite=${overwrite ? '1' : '0'}`,
+            { method: 'POST' }
+        ),
+
     provisionGymWhatsAppTemplates: (gymId: number) =>
         request<{ ok: boolean; existing_count: number; created: string[]; failed: Array<{ name: string; error: string }> }>(
             `/gyms/${gymId}/whatsapp/provision-templates`,
             { method: 'POST' }
         ),
+
+    getGymWhatsAppActions: (gymId: number) =>
+        request<{ ok: boolean; actions: Array<{ action_key: string; enabled: boolean; template_name: string; required_params: number }> }>(
+            `/gyms/${gymId}/whatsapp/actions`
+        ),
+
+    setGymWhatsAppAction: (gymId: number, actionKey: string, enabled: boolean, templateName: string) =>
+        request<{ ok: boolean }>(`/gyms/${gymId}/whatsapp/actions/${encodeURIComponent(actionKey)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled, template_name: templateName }),
+        }),
 
     getGymWhatsAppHealth: (gymId: number) =>
         request<any>(`/gyms/${gymId}/whatsapp/health`),

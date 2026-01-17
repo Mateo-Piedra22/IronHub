@@ -2361,18 +2361,18 @@ class AdminService:
         lang = (os.getenv("WHATSAPP_TEMPLATE_LANGUAGE") or "es_AR").strip()
         templates = [
             ("ih_welcome_v1", "UTILITY", f"Hola {{{{1}}}}. ¡Bienvenido/a! Si necesitás ayuda, respondé a este mensaje.", ["Mateo"]),
-            ("ih_payment_confirmed_v1", "UTILITY", "Hola {{1}}. Confirmamos tu pago de ${{2}} correspondiente a {{3}}. ¡Gracias!", ["Mateo", "25000", "01/2026"]),
-            ("ih_membership_due_today_v1", "UTILITY", "Hola {{1}}. Recordatorio: tu cuota vence hoy ({{2}}). Si ya abonaste, ignorá este mensaje.", ["Mateo", "16/01"]),
-            ("ih_membership_due_soon_v1", "UTILITY", "Hola {{1}}. Tu cuota vence el {{2}}. Si querés, respondé a este mensaje y te ayudamos a regularizar.", ["Mateo", "20/01"]),
+            ("ih_payment_confirmed_v1", "UTILITY", "Hola {{1}}. Confirmamos tu pago de ${{2}} correspondiente a {{3}}. ¡Gracias!", ["Mateo", "25000", "enero 2026"]),
+            ("ih_membership_due_today_v1", "UTILITY", "Hola {{1}}. Recordatorio: tu cuota vence hoy ({{2}}). Si ya abonaste, ignorá este mensaje.", ["Mateo", "16 de enero"]),
+            ("ih_membership_due_soon_v1", "UTILITY", "Hola {{1}}. Tu cuota vence el {{2}}. Si querés, respondé a este mensaje y te ayudamos a regularizar.", ["Mateo", "20 de enero"]),
             ("ih_membership_overdue_v1", "UTILITY", "Hola {{1}}. Tu cuota está vencida. Si ya abonaste, ignorá este mensaje. Si necesitás ayuda, respondé “AYUDA”.", ["Mateo"]),
             ("ih_membership_deactivated_v1", "UTILITY", "Hola {{1}}. Tu acceso está temporalmente suspendido. Motivo: {{2}}. Respondé a este mensaje si necesitás asistencia.", ["Mateo", "cuotas vencidas"]),
             ("ih_membership_reactivated_v1", "UTILITY", "Hola {{1}}. Tu acceso fue reactivado. ¡Gracias!", ["Mateo"]),
-            ("ih_class_booking_confirmed_v1", "UTILITY", "Reserva confirmada: {{1}} el {{2}} a las {{3}}. Si no podés asistir, respondé “CANCELAR”.", ["Funcional", "16/01", "19:00"]),
-            ("ih_class_booking_cancelled_v1", "UTILITY", "Tu reserva para {{1}} ({{2}} {{3}}) fue cancelada.", ["Funcional", "16/01", "19:00"]),
-            ("ih_class_reminder_v1", "UTILITY", "Hola {{1}}. Recordatorio: {{2}} el {{3}} a las {{4}}.", ["Mateo", "Funcional", "16/01", "19:00"]),
-            ("ih_waitlist_spot_available_v1", "UTILITY", "Hola {{1}}. Se liberó un cupo para {{2}} ({{3}} {{4}}). Respondé “SI” para tomarlo.", ["Mateo", "Funcional", "viernes", "19:00"]),
-            ("ih_waitlist_confirmed_v1", "UTILITY", "Listo {{1}}. Te anotamos en {{2}} ({{3}} {{4}}).", ["Mateo", "Funcional", "viernes", "19:00"]),
-            ("ih_schedule_change_v1", "UTILITY", "Aviso: hubo un cambio en {{1}}. Nuevo horario: {{2}} {{3}}.", ["Funcional", "viernes", "20:00"]),
+            ("ih_class_booking_confirmed_v1", "UTILITY", "Confirmación de reserva: clase {{1}} el {{2}} a las {{3}} hs.", ["Funcional", "16 de enero", "19:00"]),
+            ("ih_class_booking_cancelled_v1", "UTILITY", "Tu reserva fue cancelada para la clase {{1}}. Si necesitás ayuda, respondé a este mensaje.", ["Funcional"]),
+            ("ih_class_reminder_v1", "UTILITY", "Hola {{1}}. Te recordamos tu clase de {{2}} el {{3}} a las {{4}} hs. Si no podés asistir, avisá por este medio.", ["Mateo", "Funcional", "viernes", "19:00"]),
+            ("ih_waitlist_spot_available_v1", "UTILITY", "Hola {{1}}. Se liberó un cupo para {{2}} el {{3}} a las {{4}} hs. Respondé “SI” para tomarlo.", ["Mateo", "Funcional", "viernes", "19:00"]),
+            ("ih_waitlist_confirmed_v1", "UTILITY", "Listo {{1}}. Quedaste anotado en {{2}} el {{3}} a las {{4}} hs.", ["Mateo", "Funcional", "viernes", "19:00"]),
+            ("ih_schedule_change_v1", "UTILITY", "Aviso: hubo un cambio en {{1}}. Nuevo horario: {{2}} a las {{3}} hs. Gracias.", ["Funcional", "viernes", "20:00"]),
             ("ih_auth_code_v1", "AUTHENTICATION", "Tu código de verificación es {{1}}. Vence en {{2}} minutos. No lo compartas con nadie.", ["928314", "10"]),
             ("ih_marketing_promo_v1", "MARKETING", "Hola {{1}}. Esta semana tenemos {{2}}. Si querés más info, respondé a este mensaje.", ["Mateo", "descuento del 10% en el plan trimestral"]),
             ("ih_marketing_new_class_v1", "MARKETING", "Nueva clase disponible: {{1}}. Primer horario: {{2}} {{3}}. ¿Querés que te reservemos un lugar?", ["Movilidad", "miércoles", "18:00"]),
@@ -2384,7 +2384,7 @@ class AdminService:
                 "language": lang,
                 "body_text": body,
                 "example_params": examples,
-                "active": True,
+                "active": False if name == "ih_auth_code_v1" else True,
                 "version": 1,
             }
             for name, category, body, examples in templates
@@ -2421,6 +2421,165 @@ class AdminService:
             return out
         except Exception:
             return []
+
+    def _ensure_whatsapp_template_bindings_table(self, conn) -> None:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS whatsapp_template_bindings (
+                binding_key VARCHAR(120) PRIMARY KEY,
+                template_name VARCHAR(255) NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+    def _default_whatsapp_bindings(self) -> Dict[str, str]:
+        return {
+            "welcome": "ih_welcome_v1",
+            "payment": "ih_payment_confirmed_v1",
+            "membership_due_today": "ih_membership_due_today_v1",
+            "membership_due_soon": "ih_membership_due_soon_v1",
+            "overdue": "ih_membership_overdue_v1",
+            "deactivation": "ih_membership_deactivated_v1",
+            "membership_reactivated": "ih_membership_reactivated_v1",
+            "class_booking_confirmed": "ih_class_booking_confirmed_v1",
+            "class_booking_cancelled": "ih_class_booking_cancelled_v1",
+            "class_reminder": "ih_class_reminder_v1",
+            "waitlist": "ih_waitlist_spot_available_v1",
+            "waitlist_confirmed": "ih_waitlist_confirmed_v1",
+            "schedule_change": "ih_schedule_change_v1",
+            "marketing_promo": "ih_marketing_promo_v1",
+            "marketing_new_class": "ih_marketing_new_class_v1",
+        }
+
+    def list_whatsapp_template_bindings(self) -> Dict[str, str]:
+        try:
+            with self.db.get_connection_context() as conn:
+                self._ensure_whatsapp_template_bindings_table(conn)
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute("SELECT binding_key, template_name FROM whatsapp_template_bindings ORDER BY binding_key ASC")
+                rows = cur.fetchall() or []
+                conn.commit()
+            out: Dict[str, str] = {}
+            for r in rows:
+                out[str(r.get("binding_key") or "")] = str(r.get("template_name") or "")
+            defaults = self._default_whatsapp_bindings()
+            merged = {**defaults, **{k: v for k, v in out.items() if k}}
+            missing = [k for k in defaults.keys() if k not in out]
+            if missing:
+                try:
+                    self.sync_whatsapp_template_bindings_defaults(overwrite=False)
+                except Exception:
+                    pass
+            return merged
+        except Exception:
+            return self._default_whatsapp_bindings()
+
+    def upsert_whatsapp_template_binding(self, binding_key: str, template_name: str) -> Dict[str, Any]:
+        k = str(binding_key or "").strip()
+        t = str(template_name or "").strip()
+        if not k or not t:
+            return {"ok": False, "error": "binding_key_and_template_required"}
+        try:
+            with self.db.get_connection_context() as conn:
+                self._ensure_whatsapp_template_bindings_table(conn)
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO whatsapp_template_bindings (binding_key, template_name, updated_at)
+                    VALUES (%s, %s, NOW())
+                    ON CONFLICT (binding_key) DO UPDATE SET
+                        template_name = EXCLUDED.template_name,
+                        updated_at = NOW()
+                    """,
+                    (k, t),
+                )
+                conn.commit()
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def sync_whatsapp_template_bindings_defaults(self, overwrite: bool = True) -> Dict[str, Any]:
+        defaults = self._default_whatsapp_bindings()
+        updated = 0
+        created = 0
+        failed: List[Dict[str, Any]] = []
+        try:
+            with self.db.get_connection_context() as conn:
+                self._ensure_whatsapp_template_bindings_table(conn)
+                cur = conn.cursor()
+                for k, v in defaults.items():
+                    if not overwrite:
+                        cur.execute("SELECT 1 FROM whatsapp_template_bindings WHERE binding_key = %s LIMIT 1", (k,))
+                        if cur.fetchone():
+                            continue
+                    cur.execute(
+                        """
+                        INSERT INTO whatsapp_template_bindings (binding_key, template_name, updated_at)
+                        VALUES (%s, %s, NOW())
+                        ON CONFLICT (binding_key) DO UPDATE SET
+                            template_name = EXCLUDED.template_name,
+                            updated_at = NOW()
+                        """,
+                        (k, v),
+                    )
+                    if cur.rowcount == 1:
+                        created += 1
+                    else:
+                        updated += 1
+                conn.commit()
+            return {"ok": True, "overwrite": overwrite, "created": created, "updated": updated, "failed": failed}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "created": created, "updated": updated, "failed": failed}
+
+    def bump_whatsapp_template_version(self, template_name: str) -> Dict[str, Any]:
+        name = str(template_name or "").strip()
+        if not name:
+            return {"ok": False, "error": "template_name_required"}
+        try:
+            m = re.match(r"^(?P<base>.+)_v(?P<v>\d+)$", name)
+            if not m:
+                return {"ok": False, "error": "template_name_must_end_with__vN"}
+            base = m.group("base")
+            v = int(m.group("v"))
+            new_v = v + 1
+            new_name = f"{base}_v{new_v}"
+
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute(
+                    "SELECT template_name, category, language, body_text, example_params, active, version FROM whatsapp_template_catalog WHERE template_name = %s LIMIT 1",
+                    (name,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return {"ok": False, "error": "template_not_found_in_catalog"}
+                cur.execute("SELECT 1 FROM whatsapp_template_catalog WHERE template_name = %s LIMIT 1", (new_name,))
+                if cur.fetchone():
+                    return {"ok": False, "error": "target_version_already_exists", "new_template_name": new_name}
+
+                cur.execute(
+                    """
+                    INSERT INTO whatsapp_template_catalog (template_name, category, language, body_text, example_params, active, version, updated_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,NOW())
+                    """,
+                    (
+                        new_name,
+                        str(row.get("category") or "UTILITY"),
+                        str(row.get("language") or "es_AR"),
+                        str(row.get("body_text") or ""),
+                        row.get("example_params"),
+                        bool(row.get("active") is True),
+                        int(row.get("version") or new_v),
+                    ),
+                )
+
+                conn.commit()
+
+            return {"ok": True, "new_template_name": new_name}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     def upsert_whatsapp_template_catalog(self, template_name: str, data: Dict[str, Any]) -> Dict[str, Any]:
         name = str(template_name or "").strip()
@@ -2471,6 +2630,63 @@ class AdminService:
                 cur.execute("DELETE FROM whatsapp_template_catalog WHERE template_name = %s", (name,))
                 conn.commit()
             return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def sync_whatsapp_template_defaults(self, overwrite: bool = True) -> Dict[str, Any]:
+        defaults = self._default_whatsapp_template_catalog()
+        if not defaults:
+            return {"ok": False, "error": "no_defaults"}
+        updated = 0
+        created = 0
+        failed: List[Dict[str, Any]] = []
+        try:
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor()
+                for t in defaults:
+                    name = str(t.get("template_name") or "").strip()
+                    if not name:
+                        continue
+                    if not overwrite:
+                        try:
+                            cur.execute("SELECT 1 FROM whatsapp_template_catalog WHERE template_name = %s LIMIT 1", (name,))
+                            if cur.fetchone():
+                                continue
+                        except Exception:
+                            pass
+                    try:
+                        cur.execute(
+                            """
+                            INSERT INTO whatsapp_template_catalog (template_name, category, language, body_text, example_params, active, version, updated_at)
+                            VALUES (%s,%s,%s,%s,%s,%s,%s,NOW())
+                            ON CONFLICT (template_name) DO UPDATE SET
+                                category = EXCLUDED.category,
+                                language = EXCLUDED.language,
+                                body_text = EXCLUDED.body_text,
+                                example_params = EXCLUDED.example_params,
+                                active = EXCLUDED.active,
+                                version = EXCLUDED.version,
+                                updated_at = NOW()
+                            """,
+                            (
+                                name,
+                                str(t.get("category") or "UTILITY"),
+                                str(t.get("language") or "es_AR"),
+                                str(t.get("body_text") or ""),
+                                psycopg2.extras.Json(t.get("example_params")) if t.get("example_params") is not None else None,
+                                bool(t.get("active", True)),
+                                int(t.get("version", 1)),
+                            ),
+                        )
+                        if cur.rowcount == 1:
+                            created += 1
+                        else:
+                            updated += 1
+                    except Exception as e:
+                        failed.append({"name": name, "error": str(e)})
+                conn.commit()
+            self.log_action("owner", "whatsapp_templates_catalog_sync", None, f"overwrite={overwrite} created={created} updated={updated} failed={len(failed)}")
+            return {"ok": True, "overwrite": overwrite, "created": created, "updated": updated, "failed": failed}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
@@ -2563,6 +2779,45 @@ class AdminService:
             created = []
             failed = []
             create_url = list_url
+            template_status_by_name: Dict[str, str] = {}
+            after = None
+            for _ in range(10):
+                params_q = {"fields": "name,status", "limit": "200"}
+                if after:
+                    params_q["after"] = after
+                resp = requests.get(list_url, headers=headers, params=params_q, timeout=20)
+                data = resp.json() if resp.content else {}
+                if resp.status_code >= 400:
+                    break
+                for item in (data.get("data") or []):
+                    n = (item or {}).get("name")
+                    st = (item or {}).get("status")
+                    if n:
+                        template_status_by_name[str(n)] = str(st or "")
+                cursors = ((data.get("paging") or {}).get("cursors") or {})
+                after = cursors.get("after")
+                if not after:
+                    break
+
+            def _try_parse_meta_error(raw: Any) -> str:
+                try:
+                    if isinstance(raw, dict):
+                        u = raw.get("error_user_title") or ""
+                        m = raw.get("error_user_msg") or raw.get("message") or ""
+                        if u or m:
+                            return f"{u}: {m}".strip(": ").strip()
+                        return str(raw)
+                    if isinstance(raw, str):
+                        try:
+                            obj = json.loads(raw)
+                            if isinstance(obj, dict):
+                                return _try_parse_meta_error(obj)
+                        except Exception:
+                            return raw
+                    return str(raw)
+                except Exception:
+                    return "Error"
+
             for t in templates:
                 name = str(t.get("template_name") or "").strip()
                 if not name or name in existing:
@@ -2589,14 +2844,57 @@ class AdminService:
                     r2 = requests.post(create_url, headers={**headers, "Content-Type": "application/json"}, json=payload, timeout=30)
                     d2 = r2.json() if r2.content else {}
                     if r2.status_code >= 400:
-                        failed.append({"name": name, "error": str((d2 or {}).get("error") or d2 or r2.text)})
+                        err_obj = (d2 or {}).get("error") or d2 or r2.text
+                        failed.append({"name": name, "error": _try_parse_meta_error(err_obj), "raw": err_obj})
                     else:
                         created.append(name)
                 except Exception as e:
                     failed.append({"name": name, "error": str(e)})
 
+            skipped = []
+            for t in templates:
+                name = str(t.get("template_name") or "").strip()
+                if not name:
+                    continue
+                st = template_status_by_name.get(name)
+                if st:
+                    skipped.append({"name": name, "status": st})
+
+            try:
+                bindings = self.list_whatsapp_template_bindings()
+            except Exception:
+                bindings = self._default_whatsapp_bindings()
+
+            try:
+                with psycopg2.connect(**pg_params) as t_conn2:
+                    with t_conn2.cursor() as t_cur2:
+                        for k, tname in (bindings or {}).items():
+                            key = f"wa_meta_template_{str(k).strip()}"
+                            chosen = str(tname or "").strip()
+                            if not chosen:
+                                continue
+                            st = str(template_status_by_name.get(chosen) or "")
+                            if not st:
+                                continue
+                            if st.upper() != "APPROVED":
+                                continue
+                            t_cur2.execute(
+                                """
+                                INSERT INTO configuracion (clave, valor, tipo, descripcion)
+                                VALUES (%s,%s,%s,%s)
+                                ON CONFLICT (clave) DO UPDATE SET
+                                    valor = EXCLUDED.valor,
+                                    tipo = EXCLUDED.tipo,
+                                    descripcion = EXCLUDED.descripcion
+                                """,
+                                (key, chosen, "string", "Nombre de template Meta activo para este evento"),
+                            )
+                        t_conn2.commit()
+            except Exception:
+                pass
+
             self.log_action("owner", "whatsapp_templates_provisioned", gid, f"created={len(created)} failed={len(failed)}")
-            return {"ok": True, "existing_count": len(existing), "created": created, "failed": failed}
+            return {"ok": True, "existing_count": len(existing), "created": created, "skipped": skipped, "failed": failed}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
@@ -2804,6 +3102,228 @@ class AdminService:
                 "waba_id": waba_id,
                 "access_token_present": bool(access_token_present),
             }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def _action_specs(self) -> Dict[str, Dict[str, Any]]:
+        return {
+            "welcome": {"required_params": 1, "default_enabled": True},
+            "payment": {"required_params": 3, "default_enabled": True},
+            "membership_due_today": {"required_params": 2, "default_enabled": True},
+            "membership_due_soon": {"required_params": 2, "default_enabled": True},
+            "overdue": {"required_params": 1, "default_enabled": True},
+            "deactivation": {"required_params": 2, "default_enabled": True},
+            "membership_reactivated": {"required_params": 1, "default_enabled": True},
+            "class_booking_confirmed": {"required_params": 3, "default_enabled": True},
+            "class_booking_cancelled": {"required_params": 1, "default_enabled": True},
+            "class_reminder": {"required_params": 4, "default_enabled": True},
+            "waitlist": {"required_params": 4, "default_enabled": True},
+            "waitlist_confirmed": {"required_params": 4, "default_enabled": True},
+            "schedule_change": {"required_params": 3, "default_enabled": True},
+            "marketing_promo": {"required_params": 2, "default_enabled": False},
+            "marketing_new_class": {"required_params": 3, "default_enabled": False},
+        }
+
+    def _count_meta_params(self, body_text: str) -> int:
+        matches = re.findall(r"\{\{(\d+)\}\}", str(body_text or ""))
+        nums = []
+        for m in matches:
+            try:
+                nums.append(int(m))
+            except Exception:
+                pass
+        return max(nums) if nums else 0
+
+    def get_gym_whatsapp_actions(self, gym_id: int) -> Dict[str, Any]:
+        try:
+            gid = int(gym_id)
+        except Exception:
+            return {"ok": False, "error": "invalid_gym_id"}
+        specs = self._action_specs()
+        bindings = self.list_whatsapp_template_bindings()
+        try:
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute("SELECT db_name FROM gyms WHERE id = %s", (gid,))
+                row = cur.fetchone()
+            if not row:
+                return {"ok": False, "error": "gym_not_found"}
+            db_name = str(row.get("db_name") or "").strip()
+            if not db_name:
+                return {"ok": False, "error": "gym_db_missing"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+        params = self.resolve_admin_db_params()
+        pg_params = {
+            "host": params.get("host"),
+            "port": params.get("port"),
+            "dbname": db_name,
+            "user": params.get("user"),
+            "password": params.get("password"),
+            "sslmode": params.get("sslmode"),
+            "connect_timeout": params.get("connect_timeout"),
+            "application_name": "admin_get_tenant_whatsapp_actions",
+        }
+        current_enabled: Dict[str, Optional[str]] = {}
+        current_tpl: Dict[str, Optional[str]] = {}
+        try:
+            with psycopg2.connect(**pg_params) as t_conn:
+                with t_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as t_cur:
+                    t_cur.execute("SELECT clave, valor FROM configuracion WHERE clave LIKE 'wa_action_enabled_%' OR clave LIKE 'wa_meta_template_%'")
+                    rows = t_cur.fetchall() or []
+            for r in rows:
+                k = str(r.get("clave") or "")
+                v = r.get("valor")
+                if k.startswith("wa_action_enabled_"):
+                    current_enabled[k.replace("wa_action_enabled_", "")] = v
+                elif k.startswith("wa_meta_template_"):
+                    current_tpl[k.replace("wa_meta_template_", "")] = v
+        except Exception:
+            pass
+
+        items: List[Dict[str, Any]] = []
+        for action_key, spec in specs.items():
+            default_tpl = str(bindings.get(action_key) or self._default_whatsapp_bindings().get(action_key) or "")
+            raw_enabled = current_enabled.get(action_key)
+            if raw_enabled is None:
+                enabled = bool(spec.get("default_enabled") is True)
+            else:
+                enabled = str(raw_enabled or "").strip().lower() in ("1", "true", "yes", "on")
+            tpl = str((current_tpl.get(action_key) or default_tpl) or "").strip()
+            items.append(
+                {
+                    "action_key": action_key,
+                    "enabled": bool(enabled),
+                    "template_name": tpl,
+                    "required_params": int(spec.get("required_params") or 0),
+                    "default_enabled": bool(spec.get("default_enabled") is True),
+                    "default_template_name": default_tpl,
+                }
+            )
+        return {"ok": True, "actions": items}
+
+    def set_gym_whatsapp_action(self, gym_id: int, action_key: str, enabled: bool, template_name: str) -> Dict[str, Any]:
+        try:
+            gid = int(gym_id)
+        except Exception:
+            return {"ok": False, "error": "invalid_gym_id"}
+        key = str(action_key or "").strip()
+        specs = self._action_specs()
+        if key not in specs:
+            return {"ok": False, "error": "invalid_action_key"}
+        tname = str(template_name or "").strip()
+        if not tname:
+            tname = str(self.list_whatsapp_template_bindings().get(key) or self._default_whatsapp_bindings().get(key) or "").strip()
+        if not tname:
+            return {"ok": False, "error": "template_name_required"}
+
+        try:
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute(
+                    "SELECT template_name, body_text, active FROM whatsapp_template_catalog WHERE template_name = %s LIMIT 1",
+                    (tname,),
+                )
+                row = cur.fetchone()
+                if not row or not bool(row.get("active") is True):
+                    return {"ok": False, "error": "template_not_found_or_inactive"}
+                required = int(specs[key].get("required_params") or 0)
+                actual = self._count_meta_params(str(row.get("body_text") or ""))
+                if required != actual:
+                    return {"ok": False, "error": f"params_mismatch_required_{required}_got_{actual}"}
+                cur.execute("SELECT db_name FROM gyms WHERE id = %s", (gid,))
+                grow = cur.fetchone()
+            if not grow:
+                return {"ok": False, "error": "gym_not_found"}
+            db_name = str(grow.get("db_name") or "").strip()
+            if not db_name:
+                return {"ok": False, "error": "gym_db_missing"}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+        params = self.resolve_admin_db_params()
+        pg_params = {
+            "host": params.get("host"),
+            "port": params.get("port"),
+            "dbname": db_name,
+            "user": params.get("user"),
+            "password": params.get("password"),
+            "sslmode": params.get("sslmode"),
+            "connect_timeout": params.get("connect_timeout"),
+            "application_name": "admin_set_tenant_whatsapp_action",
+        }
+        meta_status = None
+        meta_list_ok = False
+        try:
+            with psycopg2.connect(**pg_params) as t_conn0:
+                with t_conn0.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as t_cur0:
+                    t_cur0.execute(
+                        "SELECT phone_id, waba_id, access_token FROM whatsapp_config WHERE active = TRUE ORDER BY created_at DESC LIMIT 1"
+                    )
+                    cfg = t_cur0.fetchone() or {}
+            waba_id = str((cfg or {}).get("waba_id") or "").strip()
+            token_raw = str((cfg or {}).get("access_token") or "").strip()
+            token = SecureConfig.decrypt_waba_secret(token_raw) if token_raw else ""
+            if not token and (token_raw.startswith("EAA") or token_raw.startswith("EAAB") or token_raw.startswith("EAAJ")):
+                token = token_raw
+            if waba_id and token:
+                api_v = (os.getenv("META_GRAPH_API_VERSION") or os.getenv("WHATSAPP_API_VERSION") or "v19.0").strip()
+                url = f"https://graph.facebook.com/{api_v}/{waba_id}/message_templates"
+                headers = {"Authorization": f"Bearer {token}"}
+                after = None
+                for _ in range(10):
+                    q = {"fields": "name,status", "limit": "200"}
+                    if after:
+                        q["after"] = after
+                    resp = requests.get(url, headers=headers, params=q, timeout=20)
+                    data = resp.json() if resp.content else {}
+                    if resp.status_code >= 400:
+                        break
+                    meta_list_ok = True
+                    for item in (data.get("data") or []):
+                        if str((item or {}).get("name") or "") == tname:
+                            meta_status = str((item or {}).get("status") or "")
+                            break
+                    if meta_status:
+                        break
+                    cursors = ((data.get("paging") or {}).get("cursors") or {})
+                    after = cursors.get("after")
+                    if not after:
+                        break
+        except Exception:
+            meta_status = None
+        if meta_list_ok and not meta_status:
+            return {"ok": False, "error": "template_not_found_in_meta"}
+        if meta_status and meta_status.upper() != "APPROVED":
+            return {"ok": False, "error": f"template_not_approved_in_meta:{meta_status}"}
+        try:
+            with psycopg2.connect(**pg_params) as t_conn:
+                with t_conn.cursor() as t_cur:
+                    t_cur.execute(
+                        """
+                        INSERT INTO configuracion (clave, valor, tipo, descripcion)
+                        VALUES (%s,%s,%s,%s)
+                        ON CONFLICT (clave) DO UPDATE SET
+                            valor = EXCLUDED.valor,
+                            tipo = EXCLUDED.tipo,
+                            descripcion = EXCLUDED.descripcion
+                        """,
+                        (f"wa_action_enabled_{key}", "true" if enabled else "false", "bool", "Habilita envío WhatsApp para esta acción"),
+                    )
+                    t_cur.execute(
+                        """
+                        INSERT INTO configuracion (clave, valor, tipo, descripcion)
+                        VALUES (%s,%s,%s,%s)
+                        ON CONFLICT (clave) DO UPDATE SET
+                            valor = EXCLUDED.valor,
+                            tipo = EXCLUDED.tipo,
+                            descripcion = EXCLUDED.descripcion
+                        """,
+                        (f"wa_meta_template_{key}", tname, "string", "Nombre de template Meta activo para esta acción"),
+                    )
+                t_conn.commit()
+            return {"ok": True}
         except Exception as e:
             return {"ok": False, "error": str(e)}
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Loader2, MessageSquare, Send, Check, X, ExternalLink, Save, Trash2, RefreshCw } from 'lucide-react';
+import { Loader2, MessageSquare, Send, Check, X, ExternalLink, Save, Trash2, RefreshCw, ArrowUpRight } from 'lucide-react';
 import { api, type Gym, type WhatsAppTemplateCatalogItem } from '@/lib/api';
 
 export default function WhatsAppPage() {
@@ -14,6 +14,9 @@ export default function WhatsAppPage() {
 
     const [templates, setTemplates] = useState<WhatsAppTemplateCatalogItem[]>([]);
     const [templatesLoading, setTemplatesLoading] = useState(true);
+    const [bindings, setBindings] = useState<Record<string, string>>({});
+    const [bindingsLoading, setBindingsLoading] = useState(true);
+    const [savingBindingKey, setSavingBindingKey] = useState<string>('');
     const [editing, setEditing] = useState<Partial<WhatsAppTemplateCatalogItem>>({
         template_name: '',
         category: 'UTILITY',
@@ -24,6 +27,7 @@ export default function WhatsAppPage() {
         example_params: [],
     });
     const [savingTemplate, setSavingTemplate] = useState(false);
+    const [syncingDefaults, setSyncingDefaults] = useState(false);
 
     useEffect(() => {
         async function load() {
@@ -54,9 +58,73 @@ export default function WhatsAppPage() {
         }
     };
 
+    const loadBindings = async () => {
+        setBindingsLoading(true);
+        try {
+            const res = await api.getWhatsAppTemplateBindings();
+            if (res.ok && res.data) {
+                setBindings(res.data.bindings || {});
+            }
+        } finally {
+            setBindingsLoading(false);
+        }
+    };
+
+    const handleSyncDefaults = async () => {
+        setSyncingDefaults(true);
+        try {
+            const res = await api.syncWhatsAppTemplateDefaults(true);
+            if (!res.ok || !res.data) {
+                alert(res.error || 'Error sincronizando defaults');
+                return;
+            }
+            if ((res.data.failed || []).length > 0) {
+                alert(`Sincronizado con fallas: ${res.data.failed.length}`);
+            } else {
+                alert(`Sincronizado: created=${res.data.created}, updated=${res.data.updated}`);
+            }
+            await loadTemplates();
+            await loadBindings();
+        } finally {
+            setSyncingDefaults(false);
+        }
+    };
+
     useEffect(() => {
         loadTemplates();
+        loadBindings();
     }, []);
+
+    const handleBumpVersion = async (templateName: string) => {
+        const name = String(templateName || '').trim();
+        if (!name) return;
+        if (!confirm(`Crear nueva versión a partir de ${name}?`)) return;
+        const res = await api.bumpWhatsAppTemplateVersion(name);
+        if (!res.ok || !res.data) {
+            alert(res.error || 'Error bumping version');
+            return;
+        }
+        alert(`Nueva versión creada: ${res.data.new_template_name}`);
+        await loadTemplates();
+        await loadBindings();
+    };
+
+    const handleSaveBinding = async (bindingKey: string, templateName: string) => {
+        const k = String(bindingKey || '').trim();
+        const t = String(templateName || '').trim();
+        if (!k || !t) return;
+        setSavingBindingKey(k);
+        try {
+            const res = await api.upsertWhatsAppTemplateBinding(k, t);
+            if (!res.ok) {
+                alert(res.error || 'Error guardando binding');
+                return;
+            }
+            await loadBindings();
+        } finally {
+            setSavingBindingKey('');
+        }
+    };
 
     const configuredGyms = gyms.filter((g) => g.wa_configured);
     const notConfiguredGyms = gyms.filter((g) => !g.wa_configured);
@@ -258,10 +326,73 @@ export default function WhatsAppPage() {
                         <h3 className="font-semibold text-white">Catálogo estándar de plantillas (Meta)</h3>
                         <p className="text-slate-400 text-sm mt-1">Fuente central para provisionar templates en la WABA de cada gimnasio</p>
                     </div>
-                    <button onClick={loadTemplates} className="btn-secondary flex items-center gap-2" disabled={templatesLoading}>
-                        <RefreshCw className="w-4 h-4" />
-                        Refrescar
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button onClick={handleSyncDefaults} className="btn-secondary flex items-center gap-2" disabled={syncingDefaults}>
+                            {syncingDefaults ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                            Sincronizar defaults
+                        </button>
+                        <button onClick={loadTemplates} className="btn-secondary flex items-center gap-2" disabled={templatesLoading}>
+                            <RefreshCw className="w-4 h-4" />
+                            Refrescar
+                        </button>
+                    </div>
+                </div>
+
+                <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/40 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                        <div>
+                            <div className="font-medium text-white">Bindings (acciones → template)</div>
+                            <div className="text-slate-400 text-sm mt-1">Define qué versión se usa al enviar cada tipo de mensaje</div>
+                        </div>
+                        <button
+                            onClick={async () => {
+                                const res = await api.syncWhatsAppTemplateBindings(true);
+                                if (!res.ok) {
+                                    alert(res.error || 'Error sincronizando bindings');
+                                    return;
+                                }
+                                await loadBindings();
+                            }}
+                            className="btn-secondary flex items-center gap-2"
+                            disabled={bindingsLoading}
+                        >
+                            <RefreshCw className="w-4 h-4" />
+                            Reset defaults
+                        </button>
+                    </div>
+                    {bindingsLoading ? (
+                        <div className="mt-3 flex items-center gap-2 text-slate-400">
+                            <Loader2 className="w-4 h-4 animate-spin" /> Cargando...
+                        </div>
+                    ) : (
+                        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {Object.entries(bindings).map(([k, v]) => (
+                                <div key={k} className="flex items-center gap-2">
+                                    <div className="w-40 text-sm text-slate-300">{k}</div>
+                                    <select
+                                        className="input flex-1"
+                                        value={v || ''}
+                                        onChange={(e) => setBindings((p) => ({ ...p, [k]: e.target.value }))}
+                                    >
+                                        {templates
+                                            .filter((t) => t.active)
+                                            .map((t) => (
+                                                <option key={t.template_name} value={t.template_name}>
+                                                    {t.template_name}
+                                                </option>
+                                            ))}
+                                    </select>
+                                    <button
+                                        className="btn-primary"
+                                        disabled={savingBindingKey === k || !String(bindings[k] || '').trim()}
+                                        onClick={() => handleSaveBinding(k, String(bindings[k] || ''))}
+                                    >
+                                        {savingBindingKey === k ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Guardar'}
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
 
                 <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -356,6 +487,13 @@ export default function WhatsAppPage() {
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <button
+                                                className="btn-secondary text-sm flex items-center gap-1"
+                                                onClick={() => handleBumpVersion(t.template_name)}
+                                            >
+                                                <ArrowUpRight className="w-3 h-3" />
+                                                Bump
+                                            </button>
+                                            <button
                                                 className="btn-secondary text-sm"
                                                 onClick={() => setEditing({ ...t, example_params: Array.isArray(t.example_params) ? t.example_params : [] })}
                                             >
@@ -376,4 +514,3 @@ export default function WhatsAppPage() {
         </div>
     );
 }
-
