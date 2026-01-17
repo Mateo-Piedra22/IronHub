@@ -924,7 +924,12 @@ async def whatsapp_verify(request: Request, st: WhatsAppSettingsService = Depend
     mode = request.query_params.get("hub.mode")
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
-    expected = os.getenv("WHATSAPP_VERIFY_TOKEN", "") or st.get_webhook_verify_token()
+    expected = os.getenv("WHATSAPP_VERIFY_TOKEN", "").strip()
+    if not expected:
+        try:
+            expected = str(st.get_webhook_verify_token() or "").strip()
+        except Exception:
+            expected = ""
     if mode == "subscribe" and expected and token == expected and challenge:
         return Response(content=str(challenge), media_type="text/plain")
     raise HTTPException(status_code=403, detail="Invalid verify token")
@@ -949,68 +954,118 @@ async def whatsapp_verify_tenant(tenant: str, request: Request):
 
 @router.post("/webhooks/whatsapp")
 async def whatsapp_webhook(request: Request, svc: WhatsAppService = Depends(get_whatsapp_service), db: Session = Depends(get_db_session)):
+    def _admin_db_params() -> Dict[str, Any]:
+        return {
+            "host": os.getenv("ADMIN_DB_HOST", os.getenv("DB_HOST", "localhost")),
+            "port": int(os.getenv("ADMIN_DB_PORT", os.getenv("DB_PORT", 5432))),
+            "database": os.getenv("ADMIN_DB_NAME", os.getenv("DB_NAME", "ironhub_admin")),
+            "user": os.getenv("ADMIN_DB_USER", os.getenv("DB_USER", "postgres")),
+            "password": os.getenv("ADMIN_DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
+            "sslmode": os.getenv("ADMIN_DB_SSLMODE", os.getenv("DB_SSLMODE", "require")),
+            "connect_timeout": 10,
+            "application_name": "webapp_api_whatsapp_webhook",
+        }
+
+    def _resolve_tenant_by_phone_number_id(phone_number_id: str) -> Optional[str]:
+        from src.database.raw_manager import RawPostgresManager
+
+        pid = str(phone_number_id or "").strip()
+        if not pid:
+            return None
+        try:
+            adm = RawPostgresManager(connection_params=_admin_db_params())
+            with adm.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT subdominio FROM gyms WHERE whatsapp_phone_id = %s LIMIT 1", (pid,))
+                row = cur.fetchone()
+            return str(row[0]).strip().lower() if row and row[0] else None
+        except Exception:
+            return None
+
+    def _extract_phone_number_id(payload: Dict[str, Any]) -> Optional[str]:
+        try:
+            for entry in (payload or {}).get("entry") or []:
+                for change in (entry or {}).get("changes") or []:
+                    value = (change or {}).get("value") or {}
+                    md = value.get("metadata") or {}
+                    pid = (md or {}).get("phone_number_id")
+                    if pid:
+                        return str(pid)
+                    for st0 in value.get("statuses") or []:
+                        c = (st0 or {}).get("recipient_id") or (st0 or {}).get("conversation") or None
+                        _ = c
+            return None
+        except Exception:
+            return None
+
+    def _verify_signature(raw: bytes, request: Request, app_secret: str, dev_mode: bool, allow_unsigned: bool) -> None:
+        if not app_secret and not (dev_mode or allow_unsigned):
+            raise HTTPException(status_code=503, detail="Webhook signature not configured")
+        if not app_secret:
+            return
+        import hmac, hashlib
+
+        sig = request.headers.get("X-Hub-Signature-256") or ""
+        expected_hash = hmac.new(app_secret.encode(), raw, hashlib.sha256).hexdigest()
+        incoming_hash = str(sig).strip()
+        if incoming_hash.lower().startswith("sha256="):
+            incoming_hash = incoming_hash.split("=", 1)[1]
+        if not hmac.compare_digest(expected_hash, incoming_hash):
+            raise HTTPException(status_code=403, detail="Invalid signature")
+
+    def _process_payload(svc0: WhatsAppService, payload0: Dict[str, Any]) -> None:
+        for entry in payload0.get("entry") or []:
+            for change in entry.get("changes") or []:
+                value = change.get("value") or {}
+                for status in value.get("statuses") or []:
+                    mid, stt = status.get("id"), status.get("status")
+                    if mid and stt:
+                        svc0.actualizar_estado_mensaje(mid, stt)
+                for msg in value.get("messages") or []:
+                    mid = msg.get("id")
+                    mtype = msg.get("type")
+                    wa_from = msg.get("from")
+                    text = None
+                    if mtype == "text":
+                        text = (msg.get("text") or {}).get("body")
+                    elif mtype == "button":
+                        text = (msg.get("button") or {}).get("text")
+                    elif mtype == "interactive":
+                        ir = msg.get("interactive") or {}
+                        text = (ir.get("button_reply") or {}).get("title") or (ir.get("list_reply") or {}).get("title")
+                    elif mtype in ("image", "audio", "video", "document"):
+                        text = f"[{mtype}]"
+                    uid = svc0.obtener_usuario_id_por_telefono(wa_from) if wa_from else None
+                    svc0.registrar_mensaje_entrante(uid, wa_from, text or "", mid)
+
     try:
         raw = await request.body()
         dev_mode = os.getenv("DEVELOPMENT_MODE", "").lower() in ("1", "true", "yes") or os.getenv("ENV", "").lower() in ("dev", "development")
         allow_unsigned = os.getenv("ALLOW_UNSIGNED_WHATSAPP_WEBHOOK", "").lower() in ("1", "true", "yes")
-
-        app_secret = os.getenv("WHATSAPP_APP_SECRET", "")
-        if not app_secret:
-            try:
-                row = db.execute(select(Configuracion.valor).where(Configuracion.clave == "WHATSAPP_APP_SECRET").limit(1)).first()
-                app_secret = (row[0] if row else "") or ""
-            except Exception:
-                app_secret = ""
-        if not app_secret and not (dev_mode or allow_unsigned):
-            raise HTTPException(status_code=503, detail="Webhook signature not configured")
-
-        if app_secret:
-            import hmac, hashlib
-            sig = request.headers.get("X-Hub-Signature-256") or ""
-            expected_hash = hmac.new(app_secret.encode(), raw, hashlib.sha256).hexdigest()
-            incoming_hash = str(sig).strip()
-            if incoming_hash.lower().startswith("sha256="):
-                incoming_hash = incoming_hash.split("=", 1)[1]
-            if not hmac.compare_digest(expected_hash, incoming_hash):
-                raise HTTPException(status_code=403, detail="Invalid signature")
-        
+        app_secret = (os.getenv("WHATSAPP_APP_SECRET", "") or "").strip()
+        _verify_signature(raw, request, app_secret, dev_mode, allow_unsigned)
         payload = json.loads(raw.decode())
+        if not isinstance(payload, dict):
+            return {"status": "ignored"}
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=400, detail="Bad Request")
-    
-    for entry in payload.get("entry") or []:
-        for change in entry.get("changes") or []:
-            value = change.get("value") or {}
-            
-            # Status updates
-            for status in value.get("statuses") or []:
-                mid, st = status.get("id"), status.get("status")
-                if mid and st:
-                    svc.actualizar_estado_mensaje(mid, st)
-            
-            # Incoming messages
-            for msg in value.get("messages") or []:
-                mid = msg.get("id")
-                mtype = msg.get("type")
-                wa_from = msg.get("from")
-                
-                text = None
-                if mtype == "text":
-                    text = (msg.get("text") or {}).get("body")
-                elif mtype == "button":
-                    text = (msg.get("button") or {}).get("text")
-                elif mtype == "interactive":
-                    ir = msg.get("interactive") or {}
-                    text = (ir.get("button_reply") or {}).get("title") or (ir.get("list_reply") or {}).get("title")
-                elif mtype in ("image", "audio", "video", "document"):
-                    text = f"[{mtype}]"
-                
-                uid = svc.obtener_usuario_id_por_telefono(wa_from) if wa_from else None
-                svc.registrar_mensaje_entrante(uid, wa_from, text or "", mid)
-    
-    return {"status": "ok"}
+
+    phone_number_id = _extract_phone_number_id(payload)
+    tenant = _resolve_tenant_by_phone_number_id(phone_number_id or "")
+    if tenant:
+        ok, err = validate_tenant_name(str(tenant))
+        if not ok:
+            return {"status": "ignored", "reason": "invalid_tenant"}
+        set_current_tenant(str(tenant))
+        with tenant_session_scope(str(tenant)) as tdb:
+            tsvc = WhatsAppService(tdb)
+            _process_payload(tsvc, payload)
+        return {"status": "ok"}
+
+    _process_payload(svc, payload)
+    return {"status": "ok", "routed": False}
 
 
 @router.post("/webhooks/whatsapp/{tenant}")

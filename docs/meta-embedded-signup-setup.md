@@ -5,7 +5,7 @@
 - El dueño del gimnasio completa el wizard nativo de Meta (Embedded Signup) y IronHub guarda `waba_id`, `phone_number_id` y `access_token` en la DB del tenant.
 - Luego se provisionan automáticamente las plantillas estándar en la WABA del cliente.
 
-## 1) Meta App (Settings → Basic)
+## 1) Meta App (Settings → Basic) LISTO
 - App ID: ya lo tenés (es el que va en `META_APP_ID`).
 - App Secret: guardalo solo como secreto del entorno (no lo subas al repo).
 - Privacy Policy URL: obligatorio para pasar a Live.
@@ -18,12 +18,12 @@
   - `connect.ironhub.motiona.xyz` (recomendado para evitar whitelists por tenant)
   - (y cualquier dominio custom adicional si lo usás).
 
-## 2) Agregar productos
+## 2) Agregar productos LISTO
 - Agregar producto **WhatsApp** y completar el setup (Quickstart).
 - Agregar producto **Facebook Login for Business** (es el que genera el `config_id`).
 
 ## 3) Facebook Login for Business → Settings (pantalla del screenshot)
-### Toggles recomendados
+### Toggles recomendados LISTO
 - Acceso del cliente de OAuth: **Sí**
 - Acceso de OAuth web: **Sí**
 - Aplicar HTTPS: **Sí**
@@ -43,7 +43,7 @@ Meta exige al menos uno aunque uses SDK/popup. Recomendado:
 
 Si tenés un dominio dedicado “conector” (por ej. `https://connect.ironhub.motiona.xyz/`), agregalo también.
 
-## 4) Facebook Login for Business → Configurations (de acá sale el config_id)
+## 4) Facebook Login for Business → Configurations (de acá sale el config_id) LISTO
 Cómo obtener `META_WA_EMBEDDED_SIGNUP_CONFIG_ID`:
 - Ir a **Facebook Login for Business → Configurations**
 - Create configuration
@@ -64,7 +64,7 @@ Referencia (guía externa que describe el mismo lugar del “Configuration ID”
 ## Checklist
 Ver checklist actualizado en [meta-tech-provider-checklist.md](file:///c:/Users/mateo/OneDrive/Escritorio/Work/Programas/IronHub/docs/meta-tech-provider-checklist.md).
 
-## 5) Qué va en META_OAUTH_REDIRECT_URI
+## 5) Qué va en META_OAUTH_REDIRECT_URI LISTO
 En IronHub el flujo usa el SDK JS (popup) y devuelve un `code`. En este caso el `redirect_uri` efectivo suele ser interno del SDK.
 - Recomendación: dejar `META_OAUTH_REDIRECT_URI` vacío (equivale a `""`) salvo que Meta te exija un valor explícito para el intercambio del code.
 - Si Meta devuelve error de validación del code por mismatch de redirect_uri, recién ahí fijar un valor estable y migrar el flujo a redirect-based OAuth.
@@ -72,7 +72,7 @@ En IronHub el flujo usa el SDK JS (popup) y devuelve un `code`. En este caso el 
 Nota práctica:
 - Meta no soporta comodines en “Valid OAuth Redirect URIs” para subdominios dinámicos; por eso el patrón robusto es el dominio único `connect.*` para ejecutar el SDK.
 
-## 6) Variables de entorno (webapp-api)
+## 6) Variables de entorno (webapp-api) LISTO
 - `META_APP_ID`
 - `META_APP_SECRET` (solo secreto del entorno)
 - `META_WA_EMBEDDED_SIGNUP_CONFIG_ID`
@@ -116,9 +116,13 @@ Para enviar mensajes no es obligatorio, pero para un sistema “ultra pro” sí
 - Recibir estados de entrega (sent/delivered/read/failed)
 
 ### URL multi-tenant (IronHub)
-Meta no puede enviar headers custom (como `x-tenant`), por eso IronHub expone un endpoint por tenant:
-- Callback URL: `https://<TU_API_BASE>/webhooks/whatsapp/{tenant}`
-  - Ejemplo: `https://api.ironhub.motiona.xyz/webhooks/whatsapp/testingiron`
+Meta no puede enviar headers custom (como `x-tenant`). En IronHub, la configuración recomendada es usar **una sola Callback URL** para toda la app y que el backend rutee al tenant correcto usando el `phone_number_id` del payload.
+
+- Callback URL (única, la que tenés que pegar en Meta): `https://api.ironhub.motiona.xyz/webhooks/whatsapp`
+- Verify Token: usar un valor global en `WHATSAPP_VERIFY_TOKEN` (env) y pegar el mismo en Meta.
+
+Notas:
+- Existe también el endpoint `/webhooks/whatsapp/{tenant}` para debugging, pero no es el recomendado para operación normal porque Meta solo permite una callback por app.
 
 ### Verify Token
 En Meta “Verify token” debe coincidir con:

@@ -11,6 +11,7 @@ from sqlalchemy import select, func, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from src.database.tenant_connection import get_current_tenant
 from src.secure_config import SecureConfig
 from src.services.base import BaseService
 from src.database.orm_models import WhatsappConfig, WhatsappMessage, Configuracion
@@ -49,6 +50,39 @@ class WhatsAppSettingsService(BaseService):
                 self.db.rollback()
             except Exception:
                 pass
+
+    def _sync_tenant_whatsapp_to_admin_db(self, phone_id: str, waba_id: str) -> None:
+        tenant = str(get_current_tenant() or "").strip().lower()
+        if not tenant or not phone_id:
+            return
+        try:
+            from src.database.raw_manager import RawPostgresManager
+
+            admin_params = {
+                "host": os.getenv("ADMIN_DB_HOST", os.getenv("DB_HOST", "localhost")),
+                "port": int(os.getenv("ADMIN_DB_PORT", os.getenv("DB_PORT", 5432))),
+                "database": os.getenv("ADMIN_DB_NAME", os.getenv("DB_NAME", "ironhub_admin")),
+                "user": os.getenv("ADMIN_DB_USER", os.getenv("DB_USER", "postgres")),
+                "password": os.getenv("ADMIN_DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
+                "sslmode": os.getenv("ADMIN_DB_SSLMODE", os.getenv("DB_SSLMODE", "require")),
+                "connect_timeout": 10,
+                "application_name": "webapp_sync_whatsapp_to_admin",
+            }
+            adm = RawPostgresManager(connection_params=admin_params)
+            with adm.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    UPDATE gyms
+                    SET whatsapp_phone_id = %s,
+                        whatsapp_business_account_id = %s
+                    WHERE subdominio = %s
+                    """,
+                    (str(phone_id).strip(), str(waba_id or "").strip() or None, tenant),
+                )
+                conn.commit()
+        except Exception:
+            return
 
     def _now_utc_naive(self) -> datetime:
         return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -166,6 +200,10 @@ class WhatsAppSettingsService(BaseService):
                 self._set_cfg_value("wa_template_language", str(payload.get("wa_template_language") or ""))
 
             self.db.commit()
+            try:
+                self._sync_tenant_whatsapp_to_admin_db(phone_id=str(phone_id or ""), waba_id=str(waba_id or ""))
+            except Exception:
+                pass
             return self.get_ui_config()
         except Exception as e:
             try:
@@ -257,6 +295,10 @@ class WhatsAppSettingsService(BaseService):
         if not str(self._get_cfg_value("enabled") or "").strip():
             self._set_cfg_value("enabled", "1")
         self.db.commit()
+        try:
+            self._sync_tenant_whatsapp_to_admin_db(phone_id=phone_id, waba_id=waba)
+        except Exception:
+            pass
 
     def provision_meta_templates_for_current_config(self, language_code: Optional[str] = None) -> Dict[str, Any]:
         row = self._get_active_config_row()
