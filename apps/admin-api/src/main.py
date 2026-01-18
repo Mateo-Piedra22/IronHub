@@ -213,32 +213,95 @@ async def list_gyms(
 
 
 @app.get("/gyms/public")
+@app.get("/gyms/public")
 async def list_public_gyms():
     """List active gyms for public display (landing page). No authentication required."""
     adm = get_admin_service()
     try:
         # Only return active gyms with limited info
-        result = adm.listar_gimnasios_avanzado(1, 50, None, "active", "nombre", "ASC")
-        items = result.get("items", [])
+        result = adm.listar_gimnasios_avanzado(1, 100, None, "active", "nombre", "ASC")
+        items = result.get("items", []) or []
         
-        # Return only public-safe fields
-        public_gyms = []
-        for gym in items:
-            logo_url = ""
-            nombre_publico = ""
-            try:
-                branding = adm.get_gym_branding(int(gym.get("id")))
-                logo_url = str((branding or {}).get("logo_url") or "").strip()
-                nombre_publico = str((branding or {}).get("nombre_publico") or "").strip()
-            except Exception:
-                pass
-            public_gyms.append({
-                "id": gym.get("id"),
-                "nombre": nombre_publico or gym.get("nombre"),
+        # 3. Resolve base DB params once
+        admin_params = AdminService.resolve_admin_db_params()
+        base_pg_params = {
+            "host": admin_params.get("host"),
+            "port": admin_params.get("port"),
+            "user": admin_params.get("user"),
+            "password": admin_params.get("password"),
+            "sslmode": admin_params.get("sslmode"),
+            "connect_timeout": 3,
+        }
+        
+        def _fetch_gym_branding(gym):
+            gid = int(gym.get("id"))
+            db_name = str(gym.get("db_name") or "").strip()
+            # Default structure
+            g_out = {
+                "id": gid,
+                "nombre": gym.get("nombre"),
                 "subdominio": gym.get("subdominio"),
                 "status": gym.get("status", "active"),
-                "logo_url": logo_url or None,
-            })
+                "logo_url": None
+            }
+            if not db_name:
+                return g_out
+
+            # Retry logic for branding (Cold Starts)
+            last_err = None
+            for attempt in range(3):
+                try:
+                    pg_params = {
+                        **base_pg_params,
+                        "dbname": db_name,
+                        "application_name": "landing_gyms_worker",
+                        "connect_timeout": 3 if attempt == 0 else 5
+                    }
+                    with psycopg2.connect(**pg_params) as t_conn:
+                        with t_conn.cursor() as t_cur:
+                            # Fetch branding config
+                            t_cur.execute(
+                                "SELECT clave, valor FROM configuracion WHERE clave IN ('logo_url', 'nombre_publico')"
+                            )
+                            rows = t_cur.fetchall()
+                            kv = {r[0]: r[1] for r in rows}
+                            
+                            logo_url = str(kv.get("logo_url") or "").strip()
+                            nombre_publico = str(kv.get("nombre_publico") or "").strip()
+                            
+                            if nombre_publico:
+                                g_out["nombre"] = nombre_publico
+                            
+                            # Simple B2/URL validation
+                            if logo_url:
+                                if not logo_url.startswith("http") and not logo_url.startswith("/"):
+                                    # It's a B2 path, resolve it roughly or null it if we can't contextually resolve B2 here without heavy libs
+                                    # Assuming standard format: https://cdn_domain/file/bucket/key
+                                    # For now, return raw, frontend/proxy fixes it, or we rely on pre-resolved URLs stored in DB
+                                    pass
+                                g_out["logo_url"] = logo_url
+                            
+                            return g_out
+                except Exception as e:
+                    import time
+                    last_err = e
+                    time.sleep(0.5 * (attempt + 1))
+            
+            return g_out
+
+        # Parallel Execution
+        import concurrent.futures
+        import asyncio
+        loop = asyncio.get_event_loop()
+        
+        public_gyms = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            futures = [
+                loop.run_in_executor(executor, _fetch_gym_branding, g)
+                for g in items
+            ]
+            results = await asyncio.gather(*futures)
+            public_gyms = list(results)
         
         return {"items": public_gyms, "total": len(public_gyms)}
     except Exception as e:
