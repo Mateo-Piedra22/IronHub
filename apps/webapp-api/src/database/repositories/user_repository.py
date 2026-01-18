@@ -229,6 +229,18 @@ class UserRepository(BaseRepository):
             
         if user:
             # Eliminar referencias manuales si necesario (aunque cascade debería manejarlo)
+            # Fix: Decouple WhatsApp messages manually to prevent FK violation (since DB lacks cascade)
+            # We set user_id=None to preserve history as requested
+            try:
+                from ..orm_models import WhatsappMessage
+                self.db.execute(
+                    update(WhatsappMessage)
+                    .where(WhatsappMessage.user_id == usuario_id)
+                    .values(user_id=None)
+                )
+            except Exception:
+                pass
+
             self.db.delete(user)
             self.db.commit()
             self._invalidate_cache('usuarios')

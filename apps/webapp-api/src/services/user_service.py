@@ -194,10 +194,34 @@ class UserService(BaseService):
                 pass
              
         # Update fields
+        # Check if tipo_cuota is changing to recalculate expiration
+        should_recalc_expiry = False
+        if "tipo_cuota" in data and hasattr(current_user, "tipo_cuota"):
+            old_val = getattr(current_user, "tipo_cuota", None)
+            new_val = data["tipo_cuota"]
+            # Detect actual change
+            if old_val != new_val:
+                should_recalc_expiry = True
+
         for k, v in data.items():
             if k != "new_id" and hasattr(current_user, k):
                 setattr(current_user, k, v)
-                
+        
+        # If quota type changed and expiration was not manually provided in this update, recalculate it
+        if should_recalc_expiry and "fecha_proximo_vencimiento" not in data:
+            try:
+                # Need to find the duracion_dias for the new tipo_cuota
+                # data["tipo_cuota"] holds the name now
+                tc_name = data.get("tipo_cuota")
+                if tc_name:
+                    # Resolve duration via repo helper (or direct DB query if needed, but repo has helper)
+                    # We can use payment_repo attached to service
+                    tc_obj = self.payment_repo.obtener_tipo_cuota_por_nombre(tc_name)
+                    duracion = int(getattr(tc_obj, 'duracion_dias', 30) or 30)
+                    current_user.fecha_proximo_vencimiento = self._today_local_date() + timedelta(days=duracion)
+            except Exception:
+                pass
+
         self.user_repo.actualizar_usuario(current_user)
         
         # Handle ID change
