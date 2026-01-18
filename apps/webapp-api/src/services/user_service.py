@@ -152,6 +152,7 @@ class UserService(BaseService):
                 pass
         
         # Create object
+        data.pop("tipo_cuota_id", None)
         usuario = Usuario(**data)
         return self.user_repo.crear_usuario(usuario)
 
