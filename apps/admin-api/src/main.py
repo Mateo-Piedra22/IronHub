@@ -259,14 +259,29 @@ async def list_public_gyms():
                     }
                     with psycopg2.connect(**pg_params) as t_conn:
                         with t_conn.cursor() as t_cur:
-                            # Fetch branding config
-                            t_cur.execute(
-                                "SELECT clave, valor FROM configuracion WHERE clave IN ('logo_url', 'nombre_publico')"
-                            )
-                            rows = t_cur.fetchall()
-                            kv = {r[0]: r[1] for r in rows}
+                            # Fetch branding config from Key-Value store
+                            kv = {}
+                            try:
+                                t_cur.execute(
+                                    "SELECT clave, valor FROM configuracion WHERE clave IN ('logo_url', 'gym_logo_url', 'nombre_publico')"
+                                )
+                                rows = t_cur.fetchall()
+                                kv = {r[0]: r[1] for r in rows}
+                            except Exception:
+                                pass # Table might not exist or be empty
                             
-                            logo_url = str(kv.get("logo_url") or "").strip()
+                            # Fetch branding from Legacy Fixed-Column table (gym_config)
+                            legacy_logo = None
+                            try:
+                                t_cur.execute("SELECT logo_url FROM gym_config LIMIT 1")
+                                row = t_cur.fetchone()
+                                if row and row[0]:
+                                    legacy_logo = str(row[0]).strip()
+                            except Exception:
+                                pass
+
+                            # Strategy: gym_config > configuracion[logo_url] > configuracion[gym_logo_url]
+                            logo_url = legacy_logo or str(kv.get("logo_url") or kv.get("gym_logo_url") or "").strip()
                             nombre_publico = str(kv.get("nombre_publico") or "").strip()
                             
                             if nombre_publico:
@@ -275,9 +290,7 @@ async def list_public_gyms():
                             # Simple B2/URL validation
                             if logo_url:
                                 if not logo_url.startswith("http") and not logo_url.startswith("/"):
-                                    # It's a B2 path, resolve it roughly or null it if we can't contextually resolve B2 here without heavy libs
-                                    # Assuming standard format: https://cdn_domain/file/bucket/key
-                                    # For now, return raw, frontend/proxy fixes it, or we rely on pre-resolved URLs stored in DB
+                                    # It's a B2 path, return as is
                                     pass
                                 g_out["logo_url"] = logo_url
                             

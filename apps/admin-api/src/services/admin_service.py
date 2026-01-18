@@ -1957,13 +1957,29 @@ class AdminService:
             session = Session()
             try:
                 branding = {}
-                config_keys = ["logo_url", "nombre_publico", "direccion", "color_primario", 
+                config_keys = ["logo_url", "gym_logo_url", "nombre_publico", "direccion", "color_primario", 
                               "color_secundario", "color_fondo", "color_texto"]
                 
+                db_values = {}
                 for key in config_keys:
                     config = session.query(Configuracion).filter_by(clave=key).first()
                     if config:
-                        branding[key] = config.valor
+                        db_values[key] = config.valor
+                        
+                branding = db_values.copy()
+                
+                # Fallback logic for logo: gym_config (legacy) > gym_logo_url > logo_url
+                if not branding.get("logo_url"):
+                    # Check legacy table
+                    try:
+                        legacy_row = session.execute(text("SELECT logo_url FROM gym_config LIMIT 1")).fetchone()
+                        if legacy_row and legacy_row[0]:
+                            branding["logo_url"] = str(legacy_row[0]).strip()
+                    except Exception:
+                        pass
+
+                if not branding.get("logo_url") and branding.get("gym_logo_url"):
+                    branding["logo_url"] = branding["gym_logo_url"]
                 
                 return branding
             finally:
