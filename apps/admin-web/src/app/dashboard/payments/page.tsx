@@ -8,6 +8,7 @@ import { api, type Payment, type Gym } from '@/lib/api';
 export default function PaymentsPage() {
     const [payments, setPayments] = useState<Payment[]>([]);
     const [gyms, setGyms] = useState<Gym[]>([]);
+    const [plans, setPlans] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [createOpen, setCreateOpen] = useState(false);
     const [editOpen, setEditOpen] = useState(false);
@@ -20,6 +21,7 @@ export default function PaymentsPage() {
         gym_id: '',
         amount: '',
         plan: '',
+        plan_id: '',
         valid_until: '',
         notes: '',
         currency: 'ARS',
@@ -31,7 +33,7 @@ export default function PaymentsPage() {
         setLoading(true);
         try {
             const gymId = filters.gym_id ? Number(filters.gym_id) : undefined;
-            const [paymentsRes, gymsRes] = await Promise.all([
+            const [paymentsRes, gymsRes, plansRes] = await Promise.all([
                 api.listPayments({
                     gym_id: gymId,
                     status: filters.status || undefined,
@@ -40,6 +42,7 @@ export default function PaymentsPage() {
                     page_size: pageSize,
                 }),
                 api.getGyms({ page_size: 100 }),
+                api.getAdminPlans(),
             ]);
             if (paymentsRes.ok && paymentsRes.data) {
                 setPayments(paymentsRes.data.items || []);
@@ -47,6 +50,9 @@ export default function PaymentsPage() {
             }
             if (gymsRes.ok && gymsRes.data) {
                 setGyms(gymsRes.data.gyms || []);
+            }
+            if (plansRes && (plansRes as any).plans) {
+                setPlans((plansRes as any).plans);
             }
         } catch {
             // Ignore
@@ -67,6 +73,7 @@ export default function PaymentsPage() {
             const res = await api.registerPayment(Number(formData.gym_id), {
                 amount: Number(formData.amount),
                 plan: formData.plan || undefined,
+                plan_id: formData.plan_id ? Number(formData.plan_id) : undefined,
                 valid_until: formData.valid_until || undefined,
                 notes: formData.notes || undefined,
                 currency: formData.currency || 'ARS',
@@ -74,7 +81,7 @@ export default function PaymentsPage() {
             });
             if (res.ok) {
                 setCreateOpen(false);
-                setFormData({ gym_id: '', amount: '', plan: '', valid_until: '', notes: '', currency: 'ARS', status: 'paid' });
+                setFormData({ gym_id: '', amount: '', plan: '', plan_id: '', valid_until: '', notes: '', currency: 'ARS', status: 'paid' });
                 loadData();
             }
         } catch {
@@ -113,6 +120,7 @@ export default function PaymentsPage() {
             gym_id: String(p.gym_id),
             amount: String(p.amount ?? ''),
             plan: String((p as any).plan || ''),
+            plan_id: '',
             valid_until: p.valid_until ? String(p.valid_until).slice(0, 10) : '',
             notes: String(p.notes || ''),
             currency: String(p.currency || 'ARS'),
@@ -301,7 +309,43 @@ export default function PaymentsPage() {
                                     <label className="label">Gimnasio *</label>
                                     <select
                                         value={formData.gym_id}
-                                        onChange={(e) => setFormData({ ...formData, gym_id: e.target.value })}
+                                        onChange={(e) => {
+                                            const newGymId = e.target.value;
+                                            let newPlanId = formData.plan_id;
+                                            let newAmount = formData.amount;
+                                            let newValidUntil = formData.valid_until;
+                                            let newCurrency = formData.currency;
+                                            let newPlanName = formData.plan;
+
+                                            // Auto-select plan if gym has one assigned
+                                            if (newGymId) {
+                                                const g = gyms.find(x => x.id === Number(newGymId));
+                                                if (g && (g as any).subscription_plan_id) {
+                                                    const pid = (g as any).subscription_plan_id;
+                                                    const p = plans.find(x => x.id === pid);
+                                                    if (p) {
+                                                        newPlanId = String(pid);
+                                                        newPlanName = p.name;
+                                                        newAmount = String(p.amount);
+                                                        newCurrency = p.currency;
+                                                        // Calculate valid until
+                                                        const d = new Date();
+                                                        d.setDate(d.getDate() + (p.period_days || 30));
+                                                        newValidUntil = d.toISOString().slice(0, 10);
+                                                    }
+                                                }
+                                            }
+
+                                            setFormData({
+                                                ...formData,
+                                                gym_id: newGymId,
+                                                plan_id: newPlanId,
+                                                plan: newPlanName,
+                                                amount: newAmount,
+                                                valid_until: newValidUntil,
+                                                currency: newCurrency
+                                            });
+                                        }}
                                         className="input"
                                         required
                                     >
@@ -313,36 +357,50 @@ export default function PaymentsPage() {
                                         ))}
                                     </select>
                                 </div>
-                                <div>
-                                    <label className="label">Monto *</label>
-                                    <input
-                                        type="number"
-                                        step="0.01"
-                                        value={formData.amount}
-                                        onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                                        className="input"
-                                        required
-                                    />
-                                </div>
-                                <div>
-                                    <label className="label">Plan</label>
-                                    <input
-                                        type="text"
-                                        value={formData.plan}
-                                        onChange={(e) => setFormData({ ...formData, plan: e.target.value })}
-                                        className="input"
-                                        placeholder="Mensual, Anual..."
-                                    />
-                                </div>
-                                <div>
-                                    <label className="label">Notas</label>
-                                    <input
-                                        type="text"
-                                        value={formData.notes}
-                                        onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                                        className="input"
-                                        placeholder="Referencia / observaciones"
-                                    />
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="label">Plan</label>
+                                        <select
+                                            value={formData.plan_id}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                let newAmount = formData.amount;
+                                                let newValidUntil = formData.valid_until;
+                                                let newCurrency = formData.currency;
+                                                let newPlanName = '';
+
+                                                if (val) {
+                                                    const p = plans.find(x => x.id === Number(val));
+                                                    if (p) {
+                                                        newPlanName = p.name;
+                                                        newAmount = String(p.amount);
+                                                        newCurrency = p.currency;
+                                                        const d = new Date();
+                                                        d.setDate(d.getDate() + (p.period_days || 30));
+                                                        newValidUntil = d.toISOString().slice(0, 10);
+                                                    }
+                                                }
+                                                setFormData({ ...formData, plan_id: val, plan: newPlanName, amount: newAmount, valid_until: newValidUntil, currency: newCurrency });
+                                            }}
+                                            className="input"
+                                        >
+                                            <option value="">-- Sin plan --</option>
+                                            {plans.map(p => (
+                                                <option key={p.id} value={p.id}>{p.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="label">Monto *</label>
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            value={formData.amount}
+                                            onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                                            className="input"
+                                            required
+                                        />
+                                    </div>
                                 </div>
                                 <div>
                                     <label className="label">Válido hasta</label>
@@ -351,7 +409,9 @@ export default function PaymentsPage() {
                                         value={formData.valid_until}
                                         onChange={(e) => setFormData({ ...formData, valid_until: e.target.value })}
                                         className="input"
+                                        title="Fecha de vencimiento calculada o manual"
                                     />
+                                    <p className="text-[10px] text-slate-500 mt-1">* Se calcula automáticamente al elegir plan.</p>
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
@@ -375,6 +435,16 @@ export default function PaymentsPage() {
                                             <option value="failed">failed</option>
                                         </select>
                                     </div>
+                                </div>
+                                <div>
+                                    <label className="label">Notas</label>
+                                    <input
+                                        type="text"
+                                        value={formData.notes}
+                                        onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                                        className="input"
+                                        placeholder="Referencia / observaciones"
+                                    />
                                 </div>
                                 <div className="flex justify-end gap-3 pt-2">
                                     <button type="button" onClick={() => setCreateOpen(false)} className="btn-secondary">

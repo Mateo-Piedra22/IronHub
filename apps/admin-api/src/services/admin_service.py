@@ -519,7 +519,7 @@ class AdminService:
                     SELECT g.id, g.nombre, g.subdominio, g.db_name, g.owner_phone, g.status, g.hard_suspend, g.suspended_until,
                            g.whatsapp_phone_id, g.whatsapp_business_account_id, g.whatsapp_access_token,
                            g.b2_bucket_name, g.b2_bucket_id, g.created_at,
-                           gs.next_due_date, gs.status AS sub_status,
+                           gs.next_due_date, gs.status AS sub_status, gs.plan_id AS subscription_plan_id,
                            (SELECT amount FROM gym_payments WHERE gym_id = g.id ORDER BY paid_at DESC LIMIT 1) AS last_payment_amount,
                            (SELECT currency FROM gym_payments WHERE gym_id = g.id ORDER BY paid_at DESC LIMIT 1) AS last_payment_currency,
                            (SELECT paid_at FROM gym_payments WHERE gym_id = g.id ORDER BY paid_at DESC LIMIT 1) AS last_payment_at
