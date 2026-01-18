@@ -741,7 +741,7 @@ async def list_admin_plans(request: Request):
     """List all available gym subscription plans."""
     require_admin(request)
     adm = get_admin_service()
-    plans = adm.listar_planes(active_only=True)
+    plans = adm.listar_planes()
     return {"plans": plans}
 
 

@@ -661,15 +661,12 @@ class AdminService:
             logger.error(f"Error registering payment for gym {gym_id}: {e}")
             return False
 
-    def listar_planes(self, active_only: bool = True) -> List[Dict[str, Any]]:
+    def listar_planes(self) -> List[Dict[str, Any]]:
         try:
-            logger.info(f"Listing plans (active_only={active_only})")
+            logger.info("Listing plans (active_only=True)")
             with self.db.get_connection_context() as conn:
                 cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                sql = "SELECT id, name, amount, currency, period_days, active, created_at FROM plans"
-                if active_only:
-                    sql += " WHERE active = TRUE"
-                sql += " ORDER BY amount ASC"
+                sql = "SELECT id, name, amount, currency, period_days, active, created_at FROM plans WHERE active = TRUE ORDER BY amount ASC"
                 cur.execute(sql)
                 return [dict(r) for r in cur.fetchall()]
         except Exception as e:
