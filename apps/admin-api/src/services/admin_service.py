@@ -663,6 +663,7 @@ class AdminService:
 
     def listar_planes(self, active_only: bool = True) -> List[Dict[str, Any]]:
         try:
+            logger.info(f"Listing plans (active_only={active_only})")
             with self.db.get_connection_context() as conn:
                 cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                 sql = "SELECT id, name, amount, currency, period_days, active, created_at FROM plans"
