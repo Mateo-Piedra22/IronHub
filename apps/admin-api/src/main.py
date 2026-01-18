@@ -252,13 +252,17 @@ async def get_public_metrics(ttl_seconds: int = Query(600, ge=60, le=3600)):
     now = time.time()
     cached = _public_metrics_cache.get("value")
     cached_ts = float(_public_metrics_cache.get("ts") or 0.0)
+    
+    # Check cache validity
     if cached and (now - cached_ts) < float(ttl_seconds):
         return cached
 
     try:
-        result = adm.listar_gimnasios_avanzado(1, 200, None, "active", "nombre", "ASC")
+        # 1. Fetch all active gyms
+        result = adm.listar_gimnasios_avanzado(1, 500, None, "active", "nombre", "ASC")
         gyms = result.get("items", []) or []
 
+        # 2. Get paying gyms count (centralized query, fast)
         paying_count = 0
         try:
             with adm.db.get_connection_context() as conn:
@@ -270,6 +274,7 @@ async def get_public_metrics(ttl_seconds: int = Query(600, ge=60, le=3600)):
         except Exception:
             paying_count = 0
 
+        # 3. Resolve base DB params once
         admin_params = AdminService.resolve_admin_db_params()
         base_pg_params = {
             "host": admin_params.get("host"),
@@ -277,47 +282,89 @@ async def get_public_metrics(ttl_seconds: int = Query(600, ge=60, le=3600)):
             "user": admin_params.get("user"),
             "password": admin_params.get("password"),
             "sslmode": admin_params.get("sslmode"),
-            "connect_timeout": admin_params.get("connect_timeout"),
+            "connect_timeout": 3, # Lower timeout for individual checks
         }
 
-        gyms_metrics = []
-        total_users = 0
-        total_active_users = 0
-        for g in gyms:
-            gid = int(g.get("id"))
-            db_name = str(g.get("db_name") or "").strip()
-            users_total = None
-            users_active = None
-            if db_name:
+        # 4. Define helper for parallel execution
+        def _fetch_gym_metrics(gym):
+            gid = int(gym.get("id"))
+            db_name = str(gym.get("db_name") or "").strip()
+            sub = str(gym.get("subdominio") or "")
+            
+            if not db_name:
+                return {"id": gid, "subdominio": sub, "users_total": None, "users_active": None}
+
+            # Retry policy for Cold Starts (Neon DB wakes up)
+            # Default connect_timeout is short (3s), so we retry 3 times.
+            last_err = None
+            for attempt in range(3):
                 try:
                     pg_params = {
                         **base_pg_params,
                         "dbname": db_name,
-                        "application_name": "landing_public_metrics",
+                        "application_name": "landing_metrics_worker",
+                        # On attempt 0: 3s timeout. On attempt 1+: 5s timeout.
+                        "connect_timeout": 3 if attempt == 0 else 5
                     }
+                    
                     with psycopg2.connect(**pg_params) as t_conn:
                         with t_conn.cursor() as t_cur:
-                            t_cur.execute("SELECT COUNT(*) FROM usuarios")
-                            users_total = int((t_cur.fetchone() or [0])[0] or 0)
-                            t_cur.execute("SELECT COUNT(*) FROM usuarios WHERE activo = TRUE")
-                            users_active = int((t_cur.fetchone() or [0])[0] or 0)
-                except Exception:
-                    users_total = None
-                    users_active = None
+                            # SINGLE OPTIMIZED QUERY: Reduces DB round-trips by 50%
+                            t_cur.execute("""
+                                SELECT 
+                                    COUNT(*) as total, 
+                                    COUNT(*) FILTER (WHERE activo = TRUE) as activos 
+                                FROM usuarios
+                            """)
+                            row = t_cur.fetchone() or (0, 0)
+                            u_total = int(row[0] or 0)
+                            u_active = int(row[1] or 0)
+                            
+                            return {
+                                "id": gid, 
+                                "subdominio": sub, 
+                                "users_total": u_total, 
+                                "users_active": u_active
+                            }
+                except Exception as e:
+                    import time # Ensure locally available just in case, logic safe
+                    last_err = e
+                    # Wait briefly before retrying if it's a connection issue
+                    time.sleep(0.5 * (attempt + 1))
+            
+            # If we get here, all retries failed
+            logger.warning(f"Failed to fetch metrics for gym {gid} ({sub}) after 3 attempts: {last_err}")
+            return {"id": gid, "subdominio": sub, "users_total": None, "users_active": None}
 
-            if isinstance(users_total, int):
-                total_users += users_total
-            if isinstance(users_active, int):
-                total_active_users += users_active
+        # 5. execute in parallel using ThreadPoolExecutor
+        import concurrent.futures
+        import asyncio
+        
+        loop = asyncio.get_event_loop()
+        gyms_metrics = []
+        
+        # We can use a reasonable number of workers, e.g., 20, to parallelize DB IO
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            # Wrap standard blocking calls in executor
+            futures = [
+                loop.run_in_executor(executor, _fetch_gym_metrics, g)
+                for g in gyms
+            ]
+            # Gather results
+            results = await asyncio.gather(*futures)
+            gyms_metrics = list(results)
 
-            gyms_metrics.append(
-                {
-                    "id": gid,
-                    "subdominio": str(g.get("subdominio") or ""),
-                    "users_total": users_total,
-                    "users_active": users_active,
-                }
-            )
+        # 6. Aggregate results
+        total_users = 0
+        total_active_users = 0
+        
+        for gm in gyms_metrics:
+            ut = gm.get("users_total")
+            ua = gm.get("users_active")
+            if isinstance(ut, int):
+                total_users += ut
+            if isinstance(ua, int):
+                total_active_users += ua
 
         value = {
             "ok": True,
@@ -330,11 +377,16 @@ async def get_public_metrics(ttl_seconds: int = Query(600, ge=60, le=3600)):
             },
             "gyms": gyms_metrics,
         }
+        
+        # Update cache
         _public_metrics_cache["ts"] = now
         _public_metrics_cache["value"] = value
+        
         return value
+
     except Exception as e:
         logger.error(f"Error fetching public metrics: {e}")
+        # If we have a stale cache, maybe return it? For now, return error structure
         return {"ok": False, "error": "error_fetching_public_metrics"}
 
 
