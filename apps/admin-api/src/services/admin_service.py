@@ -661,6 +661,87 @@ class AdminService:
             logger.error(f"Error registering payment for gym {gym_id}: {e}")
             return False
 
+    def listar_planes(self, active_only: bool = True) -> List[Dict[str, Any]]:
+        try:
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                sql = "SELECT id, name, amount, currency, period_days, active, created_at FROM plans"
+                if active_only:
+                    sql += " WHERE active = TRUE"
+                sql += " ORDER BY amount ASC"
+                cur.execute(sql)
+                return [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            logger.error(f"Error listing plans: {e}")
+            return []
+
+    def asignar_suscripcion_manual(self, gym_id: int, plan_id: int, end_date: Optional[str] = None, start_date: Optional[str] = None) -> bool:
+        try:
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor()
+                
+                # Verify plan exists and get details
+                cur.execute("SELECT period_days FROM plans WHERE id = %s", (plan_id,))
+                prow = cur.fetchone()
+                if not prow:
+                    return False
+                period_days = int(prow[0] or 30)
+
+                # Determine dates
+                sd = datetime.now().date()
+                if start_date:
+                    try:
+                        if isinstance(start_date, str):
+                            # Handle potential YYYY-MM-DDTHH:MM:SS format
+                            sd = datetime.fromisoformat(str(start_date).replace('Z', '+00:00')).date()
+                    except:
+                        pass
+                
+                nd = sd + timedelta(days=period_days)
+                if end_date:
+                    try:
+                        if isinstance(end_date, str):
+                            nd = datetime.fromisoformat(str(end_date).replace('Z', '+00:00')).date()
+                    except:
+                        pass
+
+                # Upsert subscription
+                cur.execute(
+                    "SELECT id FROM gym_subscriptions WHERE gym_id = %s ORDER BY id DESC LIMIT 1",
+                    (gym_id,)
+                )
+                srow = cur.fetchone()
+                
+                if srow:
+                    sub_id = srow[0]
+                    cur.execute(
+                        "UPDATE gym_subscriptions SET plan_id = %s, start_date = %s, next_due_date = %s, status = 'active' WHERE id = %s",
+                        (plan_id, sd, nd, sub_id)
+                    )
+                else:
+                    cur.execute(
+                        "INSERT INTO gym_subscriptions (gym_id, plan_id, start_date, next_due_date, status) VALUES (%s, %s, %s, %s, 'active')",
+                        (gym_id, plan_id, sd, nd)
+                    )
+
+                # Activate gym
+                cur.execute(
+                    """
+                    UPDATE gyms
+                    SET status = 'active',
+                        hard_suspend = FALSE,
+                        suspended_until = NULL,
+                        suspended_reason = NULL
+                    WHERE id = %s
+                    """,
+                    (gym_id,)
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error assigning manual subscription for gym {gym_id}: {e}")
+            return False
+
     def listar_pagos(self, gym_id: int) -> List[Dict[str, Any]]:
         try:
             with self.db.get_connection_context() as conn:
