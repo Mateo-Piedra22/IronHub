@@ -2802,15 +2802,7 @@ class AdminService:
         except Exception:
             return []
 
-    def listar_planes(self) -> List[Dict[str, Any]]:
-        try:
-            with self.db.get_connection_context() as conn:
-                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                cur.execute("SELECT id, name, amount, currency, period_days, active, created_at FROM plans ORDER BY amount ASC")
-                rows = cur.fetchall()
-                return [dict(r) for r in rows]
-        except Exception:
-            return []
+
 
     def crear_plan(self, name: str, amount: float, currency: str, period_days: int) -> Dict[str, Any]:
         try:

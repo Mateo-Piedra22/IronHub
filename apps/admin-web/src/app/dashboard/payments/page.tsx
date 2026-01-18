@@ -51,11 +51,15 @@ export default function PaymentsPage() {
             if (gymsRes.ok && gymsRes.data) {
                 setGyms(gymsRes.data.gyms || []);
             }
-            if (plansRes && (plansRes as any).plans) {
-                setPlans((plansRes as any).plans);
+            console.log('Plans Response:', plansRes);
+            if (plansRes && plansRes.data && plansRes.data.plans) {
+                console.log('Plans found:', plansRes.data.plans);
+                setPlans(plansRes.data.plans);
+            } else {
+                console.error('No plans found in response');
             }
-        } catch {
-            // Ignore
+        } catch (err) {
+            console.error('Error loading data:', err);
         } finally {
             setLoading(false);
         }
