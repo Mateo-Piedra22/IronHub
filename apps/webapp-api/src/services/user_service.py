@@ -148,6 +148,12 @@ class UserService(BaseService):
                 tc = self.payment_repo.obtener_tipo_cuota_por_id(int(data["tipo_cuota_id"]))
                 if tc:
                     data["tipo_cuota"] = tc.nombre
+                    # Calculate expiration based on plan duration
+                    try:
+                        duracion = int(getattr(tc, 'duracion_dias', 30) or 30)
+                        data["fecha_proximo_vencimiento"] = self._today_local_date() + timedelta(days=duracion)
+                    except Exception:
+                        pass
             except Exception:
                 pass
         

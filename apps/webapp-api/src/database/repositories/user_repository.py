@@ -171,7 +171,7 @@ class UserRepository(BaseRepository):
         self.db.add(usuario)
         self.db.flush()
         
-        if usuario.rol == 'socio':
+        if usuario.rol == 'socio' and not usuario.fecha_proximo_vencimiento:
             usuario.fecha_proximo_vencimiento = self._today_local_date() + timedelta(days=30)
         
         if usuario.rol == 'profesor':
