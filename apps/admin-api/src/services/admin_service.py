@@ -547,7 +547,24 @@ class AdminService:
         try:
             with self.db.get_connection_context() as conn:
                 cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                cur.execute("SELECT * FROM gyms WHERE id = %s", (int(gym_id),))
+                cur.execute(
+                    """
+                    SELECT g.*, 
+                           gs.status as subscription_status,
+                           gs.next_due_date as subscription_next_due_date,
+                           gs.start_date as subscription_start_date,
+                           p.name as subscription_plan_name,
+                           p.id as subscription_plan_id,
+                           p.amount as subscription_plan_amount,
+                           p.currency as subscription_plan_currency
+                    FROM gyms g
+                    LEFT JOIN gym_subscriptions gs ON gs.gym_id = g.id AND gs.status = 'active'
+                    LEFT JOIN plans p ON p.id = gs.plan_id
+                    WHERE g.id = %s
+                    ORDER BY gs.id DESC LIMIT 1
+                    """,
+                    (int(gym_id),)
+                )
                 row = cur.fetchone()
                 return dict(row) if row else None
         except Exception as e:

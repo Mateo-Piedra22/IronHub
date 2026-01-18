@@ -16,6 +16,13 @@ export interface Gym {
     owner_phone?: string;
     wa_configured?: boolean;
     b2_bucket_name?: string;
+    // Subscription fields
+    subscription_status?: string;
+    subscription_plan_name?: string;
+    subscription_plan_id?: number | null;
+    subscription_plan_amount?: number;
+    subscription_next_due_date?: string;
+    subscription_start_date?: string;
 }
 
 export interface GymCreateInput {

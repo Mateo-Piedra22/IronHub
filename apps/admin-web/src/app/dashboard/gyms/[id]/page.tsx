@@ -823,6 +823,16 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                 <div className="text-sm text-slate-500">Creado</div>
                                 <div className="text-white">{gym.created_at?.slice(0, 10) || '—'}</div>
                             </div>
+                            <div>
+                                <div className="text-sm text-slate-500">Plan Actual</div>
+                                <div className="text-white font-medium">{gym.subscription_plan_name || '—'}</div>
+                            </div>
+                            <div>
+                                <div className="text-sm text-slate-500">Vencimiento</div>
+                                <div className={`${gym.subscription_status === 'active' ? 'text-success-400' : 'text-slate-400'}`}>
+                                    {gym.subscription_next_due_date ? gym.subscription_next_due_date.slice(0, 10) : '—'}
+                                </div>
+                            </div>
                         </div>
 
                         {/* Manual Assignment Section */}
@@ -938,28 +948,48 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                             <h3 className="font-medium text-white mb-3">Registrar pago</h3>
                             <form className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                 <input type="number" className="input" placeholder="Monto" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
-                                <select
-                                    className="input"
-                                    value={paymentPlanId}
-                                    onChange={(e) => {
-                                        const val = e.target.value;
-                                        if (val === '') {
-                                            setPaymentPlanId('');
-                                            setPaymentPlanName('');
-                                        } else {
-                                            const pid = Number(val);
-                                            setPaymentPlanId(pid);
-                                            const p = plans.find(x => x.id === pid);
-                                            if (p) setPaymentPlanName(p.name);
-                                        }
-                                    }}
-                                >
-                                    <option value="">-- Sin plan / Solo pago --</option>
-                                    {plans.map(p => (
-                                        <option key={p.id} value={p.id}>{p.name} ({p.amount} {p.currency})</option>
-                                    ))}
-                                </select>
-                                <input type="date" className="input" value={paymentValidUntil} onChange={(e) => setPaymentValidUntil(e.target.value)} />
+                                <div className="space-y-1">
+                                    <select
+                                        className="input w-full"
+                                        value={paymentPlanId}
+                                        onChange={(e) => {
+                                            const val = e.target.value;
+                                            if (val === '') {
+                                                setPaymentPlanId('');
+                                                setPaymentPlanName('');
+                                            } else {
+                                                const pid = Number(val);
+                                                setPaymentPlanId(pid);
+                                                const p = plans.find(x => x.id === pid);
+                                                if (p) {
+                                                    setPaymentPlanName(p.name);
+                                                    setPaymentAmount(String(p.amount));
+
+                                                    // Calculate valid_until based on plan period from TODAY
+                                                    const d = new Date();
+                                                    d.setDate(d.getDate() + (p.period_days || 30));
+                                                    setPaymentValidUntil(d.toISOString().slice(0, 10));
+                                                }
+                                            }
+                                        }}
+                                    >
+                                        <option value="">-- Sin plan / Solo pago --</option>
+                                        {plans.map(p => (
+                                            <option key={p.id} value={p.id}>{p.name} ({p.amount} {p.currency})</option>
+                                        ))}
+                                    </select>
+                                    <p className="text-[10px] text-slate-500">* Seleccionar un plan autocompletará el monto y fecha.</p>
+                                </div>
+                                <div className="space-y-1">
+                                    <input
+                                        type="date"
+                                        className="input w-full"
+                                        value={paymentValidUntil}
+                                        onChange={(e) => setPaymentValidUntil(e.target.value)}
+                                        title="Fecha hasta la cual es válido el pago (vencimiento de suscripción)"
+                                    />
+                                    <p className="text-[10px] text-slate-500">* "Válido hasta": Nueva fecha de vencimiento estimado.</p>
+                                </div>
                                 <button type="button" onClick={handleRegisterPayment} disabled={saving || !paymentAmount} className="btn-primary">Registrar</button>
                             </form>
                         </div>
