@@ -602,6 +602,14 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
 
     const handleAssignSubscription = async () => {
         if (!assignSubParams.plan_id) return;
+
+        if (assignSubParams.start_date && assignSubParams.end_date) {
+            if (new Date(assignSubParams.end_date) <= new Date(assignSubParams.start_date)) {
+                showMessage('La fecha de vencimiento debe ser posterior al inicio');
+                return;
+            }
+        }
+
         setAssignSubLoading(true);
         try {
             const res = await api.assignGymSubscriptionManual(gymId, {
@@ -828,33 +836,45 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                             ) : (
                                 <div className="p-4 bg-slate-800/50 rounded-lg border border-slate-700 space-y-3">
                                     <h4 className="text-sm font-medium text-slate-300">Asignar Plan (Sin Pago)</h4>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                        <select
-                                            className="input"
-                                            value={assignSubParams.plan_id}
-                                            onChange={(e) => setAssignSubParams({ ...assignSubParams, plan_id: Number(e.target.value) })}
-                                        >
-                                            <option value={0}>Seleccionar Plan...</option>
-                                            {plans.map(p => (
-                                                <option key={p.id} value={p.id}>{p.name} ({p.period_days} días)</option>
-                                            ))}
-                                        </select>
-                                        <div className="flex gap-2">
-                                            <input
-                                                type="date"
-                                                className="input"
-                                                placeholder="Inicio"
-                                                value={assignSubParams.start_date}
-                                                onChange={(e) => setAssignSubParams({ ...assignSubParams, start_date: e.target.value })}
-                                            />
-                                            <input
-                                                type="date"
-                                                className="input"
-                                                placeholder="Fin (Opcy)"
-                                                value={assignSubParams.end_date}
-                                                onChange={(e) => setAssignSubParams({ ...assignSubParams, end_date: e.target.value })}
-                                            />
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="text-xs text-slate-400 block mb-1">Plan</label>
+                                            <select
+                                                className="input w-full"
+                                                value={assignSubParams.plan_id}
+                                                onChange={(e) => setAssignSubParams({ ...assignSubParams, plan_id: Number(e.target.value) })}
+                                            >
+                                                <option value={0}>Seleccionar Plan...</option>
+                                                {plans.map(p => (
+                                                    <option key={p.id} value={p.id}>{p.name} ({p.period_days} días)</option>
+                                                ))}
+                                            </select>
                                         </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="text-xs text-slate-400 block mb-1">Fecha de Inicio</label>
+                                                <input
+                                                    type="date"
+                                                    className="input w-full"
+                                                    value={assignSubParams.start_date}
+                                                    onChange={(e) => setAssignSubParams({ ...assignSubParams, start_date: e.target.value })}
+                                                    title="Fecha de inicio de la suscripción (hoy por defecto)"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-slate-400 block mb-1">Fecha de Vencimiento (Opcional)</label>
+                                                <input
+                                                    type="date"
+                                                    className="input w-full"
+                                                    value={assignSubParams.end_date}
+                                                    onChange={(e) => setAssignSubParams({ ...assignSubParams, end_date: e.target.value })}
+                                                    title="Si se deja vacío, se calcula automáticamente según el plan"
+                                                />
+                                            </div>
+                                        </div>
+                                        <p className="text-xs text-slate-500 italic">
+                                            * Si no defines la fecha de vencimiento, se calculará sumando la duración del plan a la fecha de inicio.
+                                        </p>
                                     </div>
                                     <div className="flex gap-2">
                                         <button onClick={handleAssignSubscription} disabled={assignSubLoading || !assignSubParams.plan_id} className="btn-primary">
