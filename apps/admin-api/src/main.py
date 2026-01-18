@@ -42,23 +42,26 @@ app = FastAPI(
 app.include_router(payments_router)
 
 # CORS
-origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
-_origins = [o.strip() for o in (origins or []) if o and o.strip()]
-_allow_all = (len(_origins) == 0)
-_origin_regex = os.getenv("ALLOWED_ORIGIN_REGEX", "").strip()
-if not _origin_regex:
+origins_str = os.getenv("ALLOWED_ORIGINS", "")
+origins = [o.strip() for o in origins_str.split(",") if o.strip()]
+_origin_regex = os.getenv("ALLOWED_ORIGIN_REGEX", "")
+
+if not origins and not _origin_regex:
+    # Default behavior: Use regex to allow subdomains + localhost
     base_domain = str(os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz") or "").strip().lstrip(".")
     base_domain_escaped = re.escape(base_domain)
     _origin_regex = (
-        rf"^https?://([a-z0-9-]+\.)?{base_domain_escaped}$"
-        r"|^http://localhost(:\d+)?$"
-        r"|^http://127\.0\.0\.1(:\d+)?$"
+        rf"^https?://([a-z0-9-]+\.)?{base_domain_escaped}$"  # Any subdomain of base
+        r"|^https?://.*\.vercel\.app$"                        # Any Vercel preview
+        r"|^http://localhost(:\d+)?$"                         # Localhost
+        r"|^http://127\.0\.0\.1(:\d+)?$"                      # IP Localhost
     )
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_origins if not _allow_all else ["*"],
-    allow_origin_regex=None if _allow_all else _origin_regex,
-    allow_credentials=(not _allow_all),
+    allow_origins=origins if origins else [],
+    allow_origin_regex=_origin_regex,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
