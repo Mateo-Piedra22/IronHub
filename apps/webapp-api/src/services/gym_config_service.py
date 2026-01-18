@@ -144,3 +144,73 @@ class GymConfigService(BaseService):
         self.db.add(tema)
         self.db.commit()
         return tema
+
+    # =========================================================================
+    # SUBSCRIPTION STATUS (Admin DB Integration)
+    # =========================================================================
+
+    def get_subscription_status(self) -> Dict[str, Any]:
+        """
+        Get gym subscription status from Admin DB.
+        """
+        try:
+            from src.dependencies import get_current_tenant
+            from src.database.connection import AdminSessionLocal
+            
+            tenant = get_current_tenant()
+            if not tenant:
+                return {}
+
+            admin_db = AdminSessionLocal()
+            try:
+                # 1. Get Gym ID
+                row = admin_db.execute(
+                    text("SELECT id, nombre FROM gyms WHERE subdominio = :sub"),
+                    {"sub": tenant}
+                ).fetchone()
+                
+                if not row:
+                    return {}
+                
+                gym_id = row[0]
+                
+                # 2. Get Active Subscription
+                sub_row = admin_db.execute(
+                    text("""
+                        SELECT p.name, gs.status, gs.next_due_date, gs.start_date
+                        FROM gym_subscriptions gs
+                        JOIN plans p ON p.id = gs.plan_id
+                        WHERE gs.gym_id = :gym_id AND gs.status = 'active'
+                        ORDER BY gs.id DESC
+                        LIMIT 1
+                    """),
+                    {"gym_id": gym_id}
+                ).fetchone()
+                
+                if not sub_row:
+                    return {"status": "inactive", "plan": "None"}
+                
+                # Calculate days remaining
+                days_remaining = None
+                valid_until = None
+                if sub_row[2]:
+                    today = datetime.now().date()
+                    due_date = sub_row[2] # might be date or datetime
+                    if isinstance(due_date, datetime):
+                        due_date = due_date.date()
+                    
+                    days_remaining = (due_date - today).days
+                    valid_until = str(due_date)
+
+                return {
+                    "plan": sub_row[0],
+                    "status": sub_row[1],
+                    "valid_until": valid_until,
+                    "days_remaining": days_remaining,
+                    "start_date": str(sub_row[3]) if sub_row[3] else None
+                }
+            finally:
+                admin_db.close()
+        except Exception as e:
+            logger.error(f"Error getting subscription status: {e}")
+            return {}

@@ -31,6 +31,12 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState('');
 
+    // Plans & Subscription Manual Assignment
+    const [plans, setPlans] = useState<any[]>([]);
+    const [assignSubOpen, setAssignSubOpen] = useState(false);
+    const [assignSubParams, setAssignSubParams] = useState({ plan_id: 0, start_date: '', end_date: '' });
+    const [assignSubLoading, setAssignSubLoading] = useState(false);
+
     // WhatsApp form
     const [waConfig, setWaConfig] = useState<WhatsAppConfig>({});
 
@@ -77,7 +83,8 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
 
     // Payment form
     const [paymentAmount, setPaymentAmount] = useState('');
-    const [paymentPlan, setPaymentPlan] = useState('');
+    const [paymentPlanId, setPaymentPlanId] = useState<number | ''>(''); // Changed to planId
+    const [paymentPlanName, setPaymentPlanName] = useState(''); // Keep name for custom or fallback
     const [paymentValidUntil, setPaymentValidUntil] = useState('');
 
     // Payments
@@ -100,6 +107,14 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         async function load() {
             setLoading(true);
             try {
+                // Fetch Plans
+                try {
+                    const pRes = await api.getAdminPlans();
+                    if (pRes.ok && pRes.data?.plans) {
+                        setPlans(pRes.data.plans);
+                    }
+                } catch { }
+
                 const res = await api.getGym(gymId);
                 if (res.ok && res.data) {
                     setGym(res.data);
@@ -564,13 +579,15 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         try {
             const res = await api.registerPayment(gymId, {
                 amount: Number(paymentAmount),
-                plan: paymentPlan || undefined,
+                plan: paymentPlanName || undefined,
+                plan_id: typeof paymentPlanId === 'number' ? paymentPlanId : undefined,
                 valid_until: paymentValidUntil || undefined,
             });
             if (res.ok) {
                 showMessage('Pago registrado');
                 setPaymentAmount('');
-                setPaymentPlan('');
+                setPaymentPlanId('');
+                setPaymentPlanName('');
                 setPaymentValidUntil('');
                 await refresh();
             } else {
@@ -580,6 +597,30 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
             showMessage('Error');
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleAssignSubscription = async () => {
+        if (!assignSubParams.plan_id) return;
+        setAssignSubLoading(true);
+        try {
+            const res = await api.assignGymSubscriptionManual(gymId, {
+                plan_id: assignSubParams.plan_id,
+                start_date: assignSubParams.start_date || undefined,
+                end_date: assignSubParams.end_date || undefined
+            });
+            if (res.ok) {
+                showMessage('Suscripción asignada');
+                setAssignSubOpen(false);
+                setAssignSubParams({ plan_id: 0, start_date: '', end_date: '' });
+                await refresh();
+            } else {
+                showMessage(res.error || 'Error asignando suscripción');
+            }
+        } catch {
+            showMessage('Error');
+        } finally {
+            setAssignSubLoading(false);
         }
     };
 
@@ -775,6 +816,56 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                 <div className="text-white">{gym.created_at?.slice(0, 10) || '—'}</div>
                             </div>
                         </div>
+
+                        {/* Manual Assignment Section */}
+                        <div className="pt-4 border-t border-slate-800">
+                            <h3 className="font-medium text-white mb-3">Gestión Manual</h3>
+                            {!assignSubOpen ? (
+                                <button onClick={() => setAssignSubOpen(true)} className="btn-secondary flex items-center gap-2">
+                                    <CreditCard className="w-4 h-4" />
+                                    Asignar Suscripción Manual
+                                </button>
+                            ) : (
+                                <div className="p-4 bg-slate-800/50 rounded-lg border border-slate-700 space-y-3">
+                                    <h4 className="text-sm font-medium text-slate-300">Asignar Plan (Sin Pago)</h4>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        <select
+                                            className="input"
+                                            value={assignSubParams.plan_id}
+                                            onChange={(e) => setAssignSubParams({ ...assignSubParams, plan_id: Number(e.target.value) })}
+                                        >
+                                            <option value={0}>Seleccionar Plan...</option>
+                                            {plans.map(p => (
+                                                <option key={p.id} value={p.id}>{p.name} ({p.period_days} días)</option>
+                                            ))}
+                                        </select>
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="date"
+                                                className="input"
+                                                placeholder="Inicio"
+                                                value={assignSubParams.start_date}
+                                                onChange={(e) => setAssignSubParams({ ...assignSubParams, start_date: e.target.value })}
+                                            />
+                                            <input
+                                                type="date"
+                                                className="input"
+                                                placeholder="Fin (Opcy)"
+                                                value={assignSubParams.end_date}
+                                                onChange={(e) => setAssignSubParams({ ...assignSubParams, end_date: e.target.value })}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button onClick={handleAssignSubscription} disabled={assignSubLoading || !assignSubParams.plan_id} className="btn-primary">
+                                            {assignSubLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Guardar'}
+                                        </button>
+                                        <button onClick={() => setAssignSubOpen(false)} className="btn-secondary">Cancelar</button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
                         <div className="pt-4 border-t border-slate-800">
                             <h3 className="font-medium text-white mb-3">Enviar recordatorio</h3>
                             <div className="flex gap-3">
@@ -827,7 +918,27 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                             <h3 className="font-medium text-white mb-3">Registrar pago</h3>
                             <form className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                 <input type="number" className="input" placeholder="Monto" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
-                                <input type="text" className="input" placeholder="Plan" value={paymentPlan} onChange={(e) => setPaymentPlan(e.target.value)} />
+                                <select
+                                    className="input"
+                                    value={paymentPlanId}
+                                    onChange={(e) => {
+                                        const val = e.target.value;
+                                        if (val === '') {
+                                            setPaymentPlanId('');
+                                            setPaymentPlanName('');
+                                        } else {
+                                            const pid = Number(val);
+                                            setPaymentPlanId(pid);
+                                            const p = plans.find(x => x.id === pid);
+                                            if (p) setPaymentPlanName(p.name);
+                                        }
+                                    }}
+                                >
+                                    <option value="">-- Sin plan / Solo pago --</option>
+                                    {plans.map(p => (
+                                        <option key={p.id} value={p.id}>{p.name} ({p.amount} {p.currency})</option>
+                                    ))}
+                                </select>
                                 <input type="date" className="input" value={paymentValidUntil} onChange={(e) => setPaymentValidUntil(e.target.value)} />
                                 <button type="button" onClick={handleRegisterPayment} disabled={saving || !paymentAmount} className="btn-primary">Registrar</button>
                             </form>
@@ -963,13 +1074,12 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                                     </div>
                                                 </div>
                                                 <span
-                                                    className={`badge ${
-                                                        String(ev.severity || '').toLowerCase() === 'error'
-                                                            ? 'badge-danger'
-                                                            : String(ev.severity || '').toLowerCase() === 'warning'
+                                                    className={`badge ${String(ev.severity || '').toLowerCase() === 'error'
+                                                        ? 'badge-danger'
+                                                        : String(ev.severity || '').toLowerCase() === 'warning'
                                                             ? 'badge-warning'
                                                             : 'badge-success'
-                                                    }`}
+                                                        }`}
                                                 >
                                                     {String(ev.severity || 'info')}
                                                 </span>

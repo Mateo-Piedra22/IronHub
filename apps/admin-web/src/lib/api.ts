@@ -507,6 +507,22 @@ export const api = {
             body: new URLSearchParams({ periods: String(periods) }),
         }),
 
+    // Manual Subscription Assignment (New)
+    assignGymSubscriptionManual: (gymId: number, data: { plan_id: number; start_date?: string; end_date?: string }) => {
+        const params = new URLSearchParams();
+        params.append('plan_id', String(data.plan_id));
+        if (data.start_date) params.append('start_date', data.start_date);
+        if (data.end_date) params.append('end_date', data.end_date);
+        return request<{ ok: boolean }>(`/gyms/${gymId}/subscription`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: params,
+        });
+    },
+
+    // Plans List for Admin (New)
+    getAdminPlans: () => request<{ plans: Array<{ id: number; name: string; amount: number; period_days: number }> }>('/admin/plans'),
+
     listSubscriptions: async (params: { q?: string; status?: string; due_before_days?: number; page?: number; page_size?: number }) => {
         const qs = new URLSearchParams();
         for (const [k, v] of Object.entries(params || {})) {

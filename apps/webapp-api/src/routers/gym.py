@@ -460,41 +460,30 @@ async def api_gym_logo(
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 @router.get("/api/gym/subscription")
-async def api_gym_subscription(request: Request, _=Depends(require_gestion_access)):
-    from src.utils import _get_multi_tenant_mode, _get_tenant_from_request
-    from src.dependencies import get_admin_db
-    
-    if not _get_multi_tenant_mode():
-        return {"active": True, "plan": "pro", "gym_name": get_gym_name()}
-        
-    # Multi-tenant logic
-    sub = _get_tenant_from_request(request)
-    if not sub:
-        return {"active": False, "error": "no_tenant"}
-        
-    adm = get_admin_db()
-    if adm is None:
-        # Fail open or closed? Legacy failed open usually for safety if admin db down
-        return {"active": True, "plan": "pro", "source": "fallback"}
-        
+async def api_gym_subscription(
+    request: Request, 
+    _=Depends(require_gestion_access),
+    svc: GymConfigService = Depends(get_gym_config_service)
+):
+    """Get real gym subscription status from Admin DB."""
     try:
-        # Assuming admin_db has a way to get subscription by subdomain or we need gym_id
-        # We don't have gym_id easily here without querying admin DB for the tenant
-        # But wait, we can query gyms table in admin db by subdomain
-        with adm.db.get_connection_context() as conn: # type: ignore
-             cur = conn.cursor()
-             cur.execute("SELECT id, plan, active FROM gyms WHERE subdominio = %s", (sub,))
-             row = cur.fetchone()
-             if row:
-                 return {
-                     "active": bool(row[2]), 
-                     "plan": str(row[1]),
-                     "gym_id": int(row[0])
-                 }
-    except Exception:
-        pass
+        status = svc.get_subscription_status()
+        if not status:
+            # Fallback for error or no data
+            return {"active": True, "plan": "free", "status": "fallback"}
         
-    return {"active": True, "plan": "pro", "source": "default"}
+        # Normalize for frontend
+        is_active = status.get("status") == "active"
+        return {
+            "active": is_active,
+            "plan": status.get("plan"),
+            "valid_until": status.get("valid_until"),
+            "days_remaining": status.get("days_remaining"),
+            "status": status.get("status")
+        }
+    except Exception as e:
+        logger.error(f"Error getting subscription: {e}")
+        return {"active": True, "plan": "unknown", "error": str(e)}
 
 # --- Helpers for Routine Export / Preview ---
 

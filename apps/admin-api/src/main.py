@@ -733,6 +733,35 @@ async def get_expirations(request: Request, days: int = Query(30, ge=1, le=365))
     return {"expirations": expirations}
 
 
+@app.get("/admin/plans")
+async def list_admin_plans(request: Request):
+    """List all available gym subscription plans."""
+    require_admin(request)
+    adm = get_admin_service()
+    plans = adm.listar_planes(active_only=True)
+    return {"plans": plans}
+
+
+@app.post("/gyms/{gym_id}/subscription")
+async def assign_gym_subscription(
+    request: Request,
+    gym_id: int,
+    plan_id: int = Form(...),
+    start_date: str = Form(None),
+    end_date: str = Form(None)
+):
+    """Manually assign a subscription to a gym (without payment)."""
+    require_admin(request)
+    adm = get_admin_service()
+    
+    ok = adm.asignar_suscripcion_manual(gym_id, plan_id, end_date, start_date)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Error assigning subscription")
+    
+    adm.log_action("owner", "assign_subscription", gym_id, f"plan={plan_id}")
+    return {"ok": True}
+
+
 # ========== PAYMENTS ROUTES ==========
 
 @app.get("/gyms/{gym_id}/payments")
