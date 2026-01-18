@@ -988,7 +988,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                         onChange={(e) => setPaymentValidUntil(e.target.value)}
                                         title="Fecha hasta la cual es válido el pago (vencimiento de suscripción)"
                                     />
-                                    <p className="text-[10px] text-slate-500">* "Válido hasta": Nueva fecha de vencimiento estimado.</p>
+                                    <p className="text-[10px] text-slate-500">* Válido hasta: Nueva fecha de vencimiento estimado.</p>
                                 </div>
                                 <button type="button" onClick={handleRegisterPayment} disabled={saving || !paymentAmount} className="btn-primary">Registrar</button>
                             </form>
