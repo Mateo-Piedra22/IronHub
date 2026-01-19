@@ -114,4 +114,4 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
 
 ## License
 
-Proprietary - MotionA
+Proprietary - MotionA - Mateo Piedrabuena 2026
