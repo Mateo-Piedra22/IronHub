@@ -27,6 +27,26 @@ export default function PaymentsPage() {
         }
     }, [user?.id]);
 
+    const handleDownloadReceipt = async (paymentId: number) => {
+        try {
+            const res = await api.previewReceipt({ id: paymentId });
+            if (res.ok && res.data) {
+                const url = window.URL.createObjectURL(res.data.blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `recibo-${paymentId}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+            } else {
+                alert('Error al descargar recibo');
+            }
+        } catch (e) {
+            console.error(e);
+            alert('Error al descargar recibo');
+        }
+    };
+
     useEffect(() => {
         loadPayments();
     }, [loadPayments]);
@@ -143,7 +163,10 @@ export default function PaymentsPage() {
                                     <div className="text-sm font-medium text-white">
                                         {formatCurrency(payment.monto || 0)}
                                     </div>
-                                    <button className="text-xs text-primary-400 hover:text-primary-300 flex items-center gap-1">
+                                    <button
+                                        onClick={() => handleDownloadReceipt(payment.id)}
+                                        className="text-xs text-primary-400 hover:text-primary-300 flex items-center gap-1"
+                                    >
                                         <Download className="w-3 h-3" />
                                         Recibo
                                     </button>
@@ -156,4 +179,3 @@ export default function PaymentsPage() {
         </div>
     );
 }
-

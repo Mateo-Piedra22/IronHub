@@ -231,25 +231,22 @@ function UserDashboardContent() {
                 >
                     <button
                         className="card p-4 text-left hover:border-primary-500/50 transition-colors group"
-                        onClick={() => setShowScanner(true)}
+                        onClick={() => {
+                            if (userData.dni) {
+                                try { localStorage.setItem('checkin_saved_user', JSON.stringify({ dni: userData.dni })); } catch (e) { }
+                            }
+                            router.push('/checkin?auto=true');
+                        }}
                     >
                         <div className="w-10 h-10 rounded-xl bg-primary-500/20 flex items-center justify-center mb-3 group-hover:bg-primary-500/30 transition-colors">
                             <QrCode className="w-5 h-5 text-primary-400" />
                         </div>
-                        <div className="font-medium text-white">Mi QR</div>
-                        <p className="text-xs text-slate-500">Para check-in/rutina</p>
+                        <div className="font-medium text-white">Check-in QR</div>
+                        <p className="text-xs text-slate-500">Ingresar al gym</p>
                     </button>
                     <button
                         className="card p-4 text-left hover:border-primary-500/50 transition-colors group"
-                        onClick={() => {
-                            if (rutina?.uuid_rutina) {
-                                router.push(`/usuario/routines?uuid=${rutina.uuid_rutina}`);
-                            } else if (rutina?.id) {
-                                alert("Rutina sin identificador único compatible con QR");
-                            } else {
-                                alert("No tienes rutina asignada");
-                            }
-                        }}
+                        onClick={() => router.push('/usuario/routines')}
                     >
                         <div className="w-10 h-10 rounded-xl bg-primary-500/20 flex items-center justify-center mb-3 group-hover:bg-primary-500/30 transition-colors">
                             <Dumbbell className="w-5 h-5 text-primary-400" />

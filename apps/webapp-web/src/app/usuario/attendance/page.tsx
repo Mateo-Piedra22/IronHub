@@ -171,13 +171,20 @@ export default function AttendancePage() {
                                 className="p-4 flex items-center justify-between hover:bg-slate-800/30 transition-colors"
                             >
                                 <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 rounded-xl bg-slate-800 flex flex-col items-center justify-center">
-                                        <span className="text-xs text-slate-500">{String(a.fecha).slice(0, 10)}</span>
-                                        <span className="text-lg font-bold text-white">{a.hora ? String(a.hora).slice(0, 5) : '—'}</span>
+                                    <div className="w-14 h-14 rounded-xl bg-slate-800 flex flex-col items-center justify-center p-1 border border-slate-700">
+                                        <span className="text-[10px] text-slate-500 uppercase tracking-tighter leading-none mb-0.5">
+                                            {new Date(a.fecha).toLocaleDateString('es-AR', { month: 'short' }).replace('.', '')}
+                                        </span>
+                                        <span className="text-xl font-bold text-white leading-none">
+                                            {new Date(a.fecha).getDate()}
+                                        </span>
+                                        <span className="text-[10px] text-slate-500 uppercase leading-none mt-0.5">
+                                            {new Date(a.fecha).toLocaleDateString('es-AR', { weekday: 'short' }).replace('.', '')}
+                                        </span>
                                     </div>
                                     <div>
-                                        <div className="text-sm font-medium text-white">
-                                            {formatDate(a.fecha)}
+                                        <div className="text-sm font-medium text-white capitalize">
+                                            {new Date(a.fecha).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}
                                         </div>
                                         <div className="text-xs text-slate-500">
                                             Check-in {a.hora ? `a las ${String(a.hora).slice(0, 8)}` : ''}
@@ -192,4 +199,3 @@ export default function AttendancePage() {
         </div>
     );
 }
-

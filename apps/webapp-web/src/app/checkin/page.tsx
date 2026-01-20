@@ -71,6 +71,16 @@ export default function CheckinPage() {
         return `${Date.now()}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;
     };
 
+    // Auto-submit support
+    useEffect(() => {
+        const query = new URLSearchParams(window.location.search);
+        // Only auto submit if we have DNI, are not authenticated, not loading, and auto param is true
+        if (query.get('auto') === 'true' && authDni && !authenticated && !authLoading) {
+            const fakeEvent = { preventDefault: () => { } } as React.FormEvent;
+            handleAuth(fakeEvent);
+        }
+    }, [authDni, authenticated, authLoading]);
+
     // Restore saved credentials
     useEffect(() => {
         try {
