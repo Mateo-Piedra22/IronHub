@@ -66,6 +66,74 @@ export default function AdminLayout({
     const [logoutWarningOpen, setLogoutWarningOpen] = useState(false);
     const [activeSession, setActiveSession] = useState<any>(null);
 
+    // Header State
+    const [userName, setUserName] = useState('');
+    const [userRole, setUserRole] = useState('');
+    const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
+    const [sessionTimer, setSessionTimer] = useState<string | null>(null);
+
+    // Load User & Session Data
+    useEffect(() => {
+        const loadHeaderData = async () => {
+            try {
+                const res = await api.getSession('gestion');
+                if (res.ok && res.data?.user) {
+                    setUserName(res.data.user.nombre);
+                    setUserRole(res.data.user.rol);
+
+                    // If profesor, check active session
+                    if (res.data.user.rol === 'profesor' && res.data.user.gestion_profesor_id) {
+                        const activeRes = await api.getSesionActiva(res.data.user.gestion_profesor_id);
+                        if (activeRes.ok && activeRes.data?.sesion) {
+                            const s = activeRes.data.sesion;
+                            // Calculate start time
+                            let start: Date | null = null;
+                            if (s.inicio) start = new Date(s.inicio);
+                            else if (s.fecha && s.hora_inicio) start = new Date(`${s.fecha}T${s.hora_inicio}`);
+
+                            if (start && !isNaN(start.getTime())) {
+                                setSessionStartTime(start);
+                            } else {
+                                setSessionStartTime(null);
+                            }
+                        } else {
+                            setSessionStartTime(null);
+                        }
+                    }
+                }
+            } catch { }
+        };
+
+        loadHeaderData();
+        const poll = setInterval(loadHeaderData, 15000); // Poll every 15s to keep sync
+        return () => clearInterval(poll);
+    }, []);
+
+    // Timer Tick
+    useEffect(() => {
+        if (!sessionStartTime) {
+            setSessionTimer(null);
+            return;
+        }
+
+        const tick = () => {
+            const now = new Date();
+            const diff = Math.floor((now.getTime() - sessionStartTime.getTime()) / 1000);
+            if (diff < 0) {
+                setSessionTimer('00:00:00');
+                return;
+            }
+            const h = Math.floor(diff / 3600);
+            const m = Math.floor((diff % 3600) / 60);
+            const s = diff % 60;
+            setSessionTimer(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`);
+        };
+
+        tick();
+        const interval = setInterval(tick, 1000);
+        return () => clearInterval(interval);
+    }, [sessionStartTime]);
+
     const proceedLogout = async () => {
         setLoggingOut(true);
         try {
@@ -166,22 +234,38 @@ export default function AdminLayout({
                     </div>
 
                     {/* Right: Actions */}
-                    <div className="flex items-center gap-2">
-                        <Link
-                            href="/"
-                            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/50 transition-colors"
-                            title="Ir al inicio"
-                        >
-                            <Home className="w-5 h-5" />
-                        </Link>
-                        <button
-                            onClick={handleLogout}
-                            disabled={loggingOut}
-                            className="p-2 rounded-lg text-slate-400 hover:text-danger-400 hover:bg-danger-500/10 transition-colors disabled:opacity-50"
-                            title="Cerrar sesión"
-                        >
-                            <LogOut className="w-5 h-5" />
-                        </button>
+                    <div className="flex items-center gap-4">
+                        {/* User Info & Timer */}
+                        <div className="hidden md:flex flex-col items-end">
+                            <div className="text-sm font-medium text-white flex items-center gap-2">
+                                {userName}
+                                {userRole === 'owner' && <span className="text-[10px] bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Admin</span>}
+                            </div>
+                            {sessionTimer && (
+                                <div className="text-xs text-success-400 font-mono flex items-center gap-1.5 bg-success-500/10 px-2 py-0.5 rounded-full mt-0.5">
+                                    <Clock className="w-3 h-3 animate-pulse" />
+                                    {sessionTimer}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                            <Link
+                                href="/"
+                                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/50 transition-colors"
+                                title="Ir al inicio"
+                            >
+                                <Home className="w-5 h-5" />
+                            </Link>
+                            <button
+                                onClick={handleLogout}
+                                disabled={loggingOut}
+                                className="p-2 rounded-lg text-slate-400 hover:text-danger-400 hover:bg-danger-500/10 transition-colors disabled:opacity-50"
+                                title="Cerrar sesión"
+                            >
+                                <LogOut className="w-5 h-5" />
+                            </button>
+                        </div>
                     </div>
                 </div>
             </header>
