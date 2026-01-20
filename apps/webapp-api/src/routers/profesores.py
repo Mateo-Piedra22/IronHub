@@ -49,17 +49,9 @@ def _assert_profesor_access(request: Request, profesor_id: int) -> None:
 
 @router.get("/api/profesores")
 async def api_profesores_list(request: Request, _=Depends(require_gestion_access), svc: ProfesorService = Depends(get_profesor_service)):
-    """List all profesores."""
-    try:
-        role = str(request.session.get("role") or "").lower()
-        if role == "profesor":
-            pid = request.session.get("gestion_profesor_id")
-            if pid is None:
-                return {"profesores": []}
-            prof = svc.obtener_profesor(int(pid))
-            return {"profesores": [prof] if prof else []}
-    except Exception:
-        pass
+    """List all profesores. Professors can see all for metric viewing."""
+    # Note: Professors can VIEW all professors for metrics, but cannot EDIT them
+    # The edit/delete restrictions are enforced by require_owner on those endpoints
     return {"profesores": svc.obtener_profesores()}
 
 
@@ -167,10 +159,9 @@ async def api_profesor_horarios_list(profesor_id: int, request: Request, _=Depen
 
 
 @router.post("/api/profesores/{profesor_id}/horarios")
-async def api_profesor_horario_create(profesor_id: int, request: Request, _=Depends(require_gestion_access), svc: ProfesorService = Depends(get_profesor_service)):
-    """Create availability schedule."""
+async def api_profesor_horario_create(profesor_id: int, request: Request, _=Depends(require_owner), svc: ProfesorService = Depends(get_profesor_service)):
+    """Create availability schedule. Owner only."""
     try:
-        _assert_profesor_access(request, profesor_id)
         payload = await request.json()
         dia = (payload.get("dia") or "").strip().lower()
         hora_inicio = payload.get("hora_inicio")
@@ -186,10 +177,9 @@ async def api_profesor_horario_create(profesor_id: int, request: Request, _=Depe
 
 
 @router.put("/api/profesores/{profesor_id}/horarios/{horario_id}")
-async def api_profesor_horario_update(profesor_id: int, horario_id: int, request: Request, _=Depends(require_gestion_access), svc: ProfesorService = Depends(get_profesor_service)):
-    """Update availability schedule."""
+async def api_profesor_horario_update(profesor_id: int, horario_id: int, request: Request, _=Depends(require_owner), svc: ProfesorService = Depends(get_profesor_service)):
+    """Update availability schedule. Owner only."""
     try:
-        _assert_profesor_access(request, profesor_id)
         payload = await request.json()
         result = svc.actualizar_horario(profesor_id, horario_id, payload)
         return result if result else {"ok": True}
@@ -198,10 +188,9 @@ async def api_profesor_horario_update(profesor_id: int, horario_id: int, request
 
 
 @router.delete("/api/profesores/{profesor_id}/horarios/{horario_id}")
-async def api_profesor_horario_delete(profesor_id: int, horario_id: int, request: Request, _=Depends(require_gestion_access), svc: ProfesorService = Depends(get_profesor_service)):
-    """Delete availability schedule."""
+async def api_profesor_horario_delete(profesor_id: int, horario_id: int, request: Request, _=Depends(require_owner), svc: ProfesorService = Depends(get_profesor_service)):
+    """Delete availability schedule. Owner only."""
     try:
-        _assert_profesor_access(request, profesor_id)
         svc.eliminar_horario(profesor_id, horario_id)
         return {"ok": True}
     except Exception as e:
@@ -263,3 +252,50 @@ async def api_profesor_resumen_semanal(profesor_id: int, request: Request, _=Dep
     fecha = request.query_params.get("fecha")
     ref = datetime.strptime(fecha, "%Y-%m-%d").date() if fecha else _today_local_date()
     return svc.resumen_semanal(profesor_id, ref)
+@router.put("/api/profesores/{profesor_id}/password")
+async def api_profesor_password_update(
+    profesor_id: int,
+    request: Request,
+    _=Depends(require_gestion_access),
+    svc: ProfesorService = Depends(get_profesor_service)
+):
+    """Set/change professor password. Professor can change own, owner can change any."""
+    try:
+        role = str(request.session.get("role") or "").lower()
+        my_id = request.session.get("gestion_profesor_id")
+        
+        is_owner = role in ("owner", "dueño", "admin", "dueno")
+        is_self = False
+        if my_id:
+            try:
+                if int(my_id) == int(profesor_id):
+                    is_self = True
+            except Exception:
+                pass
+            
+        if not is_owner and not is_self:
+            raise HTTPException(403, "No tiene permiso para cambiar la contraseña de otro profesor")
+        
+        payload = await request.json()
+        new_password = str(payload.get("password") or "").strip()
+        
+        if not new_password:
+             raise HTTPException(400, "Contraseña requerida")
+             
+        if len(new_password) < 4:
+            raise HTTPException(400, "La contraseña debe tener al menos 4 caracteres")
+        
+        import bcrypt
+        hashed = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        
+        success = svc.set_profesor_password(profesor_id, hashed)
+        if success:
+            return {"ok": True, "message": "Contraseña actualizada correctamente"}
+        else:
+            raise HTTPException(500, "Error al actualizar contraseña")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating password: {e}")
+        raise HTTPException(500, str(e))

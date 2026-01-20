@@ -304,6 +304,10 @@ export default function ProfesoresPage() {
     const [sesiones, setSesiones] = useState<Sesion[]>([]);
     const [sesionesLoading, setSesionesLoading] = useState(false);
 
+    // Session/role state for access control
+    const [isOwner, setIsOwner] = useState(false);
+    const [myProfesorId, setMyProfesorId] = useState<number | null>(null);
+
     // Modals
     const [formModalOpen, setFormModalOpen] = useState(false);
     const [profesorToEdit, setProfesorToEdit] = useState<Profesor | null>(null);
@@ -312,6 +316,23 @@ export default function ProfesoresPage() {
 
     // Detail modal
     const [detailOpen, setDetailOpen] = useState(false);
+
+    // Fetch session info for role-based access control
+    useEffect(() => {
+        const fetchSession = async () => {
+            try {
+                const res = await api.getSession('gestion');
+                if (res.ok && res.data?.user) {
+                    const role = res.data.user.rol;
+                    setIsOwner(role === 'owner' || role === 'admin');
+                    setMyProfesorId(res.data.user.gestion_profesor_id ?? null);
+                }
+            } catch {
+                // Ignore errors, default to false/null
+            }
+        };
+        fetchSession();
+    }, []);
 
     // Load profesores
     const loadProfesores = useCallback(async () => {
@@ -438,15 +459,17 @@ export default function ProfesoresPage() {
                         Gestión de staff y control de sesiones
                     </p>
                 </div>
-                <Button
-                    leftIcon={<Plus className="w-4 h-4" />}
-                    onClick={() => {
-                        setProfesorToEdit(null);
-                        setFormModalOpen(true);
-                    }}
-                >
-                    Nuevo Profesor
-                </Button>
+                {isOwner && (
+                    <Button
+                        leftIcon={<Plus className="w-4 h-4" />}
+                        onClick={() => {
+                            setProfesorToEdit(null);
+                            setFormModalOpen(true);
+                        }}
+                    >
+                        Nuevo Profesor
+                    </Button>
+                )}
             </motion.div>
 
             {/* Main content - two columns */}
@@ -494,28 +517,30 @@ export default function ProfesoresPage() {
                                             {prof.telefono || prof.email || 'Sin contacto'}
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-1">
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                setProfesorToEdit(prof);
-                                                setFormModalOpen(true);
-                                            }}
-                                            className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-800"
-                                        >
-                                            <Edit className="w-3.5 h-3.5" />
-                                        </button>
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                setProfesorToDelete(prof);
-                                                setDeleteModalOpen(true);
-                                            }}
-                                            className="p-1.5 rounded text-slate-400 hover:text-danger-400"
-                                        >
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                    </div>
+                                    {isOwner && (
+                                        <div className="flex items-center gap-1">
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setProfesorToEdit(prof);
+                                                    setFormModalOpen(true);
+                                                }}
+                                                className="p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-800"
+                                            >
+                                                <Edit className="w-3.5 h-3.5" />
+                                            </button>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setProfesorToDelete(prof);
+                                                    setDeleteModalOpen(true);
+                                                }}
+                                                className="p-1.5 rounded text-slate-400 hover:text-danger-400"
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             ))
                         )}
@@ -543,18 +568,22 @@ export default function ProfesoresPage() {
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-3">
-                                        <Button
-                                            variant="secondary"
-                                            size="sm"
-                                            leftIcon={<Settings className="w-4 h-4" />}
-                                            onClick={() => setDetailOpen(true)}
-                                        >
-                                            Configurar
-                                        </Button>
-                                        <SessionTimer
-                                            profesor={selectedProfesor}
-                                            onSessionUpdate={loadSesiones}
-                                        />
+                                        {(isOwner || (selectedProfesor && selectedProfesor.id === myProfesorId)) && (
+                                            <>
+                                                <Button
+                                                    variant="secondary"
+                                                    size="sm"
+                                                    leftIcon={<Settings className="w-4 h-4" />}
+                                                    onClick={() => setDetailOpen(true)}
+                                                >
+                                                    Configurar
+                                                </Button>
+                                                <SessionTimer
+                                                    profesor={selectedProfesor}
+                                                    onSessionUpdate={loadSesiones}
+                                                />
+                                            </>
+                                        )}
                                     </div>
                                 </div>
                             </div>

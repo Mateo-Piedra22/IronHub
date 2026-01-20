@@ -18,9 +18,10 @@ import {
     ChevronRight,
     Home,
     MessageSquare,
+    Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ToastContainer } from '@/components/ui';
+import { ToastContainer, Modal, Button } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
 
@@ -62,7 +63,10 @@ export default function AdminLayout({
     }, []);
 
     // Logout handler
-    const handleLogout = async () => {
+    const [logoutWarningOpen, setLogoutWarningOpen] = useState(false);
+    const [activeSession, setActiveSession] = useState<any>(null);
+
+    const proceedLogout = async () => {
         setLoggingOut(true);
         try {
             await api.logoutGestion();
@@ -71,6 +75,37 @@ export default function AdminLayout({
         } finally {
             router.push('/gestion-login');
         }
+    };
+
+    const handleLogout = async () => {
+        setLoggingOut(true);
+        try {
+            // Check current user
+            const sessionRes = await api.getSession('gestion');
+            if (sessionRes.ok && sessionRes.data?.user?.rol === 'profesor' && sessionRes.data.user.gestion_profesor_id) {
+                const pid = sessionRes.data.user.gestion_profesor_id;
+                const activeRes = await api.getSesionActiva(pid);
+                if (activeRes.ok && activeRes.data?.sesion) {
+                    setActiveSession({ ...activeRes.data.sesion, profesorId: pid });
+                    setLogoutWarningOpen(true);
+                    setLoggingOut(false);
+                    return;
+                }
+            }
+        } catch (e) {
+            // Ignore errors and proceed
+        }
+        proceedLogout();
+    };
+
+    const handleCloseSessionAndLogout = async () => {
+        if (activeSession) {
+            try {
+                // api.endSesion requires sessionId. getSesionActiva returns sesion object with id
+                await api.endSesion(activeSession.profesorId, activeSession.id);
+            } catch { }
+        }
+        proceedLogout();
     };
 
     // Get current section title
@@ -259,6 +294,51 @@ export default function AdminLayout({
                     {children}
                 </div>
             </main>
+            {/* Logout Warning Modal */}
+            <Modal
+                isOpen={logoutWarningOpen}
+                onClose={() => setLogoutWarningOpen(false)}
+                title="Sesión Activa Detectada"
+                size="md"
+            >
+                <div className="space-y-4">
+                    <div className="p-4 bg-warning-500/10 rounded-lg flex gap-3">
+                        <div className="p-2 bg-warning-500/20 rounded-full h-fit">
+                            <Clock className="w-5 h-5 text-warning-400" />
+                        </div>
+                        <div>
+                            <h4 className="font-medium text-warning-100 mb-1">Tu jornada laboral sigue activa</h4>
+                            <p className="text-sm text-warning-200/80">
+                                Tienes una sesión iniciada. ¿Deseas finalizarla antes de salir?
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2 sm:flex-row sm:justify-end pt-2">
+                        <Button
+                            variant="ghost"
+                            onClick={() => setLogoutWarningOpen(false)}
+                            disabled={loggingOut}
+                        >
+                            Cancelar
+                        </Button>
+                        <Button
+                            variant="secondary"
+                            onClick={proceedLogout}
+                            disabled={loggingOut}
+                        >
+                            Mantener Activa y Salir
+                        </Button>
+                        <Button
+                            variant="primary"
+                            onClick={handleCloseSessionAndLogout}
+                            isLoading={loggingOut}
+                        >
+                            Finalizar y Salir
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
         </div>
     );
 }

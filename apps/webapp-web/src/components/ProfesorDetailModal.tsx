@@ -11,6 +11,7 @@ import {
     Trash2,
     Save,
     Settings,
+    Lock,
 } from 'lucide-react';
 import { Button, Modal, Input, Select, Textarea, useToast } from '@/components/ui';
 import {
@@ -72,6 +73,23 @@ export default function ProfesorDetailModal({
     });
     const [configLoading, setConfigLoading] = useState(false);
     const [usuarios, setUsuarios] = useState<Usuario[]>([]);
+
+    // Password state
+    const [newPassword, setNewPassword] = useState('');
+    const [passwordLoading, setPasswordLoading] = useState(false);
+
+    const handlePasswordChange = async () => {
+        if (!profesor || !newPassword) return;
+        setPasswordLoading(true);
+        const res = await api.updateProfesorPassword(profesor.id, newPassword);
+        setPasswordLoading(false);
+        if (res.ok) {
+            success('Contraseña actualizada');
+            setNewPassword('');
+        } else {
+            error(res.error || 'Error al actualizar contraseña');
+        }
+    };
 
     // Load data
     useEffect(() => {
@@ -469,6 +487,35 @@ export default function ProfesorDetailModal({
                                     placeholder="Notas privadas sobre el profesor..."
                                     rows={3}
                                 />
+                            </div>
+
+                            {/* Security / Password */}
+                            <div className="space-y-3 pt-4 border-t border-slate-800">
+                                <h4 className="text-sm font-medium text-white flex items-center gap-1">
+                                    <Lock className="w-4 h-4" />
+                                    Seguridad (PIN / Contraseña)
+                                </h4>
+                                <div className="flex gap-2 items-end">
+                                    <div className="flex-1">
+                                        <Input
+                                            type="password"
+                                            value={newPassword}
+                                            onChange={(e) => setNewPassword(e.target.value)}
+                                            placeholder="Nueva contraseña o PIN"
+                                        />
+                                    </div>
+                                    <Button
+                                        onClick={handlePasswordChange}
+                                        isLoading={passwordLoading}
+                                        disabled={!newPassword || newPassword.length < 4}
+                                        variant="secondary"
+                                    >
+                                        Actualizar
+                                    </Button>
+                                </div>
+                                <p className="text-xs text-slate-500">
+                                    Esta contraseña se usa para ingresar al panel de gestión y también como PIN de asistencia.
+                                </p>
                             </div>
 
                             {/* Save button */}

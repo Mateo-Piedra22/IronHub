@@ -396,6 +396,7 @@ export interface SessionUser {
     nombre: string;
     rol: 'owner' | 'admin' | 'profesor' | 'user';
     dni?: string;
+    gestion_profesor_id?: number | null;
 }
 
 // === User Tags & States ===
@@ -1099,6 +1100,13 @@ class ApiClient {
     // === Profesores ===
     async getProfesores() {
         return this.request<{ profesores: Profesor[] }>('/api/profesores');
+    }
+
+    async updateProfesorPassword(profesorId: number, password: string) {
+        return this.request<{ ok: boolean; message?: string }>(`/api/profesores/${profesorId}/password`, {
+            method: 'PUT',
+            body: JSON.stringify({ password }),
+        });
     }
 
     async getProfesor(id: number) {

@@ -923,3 +923,28 @@ class ProfesorService(BaseService):
         except Exception as e:
             logger.error(f"Error calculating weekly summary: {e}")
             return {'horas_trabajadas': 0, 'horas_proyectadas': 0, 'horas_extra': 0, 'horas_totales': 0}
+
+    def set_profesor_password(self, profesor_id: int, password_hash: str) -> bool:
+        """Set professor's password hash in the associated Usuario record."""
+        try:
+            prof = self.db.get(Profesor, profesor_id)
+            if not prof:
+                logger.error(f"Profesor {profesor_id} not found")
+                return False
+            
+            if not prof.usuario_id:
+                logger.error(f"Profesor {profesor_id} has no associated user")
+                return False
+                
+            usuario = self.db.get(Usuario, prof.usuario_id)
+            if not usuario:
+                logger.error(f"User {prof.usuario_id} for professor {profesor_id} not found")
+                return False
+
+            usuario.pin = password_hash
+            self.db.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error setting professor password: {e}")
+            self.db.rollback()
+            return False

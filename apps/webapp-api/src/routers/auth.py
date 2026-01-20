@@ -569,6 +569,7 @@ async def api_auth_session(request: Request, context: str = Query("auto")):
 
     # 2) Gestion profesor session (created via /gestion/auth)
     if gestion_prof_user_id is not None and ctx in ("auto", "gestion"):
+        gestion_prof_id = request.session.get("gestion_profesor_id")
         return JSONResponse({
             "authenticated": True,
             "user": {
@@ -576,6 +577,7 @@ async def api_auth_session(request: Request, context: str = Query("auto")):
                 "nombre": request.session.get("usuario_nombre", "") or "Profesor",
                 "rol": "profesor",
                 "dni": None,
+                "gestion_profesor_id": int(gestion_prof_id) if gestion_prof_id else None,
             }
         })
 
