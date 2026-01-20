@@ -366,6 +366,7 @@ async def gestion_auth(
         profesor_id = profesor_id
         
     request.session["gestion_profesor_user_id"] = usuario_id
+    request.session["usuario_nombre"] = user_name
     request.session["tenant"] = tenant
     try:
         request.session["logged_in"] = True
