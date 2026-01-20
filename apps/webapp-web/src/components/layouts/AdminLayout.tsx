@@ -240,6 +240,7 @@ export default function AdminLayout({
                             <div className="text-sm font-medium text-white flex items-center gap-2">
                                 {userName}
                                 {userRole === 'owner' && <span className="text-[10px] bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Admin</span>}
+                                {userRole === 'profesor' && <span className="text-[10px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Profe</span>}
                             </div>
                             {sessionTimer && (
                                 <div className="text-xs text-success-400 font-mono flex items-center gap-1.5 bg-success-500/10 px-2 py-0.5 rounded-full mt-0.5">
