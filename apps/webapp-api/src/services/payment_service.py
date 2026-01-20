@@ -183,10 +183,153 @@ class PaymentService(BaseService):
             self.db.commit()
             return pago.id
 
+
         except Exception as e:
             self.db.rollback()
             logger.error(f"Error en modificar_pago_avanzado: {e}")
             raise
+
+    def actualizar_pago_con_diferencial(
+        self,
+        pago_id: int,
+        nuevo_items: List[Dict[str, Any]],
+        nuevo_tipo_cuota_nombre: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Update a payment with differential calculation for user expiration.
+        
+        Algorithm:
+        1. SNAPSHOT: Get duration of original item(s)
+        2. IDENTIFY NEW: Get duration of new item(s)
+        3. CALCULATE DELTA: dias_nuevos - dias_originales
+        4. IMPACT USER: Adjust fecha_proximo_vencimiento by delta
+        
+        Rules:
+        - Updates pago.tipo_cuota (historical record)
+        - Adjusts usuario.fecha_proximo_vencimiento by delta
+        - Does NOT change usuario.tipo_cuota (profile preference)
+        """
+        pago = self.db.get(Pago, pago_id)
+        if not pago:
+            raise ValueError(f"Pago con ID {pago_id} no encontrado")
+
+        usuario = self.db.get(Usuario, pago.usuario_id)
+        if not usuario:
+            raise ValueError(f"Usuario con ID {pago.usuario_id} no encontrado")
+
+        try:
+            # ===========================================================
+            # STEP 1: SNAPSHOT - Get duration of original item(s)
+            # ===========================================================
+            detalles_originales = self.db.execute(
+                select(PagoDetalle).where(PagoDetalle.pago_id == pago_id)
+            ).scalars().all()
+            
+            dias_originales = 0
+            for detalle in detalles_originales:
+                # Try to find TipoCuota by matching descripcion
+                tipo_original = self.db.execute(
+                    select(TipoCuota).where(TipoCuota.nombre == detalle.descripcion)
+                ).scalar_one_or_none()
+                if tipo_original and tipo_original.duracion_dias:
+                    dias_originales += int(tipo_original.duracion_dias) * int(detalle.cantidad or 1)
+                else:
+                    # Default fallback: assume 30 days per unit
+                    dias_originales += 30 * int(detalle.cantidad or 1)
+            
+            # ===========================================================
+            # STEP 2: IDENTIFY NEW - Get duration of new item(s)
+            # ===========================================================
+            dias_nuevos = 0
+            for item in nuevo_items:
+                descripcion = str(item.get('descripcion', '')).strip()
+                cantidad = int(item.get('cantidad', 1) or 1)
+                
+                # Try to find TipoCuota by matching descripcion
+                tipo_nuevo = self.db.execute(
+                    select(TipoCuota).where(TipoCuota.nombre == descripcion)
+                ).scalar_one_or_none()
+                if tipo_nuevo and tipo_nuevo.duracion_dias:
+                    dias_nuevos += int(tipo_nuevo.duracion_dias) * cantidad
+                else:
+                    # Default fallback: assume 30 days per unit
+                    dias_nuevos += 30 * cantidad
+            
+            # ===========================================================
+            # STEP 3: CALCULATE DELTA
+            # ===========================================================
+            delta = dias_nuevos - dias_originales
+            
+            # ===========================================================
+            # STEP 4: IMPACT USER - Adjust expiration date by delta
+            # ===========================================================
+            if delta != 0 and usuario.fecha_proximo_vencimiento:
+                fecha_actual = usuario.fecha_proximo_vencimiento
+                if isinstance(fecha_actual, datetime):
+                    fecha_actual = fecha_actual.date()
+                nueva_fecha = fecha_actual + timedelta(days=delta)
+                usuario.fecha_proximo_vencimiento = nueva_fecha
+                logger.info(
+                    f"Ajustando vencimiento usuario {usuario.id}: "
+                    f"{fecha_actual} -> {nueva_fecha} (delta={delta} días)"
+                )
+            
+            # ===========================================================
+            # STEP 5: UPDATE PAGO RECORD
+            # ===========================================================
+            # Delete existing details
+            self.db.execute(
+                delete(PagoDetalle).where(PagoDetalle.pago_id == pago_id)
+            )
+            
+            # Calculate new total
+            subtotal = sum(
+                float(item.get('cantidad', 1)) * float(item.get('precio_unitario', 0))
+                for item in nuevo_items
+            )
+            pago.monto = subtotal
+            
+            # Update concepto on PAGO record (stores tipo_cuota name for historical record)
+            # Note: Using 'concepto' field since Pago model uses this for payment type
+            if nuevo_tipo_cuota_nombre:
+                pago.concepto = nuevo_tipo_cuota_nombre
+            elif nuevo_items:
+                # Use first item's descripcion as concepto
+                pago.concepto = nuevo_items[0].get('descripcion', '')
+            
+            # Create new details
+            for item in nuevo_items:
+                cantidad = float(item.get('cantidad', 1))
+                precio = float(item.get('precio_unitario', 0))
+                line_total = cantidad * precio
+                detalle = PagoDetalle(
+                    pago_id=pago.id,
+                    concepto_id=item.get('concepto_id'),
+                    descripcion=item.get('descripcion', ''),
+                    cantidad=cantidad,
+                    precio_unitario=precio,
+                    subtotal=line_total,
+                    total=line_total
+                )
+                self.db.add(detalle)
+            
+            self.db.commit()
+            
+            return {
+                'ok': True,
+                'pago_id': pago.id,
+                'dias_originales': dias_originales,
+                'dias_nuevos': dias_nuevos,
+                'delta': delta,
+                'nuevo_monto': subtotal,
+                'nueva_fecha_vencimiento': str(usuario.fecha_proximo_vencimiento) if usuario.fecha_proximo_vencimiento else None
+            }
+
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Error en actualizar_pago_con_diferencial: {e}")
+            raise
+
 
     def eliminar_pago(self, pago_id: int) -> bool:
         """Delete a payment and recalculate user status."""
@@ -1271,6 +1414,8 @@ class PaymentService(BaseService):
                 'metodo_pago': metodos.get(p.metodo_pago_id) if p.metodo_pago_id else None,
                 'recibo_numero': recibo_por_pago.get(int(p.id)) if getattr(p, 'id', None) is not None else None,
                 'estado': getattr(p, 'estado', None),
+                # tipo_cuota: Use pago's concepto (historical), then fallback to user's tipo_cuota
+                'tipo_cuota': getattr(p, 'concepto', None) or (p.usuario.tipo_cuota if p.usuario else None),
             }
             for p in pagos
         ]
@@ -1314,6 +1459,8 @@ class PaymentService(BaseService):
             'comision_porcentaje': float(metodo.comision or 0) if metodo else 0,
             'total_detalles': total_detalles,
             'cantidad_lineas': len(detalles),
+            # tipo_cuota: Use pago's concepto (historical), then fallback to user's tipo_cuota
+            'tipo_cuota_nombre': pago.concepto or (usuario.tipo_cuota if usuario else None),
             'detalles': [
                 {
                     'id': d.id,

@@ -749,6 +749,7 @@ async def api_pagos_list(
                     "metodo_pago_nombre": r.get("metodo_pago"),
                     "recibo_numero": r.get("recibo_numero"),
                     "estado": r.get("estado"),
+                    "tipo_cuota_nombre": r.get("tipo_cuota"),
                 }
             )
 
@@ -825,6 +826,68 @@ async def api_pago_resumen(
     except Exception as e:
         logger.error(f"Error obteniendo pago resumen: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.put("/api/pagos/{pago_id}")
+async def api_pago_update(
+    pago_id: int,
+    request: Request,
+    _=Depends(require_owner),
+    svc: PaymentService = Depends(get_payment_service)
+):
+    """
+    Update a payment with differential calculation for user expiration.
+    
+    This endpoint implements differential calculation:
+    - Calculates delta between old and new item durations
+    - Adjusts user's fecha_proximo_vencimiento by delta
+    - Updates pago's tipo_cuota (historical record)
+    - Does NOT change user's tipo_cuota (profile preference)
+    """
+    try:
+        payload = await request.json()
+        
+        # Extract items from payload
+        items = payload.get("items") or payload.get("conceptos") or []
+        if not items:
+            raise HTTPException(status_code=400, detail="Se requiere al menos un item")
+        
+        # Normalize items format
+        nuevo_items = []
+        for item in items:
+            nuevo_items.append({
+                "descripcion": item.get("descripcion", ""),
+                "cantidad": float(item.get("cantidad", 1) or 1),
+                "precio_unitario": float(item.get("precio_unitario") or item.get("precio") or 0),
+                "concepto_id": item.get("concepto_id")
+            })
+        
+        # Optional: explicit tipo_cuota override
+        tipo_cuota_override = payload.get("tipo_cuota_nombre") or payload.get("tipo_cuota")
+        
+        # Call service method with differential calculation
+        result = svc.actualizar_pago_con_diferencial(
+            pago_id=int(pago_id),
+            nuevo_items=nuevo_items,
+            nuevo_tipo_cuota_nombre=tipo_cuota_override
+        )
+        
+        return {
+            "ok": True,
+            "mensaje": "Pago actualizado correctamente",
+            "success": True,
+            "message": "Payment updated successfully",
+            **result
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error actualizando pago {pago_id}: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 
 @router.post("/api/pagos/preview")
 async def api_pago_preview(

@@ -2054,6 +2054,23 @@ class ApiClient {
     }
 
     // === Reports / Dashboard ===
+    // Update payment with differential calculation
+    async updatePago(pagoId: number, data: { items: Array<{ descripcion: string; cantidad: number; precio_unitario: number; concepto_id?: number }> }) {
+        return this.request<{
+            ok: boolean;
+            pago_id: number;
+            dias_originales: number;
+            dias_nuevos: number;
+            delta: number;
+            nuevo_monto: number;
+            nueva_fecha_vencimiento: string | null;
+        }>(`/api/pagos/${pagoId}`, {
+            method: 'PUT',
+            body: JSON.stringify(data),
+        });
+    }
+
+    // === Dashboard KPIs ===
     async getKpis() {
         return this.request<{
             total_activos: number;

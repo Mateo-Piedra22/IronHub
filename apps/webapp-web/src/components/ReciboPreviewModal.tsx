@@ -34,6 +34,7 @@ export default function ReciboPreviewModal({
     const [editing, setEditing] = useState(false);
     const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
     const [pdfLoading, setPdfLoading] = useState(false);
+    const [saving, setSaving] = useState(false);
 
     // Load preview
     useEffect(() => {
@@ -250,6 +251,31 @@ export default function ReciboPreviewModal({
         return { subtotal, total: subtotal };
     };
 
+    // Save changes to backend with differential calculation
+    const handleSaveChanges = async () => {
+        if (!pago || !draft?.items?.length) return;
+        setSaving(true);
+        try {
+            const itemsToSave = (draft.items || []).map(it => ({
+                descripcion: it.descripcion,
+                cantidad: Number(it.cantidad) || 1,
+                precio_unitario: Number(it.precio) || 0,
+            }));
+            const res = await api.updatePago(pago.id, { items: itemsToSave });
+            if (res.ok) {
+                success(`Pago actualizado. ${res.data?.delta !== 0 ? `Vencimiento ajustado ${res.data?.delta || 0} días.` : ''}`);
+                await loadPreview();
+            } else {
+                error(res.error || 'Error al guardar cambios');
+            }
+        } catch (e: any) {
+            error(e?.message || 'Error al guardar');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+
     return (
         <Modal
             isOpen={isOpen}
@@ -268,6 +294,15 @@ export default function ReciboPreviewModal({
                     >
                         {editing ? 'Cerrar editor' : 'Editar'}
                     </Button>
+                    {editing && (
+                        <Button
+                            leftIcon={<DollarSign className="w-4 h-4" />}
+                            onClick={handleSaveChanges}
+                            isLoading={saving}
+                        >
+                            Guardar Cambios
+                        </Button>
+                    )}
                     <Button
                         variant="secondary"
                         leftIcon={<Printer className="w-4 h-4" />}
@@ -435,96 +470,96 @@ export default function ReciboPreviewModal({
 
                     <div className="space-y-4">
                         <div className="bg-white text-black rounded-lg p-6 print:p-0" id="recibo-preview">
-                    {/* Header */}
-                    <div className="flex items-center justify-between border-b border-gray-200 pb-4 mb-4">
-                        <div>
-                            {data.mostrar_logo && (
-                                <div className="w-16 h-16 bg-gray-200 rounded-lg mb-2 flex items-center justify-center text-gray-500 text-xs overflow-hidden">
-                                    {data.logo_url ? (
-                                        <img src={data.logo_url} alt="Logo" className="w-full h-full object-contain bg-white" />
-                                    ) : (
-                                        <>Logo</>
+                            {/* Header */}
+                            <div className="flex items-center justify-between border-b border-gray-200 pb-4 mb-4">
+                                <div>
+                                    {data.mostrar_logo && (
+                                        <div className="w-16 h-16 bg-gray-200 rounded-lg mb-2 flex items-center justify-center text-gray-500 text-xs overflow-hidden">
+                                            {data.logo_url ? (
+                                                <img src={data.logo_url} alt="Logo" className="w-full h-full object-contain bg-white" />
+                                            ) : (
+                                                <>Logo</>
+                                            )}
+                                        </div>
+                                    )}
+                                    <h2 className="text-xl font-bold">{data.gym_nombre}</h2>
+                                    {data.gym_direccion && (
+                                        <p className="text-gray-600 text-sm">{data.gym_direccion}</p>
                                     )}
                                 </div>
-                            )}
-                            <h2 className="text-xl font-bold">{data.gym_nombre}</h2>
-                            {data.gym_direccion && (
-                                <p className="text-gray-600 text-sm">{data.gym_direccion}</p>
-                            )}
-                        </div>
-                        <div className="text-right">
-                            <h1 className="text-2xl font-bold text-gray-800">{data.titulo || 'RECIBO'}</h1>
-                            {data.numero && (
-                                <p className="text-gray-600 font-mono">N° {data.numero}</p>
-                            )}
-                            <p className="text-gray-600">{data.fecha}</p>
-                        </div>
-                    </div>
-
-                    {/* Customer info */}
-                    <div className="mb-6">
-                        <h3 className="font-semibold text-gray-700">Cliente</h3>
-                        <p className="text-lg">{data.usuario_nombre}</p>
-                        {data.mostrar_dni && data.usuario_dni && (
-                            <p className="text-gray-600">DNI: {data.usuario_dni}</p>
-                        )}
-                    </div>
-
-                    {/* Items */}
-                    <table className="w-full mb-6">
-                        <thead>
-                            <tr className="border-b-2 border-gray-200">
-                                <th className="text-left py-2">Descripción</th>
-                                <th className="text-center py-2 w-20">Cant.</th>
-                                <th className="text-right py-2 w-28">Precio</th>
-                                <th className="text-right py-2 w-28">Subtotal</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {data.items.map((item, idx) => (
-                                <tr key={idx} className="border-b border-gray-100">
-                                    <td className="py-2">{item.descripcion}</td>
-                                    <td className="text-center py-2">{item.cantidad}</td>
-                                    <td className="text-right py-2">{formatCurrency(item.precio)}</td>
-                                    <td className="text-right py-2">{formatCurrency(item.cantidad * item.precio)}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-
-                    {/* Totals */}
-                    <div className="flex justify-end">
-                        <div className="w-64">
-                            <div className="flex justify-between py-2 border-b border-gray-100">
-                                <span>Subtotal</span>
-                                <span>{formatCurrency(data.subtotal)}</span>
+                                <div className="text-right">
+                                    <h1 className="text-2xl font-bold text-gray-800">{data.titulo || 'RECIBO'}</h1>
+                                    {data.numero && (
+                                        <p className="text-gray-600 font-mono">N° {data.numero}</p>
+                                    )}
+                                    <p className="text-gray-600">{data.fecha}</p>
+                                </div>
                             </div>
-                            <div className="flex justify-between py-2 font-bold text-lg">
-                                <span>Total</span>
-                                <span>{formatCurrency(data.total)}</span>
+
+                            {/* Customer info */}
+                            <div className="mb-6">
+                                <h3 className="font-semibold text-gray-700">Cliente</h3>
+                                <p className="text-lg">{data.usuario_nombre}</p>
+                                {data.mostrar_dni && data.usuario_dni && (
+                                    <p className="text-gray-600">DNI: {data.usuario_dni}</p>
+                                )}
                             </div>
-                        </div>
-                    </div>
 
-                    {/* Payment method */}
-                    {data.mostrar_metodo && data.metodo_pago && (
-                        <div className="mt-4 text-gray-600">
-                            Método de pago: <strong>{data.metodo_pago}</strong>
-                        </div>
-                    )}
+                            {/* Items */}
+                            <table className="w-full mb-6">
+                                <thead>
+                                    <tr className="border-b-2 border-gray-200">
+                                        <th className="text-left py-2">Descripción</th>
+                                        <th className="text-center py-2 w-20">Cant.</th>
+                                        <th className="text-right py-2 w-28">Precio</th>
+                                        <th className="text-right py-2 w-28">Subtotal</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {data.items.map((item, idx) => (
+                                        <tr key={idx} className="border-b border-gray-100">
+                                            <td className="py-2">{item.descripcion}</td>
+                                            <td className="text-center py-2">{item.cantidad}</td>
+                                            <td className="text-right py-2">{formatCurrency(item.precio)}</td>
+                                            <td className="text-right py-2">{formatCurrency(item.cantidad * item.precio)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
 
-                    {/* Notes */}
-                    {data.observaciones && (
-                        <div className="mt-4 p-3 bg-gray-50 rounded text-sm text-gray-600">
-                            {data.observaciones}
-                        </div>
-                    )}
+                            {/* Totals */}
+                            <div className="flex justify-end">
+                                <div className="w-64">
+                                    <div className="flex justify-between py-2 border-b border-gray-100">
+                                        <span>Subtotal</span>
+                                        <span>{formatCurrency(data.subtotal)}</span>
+                                    </div>
+                                    <div className="flex justify-between py-2 font-bold text-lg">
+                                        <span>Total</span>
+                                        <span>{formatCurrency(data.total)}</span>
+                                    </div>
+                                </div>
+                            </div>
 
-                    {/* Footer */}
-                    <div className="mt-8 pt-4 border-t border-gray-200 text-center text-gray-500 text-sm">
-                        {data.emitido_por && <p>Emitido por: {data.emitido_por}</p>}
-                        <p>Gracias por su preferencia</p>
-                    </div>
+                            {/* Payment method */}
+                            {data.mostrar_metodo && data.metodo_pago && (
+                                <div className="mt-4 text-gray-600">
+                                    Método de pago: <strong>{data.metodo_pago}</strong>
+                                </div>
+                            )}
+
+                            {/* Notes */}
+                            {data.observaciones && (
+                                <div className="mt-4 p-3 bg-gray-50 rounded text-sm text-gray-600">
+                                    {data.observaciones}
+                                </div>
+                            )}
+
+                            {/* Footer */}
+                            <div className="mt-8 pt-4 border-t border-gray-200 text-center text-gray-500 text-sm">
+                                {data.emitido_por && <p>Emitido por: {data.emitido_por}</p>}
+                                <p>Gracias por su preferencia</p>
+                            </div>
                         </div>
 
                         {editing && (

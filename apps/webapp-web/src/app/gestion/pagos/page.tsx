@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
     Plus,
@@ -97,6 +97,9 @@ function PagoFormModal({
     const [lineItems, setLineItems] = useState<ConceptoLineItem[]>([createEmptyLineItem()]);
     const { success, error } = useToast();
 
+    // Track previous user ID to detect changes
+    const prevUsuarioIdRef = useRef<number>(0);
+
     // Reset form when modal opens
     useEffect(() => {
         if (isOpen) {
@@ -108,25 +111,51 @@ function PagoFormModal({
             setMetodoPagoId(metodosPago[0]?.id);
             setNotas('');
             setLineItems([createEmptyLineItem()]);
+            // Reset previous user tracking for clean auto-fill behavior
+            prevUsuarioIdRef.current = 0;
         }
     }, [isOpen, preselectedUsuarioId, metodosPago]);
 
-    // Auto-fill first line item from tipo_cuota when user is selected
+
+    // Auto-fill line item from user's tipo_cuota when user changes
     useEffect(() => {
-        if (usuarioId && lineItems.length === 1 && !lineItems[0].descripcion && lineItems[0].precio_unitario === 0) {
+        // Skip if no user selected or if user hasn't changed
+        if (!usuarioId) {
+            prevUsuarioIdRef.current = 0;
+            return;
+        }
+
+        // Check if user actually changed (not just first render with same ID)
+        const userChanged = prevUsuarioIdRef.current !== usuarioId && prevUsuarioIdRef.current !== 0;
+        const isFirstSelection = prevUsuarioIdRef.current === 0 && usuarioId > 0;
+
+        // Update ref for next comparison
+        prevUsuarioIdRef.current = usuarioId;
+
+        // If user changed OR first selection, always update line items
+        if (userChanged || isFirstSelection) {
             const user = usuarios.find(u => u.id === usuarioId);
             if (user?.tipo_cuota_id) {
                 const tipo = tiposCuota.find(t => t.id === user.tipo_cuota_id);
                 if (tipo) {
+                    // Replace first line item with user's quota info
                     setLineItems([{
-                        ...lineItems[0],
+                        id: crypto.randomUUID(),
+                        mode: 'custom' as const,
+                        concepto_id: undefined,
                         descripcion: tipo.nombre,
+                        cantidad: 1,
                         precio_unitario: tipo.precio || 0,
                     }]);
+                    return;
                 }
             }
+            // User has no tipo_cuota, reset to empty
+            if (userChanged) {
+                setLineItems([createEmptyLineItem()]);
+            }
         }
-    }, [usuarioId, usuarios, tiposCuota, lineItems]);
+    }, [usuarioId, usuarios, tiposCuota]);
 
     // Calculate total
     const total = lineItems.reduce((sum, item) => sum + (item.cantidad * item.precio_unitario), 0);
