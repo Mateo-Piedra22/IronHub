@@ -481,6 +481,7 @@ export interface ClaseEjercicio {
     ejercicio_id: number;
     ejercicio_nombre?: string;
     orden: number;
+    ejercicio?: Ejercicio;
 }
 
 // === Profesor Types Extended ===

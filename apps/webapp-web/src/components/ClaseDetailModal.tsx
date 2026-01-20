@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Clock,
     Users,
@@ -13,6 +13,10 @@ import {
     Edit,
     Dumbbell,
     Layers,
+    Search,
+    ChevronRight,
+    GripVertical,
+    Save,
 } from 'lucide-react';
 import { Button, Modal, Input, Select, Checkbox, ConfirmModal, useToast } from '@/components/ui';
 import {
@@ -215,6 +219,9 @@ export default function ClaseDetailModal({
         setBloqueItemsLoading(true);
         try {
             const res = await api.getClaseBloqueItems(clase.id, bloqueId);
+            // Race guard
+            if (bloqueId !== selectedBloqueIdRef.current) return;
+
             if (res.ok && res.data) setBloqueItems(res.data || []);
         } finally {
             setBloqueItemsLoading(false);
@@ -305,6 +312,15 @@ export default function ClaseDetailModal({
         }
     };
 
+    // Race condition guard
+    const selectedBloqueIdRef = useRef<number | null>(null);
+    useEffect(() => {
+        selectedBloqueIdRef.current = selectedBloqueId;
+    }, [selectedBloqueId]);
+
+    const activeTabRef = useRef(activeTab);
+    useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
+
     useEffect(() => {
         if (!isOpen || !clase) return;
         if (activeTab === 'ejercicios') loadClaseEjercicios();
@@ -347,6 +363,7 @@ export default function ClaseDetailModal({
         if (res.ok) {
             success('Horario agregado');
             loadHorarios();
+            onRefresh();
             setHorarioForm({
                 dia: 'Lunes',
                 hora_inicio: '09:00',
@@ -372,6 +389,7 @@ export default function ClaseDetailModal({
         if (res.ok) {
             success('Horario eliminado');
             loadHorarios();
+            onRefresh();
             if (selectedHorarioId === horarioId) {
                 setSelectedHorarioId(null);
             }
@@ -402,6 +420,7 @@ export default function ClaseDetailModal({
             setEditHorarioOpen(false);
             setHorarioToEdit(null);
             loadHorarios();
+            onRefresh();
         } else {
             error(res.error || 'Error al actualizar horario');
         }
@@ -440,6 +459,7 @@ export default function ClaseDetailModal({
             success('Usuario inscripto');
             loadInscripciones();
             loadHorarios();
+            onRefresh();
             setSelectedUsuarioId(null);
         } else {
             error(res.error || 'Error al inscribir');
@@ -453,6 +473,7 @@ export default function ClaseDetailModal({
             success('Usuario desinscripto');
             loadInscripciones();
             loadHorarios();
+            onRefresh();
         } else {
             error(res.error || 'Error al desinscribir');
         }
@@ -797,50 +818,365 @@ export default function ClaseDetailModal({
                     )}
 
                     {activeTab === 'ejercicios' && (
-                        <div className="space-y-4">
-                            <div className="flex flex-col sm:flex-row sm:items-end gap-2">
-                                <div className="flex-1">
-                                    <div className="text-xs text-slate-500 mb-1">Buscar</div>
-                                    <input
-                                        className="input w-full"
-                                        value={ejerciciosSearch}
-                                        onChange={(e) => setEjerciciosSearch(e.target.value)}
-                                        placeholder="Buscar ejercicio..."
-                                    />
+                        <div className="space-y-6">
+                            <div className="card-bordered p-4 bg-slate-900/50">
+                                <h3 className="text-sm font-medium text-white mb-3 flex items-center gap-2">
+                                    <Search className="w-4 h-4 text-primary-400" />
+                                    Catálogo de Ejercicios
+                                </h3>
+                                <div className="flex gap-2 mb-4">
+                                    <div className="relative flex-1">
+                                        <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+                                        <input
+                                            className="input w-full pl-9"
+                                            value={ejerciciosSearch}
+                                            onChange={(e) => {
+                                                setEjerciciosSearch(e.target.value);
+                                                if (e.target.value.length > 1) {
+                                                    loadEjerciciosCatalog(e.target.value);
+                                                }
+                                            }}
+                                            placeholder="Buscar para agregar..."
+                                        />
+                                    </div>
+                                    <Button onClick={saveEjercicios} isLoading={savingEjercicios}>
+                                        Guardar asignados
+                                    </Button>
                                 </div>
-                                <Button onClick={saveEjercicios} isLoading={savingEjercicios}>
-                                    Guardar
-                                </Button>
-                            </div>
 
-                            <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-                                <div className="text-xs text-slate-500">Seleccionados: {selectedEjercicioIds.length}</div>
-                                <div className="mt-3 space-y-2 max-h-[340px] overflow-y-auto pr-1">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[300px] overflow-y-auto">
                                     {ejerciciosLoading ? (
-                                        <div className="text-sm text-slate-400">Cargando…</div>
+                                        <div className="col-span-full py-8 text-center text-slate-500">
+                                            Cargando catálogo...
+                                        </div>
+                                    ) : ejerciciosSearch && ejercicios.length === 0 ? (
+                                        <div className="col-span-full py-8 text-center text-slate-500">
+                                            Sin resultados
+                                        </div>
                                     ) : (
-                                        <>
-                                            {ejercicios.map((e) => (
-                                                <Checkbox
-                                                    key={String(e.id)}
-                                                    label={String(e.nombre || `Ejercicio #${e.id}`)}
-                                                    checked={selectedEjercicioIds.includes(Number(e.id))}
-                                                    onChange={(ev) => toggleEjercicio(Number(e.id), Boolean((ev.target as HTMLInputElement).checked))}
-                                                />
-                                            ))}
-                                            {!ejercicios.length ? <div className="text-sm text-slate-400">Sin resultados</div> : null}
-                                        </>
+                                        ejercicios.map((e) => {
+                                            const isSelected = selectedEjercicioIds.includes(Number(e.id));
+                                            return (
+                                                <button
+                                                    key={e.id}
+                                                    onClick={() => toggleEjercicio(Number(e.id), !isSelected)}
+                                                    className={cn(
+                                                        "flex items-center justify-between p-3 rounded-lg border text-left transition-all",
+                                                        isSelected
+                                                            ? "bg-primary-500/20 border-primary-500/50 text-white"
+                                                            : "bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-white"
+                                                    )}
+                                                >
+                                                    <span className="truncate pr-2 font-medium text-sm">{e.nombre}</span>
+                                                    {isSelected && <div className="w-2 h-2 rounded-full bg-primary-500" />}
+                                                </button>
+                                            );
+                                        })
                                     )}
                                 </div>
                             </div>
 
-                            {claseEjercicios.length ? (
-                                <div className="text-xs text-slate-500">
-                                    En la clase: {claseEjercicios.length} asignados
+                            <div className="space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <h3 className="text-sm font-medium text-slate-400 uppercase tracking-wider">
+                                        Ejercicios Asignados ({selectedEjercicioIds.length})
+                                    </h3>
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={() => setSelectedEjercicioIds([])}
+                                        disabled={!selectedEjercicioIds.length}
+                                    >
+                                        Limpiar todos
+                                    </Button>
                                 </div>
-                            ) : (
-                                <div className="text-xs text-slate-500">En la clase: sin ejercicios asignados</div>
-                            )}
+
+                                <div className="overflow-x-auto rounded-xl border border-slate-800">
+                                    <table className="min-w-full text-sm">
+                                        <thead className="bg-slate-900 text-slate-500">
+                                            <tr>
+                                                <th className="px-4 py-3 text-left">Ejercicio</th>
+                                                <th className="px-4 py-3 text-right">Acciones</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-800">
+                                            {selectedEjercicioIds.length === 0 ? (
+                                                <tr>
+                                                    <td colSpan={2} className="px-4 py-8 text-center text-slate-500">
+                                                        No hay ejercicios asignados a esta clase.
+                                                    </td>
+                                                </tr>
+                                            ) : (
+                                                selectedEjercicioIds.map(id => {
+                                                    const ej = claseEjercicios.find(ce => Number(ce.ejercicio_id) === id)?.ejercicio || ejercicios.find(e => Number(e.id) === id) || { id, nombre: 'Cargando/Desconocido' };
+                                                    return (
+                                                        <tr key={id} className="group hover:bg-slate-900/50">
+                                                            <td className="px-4 py-3 font-medium text-slate-300">
+                                                                {ej.nombre}
+                                                            </td>
+                                                            <td className="px-4 py-3 text-right">
+                                                                <button
+                                                                    className="text-slate-500 hover:text-danger-400 p-1"
+                                                                    onClick={() => toggleEjercicio(id, false)}
+                                                                >
+                                                                    <Trash2 className="w-4 h-4" />
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'bloques' && (
+                        <div className="flex flex-col md:flex-row h-[600px] gap-4 -mx-2 -mb-2">
+                            {/* Sidebar: Blocks List */}
+                            <div className="w-full md:w-1/3 flex flex-col gap-4 border-r border-slate-800 pr-4">
+                                <div className="flex items-center justify-between">
+                                    <h3 className="font-semibold text-white">Bloques</h3>
+                                    <Button
+                                        size="sm"
+                                        leftIcon={<Plus className="w-3 h-3" />}
+                                        onClick={() => {
+                                            if (clase) {
+                                                setNewBloqueNombre('Nuevo Bloque');
+                                                setNewBloqueOpen(true);
+                                            }
+                                        }}
+                                    >
+                                        Nuevo
+                                    </Button>
+                                </div>
+
+                                <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                                    {bloquesLoading ? (
+                                        <div className="text-center py-4 text-sm text-slate-500">Cargando...</div>
+                                    ) : bloques.length === 0 ? (
+                                        <div className="text-center py-8 border border-dashed border-slate-800 rounded-lg text-slate-500 text-sm p-4">
+                                            No hay bloques definidos.<br />Crea uno para empezar.
+                                        </div>
+                                    ) : (
+                                        bloques.map((b) => (
+                                            <div
+                                                key={b.id}
+                                                onClick={() => {
+                                                    setSelectedBloqueId(b.id);
+                                                    setBloqueNombre(b.nombre);
+                                                    // Load items is separate effect or manual call here
+                                                    (async () => {
+                                                        const res = await api.getClaseBloqueItems(clase!.id, b.id);
+                                                        if (res.ok && res.data) setBloqueItems(res.data);
+                                                    })();
+                                                }}
+                                                className={cn(
+                                                    "p-3 rounded-lg border cursor-pointer transition-all flex items-center justify-between group",
+                                                    selectedBloqueId === b.id
+                                                        ? "bg-primary-500/20 border-primary-500/50 text-white"
+                                                        : "bg-slate-900/40 border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-white"
+                                                )}
+                                            >
+                                                <div className="font-medium text-sm">{b.nombre}</div>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        // Quick delete logic
+                                                        if (confirm('¿Eliminar bloque?')) {
+                                                            api.deleteClaseBloque(clase!.id, b.id).then(() => {
+                                                                loadBloques();
+                                                                if (selectedBloqueId === b.id) {
+                                                                    setSelectedBloqueId(null);
+                                                                    setBloqueItems([]);
+                                                                }
+                                                            });
+                                                        }
+                                                    }}
+                                                    className="opacity-0 group-hover:opacity-100 p-1 hover:text-danger-400"
+                                                >
+                                                    <Trash2 className="w-3 h-3" />
+                                                </button>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Main: Block Editor */}
+                            <div className="flex-1 flex flex-col bg-slate-900/30 rounded-xl overflow-hidden border border-slate-800">
+                                {selectedBloqueId ? (
+                                    <>
+                                        <div className="p-4 border-b border-slate-800 flex items-center gap-3 bg-slate-900/80">
+                                            <div className="flex-1">
+                                                <label className="text-xs text-slate-500 mb-1 block">Nombre del bloque</label>
+                                                <input
+                                                    className="input w-full"
+                                                    value={bloqueNombre}
+                                                    onChange={(e) => setBloqueNombre(e.target.value)}
+                                                />
+                                            </div>
+                                            <div className="self-end pb-0.5">
+                                                <Button
+                                                    onClick={async () => {
+                                                        if (!selectedBloqueId) return;
+                                                        setSavingBloque(true);
+                                                        // Update items
+                                                        // We just send items as is, backend handles replace
+                                                        await api.updateClaseBloque(clase!.id, selectedBloqueId, {
+                                                            nombre: bloqueNombre,
+                                                            items: bloqueItems
+                                                        });
+                                                        setSavingBloque(false);
+                                                        success('Guardado');
+                                                        loadBloques();
+                                                    }}
+                                                    isLoading={savingBloque}
+                                                    leftIcon={<Save className="w-4 h-4" />}
+                                                >
+                                                    Guardar Bloque
+                                                </Button>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                                            {/* Items List */}
+                                            <div className="space-y-2">
+                                                {bloqueItems.map((item, idx) => (
+                                                    <div key={idx} className="flex gap-2 items-start p-3 rounded-lg bg-slate-950/50 border border-slate-800">
+                                                        <div className="pt-2 text-slate-500 cursor-move">
+                                                            <GripVertical className="w-4 h-4" />
+                                                        </div>
+                                                        <div className="flex-1 grid grid-cols-12 gap-2">
+                                                            <div className="col-span-12 sm:col-span-4">
+                                                                <label className="text-[10px] text-slate-500 uppercase">Ejercicio</label>
+                                                                <div className="text-sm font-medium text-slate-200 truncate" title={item.nombre_ejercicio}>
+                                                                    {item.nombre_ejercicio || 'Ejercicio'}
+                                                                </div>
+                                                            </div>
+                                                            <div className="col-span-3 sm:col-span-2">
+                                                                <label className="text-[10px] text-slate-500 uppercase">Series</label>
+                                                                <input
+                                                                    type="number" className="input h-7 px-2 text-xs"
+                                                                    value={item.series}
+                                                                    onChange={(e) => {
+                                                                        const copy = [...bloqueItems];
+                                                                        copy[idx] = { ...copy[idx], series: Number(e.target.value) };
+                                                                        setBloqueItems(copy);
+                                                                    }}
+                                                                />
+                                                            </div>
+                                                            <div className="col-span-3 sm:col-span-2">
+                                                                <label className="text-[10px] text-slate-500 uppercase">Reps</label>
+                                                                <input
+                                                                    type="text" className="input h-7 px-2 text-xs"
+                                                                    value={item.repeticiones}
+                                                                    onChange={(e) => {
+                                                                        const copy = [...bloqueItems];
+                                                                        copy[idx] = { ...copy[idx], repeticiones: e.target.value };
+                                                                        setBloqueItems(copy);
+                                                                    }}
+                                                                />
+                                                            </div>
+                                                            <div className="col-span-3 sm:col-span-2">
+                                                                <label className="text-[10px] text-slate-500 uppercase">Desc(s)</label>
+                                                                <input
+                                                                    type="number" className="input h-7 px-2 text-xs"
+                                                                    value={item.descanso_segundos}
+                                                                    onChange={(e) => {
+                                                                        const copy = [...bloqueItems];
+                                                                        copy[idx] = { ...copy[idx], descanso_segundos: Number(e.target.value) };
+                                                                        setBloqueItems(copy);
+                                                                    }}
+                                                                />
+                                                            </div>
+                                                            <div className="col-span-3 sm:col-span-2 text-right pt-4">
+                                                                <button
+                                                                    onClick={() => {
+                                                                        const copy = [...bloqueItems];
+                                                                        copy.splice(idx, 1);
+                                                                        setBloqueItems(copy);
+                                                                    }}
+                                                                    className="text-slate-500 hover:text-danger-400"
+                                                                >
+                                                                    <Trash2 className="w-4 h-4" />
+                                                                </button>
+                                                            </div>
+                                                            <div className="col-span-12">
+                                                                <input
+                                                                    className="input h-7 px-2 text-xs w-full bg-transparent border-slate-800 placeholder:text-slate-600 focus:bg-slate-900"
+                                                                    placeholder="Notas técnicas..."
+                                                                    value={item.notas || ''}
+                                                                    onChange={(e) => {
+                                                                        const copy = [...bloqueItems];
+                                                                        copy[idx] = { ...copy[idx], notas: e.target.value };
+                                                                        setBloqueItems(copy);
+                                                                    }}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                                {!bloqueItems.length && (
+                                                    <div className="text-center py-8 text-slate-500">
+                                                        Este bloque no tiene ejercicios.
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Add Item Panel */}
+                                            <div className="mt-4 p-4 border border-dashed border-slate-700 bg-slate-900/20 rounded-xl">
+                                                <h4 className="text-xs font-semibold text-slate-400 uppercase mb-3">Agregar Ejercicio al Bloque</h4>
+                                                <div className="flex gap-2">
+                                                    <div className="relative flex-1">
+                                                        <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+                                                        <input
+                                                            className="input w-full pl-9"
+                                                            placeholder="Buscar en catálogo..."
+                                                            onChange={(e) => {
+                                                                if (e.target.value.length > 1) loadEjerciciosCatalog(e.target.value);
+                                                            }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                                {/* Mini Results */}
+                                                {ejercicios.length > 0 && (
+                                                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[150px] overflow-y-auto">
+                                                        {ejercicios.slice(0, 10).map(e => (
+                                                            <button
+                                                                key={e.id}
+                                                                onClick={() => {
+                                                                    // Add to items
+                                                                    setBloqueItems([...bloqueItems, {
+                                                                        ejercicio_id: e.id,
+                                                                        nombre_ejercicio: e.nombre,
+                                                                        series: 3,
+                                                                        repeticiones: '10',
+                                                                        descanso_segundos: 60,
+                                                                        orden: bloqueItems.length,
+                                                                        bloque_id: selectedBloqueId
+                                                                    } as any]);
+                                                                    setEjercicios([]); // clear search results
+                                                                }}
+                                                                className="text-left text-xs p-2 rounded border border-slate-800 hover:bg-slate-800 hover:text-white text-slate-300 transition-colors"
+                                                            >
+                                                                {e.nombre}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div className="flex-1 flex flex-col items-center justify-center text-slate-500">
+                                        <Layers className="w-12 h-12 mb-2 opacity-20" />
+                                        <p>Selecciona un bloque para editar</p>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     )}
                 </div>

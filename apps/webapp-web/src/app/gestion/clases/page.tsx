@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
     Plus,
     Clock,
@@ -33,12 +33,13 @@ const diasSemana = [
 ];
 
 // Schedule grid view
-function ScheduleGrid({ clases, agenda, onEdit, onDelete, onManage }: {
+function ScheduleGrid({ clases, agenda, onEdit, onDelete, onManage, onSelect }: {
     clases: Clase[];
     agenda: ClaseAgendaItem[];
     onEdit: (c: Clase) => void;
     onDelete: (c: Clase) => void;
     onManage: (c: Clase) => void;
+    onSelect: (c: Clase) => void;
 }) {
     const diaToValue = (dia: string) => {
         const d = (dia || '').trim().toLowerCase();
@@ -83,45 +84,45 @@ function ScheduleGrid({ clases, agenda, onEdit, onDelete, onManage }: {
                                         ? `${item.inscriptos_count || 0}/${item.cupo}`
                                         : `${item.inscriptos_count || 0}`;
                                 return (
-                                <div
-                                    key={item.horario_id}
-                                    className={cn(
-                                        'p-3 rounded-xl border border-slate-800 bg-slate-900/50',
-                                        'hover:border-primary-500/50 transition-colors group cursor-pointer'
-                                    )}
-                                    onClick={() => onManage(clase)}
-                                >
-                                    <div className="font-medium text-white text-sm">{item.clase_nombre}</div>
-                                    <div className="text-xs text-slate-400 mt-1 flex items-center gap-1">
-                                        <Clock className="w-3 h-3" />
-                                        {formatTime(item.hora_inicio)} - {formatTime(item.hora_fin)}
+                                    <div
+                                        key={item.horario_id}
+                                        className={cn(
+                                            'p-3 rounded-xl border border-slate-800 bg-slate-900/50',
+                                            'hover:border-primary-500/50 transition-colors group cursor-pointer'
+                                        )}
+                                        onClick={() => onSelect(clase)}
+                                    >
+                                        <div className="font-medium text-white text-sm">{item.clase_nombre}</div>
+                                        <div className="text-xs text-slate-400 mt-1 flex items-center gap-1">
+                                            <Clock className="w-3 h-3" />
+                                            {formatTime(item.hora_inicio)} - {formatTime(item.hora_fin)}
+                                        </div>
+                                        <div className="text-xs text-slate-500 mt-1 flex items-center justify-between gap-2">
+                                            <span className="truncate">{item.profesor_nombre || 'Sin profesor'}</span>
+                                            <span className="tabular-nums">{cupoTxt}</span>
+                                        </div>
+                                        <div className="hidden group-hover:flex items-center gap-1 mt-2">
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); onManage(clase); }}
+                                                className="p-1 rounded text-primary-400 hover:text-primary-300"
+                                                title="Gestionar horarios e inscripciones"
+                                            >
+                                                <Settings className="w-3 h-3" />
+                                            </button>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); onEdit(clase); }}
+                                                className="p-1 rounded text-slate-400 hover:text-white"
+                                            >
+                                                <Edit className="w-3 h-3" />
+                                            </button>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); onDelete(clase); }}
+                                                className="p-1 rounded text-slate-400 hover:text-danger-400"
+                                            >
+                                                <Trash2 className="w-3 h-3" />
+                                            </button>
+                                        </div>
                                     </div>
-                                    <div className="text-xs text-slate-500 mt-1 flex items-center justify-between gap-2">
-                                        <span className="truncate">{item.profesor_nombre || 'Sin profesor'}</span>
-                                        <span className="tabular-nums">{cupoTxt}</span>
-                                    </div>
-                                    <div className="hidden group-hover:flex items-center gap-1 mt-2">
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); onManage(clase); }}
-                                            className="p-1 rounded text-primary-400 hover:text-primary-300"
-                                            title="Gestionar horarios e inscripciones"
-                                        >
-                                            <Settings className="w-3 h-3" />
-                                        </button>
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); onEdit(clase); }}
-                                            className="p-1 rounded text-slate-400 hover:text-white"
-                                        >
-                                            <Edit className="w-3 h-3" />
-                                        </button>
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); onDelete(clase); }}
-                                            className="p-1 rounded text-slate-400 hover:text-danger-400"
-                                        >
-                                            <Trash2 className="w-3 h-3" />
-                                        </button>
-                                    </div>
-                                </div>
                                 );
                             })
                         )}
@@ -236,6 +237,8 @@ function ClaseFormModal({ isOpen, onClose, clase, onSuccess }: ClaseFormModalPro
     );
 }
 
+import ClaseQuickView from '@/components/ClaseQuickView';
+
 export default function ClasesPage() {
     const { success, error } = useToast();
 
@@ -263,6 +266,9 @@ export default function ClasesPage() {
     // Detail modal
     const [detailOpen, setDetailOpen] = useState(false);
     const [detailClase, setDetailClase] = useState<Clase | null>(null);
+
+    // Quick View
+    const [selectedClase, setSelectedClase] = useState<Clase | null>(null);
 
     // Load
     const loadClases = useCallback(async () => {
@@ -317,6 +323,18 @@ export default function ClasesPage() {
         loadTipos();
     }, [tiposOpen, loadTipos]);
 
+    // Robust Sync: Update selected/detail class when data refreshes
+    useEffect(() => {
+        if (selectedClase) {
+            const fresh = clases.find(c => c.id === selectedClase.id);
+            if (fresh && fresh !== selectedClase) setSelectedClase(fresh);
+        }
+        if (detailClase) {
+            const fresh = clases.find(c => c.id === detailClase.id);
+            if (fresh && fresh !== detailClase) setDetailClase(fresh);
+        }
+    }, [clases, selectedClase, detailClase]);
+
     // Delete handler
     const handleDelete = async () => {
         if (!claseToDelete) return;
@@ -339,7 +357,7 @@ export default function ClasesPage() {
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 pb-20">
             {/* Header */}
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
@@ -411,6 +429,10 @@ export default function ClasesPage() {
                             setDetailClase(c);
                             setDetailOpen(true);
                         }}
+                        onSelect={(c) => {
+                            if (selectedClase?.id === c.id) setSelectedClase(null);
+                            else setSelectedClase(c);
+                        }}
                     />
                 )}
             </motion.div>
@@ -439,7 +461,14 @@ export default function ClasesPage() {
                                 {clasesFiltered.map((c) => {
                                     const cnt = horariosCount.get(Number(c.id)) || 0;
                                     return (
-                                        <tr key={String(c.id)} className="border-t border-slate-800/60">
+                                        <tr
+                                            key={String(c.id)}
+                                            className="border-t border-slate-800/60 cursor-pointer hover:bg-slate-800/20"
+                                            onClick={() => {
+                                                if (selectedClase?.id === c.id) setSelectedClase(null);
+                                                else setSelectedClase(c);
+                                            }}
+                                        >
                                             <td className="py-2 pr-4 text-slate-200">{c.nombre}</td>
                                             <td className="py-2 pr-4 text-slate-400 max-w-[420px] truncate">{c.descripcion || '—'}</td>
                                             <td className="py-2 pr-4 text-slate-400 tabular-nums">{cnt}</td>
@@ -447,7 +476,8 @@ export default function ClasesPage() {
                                                 <div className="inline-flex items-center gap-1">
                                                     <button
                                                         className="p-2 rounded-lg text-primary-300 hover:bg-slate-800"
-                                                        onClick={() => {
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
                                                             setDetailClase(c);
                                                             setDetailOpen(true);
                                                         }}
@@ -458,7 +488,8 @@ export default function ClasesPage() {
                                                     </button>
                                                     <button
                                                         className="p-2 rounded-lg text-slate-300 hover:bg-slate-800"
-                                                        onClick={() => {
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
                                                             setClaseToEdit(c);
                                                             setFormOpen(true);
                                                         }}
@@ -469,7 +500,8 @@ export default function ClasesPage() {
                                                     </button>
                                                     <button
                                                         className="p-2 rounded-lg text-slate-300 hover:text-danger-300 hover:bg-slate-800"
-                                                        onClick={() => {
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
                                                             setClaseToDelete(c);
                                                             setDeleteOpen(true);
                                                         }}
@@ -495,6 +527,25 @@ export default function ClasesPage() {
                     </div>
                 </motion.div>
             )}
+
+            {/* Quick View Panel */}
+            <AnimatePresence>
+                {selectedClase && (
+                    <div className="fixed bottom-0 left-0 right-0 z-30 flex justify-center px-4 pb-4 pointer-events-none">
+                        <div className="w-full max-w-6xl pointer-events-auto">
+                            <ClaseQuickView
+                                key={selectedClase.id}
+                                clase={selectedClase}
+                                onClose={() => setSelectedClase(null)}
+                                onManage={() => {
+                                    setDetailClase(selectedClase);
+                                    setDetailOpen(true);
+                                }}
+                            />
+                        </div>
+                    </div>
+                )}
+            </AnimatePresence>
 
             {/* Form Modal */}
             <ClaseFormModal
