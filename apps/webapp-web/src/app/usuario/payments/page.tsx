@@ -29,7 +29,7 @@ export default function PaymentsPage() {
 
     const handleDownloadReceipt = async (paymentId: number) => {
         try {
-            const res = await api.previewReceipt({ id: paymentId });
+            const res = await api.downloadReceipt(paymentId);
             if (res.ok && res.data) {
                 const url = window.URL.createObjectURL(res.data.blob);
                 const a = document.createElement('a');
@@ -39,7 +39,7 @@ export default function PaymentsPage() {
                 a.click();
                 window.URL.revokeObjectURL(url);
             } else {
-                alert('Error al descargar recibo');
+                alert('Error al descargar recibo: ' + (res.error || 'Desconocido'));
             }
         } catch (e) {
             console.error(e);

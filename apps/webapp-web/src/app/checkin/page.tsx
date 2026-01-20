@@ -285,6 +285,14 @@ export default function CheckinPage() {
             await scannerRef.current.stop().catch(() => { });
         }
         await api.logout();
+
+        // Remove 'auto' param to prevent immediate re-login loop
+        const url = new URL(window.location.href);
+        if (url.searchParams.get('auto')) {
+            url.searchParams.delete('auto');
+            window.history.replaceState({}, '', url.toString());
+        }
+
         setAuthenticated(false);
         setUserInfo(null);
         setScanning(false);

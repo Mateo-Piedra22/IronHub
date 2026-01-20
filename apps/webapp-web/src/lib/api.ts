@@ -1098,6 +1098,30 @@ class ApiClient {
         }
     }
 
+    async downloadReceipt(id: number): Promise<ApiResponse<{ blob: Blob }>> {
+        const url = `${this.baseUrl}/api/pagos/${id}/recibo/preview`;
+        try {
+            const response = await fetch(url, {
+                method: 'GET',
+                credentials: 'include'
+            });
+
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                return {
+                    ok: false,
+                    error: errData.detail || errData.error || 'Error descargando recibo'
+                };
+            }
+
+            const blob = await response.blob();
+            return { ok: true, data: { blob } };
+        } catch (e) {
+            console.error('API Error:', e);
+            return { ok: false, error: 'Error de conexión' };
+        }
+    }
+
     // === Profesores ===
     async getProfesores() {
         return this.request<{ profesores: Profesor[] }>('/api/profesores');

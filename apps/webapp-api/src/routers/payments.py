@@ -968,13 +968,26 @@ async def api_pago_preview(
 async def api_pago_recibo_preview(
     pago_id: int,
     request: Request,
-    _=Depends(require_gestion_access),
     svc: PaymentService = Depends(get_payment_service)
 ):
     try:
         pago = svc.obtener_pago(int(pago_id))
         if not pago:
             raise HTTPException(status_code=404, detail="Pago no encontrado")
+            
+        # Permission check: Admin/Profesor OR the Payment Owner
+        role = str(request.session.get("role") or "").strip().lower()
+        is_admin = role in ("dueño", "dueno", "owner", "admin", "administrador", "profesor")
+        
+        current_user_id = request.session.get("user_id")
+        
+        if not is_admin:
+            # check if owner
+            if not current_user_id:
+                raise HTTPException(status_code=401, detail="Unauthorized")
+            if int(current_user_id) != int(pago.usuario_id):
+                raise HTTPException(status_code=403, detail="Forbidden")
+
         usuario = svc.obtener_usuario_por_id(int(pago.usuario_id))
         if not usuario:
             raise HTTPException(status_code=404, detail="Usuario del pago no encontrado")
