@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
     Plus,
@@ -38,7 +38,8 @@ import {
     type TipoCuota,
     type MetodoPago,
     type ConceptoPago,
-    PAGO_PRESET_TEMPLATES
+    PAGO_PRESET_TEMPLATES,
+    type PagoPresetTemplate,
 } from '@/lib/api';
 import { formatDate, formatCurrency, cn, getMonthName } from '@/lib/utils';
 
@@ -191,9 +192,76 @@ function PagoFormModal({
         }
     };
 
-    // Apply preset template
+    // Generate dynamic templates from actual TipoCuota records
+    // Uses the selected user's tipo_cuota for combo templates
+    const dynamicTemplates = useMemo((): PagoPresetTemplate[] => {
+        const templates: PagoPresetTemplate[] = [];
+
+        // Get selected user's tipo_cuota (if user selected)
+        const selectedUser = usuarios.find(u => u.id === usuarioId);
+        const userTipoCuota = selectedUser?.tipo_cuota_id
+            ? tiposCuota.find(t => t.id === selectedUser.tipo_cuota_id)
+            : null;
+
+        // If user has a tipo_cuota, show it prominently at the top
+        if (userTipoCuota) {
+            templates.push({
+                id: `user_cuota`,
+                nombre: `${userTipoCuota.nombre} (del usuario)`,
+                conceptos: [{
+                    descripcion: userTipoCuota.nombre,
+                    cantidad: 1,
+                    precio_unitario: userTipoCuota.precio || 0
+                }]
+            });
+
+            // Add "Inscripción + [user's cuota]" combo
+            templates.push({
+                id: 'inscripcion_user_cuota',
+                nombre: `Inscripción + ${userTipoCuota.nombre}`,
+                conceptos: [
+                    { descripcion: 'Inscripción', cantidad: 1, precio_unitario: 0 },
+                    { descripcion: userTipoCuota.nombre, cantidad: 1, precio_unitario: userTipoCuota.precio || 0 }
+                ]
+            });
+
+            // Add "[user's cuota] + Personal Training" combo
+            templates.push({
+                id: 'cuota_personal',
+                nombre: `${userTipoCuota.nombre} + Personal Training`,
+                conceptos: [
+                    { descripcion: userTipoCuota.nombre, cantidad: 1, precio_unitario: userTipoCuota.precio || 0 },
+                    { descripcion: 'Personal Training', cantidad: 1, precio_unitario: 0 }
+                ]
+            });
+        }
+
+        // Add separator if user has cuota and there are other tipos
+        const otherTipos = tiposCuota.filter(t => !userTipoCuota || t.id !== userTipoCuota.id);
+
+        // Add other tipo_cuota options (for changing user's cuota or manual selection)
+        otherTipos.forEach(tipo => {
+            templates.push({
+                id: `tipo_${tipo.id}`,
+                nombre: tipo.nombre,
+                conceptos: [{
+                    descripcion: tipo.nombre,
+                    cantidad: 1,
+                    precio_unitario: tipo.precio || 0
+                }]
+            });
+        });
+
+        return templates;
+    }, [tiposCuota, usuarioId, usuarios]);
+
+    // Apply preset template (now uses dynamic templates)
     const applyPreset = (presetId: string) => {
-        const preset = PAGO_PRESET_TEMPLATES.find(p => p.id === presetId);
+        // First check dynamic templates, then fallback to static for backwards compatibility
+        let preset = dynamicTemplates.find(p => p.id === presetId);
+        if (!preset) {
+            preset = PAGO_PRESET_TEMPLATES.find(p => p.id === presetId);
+        }
         if (preset) {
             const newItems: ConceptoLineItem[] = preset.conceptos.map(c => ({
                 id: crypto.randomUUID(),
@@ -304,10 +372,10 @@ function PagoFormModal({
                     }))}
                 />
 
-                {/* Preset Templates */}
+                {/* Preset Templates - Now dynamic from TipoCuota */}
                 <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm text-slate-400">Plantillas:</span>
-                    {PAGO_PRESET_TEMPLATES.map((preset) => (
+                    {dynamicTemplates.map((preset) => (
                         <button
                             key={preset.id}
                             type="button"
