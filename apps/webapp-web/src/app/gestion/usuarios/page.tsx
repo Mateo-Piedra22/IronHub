@@ -91,6 +91,19 @@ function UsuarioFormModal({ isOpen, onClose, usuario, tiposCuota, onSuccess }: U
 
         setLoading(true);
         try {
+            // Validate DNI uniqueness before submitting
+            if (formData.dni?.trim()) {
+                const dniCheck = await api.checkDniAvailable(
+                    formData.dni.trim(),
+                    usuario?.id // Exclude current user when editing
+                );
+                if (dniCheck.ok && dniCheck.data && !dniCheck.data.available) {
+                    error(`El DNI ya está en uso por: ${dniCheck.data.user_name || 'otro usuario'}`);
+                    setLoading(false);
+                    return;
+                }
+            }
+
             if (usuario) {
                 const res = await api.updateUsuario(usuario.id, formData);
                 if (res.ok) {
@@ -212,6 +225,8 @@ export default function UsuariosPage() {
     const [selectedUsuario, setSelectedUsuario] = useState<Usuario | null>(null);
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
     const [usuarioToDelete, setUsuarioToDelete] = useState<Usuario | null>(null);
+    const [toggleModalOpen, setToggleModalOpen] = useState(false);
+    const [usuarioToToggle, setUsuarioToToggle] = useState<Usuario | null>(null);
 
     // Config data
     const [tiposCuota, setTiposCuota] = useState<TipoCuota[]>([]);
@@ -226,10 +241,10 @@ export default function UsuariosPage() {
         try {
             const [res, hoyRes] = await Promise.all([
                 api.getUsuarios({
-                search: search || undefined,
-                activo: filterActivo,
-                page,
-                limit: pageSize,
+                    search: search || undefined,
+                    activo: filterActivo,
+                    page,
+                    limit: pageSize,
                 }),
                 api.getAsistenciasHoyIds().catch(() => ({ ok: false } as any)),
             ]);
@@ -281,10 +296,16 @@ export default function UsuariosPage() {
         }
     };
 
-    // Handle toggle activo
-    const handleToggleActivo = async (usuario: Usuario) => {
+    // Handle toggle activo - now with confirmation modal
+    const confirmToggleActivo = (usuario: Usuario) => {
+        setUsuarioToToggle(usuario);
+        setToggleModalOpen(true);
+    };
+
+    const handleToggleActivo = async () => {
+        if (!usuarioToToggle) return;
         try {
-            const res = await api.toggleUsuarioActivo(usuario.id);
+            const res = await api.toggleUsuarioActivo(usuarioToToggle.id);
             if (res.ok) {
                 success(`Usuario ${res.data?.activo ? 'activado' : 'desactivado'}`);
                 loadUsuarios();
@@ -293,6 +314,9 @@ export default function UsuariosPage() {
             }
         } catch {
             error('Error de conexión');
+        } finally {
+            setToggleModalOpen(false);
+            setUsuarioToToggle(null);
         }
     };
 
@@ -404,7 +428,7 @@ export default function UsuariosPage() {
                 <button
                     onClick={(e) => {
                         e.stopPropagation();
-                        handleToggleActivo(row);
+                        confirmToggleActivo(row);
                     }}
                     className={cn(
                         'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors',
@@ -581,6 +605,23 @@ export default function UsuariosPage() {
                 variant="danger"
             />
 
+            {/* Toggle Active Confirm Modal */}
+            <ConfirmModal
+                isOpen={toggleModalOpen}
+                onClose={() => {
+                    setToggleModalOpen(false);
+                    setUsuarioToToggle(null);
+                }}
+                onConfirm={handleToggleActivo}
+                title={usuarioToToggle?.activo ? "Desactivar Usuario" : "Activar Usuario"}
+                message={usuarioToToggle?.activo
+                    ? `¿Estás seguro de desactivar a "${usuarioToToggle?.nombre}"? No podrá acceder al sistema ni registrar check-ins.`
+                    : `¿Activar a "${usuarioToToggle?.nombre}"? Podrá acceder al sistema y registrar check-ins.`
+                }
+                confirmText={usuarioToToggle?.activo ? "Desactivar" : "Activar"}
+                variant={usuarioToToggle?.activo ? "danger" : "info"}
+            />
+
             {/* User Sidebar */}
             <AnimatePresence>
                 {sidebarOpen && (
@@ -602,7 +643,7 @@ export default function UsuariosPage() {
                             setSidebarOpen(false);
                         }}
                         onToggleActivo={(u) => {
-                            handleToggleActivo(u);
+                            confirmToggleActivo(u);
                         }}
                         onRefresh={loadUsuarios}
                     />

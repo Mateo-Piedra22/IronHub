@@ -9,10 +9,12 @@ from fastapi.templating import Jinja2Templates
 
 from src.dependencies import (
     get_user_service, get_profesor_service, 
-    require_gestion_access, require_owner, get_whatsapp_dispatch_service
+    require_gestion_access, require_owner, get_whatsapp_dispatch_service,
+    get_audit_service
 )
 from src.services import UserService, ProfesorService
 from src.services.whatsapp_dispatch_service import WhatsAppDispatchService
+from src.services.audit_service import AuditService
 from src.utils import _resolve_theme_vars, _resolve_logo_url, get_gym_name
 
 # Fallback for UsuarioEstado if not imported correctly or available
@@ -138,6 +140,48 @@ async def api_usuario_pin_set(
     except Exception as e:
         msg = str(e)
         return JSONResponse({"ok": False, "mensaje": msg, "error": msg, "success": False, "message": msg}, status_code=500)
+
+
+@router.get("/api/usuarios/check-dni")
+async def api_check_dni_unique(
+    request: Request,
+    dni: str,
+    exclude_id: Optional[int] = None,
+    user_service: UserService = Depends(get_user_service),
+    _=Depends(require_gestion_access)
+):
+    """
+    Check if a DNI is available (not already in use by another user).
+    
+    Args:
+        dni: The DNI to check
+        exclude_id: Optional user ID to exclude from the check (for updates)
+    
+    Returns:
+        {"available": bool, "user_id": int | null} - Whether the DNI is available
+    """
+    try:
+        if not dni or not dni.strip():
+            return {"available": True, "user_id": None}
+        
+        existing_user = user_service.get_user_by_dni(dni.strip())
+        
+        if existing_user is None:
+            return {"available": True, "user_id": None}
+        
+        # If we're excluding a specific user (editing), check if it's the same user
+        if exclude_id is not None and existing_user.id == exclude_id:
+            return {"available": True, "user_id": existing_user.id}
+        
+        return {
+            "available": False,
+            "user_id": existing_user.id,
+            "user_name": existing_user.nombre
+        }
+    except Exception as e:
+        logger.error(f"Error checking DNI: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
 
 @router.get("/api/usuarios/{usuario_id}")
 async def api_usuario_get(
@@ -306,12 +350,35 @@ async def api_usuario_update(
 
 @router.delete("/api/usuarios/{usuario_id}")
 async def api_usuario_delete(
-    usuario_id: int, 
+    usuario_id: int,
+    request: Request,
     user_service: UserService = Depends(get_user_service),
+    audit_service: AuditService = Depends(get_audit_service),
     _=Depends(require_gestion_access)
 ):
     try:
+        # Get user info before deletion for audit log
+        user_before = user_service.get_user(usuario_id)
+        old_values = None
+        if user_before:
+            old_values = {
+                "id": user_before.id,
+                "nombre": user_before.nombre,
+                "dni": user_before.dni,
+                "activo": user_before.activo
+            }
+        
         user_service.delete_user(usuario_id)
+        
+        # Log the deletion
+        audit_service.log_from_request(
+            request=request,
+            action=AuditService.ACTION_DELETE,
+            table_name="usuarios",
+            record_id=usuario_id,
+            old_values=old_values
+        )
+        
         return {"ok": True}
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
@@ -327,14 +394,31 @@ async def api_usuario_toggle_activo(
     background_tasks: BackgroundTasks,
     user_service: UserService = Depends(get_user_service),
     wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service),
+    audit_service: AuditService = Depends(get_audit_service),
     _=Depends(require_gestion_access)
 ):
     """Toggle user active status"""
     try:
+        # Get previous state for audit
+        user_before = user_service.get_user(usuario_id)
+        old_activo = user_before.activo if user_before else None
+        
         is_owner = bool(request.session.get("logged_in")) and str(request.session.get("role") or "").strip().lower() in ("dueño", "dueno", "owner")
         result = user_service.toggle_activo(usuario_id, is_owner=is_owner)
         if result.get('error') == 'not_found':
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        
+        # Audit log the toggle
+        new_activo = result.get("activo")
+        audit_service.log_from_request(
+            request=request,
+            action=AuditService.ACTION_USER_ACTIVATE if new_activo else AuditService.ACTION_USER_DEACTIVATE,
+            table_name="usuarios",
+            record_id=usuario_id,
+            old_values={"activo": old_activo},
+            new_values={"activo": new_activo}
+        )
+        
         try:
             active = bool(result.get("activo"))
             if not active:

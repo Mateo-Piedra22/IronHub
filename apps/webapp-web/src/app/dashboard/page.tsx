@@ -2,11 +2,48 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { api } from '@/lib/api';
+import { api, type Usuario, type Pago, type MetodoPago, type Asistencia } from '@/lib/api';
 import { AlertTriangle, ArrowRight, BarChart3, CalendarDays, CreditCard, Download, Loader2, MessageSquare, Plus, ScanLine, Settings, Users } from 'lucide-react';
 import { formatCurrency, formatDate, formatDateRelative, formatNumber } from '@/lib/utils';
 import { BarChart, ChartCard, DonutChart, HeatmapTable, LineChart } from '@/components/owner-dashboard/charts';
 import { ConfirmModal } from '@/components/ui';
+
+// Dashboard-specific types - index signatures allow extra API fields
+interface WaPendiente {
+    id?: number;
+    usuario_id?: number;
+    usuario_nombre?: string;
+    tipo?: string;
+    type?: string;
+    estado?: string;
+    status?: string;
+    fecha?: string;
+    telefono?: string;
+    phone?: string;
+    [key: string]: unknown;
+}
+
+interface AuditData {
+    daily?: Array<{ date: string; total_checkins: number; unique_users: number }>;
+    hourly?: Array<{ hour: number; count: number }>;
+    suspicious_multiples?: Array<{ usuario_id: number; usuario_nombre: string; count: number }>;
+    repetition_patterns?: Array<{ usuario_id: number; usuario_nombre: string; pattern: string }>;
+    summary?: { total_checkins?: number; unique_users?: number; unique_users_total?: number; avg_daily?: number; avg_checkins_per_user?: number;[k: string]: unknown };
+    anomalies?: {
+        spikes?: Array<{ fecha?: string; total_checkins?: number; avg_prev_7d?: number;[k: string]: unknown }>;
+        multiples_en_dia?: Array<{ usuario_id?: number; usuario_nombre?: string; count?: number; fecha?: string;[k: string]: unknown }>;
+        repeticiones_rapidas?: Array<{ usuario_id?: number; usuario_nombre?: string; count?: number; fecha?: string;[k: string]: unknown }>;
+        [k: string]: unknown;
+    };
+    [key: string]: unknown;
+}
+
+interface OwnerGymBilling {
+    gym?: { status?: string; nombre?: string; slug?: string; plan?: string; suspended_reason?: string;[k: string]: unknown };
+    subscription?: { status?: string; plan?: { name?: string; currency?: string; amount?: number } | string; plan_name?: string; valid_until?: string; trial_ends?: string; next_due_date?: string;[k: string]: unknown };
+    payments?: Array<{ id?: number; monto?: number; fecha?: string; estado?: string; notes?: string;[k: string]: unknown }>;
+    [key: string]: unknown;
+}
 
 export default function DashboardPage() {
     return <OwnerDashboard />;
@@ -29,24 +66,24 @@ function OwnerDashboard() {
     const [waitlistEvents, setWaitlistEvents] = useState<Array<{ id?: number; usuario_nombre?: string; posicion?: number; fecha?: string | null }>>([]);
     const [delinquencyAlerts, setDelinquencyAlerts] = useState<Array<{ usuario_id?: number; usuario_nombre?: string; ultimo_pago?: string | null }>>([]);
     const [waStats, setWaStats] = useState<{ total?: number; ultimo_mes?: number; por_tipo?: Record<string, number>; por_estado?: Record<string, number> } | null>(null);
-    const [waPendientes, setWaPendientes] = useState<any[]>([]);
+    const [waPendientes, setWaPendientes] = useState<WaPendiente[]>([]);
     const [ownerGymSettings, setOwnerGymSettings] = useState<{ attendance_allow_multiple_per_day: boolean } | null>(null);
-    const [ownerGymBilling, setOwnerGymBilling] = useState<any>(null);
+    const [ownerGymBilling, setOwnerGymBilling] = useState<OwnerGymBilling | null>(null);
     const [savingGymSettings, setSavingGymSettings] = useState(false);
     const [toggleConfirm, setToggleConfirm] = useState<{ open: boolean; next: boolean } | null>(null);
     const [usuariosSearch, setUsuariosSearch] = useState('');
     const [usuariosSearchDebounced, setUsuariosSearchDebounced] = useState('');
     const [usuariosActivo, setUsuariosActivo] = useState<'all' | 'true' | 'false'>('all');
-    const [usuarios, setUsuarios] = useState<any[]>([]);
+    const [usuarios, setUsuarios] = useState<Usuario[]>([]);
     const [usuariosTotal, setUsuariosTotal] = useState(0);
     const [pagosDesde, setPagosDesde] = useState('');
     const [pagosHasta, setPagosHasta] = useState('');
-    const [pagos, setPagos] = useState<any[]>([]);
-    const [metodosPago, setMetodosPago] = useState<any[]>([]);
+    const [pagos, setPagos] = useState<Pago[]>([]);
+    const [metodosPago, setMetodosPago] = useState<MetodoPago[]>([]);
     const [metodoId, setMetodoId] = useState<number | null>(null);
-    const [asistencias, setAsistencias] = useState<any[]>([]);
+    const [asistencias, setAsistencias] = useState<Asistencia[]>([]);
     const [refreshing, setRefreshing] = useState(false);
-    const [audit, setAudit] = useState<any>(null);
+    const [audit, setAudit] = useState<AuditData | null>(null);
     const [auditLoading, setAuditLoading] = useState(false);
     const [auditDesde, setAuditDesde] = useState(() => new Date(Date.now() - 34 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
     const [auditHasta, setAuditHasta] = useState(() => new Date().toISOString().slice(0, 10));
@@ -195,17 +232,11 @@ function OwnerDashboard() {
         }
     }, [usuariosSearchDebounced, usuariosActivo, pagosDesde, pagosHasta, metodoId]);
 
+    // Consolidated effect to refresh tables when loading completes or filters change
+    // This replaces three separate useEffects that were calling refreshTables redundantly
     useEffect(() => {
         if (!loading) refreshTables();
-    }, [loading, refreshTables]);
-
-    useEffect(() => {
-        if (!loading) refreshTables();
-    }, [usuariosSearchDebounced, usuariosActivo, loading, refreshTables]);
-
-    useEffect(() => {
-        if (!loading) refreshTables();
-    }, [pagosDesde, pagosHasta, metodoId, loading, refreshTables]);
+    }, [loading, refreshTables, usuariosSearchDebounced, usuariosActivo, pagosDesde, pagosHasta, metodoId]);
 
     useEffect(() => {
         const t = setTimeout(() => setUsuariosSearchDebounced(usuariosSearch), 300);
@@ -362,11 +393,11 @@ function OwnerDashboard() {
                                     <div className="rounded-xl bg-slate-900/60 border border-slate-800/60 p-4">
                                         <div className="text-xs text-slate-500">Plan</div>
                                         <div className="mt-1 text-white font-semibold">
-                                            {ownerGymBilling.subscription.plan?.name || ownerGymBilling.subscription.plan_name || '—'}
+                                            {typeof ownerGymBilling.subscription.plan === 'object' ? ownerGymBilling.subscription.plan?.name : ownerGymBilling.subscription.plan_name || '—'}
                                         </div>
                                         <div className="text-xs text-slate-500 mt-1">
-                                            {ownerGymBilling.subscription.plan?.currency || 'ARS'}{' '}
-                                            {formatCurrency(Number(ownerGymBilling.subscription.plan?.amount || 0))}
+                                            {typeof ownerGymBilling.subscription.plan === 'object' ? (ownerGymBilling.subscription.plan?.currency || 'ARS') : 'ARS'}{' '}
+                                            {formatCurrency(Number(typeof ownerGymBilling.subscription.plan === 'object' ? ownerGymBilling.subscription.plan?.amount : 0) || 0)}
                                         </div>
                                     </div>
                                     <div className="rounded-xl bg-slate-900/60 border border-slate-800/60 p-4">
@@ -448,8 +479,8 @@ function OwnerDashboard() {
                             </div>
                             <button
                                 className={`w-full rounded-xl border px-4 py-3 text-left transition-colors ${ownerGymSettings?.attendance_allow_multiple_per_day
-                                        ? 'border-emerald-600/50 bg-emerald-500/10 text-emerald-200'
-                                        : 'border-slate-800 bg-slate-900/60 text-slate-200'
+                                    ? 'border-emerald-600/50 bg-emerald-500/10 text-emerald-200'
+                                    : 'border-slate-800 bg-slate-900/60 text-slate-200'
                                     }`}
                                 disabled={savingGymSettings}
                                 onClick={() => {

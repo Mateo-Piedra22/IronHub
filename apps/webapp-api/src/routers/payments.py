@@ -20,9 +20,11 @@ from src.dependencies import (
     require_gestion_access, 
     get_whatsapp_dispatch_service,
     require_owner,
+    get_audit_service,
 )
 from src.services.payment_service import PaymentService
 from src.services.whatsapp_dispatch_service import WhatsAppDispatchService
+from src.services.audit_service import AuditService
 from src.models import MetodoPago, Pago
 from src.database.orm_models import Usuario
 
@@ -1771,13 +1773,37 @@ async def api_pagos_update(
 
 @router.delete("/api/pagos/{pago_id}")
 async def api_pagos_delete(
-    pago_id: int, 
+    pago_id: int,
+    request: Request,
     _=Depends(require_gestion_access),
-    svc: PaymentService = Depends(get_payment_service)
+    svc: PaymentService = Depends(get_payment_service),
+    audit_service: AuditService = Depends(get_audit_service),
 ):
     """Delete a payment using SQLAlchemy."""
     try:
+        # Get payment info before deletion for audit log
+        pago_before = svc.obtener_pago(int(pago_id))
+        old_values = None
+        if pago_before:
+            old_values = {
+                "id": pago_before.id,
+                "usuario_id": pago_before.usuario_id,
+                "monto": float(pago_before.monto or 0),
+                "fecha_pago": str(pago_before.fecha_pago) if pago_before.fecha_pago else None,
+                "metodo_pago_id": pago_before.metodo_pago_id,
+            }
+        
         svc.eliminar_pago(int(pago_id))
+        
+        # Log the deletion
+        audit_service.log_from_request(
+            request=request,
+            action=AuditService.ACTION_PAYMENT_DELETE,
+            table_name="pagos",
+            record_id=pago_id,
+            old_values=old_values
+        )
+        
         return {"ok": True}
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))

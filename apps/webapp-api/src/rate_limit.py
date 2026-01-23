@@ -175,3 +175,104 @@ def clear_login_attempts(request: Request, dni: str) -> None:
     """Clear attempts for both IP and DNI (on successful login)."""
     clear_ip_attempts(request)
     clear_dni_attempts(dni)
+
+
+# --- Global API Rate Limiting ---
+# These functions provide rate limiting for all API requests, not just login
+
+_api_requests_by_ip: Dict[str, list] = {}
+
+# Configuration via environment variables
+try:
+    _GLOBAL_RATE_LIMIT_MAX = int(os.getenv("GLOBAL_RATE_LIMIT_MAX", "100"))
+except Exception:
+    _GLOBAL_RATE_LIMIT_MAX = 100  # Default: 100 requests per window
+
+try:
+    _GLOBAL_RATE_LIMIT_WINDOW = int(os.getenv("GLOBAL_RATE_LIMIT_WINDOW", "60"))
+except Exception:
+    _GLOBAL_RATE_LIMIT_WINDOW = 60  # Default: 60 seconds window
+
+# Stricter limits for write operations
+try:
+    _WRITE_RATE_LIMIT_MAX = int(os.getenv("WRITE_RATE_LIMIT_MAX", "30"))
+except Exception:
+    _WRITE_RATE_LIMIT_MAX = 30  # Default: 30 writes per window
+
+try:
+    _WRITE_RATE_LIMIT_WINDOW = int(os.getenv("WRITE_RATE_LIMIT_WINDOW", "60"))
+except Exception:
+    _WRITE_RATE_LIMIT_WINDOW = 60  # Default: 60 seconds window
+
+
+_write_requests_by_ip: Dict[str, list] = {}
+
+
+def is_global_rate_limited(request: Request) -> bool:
+    """
+    Check if the request IP has exceeded the global rate limit for API requests.
+    
+    Returns:
+        True if rate limited, False otherwise
+    """
+    ip = _get_client_ip(request)
+    key = f"api:{ip}"
+    return _is_rate_limited(key, _api_requests_by_ip, _GLOBAL_RATE_LIMIT_MAX, _GLOBAL_RATE_LIMIT_WINDOW)
+
+
+def is_write_rate_limited(request: Request) -> bool:
+    """
+    Check if the request IP has exceeded the rate limit for write operations (POST/PUT/DELETE).
+    
+    Returns:
+        True if rate limited, False otherwise
+    """
+    ip = _get_client_ip(request)
+    key = f"write:{ip}"
+    return _is_rate_limited(key, _write_requests_by_ip, _WRITE_RATE_LIMIT_MAX, _WRITE_RATE_LIMIT_WINDOW)
+
+
+def register_api_request(request: Request) -> None:
+    """Register an API request for the given IP."""
+    ip = _get_client_ip(request)
+    key = f"api:{ip}"
+    _register_attempt(key, _api_requests_by_ip)
+
+
+def register_write_request(request: Request) -> None:
+    """Register a write operation (POST/PUT/DELETE) for the given IP."""
+    ip = _get_client_ip(request)
+    key = f"write:{ip}"
+    _register_attempt(key, _write_requests_by_ip)
+
+
+def get_rate_limit_status(request: Request) -> dict:
+    """
+    Get the current rate limit status for a request.
+    Useful for including in response headers.
+    
+    Returns:
+        Dict with rate limit information
+    """
+    ip = _get_client_ip(request)
+    api_key = f"api:{ip}"
+    write_key = f"write:{ip}"
+    
+    now = time.time()
+    
+    with _login_attempts_lock:
+        _prune_attempts(_api_requests_by_ip, _GLOBAL_RATE_LIMIT_WINDOW)
+        _prune_attempts(_write_requests_by_ip, _WRITE_RATE_LIMIT_WINDOW)
+        
+        api_count = len(_api_requests_by_ip.get(api_key, []))
+        write_count = len(_write_requests_by_ip.get(write_key, []))
+    
+    return {
+        "api_limit": _GLOBAL_RATE_LIMIT_MAX,
+        "api_remaining": max(0, _GLOBAL_RATE_LIMIT_MAX - api_count),
+        "api_window": _GLOBAL_RATE_LIMIT_WINDOW,
+        "write_limit": _WRITE_RATE_LIMIT_MAX,
+        "write_remaining": max(0, _WRITE_RATE_LIMIT_MAX - write_count),
+        "write_window": _WRITE_RATE_LIMIT_WINDOW,
+    }
+

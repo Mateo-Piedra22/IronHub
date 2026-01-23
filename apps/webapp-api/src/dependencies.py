@@ -96,6 +96,7 @@ from src.services.whatsapp_dispatch_service import WhatsAppDispatchService
 from src.services.whatsapp_settings_service import WhatsAppSettingsService
 from src.services.reports_service import ReportsService
 from src.services.admin_service import AdminService
+from src.services.audit_service import AuditService
 
 async def ensure_tenant_context(request: Request) -> Optional[str]:
     """
@@ -338,6 +339,11 @@ def get_reports_service(session: Session = Depends(get_db_session)) -> ReportsSe
 def get_admin_service(session: Session = Depends(get_db_session)) -> AdminService:
     """Get AdminService instance with current session."""
     return AdminService(session)
+
+
+def get_audit_service(session: Session = Depends(get_db_session)) -> AuditService:
+    """Get AuditService instance for logging sensitive actions."""
+    return AuditService(session)
 
 
 # Alias for backwards compatibility with routers

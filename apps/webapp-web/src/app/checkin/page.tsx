@@ -63,6 +63,9 @@ export default function CheckinPage() {
 
     const scannerRef = useRef<Html5Qrcode | null>(null);
     const scannerContainerRef = useRef<HTMLDivElement>(null);
+    const autoSubmitAttempted = useRef(false);
+    const logoutInProgress = useRef(false);
+
     const makeIdempotencyKey = () => {
         try {
             const c = (globalThis as any).crypto;
@@ -71,14 +74,35 @@ export default function CheckinPage() {
         return `${Date.now()}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;
     };
 
-    // Auto-submit support
+    // Auto-submit support - hardened to prevent loops
     useEffect(() => {
-        const query = new URLSearchParams(window.location.search);
-        // Only auto submit if we have DNI, are not authenticated, not loading, and auto param is true
-        if (query.get('auto') === 'true' && authDni && !authenticated && !authLoading) {
-            const fakeEvent = { preventDefault: () => { } } as React.FormEvent;
-            handleAuth(fakeEvent);
+        // Skip if already attempted, logout in progress, or already authenticated
+        if (autoSubmitAttempted.current || logoutInProgress.current || authenticated || authLoading) {
+            return;
         }
+
+        const query = new URLSearchParams(window.location.search);
+        const isAutoMode = query.get('auto') === 'true';
+
+        if (!isAutoMode) return;
+
+        // Validate that authDni is a valid DNI (has at least 6 numeric characters)
+        const cleanDni = authDni.replace(/\D/g, '');
+        if (!cleanDni || cleanDni.length < 6) {
+            return;
+        }
+
+        // Mark as attempted BEFORE triggering to prevent re-entry
+        autoSubmitAttempted.current = true;
+
+        // Remove auto param from URL to prevent loops on page reload
+        const url = new URL(window.location.href);
+        url.searchParams.delete('auto');
+        window.history.replaceState({}, '', url.toString());
+
+        // Trigger auth
+        const fakeEvent = { preventDefault: () => { } } as React.FormEvent;
+        handleAuth(fakeEvent);
     }, [authDni, authenticated, authLoading]);
 
     // Restore saved credentials
@@ -281,9 +305,16 @@ export default function CheckinPage() {
 
     // Logout
     const handleLogout = async () => {
+        // Prevent re-entry and block auto-submit
+        if (logoutInProgress.current) return;
+        logoutInProgress.current = true;
+
+        // Stop scanner first
         if (scannerRef.current && scanning) {
             await scannerRef.current.stop().catch(() => { });
         }
+
+        // Clear session on backend
         await api.logout();
 
         // Remove 'auto' param to prevent immediate re-login loop
@@ -293,10 +324,25 @@ export default function CheckinPage() {
             window.history.replaceState({}, '', url.toString());
         }
 
+        // Clear saved credentials to prevent auto re-login on reload
+        try {
+            localStorage.removeItem('checkin_saved_user');
+        } catch { }
+
+        // Reset all auth state
+        setAuthDni('');
+        setAuthPhone('');
         setAuthenticated(false);
         setUserInfo(null);
         setScanning(false);
         setScannerReady(false);
+
+        // Reset refs
+        autoSubmitAttempted.current = false;
+        logoutInProgress.current = false;
+
+        // Redirect to home page to fully exit check-in flow
+        window.location.href = '/';
     };
 
     // Get quota warning message

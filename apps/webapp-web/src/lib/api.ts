@@ -143,10 +143,12 @@ export interface Pago {
     usuario_nombre?: string;
     monto: number;
     fecha: string;
+    fecha_pago?: string;
     mes?: number;
     anio?: number;
     metodo_pago_id?: number;
     metodo_pago_nombre?: string;
+    metodo_pago?: string;
     concepto_id?: number;
     concepto_nombre?: string;
     tipo_cuota_id?: number;
@@ -333,6 +335,7 @@ export interface Asistencia {
     hora_entrada?: string;
     hora_salida?: string;
     duracion_minutos?: number;
+    tipo?: string;
 }
 
 // === Config Types ===
@@ -974,6 +977,14 @@ class ApiClient {
 
     async getUsuario(id: number) {
         return this.request<Usuario>(`/api/usuarios/${id}`);
+    }
+
+    async checkDniAvailable(dni: string, excludeId?: number) {
+        const params = new URLSearchParams({ dni });
+        if (excludeId !== undefined) params.set('exclude_id', String(excludeId));
+        return this.request<{ available: boolean; user_id?: number; user_name?: string }>(
+            `/api/usuarios/check-dni?${params.toString()}`
+        );
     }
 
     async createUsuario(data: UsuarioCreateInput) {

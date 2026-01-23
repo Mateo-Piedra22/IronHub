@@ -190,6 +190,33 @@ async def tenant_context_middleware(request: Request, call_next):
     This is CRITICAL for multi-tenant database routing.
     """
     tenant = None
+    
+    # === GLOBAL RATE LIMITING ===
+    if request.url.path.startswith("/api/"):
+        try:
+            from src.rate_limit import (
+                is_global_rate_limited, is_write_rate_limited,
+                register_api_request, register_write_request, get_rate_limit_status
+            )
+            if is_global_rate_limited(request):
+                status = get_rate_limit_status(request)
+                return JSONResponse(
+                    status_code=429,
+                    content={"ok": False, "error": "Too many requests", "mensaje": "Demasiadas solicitudes.", "retry_after": status.get("api_window", 60)},
+                    headers={"Retry-After": str(status.get("api_window", 60)), "X-RateLimit-Limit": str(status.get("api_limit", 100)), "X-RateLimit-Remaining": "0"}
+                )
+            if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+                if is_write_rate_limited(request):
+                    status = get_rate_limit_status(request)
+                    return JSONResponse(
+                        status_code=429,
+                        content={"ok": False, "error": "Too many write requests", "mensaje": "Demasiadas operaciones.", "retry_after": status.get("write_window", 60)},
+                        headers={"Retry-After": str(status.get("write_window", 60)), "X-RateLimit-Limit": str(status.get("write_limit", 30)), "X-RateLimit-Remaining": "0"}
+                    )
+                register_write_request(request)
+            register_api_request(request)
+        except Exception as e:
+            logger.warning(f"Rate limiting check failed: {e}")
     host = request.headers.get("host", "")
     base = os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz")
     debug_tenant = os.getenv("DEBUG_TENANT", "false").lower() in ("1", "true", "yes")
