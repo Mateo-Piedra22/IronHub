@@ -39,17 +39,36 @@ def _build_db_url(
 def _resolve_webapp_api_path() -> Path:
     env_root = (os.getenv("TENANT_MIGRATIONS_ROOT") or "").strip()
     if env_root:
-        p = Path(env_root).resolve()
-        if p.exists():
-            return p
+        candidates: list[Path] = []
+        try:
+            raw = Path(env_root)
+            if raw.is_absolute():
+                candidates.append(raw)
+            else:
+                candidates.append(Path.cwd() / raw)
+                candidates.append(Path(__file__).resolve().parents[1] / raw)
+        except Exception:
+            candidates = []
+        for c in candidates:
+            try:
+                p = c.resolve()
+            except Exception:
+                p = c
+            if p.exists():
+                return p
 
     root = _repo_root()
     p = (root / "apps" / "webapp-api").resolve()
     if p.exists():
         return p
 
+    bundled = (Path(__file__).resolve().parents[1] / "tenant_migrations" / "webapp-api").resolve()
+    if bundled.exists():
+        return bundled
+
     raise FileNotFoundError(
-        "No se encontró apps/webapp-api. Definí TENANT_MIGRATIONS_ROOT apuntando al directorio de webapp-api."
+        "No se encontró apps/webapp-api. Definí TENANT_MIGRATIONS_ROOT apuntando al directorio de webapp-api "
+        "o incluí el bundle de migraciones en el deploy de admin-api."
     )
 
 
@@ -110,7 +129,7 @@ def migrate_tenant_db(
         sslmode=sslmode,
     )
 
-    cfg = Config(str(cfg_path))
+    cfg = Config(str(cfg_path)) if cfg_path.exists() else Config()
     cfg.set_main_option("script_location", str(script_location))
     cfg.set_main_option("sqlalchemy.url", sqlalchemy_url)
 

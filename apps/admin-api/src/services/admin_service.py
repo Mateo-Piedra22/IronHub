@@ -25,7 +25,6 @@ from src.secure_config import SecureConfig
 from src.security_utils import SecurityUtils
 from src.tenant_migrations import migrate_tenant_db
 from src.models.orm_models import (
-    Base,
     Usuario,
     Configuracion,
     MetodoPago,
@@ -806,6 +805,18 @@ class AdminService:
                 )
                 conn.execute(
                     text(
+                        "INSERT INTO feature_flags (id, flags) VALUES (1, :flags::jsonb) ON CONFLICT (id) DO NOTHING"
+                    ),
+                    {"flags": payload},
+                )
+        except Exception:
+            logger.exception("Error ensuring feature_flags schema")
+            return
+
+        try:
+            with eng.begin() as conn:
+                conn.execute(
+                    text(
                         """
                         CREATE TABLE IF NOT EXISTS feature_flags_overrides (
                             sucursal_id INTEGER PRIMARY KEY REFERENCES sucursales(id) ON DELETE CASCADE,
@@ -815,14 +826,22 @@ class AdminService:
                         """
                     )
                 )
-                conn.execute(
-                    text(
-                        "INSERT INTO feature_flags (id, flags) VALUES (1, :flags::jsonb) ON CONFLICT (id) DO NOTHING"
-                    ),
-                    {"flags": payload},
-                )
         except Exception:
-            return
+            try:
+                with eng.begin() as conn:
+                    conn.execute(
+                        text(
+                            """
+                            CREATE TABLE IF NOT EXISTS feature_flags_overrides (
+                                sucursal_id INTEGER PRIMARY KEY,
+                                flags JSONB NOT NULL DEFAULT '{}'::jsonb,
+                                updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                            );
+                            """
+                        )
+                    )
+            except Exception:
+                logger.exception("Error ensuring feature_flags_overrides schema")
 
     def _normalize_flags_in(self, flags: Any) -> Dict[str, Any]:
         if isinstance(flags, dict):
@@ -863,6 +882,7 @@ class AdminService:
                 merged = self._merge_feature_flags(base_merged, flags_db)
                 return {"ok": True, "flags": merged}
         except Exception:
+            logger.exception("Error getting feature flags (gym_id=%s)", int(gym_id))
             return {"ok": True, "flags": dict(DEFAULT_FEATURE_FLAGS)}
 
     def set_gym_feature_flags(self, gym_id: int, flags: Any, *, scope: str = "gym", branch_id: Optional[int] = None) -> Dict[str, Any]:
@@ -911,6 +931,12 @@ class AdminService:
                         {"sid": int(sid), "flags": payload},
                     )
         except Exception:
+            logger.exception(
+                "Error updating feature flags (gym_id=%s scope=%s branch_id=%s)",
+                int(gym_id),
+                str(scope),
+                branch_id,
+            )
             return {"ok": False, "error": "update_failed", "flags": merged}
         return {"ok": True, "flags": merged}
 
