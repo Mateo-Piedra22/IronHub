@@ -670,6 +670,65 @@ async def create_gym_v2(request: Request, payload: GymCreateV2Input):
         return JSONResponse({**result, "ok": False}, status_code=400)
 
     gym_id = int(result.get("id") or 0)
+    created_branches: List[Dict[str, Any]] = []
+    bulk_res: Optional[Dict[str, Any]] = None
+    if branches:
+        bulk_items = [b.model_dump() for b in branches]
+        bulk_res = adm.bulk_crear_sucursales(gym_id, bulk_items)
+
+        def _collect_ok(res_obj: Dict[str, Any]) -> List[Dict[str, Any]]:
+            out: List[Dict[str, Any]] = []
+            if res_obj.get("ok") and isinstance(res_obj.get("results"), list):
+                for r in res_obj.get("results") or []:
+                    if isinstance(r, dict) and r.get("ok") and r.get("branch"):
+                        out.append(r.get("branch"))
+            return out
+
+        created_branches = _collect_ok(bulk_res)
+
+        failed_idx: List[int] = []
+        merged_by_index: Dict[int, Dict[str, Any]] = {}
+        if isinstance(bulk_res.get("results"), list):
+            for r in bulk_res.get("results") or []:
+                if isinstance(r, dict) and isinstance(r.get("index"), int):
+                    merged_by_index[int(r["index"])] = r
+                    if not bool(r.get("ok")):
+                        failed_idx.append(int(r["index"]))
+
+        if failed_idx:
+            try:
+                adm.provision_tenant_migrations(gym_id)
+            except Exception:
+                pass
+            retry_pairs = [(i, bulk_items[i]) for i in failed_idx if 0 <= i < len(bulk_items)]
+            retry_items = [p[1] for p in retry_pairs]
+            if retry_items:
+                retry_res = adm.bulk_crear_sucursales(gym_id, retry_items)
+                if isinstance(retry_res.get("results"), list):
+                    for pos, r in enumerate(retry_res.get("results") or []):
+                        if not isinstance(r, dict):
+                            continue
+                        orig_index = retry_pairs[pos][0] if pos < len(retry_pairs) else None
+                        if isinstance(orig_index, int):
+                            merged_by_index[int(orig_index)] = {**r, "index": int(orig_index)}
+                merged_results = [merged_by_index[i] for i in sorted(merged_by_index.keys())]
+                bulk_res = {**bulk_res, "results": merged_results}
+                created_branches = _collect_ok(bulk_res)
+
+        if isinstance(bulk_res.get("results"), list):
+            still_failed = [r for r in bulk_res.get("results") or [] if isinstance(r, dict) and not bool(r.get("ok"))]
+            if still_failed:
+                try:
+                    adm.eliminar_gimnasio(gym_id)
+                except Exception:
+                    pass
+                return JSONResponse(
+                    {"ok": False, "error": "branches_create_failed", "gym_id": gym_id, "bulk_branches": bulk_res},
+                    status_code=500,
+                )
+
+        result["bulk_branches"] = bulk_res
+
     owner_password = str(payload.owner_password or "").strip()
     owner_password_generated = False
     if not owner_password:
@@ -677,17 +736,14 @@ async def create_gym_v2(request: Request, payload: GymCreateV2Input):
         owner_password_generated = True
 
     if not adm.set_gym_owner_password(gym_id, owner_password):
-        return JSONResponse({"ok": False, "error": "owner_password_set_failed", "gym_id": gym_id}, status_code=500)
-
-    created_branches: List[Dict[str, Any]] = []
-    if branches:
-        bulk_items = [b.model_dump() for b in branches]
-        bulk_res = adm.bulk_crear_sucursales(gym_id, bulk_items)
-        if bulk_res.get("ok") and isinstance(bulk_res.get("results"), list):
-            for r in bulk_res.get("results") or []:
-                if isinstance(r, dict) and r.get("ok") and r.get("branch"):
-                    created_branches.append(r.get("branch"))
-        result["bulk_branches"] = bulk_res
+        try:
+            adm.eliminar_gimnasio(gym_id)
+        except Exception:
+            pass
+        return JSONResponse(
+            {"ok": False, "error": "owner_password_set_failed", "gym_id": gym_id},
+            status_code=500,
+        )
 
     tenant_domain = str(os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz") or "").strip().lstrip(".")
     tenant_url = f"https://{sub}.{tenant_domain}" if sub and tenant_domain else None

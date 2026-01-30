@@ -1400,9 +1400,13 @@ class AdminService:
         address: Optional[str] = None,
         timezone: Optional[str] = None,
     ) -> Dict[str, Any]:
-        eng = self._get_tenant_engine_for_gym(int(gym_id))
-        if not eng:
-            return {"ok": False, "error": "tenant_db_unavailable"}
+        gid = int(gym_id)
+        gym = self.obtener_gimnasio(gid)
+        if not gym:
+            return {"ok": False, "error": "gym_not_found"}
+        db_name = str(gym.get("db_name") or "").strip()
+        if not db_name:
+            return {"ok": False, "error": "db_name_missing"}
 
         n = str(name or "").strip() or "Sucursal"
         c = str(code or "").strip().lower()
@@ -1414,24 +1418,65 @@ class AdminService:
         if tz and len(tz) > 64:
             return {"ok": False, "error": "invalid_timezone"}
 
-        try:
-            with eng.begin() as conn:
-                row = conn.execute(
-                    text(
-                        """
-                        INSERT INTO sucursales (nombre, codigo, direccion, timezone, activa)
-                        VALUES (:n, :c, :a, :tz, TRUE)
-                        RETURNING id
-                        """
-                    ),
-                    {"n": n, "c": c, "a": address, "tz": tz},
-                ).fetchone()
-                branch_id = int(row[0]) if row and row[0] is not None else None
-        except Exception as e:
-            msg = str(e).lower()
-            if "unique" in msg or "duplicate" in msg:
-                return {"ok": False, "error": "code_already_exists"}
-            return {"ok": False, "error": "create_failed"}
+        def _try_insert() -> tuple[Optional[int], Optional[str]]:
+            eng = self._get_tenant_engine_for_gym(gid)
+            if not eng:
+                return None, "tenant_db_unavailable"
+            try:
+                with eng.begin() as conn:
+                    row = conn.execute(
+                        text(
+                            """
+                            INSERT INTO sucursales (nombre, codigo, direccion, timezone, activa)
+                            VALUES (:n, :c, :a, :tz, TRUE)
+                            RETURNING id
+                            """
+                        ),
+                        {"n": n, "c": c, "a": address, "tz": tz},
+                    ).fetchone()
+                    branch_id = int(row[0]) if row and row[0] is not None else None
+                return branch_id, None
+            except Exception as e:
+                msg = str(e).lower()
+                if "unique" in msg or "duplicate" in msg:
+                    return None, "code_already_exists"
+                if (
+                    ("does not exist" in msg and "sucursales" in msg)
+                    or ("undefined_table" in msg)
+                    or ("relation" in msg and "sucursales" in msg)
+                    or ("alembic_version" in msg and "does not exist" in msg)
+                ):
+                    return None, "schema_missing"
+                logger.exception(
+                    "Error creando sucursal en tenant (gym_id=%s db=%s code=%s)",
+                    gid,
+                    db_name,
+                    c,
+                )
+                return None, "create_failed"
+
+        branch_id, err = _try_insert()
+        if err == "schema_missing":
+            try:
+                params = self.resolve_admin_db_params()
+                params["database"] = db_name
+                self._bootstrap_tenant_db(
+                    params,
+                    owner_data={
+                        "phone": gym.get("owner_phone"),
+                        "gym_name": gym.get("nombre"),
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "Error re-bootstrapping tenant antes de crear sucursal (gym_id=%s db=%s)",
+                    gid,
+                    db_name,
+                )
+            branch_id, err = _try_insert()
+
+        if err:
+            return {"ok": False, "error": err}
 
         if not branch_id:
             return {"ok": False, "error": "create_failed"}
@@ -2701,165 +2746,158 @@ class AdminService:
     def _crear_db_postgres(
         self, db_name: str, owner_data: Optional[Dict[str, Any]] = None
     ) -> bool:
-        try:
-            name = str(db_name or "").strip()
-            if not name:
-                return False
-            token = (os.getenv("NEON_API_TOKEN") or "").strip()
-            if token and requests is not None:
-                base = self.resolve_admin_db_params()
-                host = str(base.get("host") or "").strip().lower()
-                comp_host = host.replace("-pooler.", ".")
-                api = "https://console.neon.tech/api/v2"
-                headers = {
-                    "Accept": "application/json",
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                }
-                project_id = (os.getenv("NEON_PROJECT_ID") or "").strip()
-                branch_id = (os.getenv("NEON_BRANCH_ID") or "").strip()
+        name = str(db_name or "").strip()
+        if not name:
+            raise RuntimeError("invalid_db_name")
+
+        token = (os.getenv("NEON_API_TOKEN") or "").strip()
+        base = self.resolve_admin_db_params()
+        if token and requests is not None:
+            host = str(base.get("host") or "").strip().lower()
+            comp_host = host.replace("-pooler.", ".")
+            api = "https://console.neon.tech/api/v2"
+            headers = {
+                "Accept": "application/json",
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            }
+            project_id = (os.getenv("NEON_PROJECT_ID") or "").strip()
+            branch_id = (os.getenv("NEON_BRANCH_ID") or "").strip()
 
                 # If project_id/branch_id not set, try to find them (simplified logic from original)
-                if not project_id or not branch_id:
-                    pr = requests.get(f"{api}/projects", headers=headers, timeout=10)
-                    if pr.status_code == 200:
-                        pjs = (pr.json() or {}).get("projects") or []
-                        for pj in pjs:
-                            pid = pj.get("id")
-                            if not pid:
-                                continue
-                            er = requests.get(
-                                f"{api}/projects/{pid}/endpoints",
-                                headers=headers,
-                                timeout=10,
-                            )
-                            if er.status_code == 200:
-                                eps = (er.json() or {}).get("endpoints") or []
-                                for ep in eps:
-                                    h = str(ep.get("host") or "").strip().lower()
-                                    hp = h.replace("-pooler.", ".")
-                                    if (
-                                        h == host
-                                        or hp == host
-                                        or h == comp_host
-                                        or hp == comp_host
-                                    ):
-                                        project_id = pid
-                                        branch_id = ep.get("branch_id")
-                                        break
-                            if project_id:
-                                break
+            if not project_id or not branch_id:
+                pr = requests.get(f"{api}/projects", headers=headers, timeout=10)
+                if pr.status_code == 200:
+                    pjs = (pr.json() or {}).get("projects") or []
+                    for pj in pjs:
+                        pid = pj.get("id")
+                        if not pid:
+                            continue
+                        er = requests.get(
+                            f"{api}/projects/{pid}/endpoints",
+                            headers=headers,
+                            timeout=10,
+                        )
+                        if er.status_code == 200:
+                            eps = (er.json() or {}).get("endpoints") or []
+                            for ep in eps:
+                                h = str(ep.get("host") or "").strip().lower()
+                                hp = h.replace("-pooler.", ".")
+                                if (
+                                    h == host
+                                    or hp == host
+                                    or h == comp_host
+                                    or hp == comp_host
+                                ):
+                                    project_id = pid
+                                    branch_id = ep.get("branch_id")
+                                    break
+                        if project_id:
+                            break
 
-                if project_id and branch_id:
-                    # Check if DB exists
-                    lr = requests.get(
-                        f"{api}/projects/{project_id}/branches/{branch_id}/databases",
-                        headers=headers,
-                        timeout=10,
-                    )
-                    if lr.status_code == 200:
-                        dbs = (lr.json() or {}).get("databases") or []
-                        for d in dbs:
-                            if str(d.get("name") or "").strip().lower() == name.lower():
-                                # Already exists, initialize
-                                params = self.resolve_admin_db_params()
-                                params["database"] = name
-                                return bool(self._bootstrap_tenant_db(params, owner_data))
+            if not project_id or not branch_id:
+                raise RuntimeError("neon_project_or_branch_missing")
 
-                    # Create DB
-                    owner = "neondb_owner"
-                    cr = requests.post(
-                        f"{api}/projects/{project_id}/branches/{branch_id}/databases",
-                        headers=headers,
-                        json={"database": {"name": name, "owner_name": owner}},
-                        timeout=12,
-                    )
-                    if 200 <= cr.status_code < 300:
-                        # Wait for DB to be ready
-                        import time
-
-                        time.sleep(2)  # Initial wait
-
-                        params = self.resolve_admin_db_params()
+            lr = requests.get(
+                f"{api}/projects/{project_id}/branches/{branch_id}/databases",
+                headers=headers,
+                timeout=10,
+            )
+            if lr.status_code == 200:
+                dbs = (lr.json() or {}).get("databases") or []
+                for d in dbs:
+                    if str(d.get("name") or "").strip().lower() == name.lower():
+                        params = dict(base)
                         params["database"] = name
+                        if not self._bootstrap_tenant_db(params, owner_data):
+                            raise RuntimeError("bootstrap_failed")
+                        return True
 
-                        # Retry bootstrap a few times
-                        for i in range(5):
-                            if self._bootstrap_tenant_db(params, owner_data):
-                                return True
-                            time.sleep(2)
+            owner = (
+                (os.getenv("NEON_DB_OWNER") or "").strip()
+                or str(base.get("user") or "").strip()
+                or "neondb_owner"
+            )
+            cr = requests.post(
+                f"{api}/projects/{project_id}/branches/{branch_id}/databases",
+                headers=headers,
+                json={"database": {"name": name, "owner_name": owner}},
+                timeout=15,
+            )
+            if cr.status_code == 409:
+                pass
+            elif not (200 <= cr.status_code < 300):
+                raise RuntimeError(f"neon_create_failed:{cr.status_code}")
 
-                        return False
-                    return False
+            import time
 
-            # Fallback to standard Postgres creation
-            base = self.resolve_admin_db_params()
-            host = base.get("host")
-            port = int(base.get("port") or 5432)
-            user = base.get("user")
-            password = base.get("password")
-            sslmode = base.get("sslmode")
+            params = dict(base)
+            params["database"] = name
+
+            for i in range(10):
+                if self._bootstrap_tenant_db(params, owner_data):
+                    return True
+                time.sleep(1.5 + float(i) * 0.5)
+
+            raise RuntimeError("bootstrap_failed")
+
+        host = base.get("host")
+        port = int(base.get("port") or 5432)
+        user = base.get("user")
+        password = base.get("password")
+        sslmode = base.get("sslmode")
+        try:
+            connect_timeout = int(base.get("connect_timeout") or 10)
+        except Exception:
+            connect_timeout = 10
+        appname = (base.get("application_name") or "gym_admin_provisioner").strip()
+        base_db = os.getenv("ADMIN_DB_BASE_NAME", "neondb").strip() or "neondb"
+
+        def try_create(conn_db: str) -> None:
+            conn = psycopg2.connect(
+                host=host,
+                port=port,
+                dbname=conn_db,
+                user=user,
+                password=password,
+                sslmode=sslmode,
+                connect_timeout=connect_timeout,
+                application_name=appname,
+            )
             try:
-                connect_timeout = int(base.get("connect_timeout") or 10)
-            except Exception:
-                connect_timeout = 10
-            appname = (base.get("application_name") or "gym_admin_provisioner").strip()
-            base_db = os.getenv("ADMIN_DB_BASE_NAME", "neondb").strip() or "neondb"
-
-            def try_create(conn_db):
-                conn = psycopg2.connect(
-                    host=host,
-                    port=port,
-                    dbname=conn_db,
-                    user=user,
-                    password=password,
-                    sslmode=sslmode,
-                    connect_timeout=connect_timeout,
-                    application_name=appname,
-                )
-                try:
-                    conn.autocommit = True
-                    cur = conn.cursor()
+                conn.autocommit = True
+                cur = conn.cursor()
+                cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (name,))
+                exists = bool(cur.fetchone())
+                if not exists:
+                    cur.execute(f"CREATE DATABASE {name}")
                     cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (name,))
                     exists = bool(cur.fetchone())
-                    if not exists:
-                        try:
-                            cur.execute(f"CREATE DATABASE {name}")
-                        except Exception:
-                            pass
-                    cur.close()
-                    return True
-                finally:
-                    conn.close()
+                cur.close()
+                if not exists:
+                    raise RuntimeError("create_database_failed")
+            finally:
+                conn.close()
 
-            created = False
+        try:
+            try_create(base_db)
+        except Exception:
             try:
-                created = try_create(base_db)
-            except Exception:
-                # Fallback to 'postgres' if base_db (neondb) fails
-                try:
-                    created = try_create("postgres")
-                except Exception:
-                    created = False
+                try_create("postgres")
+            except Exception as e:
+                raise RuntimeError("create_database_failed") from e
 
-            if not created:
-                # Check if it exists anyway
-                try:
-                    params = dict(base)
-                    params["database"] = name
-                    with RawPostgresManager(params).get_connection_context():
-                        created = True
-                except Exception:
-                    return False
-
-            if created:
-                params = dict(base)
-                params["database"] = name
-                return bool(self._bootstrap_tenant_db(params, owner_data))
-            return False
+        params = dict(base)
+        params["database"] = name
+        try:
+            with RawPostgresManager(params).get_connection_context():
+                pass
         except Exception as e:
-            logger.error(f"Error creating DB {db_name}: {e}")
-            return False
+            raise RuntimeError("tenant_connect_failed") from e
+
+        if not self._bootstrap_tenant_db(params, owner_data):
+            raise RuntimeError("bootstrap_failed")
+        return True
 
     def _crear_db_postgres_con_reintentos(
         self,
@@ -2878,7 +2916,7 @@ class AdminService:
                 last_err = "create_failed"
             except Exception as e:
                 ok = False
-                last_err = str(e)
+                last_err = str(e) or "create_failed"
             try:
                 time.sleep(espera)
             except Exception:
