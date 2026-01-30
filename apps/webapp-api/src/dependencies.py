@@ -818,12 +818,15 @@ def _ensure_feature_flags_schema(session: Session, tenant: Optional[str]) -> Non
 
 
 # tenant_connection has the canonical CURRENT_TENANT contextvar
+from src.database import tenant_connection as _tenant_connection
 from src.database.tenant_connection import (
     get_tenant_session_factory,
     set_current_tenant,
     get_current_tenant,
     validate_tenant_name,
 )
+
+CURRENT_TENANT = _tenant_connection.CURRENT_TENANT
 
 # Import local services
 from src.database.connection import SessionLocal, AdminSessionLocal
