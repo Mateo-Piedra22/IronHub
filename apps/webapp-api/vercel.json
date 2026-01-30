@@ -8,7 +8,12 @@
                 "maxLambdaSize": "15mb",
                 "runtime": "python3.11",
                 "includeFiles": [
-                    "assets/**"
+                    "assets/**",
+                    "alembic.ini",
+                    "alembic/**",
+                    "alembic_admin.ini",
+                    "alembic_admin/**",
+                    "src/templates/**"
                 ]
             }
         }

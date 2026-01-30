@@ -38,7 +38,11 @@ def _advisory_lock(conn, *, name: str, timeout_seconds: int) -> None:
 
 
 def _alembic_cfg(*, sqlalchemy_url: str, cfg_path: str, script_location: str) -> Config:
-    cfg = Config(cfg_path)
+    cfg_path_s = str(cfg_path or "").strip()
+    if cfg_path_s and os.path.exists(cfg_path_s):
+        cfg = Config(cfg_path_s)
+    else:
+        cfg = Config()
     cfg.set_main_option("script_location", script_location)
     cfg.set_main_option("sqlalchemy.url", sqlalchemy_url)
     return cfg
