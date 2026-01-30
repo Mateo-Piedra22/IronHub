@@ -23,7 +23,7 @@ except ImportError:
 from src.database.raw_manager import RawPostgresManager
 from src.secure_config import SecureConfig
 from src.security_utils import SecurityUtils
-from src.tenant_migrations import migrate_tenant_db
+from src.tenant_migrations import migrate_tenant_db, expected_tenant_head
 from src.models.orm_models import (
     Usuario,
     Configuracion,
@@ -772,6 +772,102 @@ class AdminService:
         if params.get("sslmode"):
             url += f"?sslmode={params.get('sslmode')}"
         return create_engine(url, pool_pre_ping=True)
+
+    def tenant_migration_status(self, gym_id: int) -> Dict[str, Any]:
+        gym = self.obtener_gimnasio(int(gym_id))
+        if not gym:
+            return {"ok": False, "error": "gym_not_found"}
+        db_name = str(gym.get("db_name") or "").strip()
+        if not db_name:
+            return {"ok": False, "error": "db_name_missing"}
+
+        head = expected_tenant_head()
+        eng = self._get_tenant_engine_for_gym(int(gym_id))
+        if not eng:
+            return {"ok": False, "error": "tenant_db_unavailable", "db_name": db_name, "head": head}
+
+        try:
+            with eng.connect() as conn:
+                reg = conn.execute(text("SELECT to_regclass('public.alembic_version')")).scalar()
+                if not reg:
+                    return {
+                        "ok": True,
+                        "gym_id": int(gym_id),
+                        "db_name": db_name,
+                        "head": head,
+                        "current": None,
+                        "status": "uninitialized",
+                    }
+                row = conn.execute(text("SELECT version_num FROM alembic_version")).fetchone()
+                current = str(row[0]) if row and row[0] is not None else None
+        except Exception:
+            logger.exception("Error checking tenant migration status (gym_id=%s)", int(gym_id))
+            return {"ok": False, "error": "status_check_failed", "db_name": db_name, "head": head}
+
+        if not head or not current:
+            status = "unknown"
+        elif current == head:
+            status = "up_to_date"
+        else:
+            status = "outdated"
+
+        return {
+            "ok": True,
+            "gym_id": int(gym_id),
+            "db_name": db_name,
+            "head": head,
+            "current": current,
+            "status": status,
+        }
+
+    def provision_tenant_migrations(self, gym_id: int) -> Dict[str, Any]:
+        gym = self.obtener_gimnasio(int(gym_id))
+        if not gym:
+            return {"ok": False, "error": "gym_not_found"}
+        db_name = str(gym.get("db_name") or "").strip()
+        if not db_name:
+            return {"ok": False, "error": "db_name_missing"}
+
+        params = self.resolve_admin_db_params()
+        try:
+            migrate_tenant_db(
+                user=str(params.get("user") or ""),
+                password=str(params.get("password") or ""),
+                host=str(params.get("host") or ""),
+                port=str(params.get("port") or ""),
+                db_name=db_name,
+                sslmode=params.get("sslmode"),
+            )
+        except Exception:
+            logger.exception("Error provisioning tenant migrations (gym_id=%s db=%s)", int(gym_id), db_name)
+            out = {"ok": False, "error": "provision_failed", "db_name": db_name}
+            st = self.tenant_migration_status(int(gym_id))
+            if st.get("ok"):
+                out["status"] = st
+            return out
+
+        st = self.tenant_migration_status(int(gym_id))
+        return {"ok": True, "db_name": db_name, "status": st}
+
+    def list_gym_ids_for_provision(
+        self, *, limit: int = 50, offset: int = 0, status: str = "active"
+    ) -> Dict[str, Any]:
+        lim = max(1, min(int(limit or 50), 200))
+        off = max(0, int(offset or 0))
+        st = str(status or "").strip().lower() or "active"
+        try:
+            with self.db.get_connection_context() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT id, db_name FROM gyms WHERE status = %s ORDER BY id ASC LIMIT %s OFFSET %s",
+                    (st, lim, off),
+                )
+                rows = cur.fetchall() or []
+            items = [{"id": int(r[0]), "db_name": str(r[1] or "")} for r in rows]
+            return {"ok": True, "items": items, "limit": lim, "offset": off, "status": st}
+        except Exception:
+            logger.exception("Error listing gyms for provision")
+            return {"ok": False, "error": "list_failed", "items": [], "limit": lim, "offset": off, "status": st}
 
     def _merge_feature_flags(self, base: Dict[str, Any], other: Dict[str, Any]) -> Dict[str, Any]:
         out: Dict[str, Any] = {"modules": dict((base or {}).get("modules") or {})}

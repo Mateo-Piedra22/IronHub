@@ -1284,6 +1284,33 @@ async def batch_provision(request: Request):
     return result
 
 
+@app.get("/gyms/{gym_id}/provision/status")
+async def gym_provision_status(request: Request, gym_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    return adm.tenant_migration_status(int(gym_id))
+
+
+@app.post("/gyms/{gym_id}/provision")
+async def gym_provision(request: Request, gym_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    result = adm.provision_tenant_migrations(int(gym_id))
+    try:
+        if result.get("ok"):
+            adm.log_action("owner", "provision_tenant_migrations", int(gym_id), None)
+        else:
+            adm.log_action(
+                "owner",
+                "provision_tenant_migrations_failed",
+                int(gym_id),
+                str(result.get("error") or ""),
+            )
+    except Exception:
+        pass
+    return result
+
+
 @app.post("/gyms/batch/suspend")
 async def batch_suspend(request: Request):
     """Suspend multiple gyms. Expects JSON {ids, reason?, until?, hard?}."""
@@ -2005,6 +2032,85 @@ async def cron_daily_reminders(
         return {"ok": True, "sent": 0, "disabled": True}
     result = adm.enviar_recordatorios_vencimiento(eff_days)
     return {"ok": True, "sent": result.get("sent", 0), "days": eff_days}
+
+
+@app.post("/cron/tenants/provision")
+async def cron_tenants_provision(
+    request: Request,
+    token: str = Query(None),
+    limit: int = Query(25, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    status: str = Query("active"),
+    only_outdated: bool = Query(True),
+    dry_run: bool = Query(False),
+    max_seconds: int = Query(25, ge=5, le=55),
+):
+    import os
+    import time as _time
+
+    expected_token = os.getenv("CRON_TOKEN", "").strip()
+    header_token = request.headers.get("x-cron-token", "")
+    if not expected_token or (
+        token != expected_token and header_token != expected_token
+    ):
+        raise HTTPException(status_code=403, detail="Invalid cron token")
+
+    adm = get_admin_service()
+    lst = adm.list_gym_ids_for_provision(limit=int(limit), offset=int(offset), status=str(status))
+    if not lst.get("ok"):
+        return {"ok": False, "error": "list_failed"}
+
+    started = _time.monotonic()
+    results = []
+    processed = 0
+    provisioned = 0
+    skipped = 0
+    failed = 0
+
+    for item in lst.get("items") or []:
+        if _time.monotonic() - started >= float(max_seconds):
+            break
+        gid = int((item or {}).get("id") or 0)
+        if gid <= 0:
+            continue
+        processed += 1
+        st = adm.tenant_migration_status(gid)
+        if not st.get("ok"):
+            failed += 1
+            results.append({"gym_id": gid, "action": "status_failed", "status": st})
+            continue
+
+        s = str(st.get("status") or "")
+        if only_outdated and s in ("up_to_date",):
+            skipped += 1
+            results.append({"gym_id": gid, "action": "skip_up_to_date", "status": st})
+            continue
+
+        if dry_run:
+            results.append({"gym_id": gid, "action": "would_provision", "status": st})
+            continue
+
+        pr = adm.provision_tenant_migrations(gid)
+        if pr.get("ok"):
+            provisioned += 1
+            results.append({"gym_id": gid, "action": "provisioned", "result": pr})
+        else:
+            failed += 1
+            results.append({"gym_id": gid, "action": "provision_failed", "result": pr})
+
+    return {
+        "ok": True,
+        "dry_run": bool(dry_run),
+        "only_outdated": bool(only_outdated),
+        "processed": processed,
+        "provisioned": provisioned,
+        "skipped": skipped,
+        "failed": failed,
+        "limit": int(limit),
+        "offset": int(offset),
+        "next_offset": int(offset) + int(processed),
+        "results": results,
+    }
 
 
 @app.post("/gyms/batch/auto-suspend")

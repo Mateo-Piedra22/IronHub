@@ -7,7 +7,7 @@ import {
     Key, Activity, FileText, Save, Send, Check, X, AlertCircle, Upload, Trash2, MapPin, Plus, Pencil, ListChecks
 } from 'lucide-react';
 import Link from 'next/link';
-import { api, type Gym, type WhatsAppConfig, type Payment, type WhatsAppTemplateCatalogItem, type FeatureFlags, type GymBranch, type GymTipoClaseItem, type GymTipoCuotaItem, type TipoCuotaEntitlementsUpdate, type GymBranchCreateInput, type GymBranchUpdateInput, type GymOnboardingStatus } from '@/lib/api';
+import { api, type Gym, type WhatsAppConfig, type Payment, type WhatsAppTemplateCatalogItem, type FeatureFlags, type GymBranch, type GymTipoClaseItem, type GymTipoCuotaItem, type TipoCuotaEntitlementsUpdate, type GymBranchCreateInput, type GymBranchUpdateInput, type GymOnboardingStatus, type TenantMigrationStatus } from '@/lib/api';
 
 type Section = 'onboarding' | 'subscription' | 'branches' | 'payments' | 'whatsapp' | 'maintenance' | 'attendance' | 'modules' | 'entitlements' | 'branding' | 'health' | 'password';
 
@@ -33,6 +33,9 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     const [onboarding, setOnboarding] = useState<GymOnboardingStatus | null>(null);
     const [onboardingLoading, setOnboardingLoading] = useState(false);
     const [prodReadySaving, setProdReadySaving] = useState(false);
+    const [tenantMigration, setTenantMigration] = useState<TenantMigrationStatus | null>(null);
+    const [tenantMigrationLoading, setTenantMigrationLoading] = useState(false);
+    const [tenantProvisioning, setTenantProvisioning] = useState(false);
 
     // Plans & Subscription Manual Assignment
     const [plans, setPlans] = useState<any[]>([]);
@@ -176,6 +179,13 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                         setMaintUntil(g.suspended_until ? String(g.suspended_until).slice(0, 16) : '');
                     }
                 }
+                setTenantMigrationLoading(true);
+                try {
+                    const ms = await api.getGymTenantMigrationStatus(gymId);
+                    if (ms.ok && ms.data) setTenantMigration(ms.data);
+                } finally {
+                    setTenantMigrationLoading(false);
+                }
                 const payRes = await api.getGymPayments(gymId);
                 if (payRes.ok && payRes.data) {
                     setPayments(payRes.data.payments || []);
@@ -265,6 +275,34 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         }
         load();
     }, [gymId]);
+
+    async function refreshTenantMigration() {
+        setTenantMigrationLoading(true);
+        try {
+            const ms = await api.getGymTenantMigrationStatus(gymId);
+            if (ms.ok && ms.data) setTenantMigration(ms.data);
+        } finally {
+            setTenantMigrationLoading(false);
+        }
+    }
+
+    async function provisionTenantNow() {
+        setTenantProvisioning(true);
+        try {
+            const pr = await api.provisionGymTenantMigrations(gymId);
+            if (pr.ok && pr.data?.ok) {
+                const st = pr.data.status;
+                if (st) setTenantMigration(st);
+                setMessage('Migraciones aplicadas');
+                setTimeout(() => setMessage(''), 3000);
+            } else {
+                setMessage(`Error al migrar: ${pr.error || pr.data?.error || 'unknown'}`);
+                setTimeout(() => setMessage(''), 5000);
+            }
+        } finally {
+            setTenantProvisioning(false);
+        }
+    }
 
     useEffect(() => {
         if (activeSection !== 'entitlements') return;
@@ -1444,6 +1482,60 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                     <button onClick={() => setActiveSection('entitlements')} className="btn-secondary">
                                         Accesos
                                     </button>
+                                </div>
+                            </div>
+
+                            <div className="p-4 bg-slate-800/50 rounded-lg border border-slate-700 space-y-3">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="text-white font-medium">Migraciones (DB tenant)</div>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={refreshTenantMigration}
+                                            disabled={tenantMigrationLoading || tenantProvisioning}
+                                            className="btn-secondary"
+                                        >
+                                            {tenantMigrationLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Revisar'}
+                                        </button>
+                                        <button
+                                            onClick={provisionTenantNow}
+                                            disabled={
+                                                tenantProvisioning ||
+                                                tenantMigrationLoading ||
+                                                !tenantMigration ||
+                                                tenantMigration.status === 'up_to_date'
+                                            }
+                                            className="btn-primary flex items-center gap-2"
+                                        >
+                                            {tenantProvisioning ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Migrar ahora'}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="text-sm text-slate-300">
+                                    {!tenantMigration && 'Sin datos'}
+                                    {tenantMigration && !tenantMigration.ok && `Error: ${tenantMigration.error || 'unknown'}`}
+                                    {tenantMigration && tenantMigration.ok && (
+                                        <div className="space-y-1">
+                                            <div className="flex items-center gap-2">
+                                                {tenantMigration.status === 'up_to_date' && <Check className="w-4 h-4 text-success-400" />}
+                                                {tenantMigration.status === 'outdated' && <AlertCircle className="w-4 h-4 text-warning-400" />}
+                                                {tenantMigration.status === 'uninitialized' && <AlertCircle className="w-4 h-4 text-warning-400" />}
+                                                {tenantMigration.status === 'unknown' && <AlertCircle className="w-4 h-4 text-slate-400" />}
+                                                <span className="font-medium">
+                                                    {tenantMigration.status === 'up_to_date'
+                                                        ? 'Al día'
+                                                        : tenantMigration.status === 'outdated'
+                                                            ? 'Desactualizado'
+                                                            : tenantMigration.status === 'uninitialized'
+                                                                ? 'Sin inicializar'
+                                                                : 'Desconocido'}
+                                                </span>
+                                            </div>
+                                            <div className="text-xs text-slate-400">
+                                                head: {tenantMigration.head || '—'} · current: {tenantMigration.current || '—'}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>

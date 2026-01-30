@@ -1,6 +1,9 @@
+import base64
+import gzip
 import os
 import sys
 import hashlib
+import tempfile
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -10,6 +13,48 @@ from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, text
+
+from src.tenant_migrations_bundle import EMBEDDED_FILES
+
+
+def _materialize_embedded_webapp_api_path() -> Path:
+    root = Path(tempfile.gettempdir()).resolve() / "tenant_migrations"
+    webapp_api = (root / "webapp-api").resolve()
+    cfg_path = webapp_api / "alembic.ini"
+    script_location = webapp_api / "alembic"
+    if cfg_path.exists() and script_location.exists():
+        return webapp_api
+
+    root.mkdir(parents=True, exist_ok=True)
+    for rel, b64 in EMBEDDED_FILES.items():
+        out_path = (root / rel).resolve()
+        if out_path.exists():
+            continue
+        data = gzip.decompress(base64.b64decode(b64))
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = out_path.with_name(out_path.name + ".tmp")
+        tmp_path.write_bytes(data)
+        tmp_path.replace(out_path)
+    return webapp_api
+
+
+def expected_tenant_head() -> Optional[str]:
+    webapp_api = _resolve_webapp_api_path()
+    cfg_path = (webapp_api / "alembic.ini").resolve()
+    script_location = (webapp_api / "alembic").resolve()
+    if not cfg_path.exists() or not script_location.exists():
+        webapp_api = _materialize_embedded_webapp_api_path()
+        cfg_path = (webapp_api / "alembic.ini").resolve()
+        script_location = (webapp_api / "alembic").resolve()
+    if not cfg_path.exists() or not script_location.exists():
+        return None
+
+    cfg = Config(str(cfg_path))
+    cfg.set_main_option("script_location", str(script_location))
+    try:
+        return ScriptDirectory.from_config(cfg).get_current_head()
+    except Exception:
+        return None
 
 
 def _repo_root() -> Path:
@@ -66,10 +111,7 @@ def _resolve_webapp_api_path() -> Path:
     if bundled.exists():
         return bundled
 
-    raise FileNotFoundError(
-        "No se encontró apps/webapp-api. Definí TENANT_MIGRATIONS_ROOT apuntando al directorio de webapp-api "
-        "o incluí el bundle de migraciones en el deploy de admin-api."
-    )
+    return _materialize_embedded_webapp_api_path()
 
 
 def _lock_key(name: str) -> int:
@@ -113,12 +155,18 @@ def migrate_tenant_db(
     script_location = (webapp_api / "alembic").resolve()
 
     if not cfg_path.exists() or not script_location.exists():
-        raise FileNotFoundError(
-            f"No se encontró Alembic tenant. Esperado: {cfg_path} y {script_location}"
-        )
+        webapp_api = _materialize_embedded_webapp_api_path()
+        cfg_path = (webapp_api / "alembic.ini").resolve()
+        script_location = (webapp_api / "alembic").resolve()
+        if not cfg_path.exists() or not script_location.exists():
+            raise FileNotFoundError(
+                f"No se encontró Alembic tenant. Esperado: {cfg_path} y {script_location}"
+            )
 
+    added_path = False
     if str(webapp_api) not in sys.path:
         sys.path.insert(0, str(webapp_api))
+        added_path = True
 
     sqlalchemy_url = _build_db_url(
         user=str(user),
@@ -159,3 +207,8 @@ def migrate_tenant_db(
             os.environ.pop("DATABASE_URL", None)
         else:
             os.environ["DATABASE_URL"] = old_env
+        if added_path:
+            try:
+                sys.path.remove(str(webapp_api))
+            except ValueError:
+                pass

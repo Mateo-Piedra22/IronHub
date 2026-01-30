@@ -67,6 +67,16 @@ export interface GymCreateV2Response {
     error?: string;
 }
 
+export interface TenantMigrationStatus {
+    ok: boolean;
+    error?: string;
+    gym_id?: number;
+    db_name?: string;
+    head?: string | null;
+    current?: string | null;
+    status?: 'up_to_date' | 'outdated' | 'uninitialized' | 'unknown';
+}
+
 export interface Metrics {
     total_gyms: number;
     active_gyms: number;
@@ -411,6 +421,14 @@ export const api = {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({ new_password: newPassword }),
+        }),
+
+    getGymTenantMigrationStatus: (gymId: number) =>
+        request<TenantMigrationStatus>(`/gyms/${gymId}/provision/status`),
+
+    provisionGymTenantMigrations: (gymId: number) =>
+        request<{ ok: boolean; db_name?: string; status?: TenantMigrationStatus; error?: string }>(`/gyms/${gymId}/provision`, {
+            method: 'POST',
         }),
 
     // Metrics
