@@ -15,11 +15,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
 from pywa import WhatsApp
 from pywa.types import Message
-from pywa.types.templates import TemplateLanguage, BodyText, HeaderImage, HeaderText
+from pywa.types.templates import TemplateLanguage, BodyText
 from .database import DatabaseManager
 from .template_processor import TemplateProcessor
 from .message_logger import MessageLogger
-from typing import Any, Dict, List, Optional
+
 try:
     from zoneinfo import ZoneInfo
 except Exception:
@@ -29,9 +29,10 @@ try:
 except Exception:
     requests = None  # type: ignore
 
+
 class WhatsAppManager:
     """Gestor de mensajes WhatsApp usando PyWa"""
-    
+
     def __init__(self, database_manager: DatabaseManager, defer_init: bool = True):
         """Inicializa el gestor; permite diferir la creación del cliente para no bloquear la UI"""
         # Cargar configuración desde base de datos y entorno (sin hardcodes)
@@ -43,12 +44,12 @@ class WhatsAppManager:
             cfg = {}
 
         # IDs de WhatsApp Business
-        self.phone_number_id = str(cfg.get('phone_id') or "")
-        self.whatsapp_business_account_id = str(cfg.get('waba_id') or "")
+        self.phone_number_id = str(cfg.get("phone_id") or "")
+        self.whatsapp_business_account_id = str(cfg.get("waba_id") or "")
 
         # Token de acceso
-        self.access_token = cfg.get('access_token')
-        
+        self.access_token = cfg.get("access_token")
+
         self.template_processor = TemplateProcessor(database_manager)
         self.message_logger = MessageLogger(database_manager)
         self.client = None
@@ -59,15 +60,17 @@ class WhatsAppManager:
         self._init_deferred = defer_init
         self._client_initialized = False
         try:
-            self._api_version = (os.getenv('WHATSAPP_API_VERSION') or 'v19.0').strip()
+            self._api_version = (os.getenv("WHATSAPP_API_VERSION") or "v19.0").strip()
         except Exception:
-            self._api_version = 'v19.0'
+            self._api_version = "v19.0"
         # Non-blocking y timeouts para envíos
         try:
-            self._send_timeout_seconds = float(os.getenv("WHATSAPP_SEND_TIMEOUT_SECONDS", "1.5"))
+            self._send_timeout_seconds = float(
+                os.getenv("WHATSAPP_SEND_TIMEOUT_SECONDS", "1.5")
+            )
         except Exception:
             self._send_timeout_seconds = 1.5
-        self._nonblocking_send = (os.getenv("NONBLOCKING_WHATSAPP_SEND", "1") == "1")
+        self._nonblocking_send = os.getenv("NONBLOCKING_WHATSAPP_SEND", "1") == "1"
         self._send_max_blocking_retries = 0  # evitar duplicados si hay timeout
 
         # Preferencias avanzadas y listas
@@ -77,11 +80,11 @@ class WhatsAppManager:
         self._retry_base_delay_seconds = 5
         self._init_lock = asyncio.Lock()
         self._stop_init = False
-        
+
         # Configurar logging
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
-        
+
         # No inicializar cliente inmediatamente si está diferido; esto evita bloqueos en arranque
         if not self._init_deferred:
             self._initialize_client()
@@ -100,7 +103,9 @@ class WhatsAppManager:
                 pass
         return timezone(timedelta(hours=-3))
 
-    def _get_meta_template_binding(self, binding_key: str, default_template: str) -> str:
+    def _get_meta_template_binding(
+        self, binding_key: str, default_template: str
+    ) -> str:
         key = f"wa_meta_template_{str(binding_key or '').strip()}"
         try:
             v = self.db.obtener_configuracion(key)  # type: ignore[attr-defined]
@@ -112,7 +117,9 @@ class WhatsAppManager:
             vv = ""
         return vv or str(default_template or "")
 
-    def _is_action_enabled(self, binding_key: str, default_enabled: bool = True) -> bool:
+    def _is_action_enabled(
+        self, binding_key: str, default_enabled: bool = True
+    ) -> bool:
         k = f"wa_action_enabled_{str(binding_key or '').strip()}"
         try:
             v = self.db.obtener_configuracion(k)  # type: ignore[attr-defined]
@@ -142,21 +149,30 @@ class WhatsAppManager:
             self._config = cfg or {}
 
             # Allowlist: números separados por comas en 'allowlist_numbers' y flag 'allowlist_enabled'
-            raw_allow = str(self._config.get('allowlist_numbers', '') or '').strip()
-            numbers = [n.strip() for n in raw_allow.split(',') if n.strip()]
+            raw_allow = str(self._config.get("allowlist_numbers", "") or "").strip()
+            numbers = [n.strip() for n in raw_allow.split(",") if n.strip()]
             self._allowlist = set(numbers)
             try:
-                self._allowlist_enabled = str(self._config.get('allowlist_enabled', 'false')).lower() == 'true'
+                self._allowlist_enabled = (
+                    str(self._config.get("allowlist_enabled", "false")).lower()
+                    == "true"
+                )
             except Exception:
                 self._allowlist_enabled = False
 
             # Reintentos/backoff configurables
             try:
-                self._max_init_retries = int(self._config.get('max_retries', self._max_init_retries))
+                self._max_init_retries = int(
+                    self._config.get("max_retries", self._max_init_retries)
+                )
             except Exception:
                 pass
             try:
-                self._retry_base_delay_seconds = int(self._config.get('retry_delay_seconds', self._retry_base_delay_seconds))
+                self._retry_base_delay_seconds = int(
+                    self._config.get(
+                        "retry_delay_seconds", self._retry_base_delay_seconds
+                    )
+                )
             except Exception:
                 pass
 
@@ -167,34 +183,51 @@ class WhatsAppManager:
             except Exception:
                 pass
         except Exception as e:
-            logging.error(f"Error al reinicializar configuración de WhatsAppManager: {e}")
+            logging.error(
+                f"Error al reinicializar configuración de WhatsAppManager: {e}"
+            )
 
     def _numero_permitido(self, telefono: str) -> bool:
         """Devuelve True si allowlist está deshabilitado o el número está permitido."""
         try:
             if not self._allowlist_enabled:
                 return True
-            tel = str(telefono or '').strip()
+            tel = str(telefono or "").strip()
             return tel in self._allowlist
         except Exception:
             return False
 
-    def initialize_async(self, max_retries: Optional[int] = None, delay_seconds: Optional[float] = None) -> None:
+    def initialize_async(
+        self, max_retries: Optional[int] = None, delay_seconds: Optional[float] = None
+    ) -> None:
         """Inicializa el cliente en segundo plano con reintentos/backoff y jitter."""
         import threading, time, random
 
-        max_r = max_retries if isinstance(max_retries, int) and max_retries >= 0 else self._max_init_retries
-        base_delay = delay_seconds if (isinstance(delay_seconds, (int, float)) and delay_seconds >= 0) else self._retry_base_delay_seconds
+        max_r = (
+            max_retries
+            if isinstance(max_retries, int) and max_retries >= 0
+            else self._max_init_retries
+        )
+        base_delay = (
+            delay_seconds
+            if (isinstance(delay_seconds, (int, float)) and delay_seconds >= 0)
+            else self._retry_base_delay_seconds
+        )
 
         def _runner():
             try:
                 # Evitar ejecuciones concurrentes
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
+
                 async def _init_with_lock():
                     async with self._init_lock:
                         attempt = 0
-                        while not self._client_initialized and attempt <= max_r and not self._stop_init:
+                        while (
+                            not self._client_initialized
+                            and attempt <= max_r
+                            and not self._stop_init
+                        ):
                             attempt += 1
                             try:
                                 self._initialize_client()
@@ -203,11 +236,14 @@ class WhatsAppManager:
                                     logging.info("WhatsApp client inicializado (async)")
                                     break
                             except Exception as err:
-                                logging.error(f"Fallo inicializando WhatsApp client (intento {attempt}/{max_r}): {err}")
+                                logging.error(
+                                    f"Fallo inicializando WhatsApp client (intento {attempt}/{max_r}): {err}"
+                                )
                             # Backoff con jitter
                             sleep_s = base_delay * (2 ** (attempt - 1))
                             jitter = random.uniform(0, base_delay)
                             time.sleep(min(300, sleep_s + jitter))
+
                 loop.run_until_complete(_init_with_lock())
             except Exception as e:
                 logging.error(f"Error en initialize_async: {e}")
@@ -227,7 +263,7 @@ class WhatsAppManager:
         except Exception:
             pass
         return False
-    
+
     def _initialize_client(self):
         """Inicializa el cliente de WhatsApp con los datos configurados"""
         try:
@@ -238,10 +274,12 @@ class WhatsAppManager:
             self.wa_client = WhatsApp(
                 phone_id=self.phone_number_id,
                 token=self.access_token,
-                business_account_id=self.whatsapp_business_account_id
+                business_account_id=self.whatsapp_business_account_id,
             )
             logging.info("WhatsApp client inicializado correctamente")
-            logging.info(f"Phone ID: {self.phone_number_id} | WABA ID: {self.whatsapp_business_account_id}")
+            logging.info(
+                f"Phone ID: {self.phone_number_id} | WABA ID: {self.whatsapp_business_account_id}"
+            )
             self._client_initialized = True
             # Cargar/actualizar configuración tras init
             try:
@@ -254,14 +292,17 @@ class WhatsAppManager:
             return False
 
     # (El método initialize_async con reintentos/backoff ya está definido más arriba; se elimina duplicado)
-    
+
     def _setup_message_handlers(self):
         """Configura los manejadores de mensajes entrantes (si webhook está habilitado)"""
         if not self.wa_client:
             return
         # Respetar flag de configuración para habilitar webhook/handlers y disponibilidad de servidor
         try:
-            enable_webhook = str((self._config or {}).get('enable_webhook', 'false')).lower() == 'true'
+            enable_webhook = (
+                str((self._config or {}).get("enable_webhook", "false")).lower()
+                == "true"
+            )
         except Exception:
             enable_webhook = False
         if not enable_webhook:
@@ -269,7 +310,9 @@ class WhatsAppManager:
 
         # Algunos entornos requieren un servidor web embebido; si no está disponible, no registrar handlers
         try:
-            has_server = hasattr(self.wa_client, 'server') and bool(getattr(self.wa_client, 'server'))
+            has_server = hasattr(self.wa_client, "server") and bool(
+                getattr(self.wa_client, "server")
+            )
         except Exception:
             has_server = False
         if not has_server:
@@ -285,13 +328,13 @@ class WhatsAppManager:
                     telefono=message.from_user.wa_id,
                     mensaje=message.text or "[Mensaje multimedia]",
                     tipo_mensaje="welcome",
-                    message_id=getattr(message, 'id', None)
+                    message_id=getattr(message, "id", None),
                 )
-                
+
                 # Procesar respuestas automáticas si están habilitadas
-                if self._config.get('respuestas_automaticas', False):
+                if self._config.get("respuestas_automaticas", False):
                     self._procesar_respuesta_automatica(message)
-                    
+
             except Exception as e:
                 logging.error(f"Error al procesar mensaje entrante: {e}")
 
@@ -300,13 +343,16 @@ class WhatsAppManager:
         Si expira, no reintenta para evitar duplicados; retorna (ok, resp_or_err).
         """
         import threading
+
         result = {"ok": False, "resp": None, "err": None}
+
         def _runner():
             try:
                 result["resp"] = fn()
                 result["ok"] = True
             except Exception as e:
                 result["err"] = e
+
         t = threading.Thread(target=_runner, name="WA-SendCall", daemon=True)
         t.start()
         t.join(self._send_timeout_seconds)
@@ -314,7 +360,9 @@ class WhatsAppManager:
             return True, result["resp"]
         if t.is_alive():
             # Evitar duplicados: no reintentar si el hilo sigue activo
-            logging.warning("WhatsApp send call excedió timeout; liberando UI y continuando en background")
+            logging.warning(
+                "WhatsApp send call excedió timeout; liberando UI y continuando en background"
+            )
             return False, TimeoutError("send timeout")
         else:
             return False, result["err"]
@@ -325,6 +373,7 @@ class WhatsAppManager:
             raise RuntimeError("wa_client no inicializado")
         if self._nonblocking_send:
             import threading
+
             threading.Thread(
                 target=lambda: self.wa_client.send_message(to=to, text=text),
                 name="WA-NonBlockingSendMessage",
@@ -332,7 +381,9 @@ class WhatsAppManager:
             ).start()
             return True, None
         else:
-            return self._call_with_timeout(lambda: self.wa_client.send_message(to=to, text=text))
+            return self._call_with_timeout(
+                lambda: self.wa_client.send_message(to=to, text=text)
+            )
 
     def _get_language_code(self, language: Any) -> str:
         """Obtiene el código de idioma para Graph API de forma segura."""
@@ -347,7 +398,15 @@ class WhatsAppManager:
         # Valor por defecto razonable
         return "es"
 
-    def _send_template_http_basic(self, to: str, name: str, language: Any, body_params: List[str], header_image_url: Optional[str] = None, header_text: Optional[str] = None):
+    def _send_template_http_basic(
+        self,
+        to: str,
+        name: str,
+        language: Any,
+        body_params: List[str],
+        header_image_url: Optional[str] = None,
+        header_text: Optional[str] = None,
+    ):
         """Fallback HTTP directo al Graph API para enviar una plantilla básica.
 
         Solo soporta parámetros de cuerpo como texto y, opcionalmente, header de imagen o texto.
@@ -365,30 +424,36 @@ class WhatsAppManager:
             url = f"https://graph.facebook.com/{self._api_version}/{phone_id}/messages"
             headers = {
                 "Authorization": f"Bearer {self.access_token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
             }
             components: List[Dict[str, Any]] = []
             # Header image o texto si aplica
             if header_image_url:
-                components.append({
-                    "type": "header",
-                    "parameters": [
-                        {"type": "image", "image": {"link": header_image_url}}
-                    ]
-                })
+                components.append(
+                    {
+                        "type": "header",
+                        "parameters": [
+                            {"type": "image", "image": {"link": header_image_url}}
+                        ],
+                    }
+                )
             elif header_text:
-                components.append({
-                    "type": "header",
-                    "parameters": [
-                        {"type": "text", "text": header_text}
-                    ]
-                })
+                components.append(
+                    {
+                        "type": "header",
+                        "parameters": [{"type": "text", "text": header_text}],
+                    }
+                )
             # Body con parámetros de texto
             if body_params and isinstance(body_params, list):
-                components.append({
-                    "type": "body",
-                    "parameters": [{"type": "text", "text": str(p)} for p in body_params]
-                })
+                components.append(
+                    {
+                        "type": "body",
+                        "parameters": [
+                            {"type": "text", "text": str(p)} for p in body_params
+                        ],
+                    }
+                )
 
             payload = {
                 "messaging_product": "whatsapp",
@@ -397,11 +462,13 @@ class WhatsAppManager:
                 "template": {
                     "name": name,
                     "language": {"code": self._get_language_code(language)},
-                    "components": components
-                }
+                    "components": components,
+                },
             }
 
-            resp = requests.post(url, headers=headers, json=payload, timeout=self._send_timeout_seconds)
+            resp = requests.post(
+                url, headers=headers, json=payload, timeout=self._send_timeout_seconds
+            )
             ok = 200 <= int(getattr(resp, "status_code", 500)) < 300
             try:
                 data = resp.json() if hasattr(resp, "json") else {}
@@ -419,37 +486,45 @@ class WhatsAppManager:
             logging.error(f"Error en HTTP fallback de plantilla: {e}")
             return False, {"error": str(e)}
 
-    def _send_template(self, to: str, name: str, language: TemplateLanguage, params: list):
+    def _send_template(
+        self, to: str, name: str, language: TemplateLanguage, params: list
+    ):
         """Envía plantilla con política non-blocking/timeout."""
         if not self.wa_client:
             raise RuntimeError("wa_client no inicializado")
         if self._nonblocking_send:
             import threading
+
             threading.Thread(
-                target=lambda: self.wa_client.send_template(to=to, name=name, language=language, params=params),
+                target=lambda: self.wa_client.send_template(
+                    to=to, name=name, language=language, params=params
+                ),
                 name="WA-NonBlockingSendTemplate",
                 daemon=True,
             ).start()
             return True, None
         else:
-            return self._call_with_timeout(lambda: self.wa_client.send_template(to=to, name=name, language=language, params=params))
+            return self._call_with_timeout(
+                lambda: self.wa_client.send_template(
+                    to=to, name=name, language=language, params=params
+                )
+            )
 
     def _procesar_respuesta_automatica(self, message: Message):
         """Procesa respuestas automáticas básicas"""
         texto = (message.text or "").lower().strip()
-        
+
         respuestas = {
             "hola": "¡Hola! Gracias por contactarnos. Para consultas sobre membresías, horarios o pagos, puedes llamarnos o visitarnos en el gimnasio.",
             "horarios": "Nuestros horarios de atención son de Lunes a Viernes de 6:00 a 22:00 y Sábados de 8:00 a 20:00.",
             "precios": "Para información sobre precios y planes, por favor contacta con recepción o visita nuestras instalaciones.",
-            "ubicacion": "Puedes encontrarnos en nuestra dirección. ¡Te esperamos!"
+            "ubicacion": "Puedes encontrarnos en nuestra dirección. ¡Te esperamos!",
         }
-        
+
         for palabra_clave, respuesta in respuestas.items():
             if palabra_clave in texto:
                 self.enviar_mensaje_simple(
-                    telefono=message.from_user.wa_id,
-                    mensaje=respuesta
+                    telefono=message.from_user.wa_id, mensaje=respuesta
                 )
                 break
 
@@ -457,8 +532,10 @@ class WhatsAppManager:
         """Envía un mensaje de texto simple"""
         if not self.wa_client:
             # Fallback: encolar para envío posterior
-            return self._enqueue_offline_op('enviar_mensaje_simple', {'telefono': telefono, 'mensaje': mensaje})
-        
+            return self._enqueue_offline_op(
+                "enviar_mensaje_simple", {"telefono": telefono, "mensaje": mensaje}
+            )
+
         try:
             # Verificar allowlist
             if not self._numero_permitido(telefono):
@@ -468,31 +545,37 @@ class WhatsAppManager:
             if not self.message_logger.puede_enviar_mensaje(telefono):
                 logging.warning(f"Mensaje bloqueado por anti-spam para {telefono}")
                 return False
-            
+
             # Enviar mensaje con política non-blocking/timeout
             ok, response = self._send_message(to=telefono, text=mensaje)
             if not ok:
                 # Si falló rápido o por timeout, no bloquear; registrar y continuar
-                logging.warning(f"WhatsApp mensaje simple no confirmado inmediatamente para {telefono}: {response}")
+                logging.warning(
+                    f"WhatsApp mensaje simple no confirmado inmediatamente para {telefono}: {response}"
+                )
                 # No encolamos para evitar duplicados si el hilo continúa
                 return True
-            
+
             # Registrar mensaje enviado
             self.message_logger.registrar_mensaje_enviado(
                 telefono=telefono,
                 mensaje=mensaje,
                 tipo_mensaje="welcome",
-                message_id=response.id if hasattr(response, 'id') else None
+                message_id=response.id if hasattr(response, "id") else None,
             )
-            
+
             logging.info(f"Mensaje enviado exitosamente a {telefono}")
             return True
-            
+
         except Exception as e:
             logging.error(f"Error al enviar mensaje a {telefono}: {e}")
-            return self._enqueue_offline_op('enviar_mensaje_simple', {'telefono': telefono, 'mensaje': mensaje})
-    
-    def enviar_mensaje_con_plantilla(self, telefono: str, plantilla_id: int, variables: Dict[str, Any] = None) -> bool:
+            return self._enqueue_offline_op(
+                "enviar_mensaje_simple", {"telefono": telefono, "mensaje": mensaje}
+            )
+
+    def enviar_mensaje_con_plantilla(
+        self, telefono: str, plantilla_id: int, variables: Dict[str, Any] = None
+    ) -> bool:
         """Envía un mensaje usando una plantilla con variables dinámicas"""
         try:
             # Obtener y procesar plantilla
@@ -500,84 +583,99 @@ class WhatsAppManager:
             if not plantilla:
                 logging.error(f"Plantilla {plantilla_id} no encontrada")
                 return False
-            
+
             mensaje_procesado = self.template_processor.procesar_plantilla(
-                plantilla['contenido'],
-                variables or {}
+                plantilla["contenido"], variables or {}
             )
-            
+
             # Enviar mensaje
             return self.enviar_mensaje_simple(telefono, mensaje_procesado)
-            
+
         except Exception as e:
             logging.error(f"Error al enviar mensaje con plantilla: {e}")
-            return self._enqueue_offline_op('enviar_mensaje_con_plantilla', {
-                'telefono': telefono,
-                'plantilla_id': plantilla_id,
-                'variables': variables or {}
-            })
-    
-    def enviar_confirmacion_pago(self, usuario_id: int, pago_info: Dict[str, Any], force_send: bool = False) -> bool:
+            return self._enqueue_offline_op(
+                "enviar_mensaje_con_plantilla",
+                {
+                    "telefono": telefono,
+                    "plantilla_id": plantilla_id,
+                    "variables": variables or {},
+                },
+            )
+
+    def enviar_confirmacion_pago(
+        self, usuario_id: int, pago_info: Dict[str, Any], force_send: bool = False
+    ) -> bool:
         """Envía confirmación de pago recibido usando plantilla real del SISTEMA WHATSAPP.txt"""
         try:
             if not self.wa_client:
                 # Registrar fallo por cliente no inicializado y encolar operación completa
                 try:
                     u = self.db.obtener_usuario(usuario_id)
-                    tel = getattr(u, 'telefono', None) if u else None
+                    tel = getattr(u, "telefono", None) if u else None
                     if tel:
                         self.message_logger.registrar_mensaje_fallido(
                             telefono=tel,
-                            mensaje=f"Confirmación de pago - {getattr(u,'nombre', '')}",
+                            mensaje=f"Confirmación de pago - {getattr(u, 'nombre', '')}",
                             error="Cliente WhatsApp no inicializado",
-                            tipo_mensaje="payment"
+                            tipo_mensaje="payment",
                         )
                 except Exception:
                     pass
-                return self._enqueue_offline_op('enviar_confirmacion_pago', {'usuario_id': usuario_id, 'pago_info': pago_info})
+                return self._enqueue_offline_op(
+                    "enviar_confirmacion_pago",
+                    {"usuario_id": usuario_id, "pago_info": pago_info},
+                )
             usuario = self.db.obtener_usuario(usuario_id)
             if not usuario or not usuario.telefono:
                 logging.warning(f"Usuario {usuario_id} sin teléfono registrado")
                 try:
                     self.message_logger.registrar_mensaje_fallido(
-                        telefono=str(getattr(usuario, 'telefono', '') or ''),
-                        mensaje=f"Confirmación de pago - {getattr(usuario,'nombre','')}",
+                        telefono=str(getattr(usuario, "telefono", "") or ""),
+                        mensaje=f"Confirmación de pago - {getattr(usuario, 'nombre', '')}",
                         error="Usuario sin teléfono",
-                        tipo_mensaje="payment"
+                        tipo_mensaje="payment",
                     )
                 except Exception:
                     pass
                 return False
             # Verificar allowlist
             if not self._numero_permitido(usuario.telefono):
-                logging.warning(f"Número no permitido por allowlist: {usuario.telefono}")
+                logging.warning(
+                    f"Número no permitido por allowlist: {usuario.telefono}"
+                )
                 try:
                     self.message_logger.registrar_mensaje_fallido(
                         telefono=usuario.telefono,
                         mensaje=f"Confirmación de pago - {usuario.nombre}",
                         error="Número fuera de allowlist",
-                        tipo_mensaje="payment"
+                        tipo_mensaje="payment",
                     )
                 except Exception:
                     pass
                 return False
-            
+
             # Verificar anti-spam antes de enviar (permitir forzar en pruebas)
-            if not force_send and not self.message_logger.puede_enviar_mensaje(usuario.telefono):
-                logging.warning(f"Mensaje bloqueado por anti-spam para {usuario.telefono}")
+            if not force_send and not self.message_logger.puede_enviar_mensaje(
+                usuario.telefono
+            ):
+                logging.warning(
+                    f"Mensaje bloqueado por anti-spam para {usuario.telefono}"
+                )
                 try:
                     self.message_logger.registrar_mensaje_fallido(
                         telefono=usuario.telefono,
                         mensaje=f"Confirmación de pago - {usuario.nombre}",
                         error="Bloqueado por anti-spam",
-                        tipo_mensaje="payment"
+                        tipo_mensaje="payment",
                     )
                 except Exception:
                     pass
                 return False
-            
-            template_name = self._get_meta_template_binding("payment", "ih_payment_confirmed_v1")
-            
+
+            template_name = self._get_meta_template_binding(
+                "payment", "ih_payment_confirmed_v1"
+            )
+
             # Usar PyWa para enviar plantilla con variables con política non-blocking/timeout
             try:
                 ok, response = self._send_template(
@@ -588,25 +686,31 @@ class WhatsAppManager:
                         BodyText.params(
                             usuario.nombre,
                             f"{pago_info.get('monto', 0):,.0f}",
-                            pago_info.get('fecha', self._now_local_naive().strftime('%d/%m/%Y'))
+                            pago_info.get(
+                                "fecha", self._now_local_naive().strftime("%d/%m/%Y")
+                            ),
                         )
-                    ]
+                    ],
                 )
                 if not ok:
-                    logging.warning(f"WhatsApp plantilla de confirmación no confirmada inmediatamente para {usuario.telefono}: {response}")
+                    logging.warning(
+                        f"WhatsApp plantilla de confirmación no confirmada inmediatamente para {usuario.telefono}: {response}"
+                    )
                     return True
-                
+
                 # Registrar mensaje enviado
                 self.message_logger.registrar_mensaje_enviado(
                     telefono=usuario.telefono,
                     mensaje=f"Confirmación de pago - {usuario.nombre}",
                     tipo_mensaje="payment",
-                    message_id=getattr(response, 'id', None)
+                    message_id=getattr(response, "id", None),
                 )
-                
-                logging.info(f"Confirmación de pago enviada exitosamente a {usuario.telefono}")
+
+                logging.info(
+                    f"Confirmación de pago enviada exitosamente a {usuario.telefono}"
+                )
                 return True
-                
+
             except Exception as template_error:
                 logging.error(f"Error al enviar plantilla: {template_error}")
                 try:
@@ -614,12 +718,15 @@ class WhatsAppManager:
                         telefono=usuario.telefono,
                         mensaje=f"Confirmación de pago - {usuario.nombre}",
                         error=str(template_error),
-                        tipo_mensaje="payment"
+                        tipo_mensaje="payment",
                     )
                 except Exception:
                     pass
-                return self._enqueue_offline_op('enviar_confirmacion_pago', {'usuario_id': usuario_id, 'pago_info': pago_info})
-            
+                return self._enqueue_offline_op(
+                    "enviar_confirmacion_pago",
+                    {"usuario_id": usuario_id, "pago_info": pago_info},
+                )
+
         except Exception as e:
             logging.error(f"Error al enviar confirmación de pago: {e}")
             try:
@@ -627,14 +734,17 @@ class WhatsAppManager:
                 if u and u.telefono:
                     self.message_logger.registrar_mensaje_fallido(
                         telefono=u.telefono,
-                        mensaje=f"Confirmación de pago - {getattr(u,'nombre','')}",
+                        mensaje=f"Confirmación de pago - {getattr(u, 'nombre', '')}",
                         error=str(e),
-                        tipo_mensaje="payment"
+                        tipo_mensaje="payment",
                     )
             except Exception:
                 pass
-            return self._enqueue_offline_op('enviar_confirmacion_pago', {'usuario_id': usuario_id, 'pago_info': pago_info})
-    
+            return self._enqueue_offline_op(
+                "enviar_confirmacion_pago",
+                {"usuario_id": usuario_id, "pago_info": pago_info},
+            )
+
     def enviar_recordatorio_cuota_vencida(self, usuario_id: int) -> bool:
         """Envía recordatorio de cuota vencida usando plantilla real del SISTEMA WHATSAPP.txt"""
         try:
@@ -644,32 +754,38 @@ class WhatsAppManager:
                 return False
             # Verificar allowlist
             if not self._numero_permitido(usuario.telefono):
-                logging.warning(f"Número no permitido por allowlist: {usuario.telefono}")
+                logging.warning(
+                    f"Número no permitido por allowlist: {usuario.telefono}"
+                )
                 return False
-            
+
             # Verificar anti-spam antes de enviar
             if not self.message_logger.puede_enviar_mensaje(usuario.telefono):
-                logging.warning(f"Mensaje bloqueado por anti-spam para {usuario.telefono}")
+                logging.warning(
+                    f"Mensaje bloqueado por anti-spam para {usuario.telefono}"
+                )
                 return False
-            
+
             # Obtener información de cuota vencida
             now = self._now_local_naive()
             pago_actual = self.db.obtener_pago_actual(usuario_id, now.month, now.year)
             if not pago_actual:
-                logging.warning(f"No se encontró información de pago para usuario {usuario_id}")
+                logging.warning(
+                    f"No se encontró información de pago para usuario {usuario_id}"
+                )
                 return False
-            
-            template_name = self._get_meta_template_binding("overdue", "ih_membership_overdue_v1")
-            
+
+            template_name = self._get_meta_template_binding(
+                "overdue", "ih_membership_overdue_v1"
+            )
+
             # Si no hay cliente, usar fallback HTTP directo
             if not self.wa_client:
                 ok, resp = self._send_template_http_basic(
                     to=usuario.telefono,
                     name=template_name,
                     language=TemplateLanguage.SPANISH_ARG,
-                    body_params=[
-                        usuario.nombre
-                    ]
+                    body_params=[usuario.nombre],
                 )
                 if ok:
                     try:
@@ -677,50 +793,56 @@ class WhatsAppManager:
                             telefono=usuario.telefono,
                             mensaje=f"Recordatorio cuota vencida - {usuario.nombre}",
                             tipo_mensaje="overdue",
-                            message_id=(resp or {}).get("id")
+                            message_id=(resp or {}).get("id"),
                         )
                     except Exception:
                         pass
-                    logging.info(f"Recordatorio de cuota vencida enviado (HTTP) a {usuario.telefono}")
+                    logging.info(
+                        f"Recordatorio de cuota vencida enviado (HTTP) a {usuario.telefono}"
+                    )
                     return True
                 else:
                     try:
                         self.message_logger.registrar_mensaje_fallido(
                             telefono=usuario.telefono,
                             mensaje=f"Recordatorio cuota vencida - {usuario.nombre}",
-                            error=str((resp or {}).get('error', 'fallback_http_failed')),
-                            tipo_mensaje="overdue"
+                            error=str(
+                                (resp or {}).get("error", "fallback_http_failed")
+                            ),
+                            tipo_mensaje="overdue",
                         )
                     except Exception:
                         pass
-                    return self._enqueue_offline_op('enviar_recordatorio_cuota_vencida', {'usuario_id': usuario_id})
-            
+                    return self._enqueue_offline_op(
+                        "enviar_recordatorio_cuota_vencida", {"usuario_id": usuario_id}
+                    )
+
             # Usar PyWa para enviar plantilla con variables con política non-blocking/timeout
             try:
                 ok, response = self._send_template(
                     to=usuario.telefono,
                     name=template_name,
                     language=TemplateLanguage.SPANISH_ARG,
-                    params=[
-                        BodyText.params(
-                            usuario.nombre
-                        )
-                    ]
+                    params=[BodyText.params(usuario.nombre)],
                 )
                 if not ok:
-                    logging.warning(f"WhatsApp plantilla de recordatorio no confirmada inmediatamente para {usuario.telefono}: {response}")
+                    logging.warning(
+                        f"WhatsApp plantilla de recordatorio no confirmada inmediatamente para {usuario.telefono}: {response}"
+                    )
                     return True
-                
+
                 # Registrar mensaje enviado
                 self.message_logger.registrar_mensaje_enviado(
                     telefono=usuario.telefono,
                     mensaje=f"Recordatorio cuota vencida - {usuario.nombre}",
-                    tipo_mensaje="overdue"
+                    tipo_mensaje="overdue",
                 )
-                
-                logging.info(f"Recordatorio de cuota vencida enviado exitosamente a {usuario.telefono}")
+
+                logging.info(
+                    f"Recordatorio de cuota vencida enviado exitosamente a {usuario.telefono}"
+                )
                 return True
-                
+
             except Exception as template_error:
                 logging.error(f"Error al enviar plantilla: {template_error}")
                 # Fallback HTTP si el cliente falla de inmediato
@@ -728,9 +850,7 @@ class WhatsAppManager:
                     to=usuario.telefono,
                     name=template_name,
                     language=TemplateLanguage.SPANISH_ARG,
-                    body_params=[
-                        usuario.nombre
-                    ]
+                    body_params=[usuario.nombre],
                 )
                 if ok:
                     try:
@@ -738,28 +858,36 @@ class WhatsAppManager:
                             telefono=usuario.telefono,
                             mensaje=f"Recordatorio cuota vencida - {usuario.nombre}",
                             tipo_mensaje="overdue",
-                            message_id=(resp or {}).get("id")
+                            message_id=(resp or {}).get("id"),
                         )
                     except Exception:
                         pass
-                    logging.info(f"Recordatorio de cuota vencida enviado (HTTP) a {usuario.telefono}")
+                    logging.info(
+                        f"Recordatorio de cuota vencida enviado (HTTP) a {usuario.telefono}"
+                    )
                     return True
                 else:
                     try:
                         self.message_logger.registrar_mensaje_fallido(
                             telefono=usuario.telefono,
                             mensaje=f"Recordatorio cuota vencida - {usuario.nombre}",
-                            error=str((resp or {}).get('error', 'fallback_http_failed')),
-                            tipo_mensaje="overdue"
+                            error=str(
+                                (resp or {}).get("error", "fallback_http_failed")
+                            ),
+                            tipo_mensaje="overdue",
                         )
                     except Exception:
                         pass
-                    return self._enqueue_offline_op('enviar_recordatorio_cuota_vencida', {'usuario_id': usuario_id})
-            
+                    return self._enqueue_offline_op(
+                        "enviar_recordatorio_cuota_vencida", {"usuario_id": usuario_id}
+                    )
+
         except Exception as e:
             logging.error(f"Error al enviar recordatorio de cuota vencida: {e}")
-            return self._enqueue_offline_op('enviar_recordatorio_cuota_vencida', {'usuario_id': usuario_id})
-    
+            return self._enqueue_offline_op(
+                "enviar_recordatorio_cuota_vencida", {"usuario_id": usuario_id}
+            )
+
     def enviar_mensaje_bienvenida(self, usuario_id: int) -> bool:
         """Envía mensaje de bienvenida a nuevo usuario usando plantilla real del SISTEMA WHATSAPP.txt"""
         try:
@@ -769,27 +897,27 @@ class WhatsAppManager:
                 return False
             # Verificar allowlist
             if not self._numero_permitido(usuario.telefono):
-                logging.warning(f"Número no permitido por allowlist: {usuario.telefono}")
+                logging.warning(
+                    f"Número no permitido por allowlist: {usuario.telefono}"
+                )
                 return False
-            
+
             # Verificar anti-spam antes de enviar
             if not self.message_logger.puede_enviar_mensaje(usuario.telefono):
-                logging.warning(f"Mensaje bloqueado por anti-spam para {usuario.telefono}")
+                logging.warning(
+                    f"Mensaje bloqueado por anti-spam para {usuario.telefono}"
+                )
                 return False
-            
-            # Obtener nombre del gimnasio desde configuración
-            gym_data = self.template_processor.obtener_datos_gimnasio()
-            gym_name = gym_data.get('nombre_gimnasio', 'nuestro gimnasio')
-            
+
             template_name = self._get_meta_template_binding("welcome", "ih_welcome_v1")
-            
+
             # Si no hay cliente, intentar fallback HTTP
             if not self.wa_client:
                 ok, resp = self._send_template_http_basic(
                     to=usuario.telefono,
                     name=template_name,
                     language=TemplateLanguage.SPANISH_ARG,
-                    body_params=[usuario.nombre]
+                    body_params=[usuario.nombre],
                 )
                 if ok:
                     try:
@@ -797,23 +925,29 @@ class WhatsAppManager:
                             telefono=usuario.telefono,
                             mensaje=f"Mensaje de bienvenida - {usuario.nombre}",
                             tipo_mensaje="welcome",
-                            message_id=(resp or {}).get("id")
+                            message_id=(resp or {}).get("id"),
                         )
                     except Exception:
                         pass
-                    logging.info(f"Mensaje de bienvenida enviado (HTTP) a {usuario.telefono}")
+                    logging.info(
+                        f"Mensaje de bienvenida enviado (HTTP) a {usuario.telefono}"
+                    )
                     return True
                 else:
                     try:
                         self.message_logger.registrar_mensaje_fallido(
                             telefono=usuario.telefono,
                             mensaje=f"Mensaje de bienvenida - {usuario.nombre}",
-                            error=str((resp or {}).get('error', 'fallback_http_failed')),
-                            tipo_mensaje="welcome"
+                            error=str(
+                                (resp or {}).get("error", "fallback_http_failed")
+                            ),
+                            tipo_mensaje="welcome",
                         )
                     except Exception:
                         pass
-                    return self._enqueue_offline_op('enviar_mensaje_bienvenida', {'usuario_id': usuario_id})
+                    return self._enqueue_offline_op(
+                        "enviar_mensaje_bienvenida", {"usuario_id": usuario_id}
+                    )
 
             # Usar PyWa para enviar plantilla
             try:
@@ -821,33 +955,33 @@ class WhatsAppManager:
                     to=usuario.telefono,
                     name=template_name,
                     language=TemplateLanguage.SPANISH_ARG,
-                    params=[
-                        BodyText.params(
-                            usuario.nombre
-                        )
-                    ]
+                    params=[BodyText.params(usuario.nombre)],
                 )
                 if not ok:
-                    logging.warning(f"WhatsApp plantilla bienvenida no confirmada inmediatamente para {usuario.telefono}: {response}")
+                    logging.warning(
+                        f"WhatsApp plantilla bienvenida no confirmada inmediatamente para {usuario.telefono}: {response}"
+                    )
                     return True
-                
+
                 # Registrar mensaje enviado
                 self.message_logger.registrar_mensaje_enviado(
                     telefono=usuario.telefono,
                     mensaje=f"Mensaje de bienvenida - {usuario.nombre}",
-                    tipo_mensaje="welcome"
+                    tipo_mensaje="welcome",
                 )
-                
-                logging.info(f"Mensaje de bienvenida enviado exitosamente a {usuario.telefono}")
+
+                logging.info(
+                    f"Mensaje de bienvenida enviado exitosamente a {usuario.telefono}"
+                )
                 return True
-                
+
             except Exception as template_error:
                 logging.error(f"Error al enviar plantilla: {template_error}")
                 ok, resp = self._send_template_http_basic(
                     to=usuario.telefono,
                     name=template_name,
                     language=TemplateLanguage.SPANISH_ARG,
-                    body_params=[usuario.nombre]
+                    body_params=[usuario.nombre],
                 )
                 if ok:
                     try:
@@ -855,79 +989,102 @@ class WhatsAppManager:
                             telefono=usuario.telefono,
                             mensaje=f"Mensaje de bienvenida - {usuario.nombre}",
                             tipo_mensaje="welcome",
-                            message_id=(resp or {}).get("id")
+                            message_id=(resp or {}).get("id"),
                         )
                     except Exception:
                         pass
-                    logging.info(f"Mensaje de bienvenida enviado (HTTP) a {usuario.telefono}")
+                    logging.info(
+                        f"Mensaje de bienvenida enviado (HTTP) a {usuario.telefono}"
+                    )
                     return True
                 else:
                     try:
                         self.message_logger.registrar_mensaje_fallido(
                             telefono=usuario.telefono,
                             mensaje=f"Mensaje de bienvenida - {usuario.nombre}",
-                            error=str((resp or {}).get('error', 'fallback_http_failed')),
-                            tipo_mensaje="welcome"
+                            error=str(
+                                (resp or {}).get("error", "fallback_http_failed")
+                            ),
+                            tipo_mensaje="welcome",
                         )
                     except Exception:
                         pass
-                    return self._enqueue_offline_op('enviar_mensaje_bienvenida', {'usuario_id': usuario_id})
-            
+                    return self._enqueue_offline_op(
+                        "enviar_mensaje_bienvenida", {"usuario_id": usuario_id}
+                    )
+
         except Exception as e:
             logging.error(f"Error al enviar mensaje de bienvenida: {e}")
-            return self._enqueue_offline_op('enviar_mensaje_bienvenida', {'usuario_id': usuario_id})
+            return self._enqueue_offline_op(
+                "enviar_mensaje_bienvenida", {"usuario_id": usuario_id}
+            )
 
-    def enviar_notificacion_desactivacion(self, usuario_id: int, motivo: str = "Falta de pago", fecha_desactivacion: Optional[str] = None, force_send: bool = False) -> bool:
+    def enviar_notificacion_desactivacion(
+        self,
+        usuario_id: int,
+        motivo: str = "Falta de pago",
+        fecha_desactivacion: Optional[str] = None,
+        force_send: bool = False,
+    ) -> bool:
         """Envía notificación de desactivación de usuario por falta de pago"""
         try:
             if not self.wa_client:
                 try:
                     u = self.db.obtener_usuario(usuario_id)
-                    tel = getattr(u, 'telefono', None) if u else None
+                    tel = getattr(u, "telefono", None) if u else None
                     if tel:
                         self.message_logger.registrar_mensaje_fallido(
                             telefono=tel,
-                            mensaje=f"Desactivación de usuario - {getattr(u,'nombre','')}",
+                            mensaje=f"Desactivación de usuario - {getattr(u, 'nombre', '')}",
                             error="Cliente WhatsApp no inicializado",
-                            tipo_mensaje="deactivation"
+                            tipo_mensaje="deactivation",
                         )
                 except Exception:
                     pass
-                return self._enqueue_offline_op('enviar_notificacion_desactivacion', {
-                    'usuario_id': usuario_id,
-                    'motivo': motivo,
-                    'fecha_desactivacion': fecha_desactivacion
-                })
+                return self._enqueue_offline_op(
+                    "enviar_notificacion_desactivacion",
+                    {
+                        "usuario_id": usuario_id,
+                        "motivo": motivo,
+                        "fecha_desactivacion": fecha_desactivacion,
+                    },
+                )
             usuario = self.db.obtener_usuario(usuario_id)
             if not usuario or not usuario.telefono:
                 logging.warning(f"Usuario {usuario_id} sin teléfono registrado")
                 try:
                     self.message_logger.registrar_mensaje_fallido(
-                        telefono=str(getattr(usuario, 'telefono', '') or ''),
-                        mensaje=f"Desactivación de usuario - {getattr(usuario,'nombre','')}",
+                        telefono=str(getattr(usuario, "telefono", "") or ""),
+                        mensaje=f"Desactivación de usuario - {getattr(usuario, 'nombre', '')}",
                         error="Usuario sin teléfono",
-                        tipo_mensaje="deactivation"
+                        tipo_mensaje="deactivation",
                     )
                 except Exception:
                     pass
                 return False
 
             # Verificar anti-spam antes de enviar (permitir forzar en pruebas)
-            if not force_send and not self.message_logger.puede_enviar_mensaje(usuario.telefono):
-                logging.warning(f"Mensaje bloqueado por anti-spam para {usuario.telefono}")
+            if not force_send and not self.message_logger.puede_enviar_mensaje(
+                usuario.telefono
+            ):
+                logging.warning(
+                    f"Mensaje bloqueado por anti-spam para {usuario.telefono}"
+                )
                 try:
                     self.message_logger.registrar_mensaje_fallido(
                         telefono=usuario.telefono,
                         mensaje=f"Desactivación de usuario - {usuario.nombre}",
                         error="Bloqueado por anti-spam",
-                        tipo_mensaje="deactivation"
+                        tipo_mensaje="deactivation",
                     )
                 except Exception:
                     pass
                 return False
 
-            template_name = self._get_meta_template_binding("deactivation", "ih_membership_deactivated_v1")
-            fecha = fecha_desactivacion or self._now_local_naive().strftime('%d/%m/%Y')
+            template_name = self._get_meta_template_binding(
+                "deactivation", "ih_membership_deactivated_v1"
+            )
+            fecha = fecha_desactivacion or self._now_local_naive().strftime("%d/%m/%Y")
             motivo_out = f"{str(motivo or '').strip()} ({fecha})".strip()
 
             try:
@@ -938,37 +1095,44 @@ class WhatsAppManager:
                     params=[
                         BodyText.params(
                             usuario.nombre,  # {{1}}
-                            motivo_out       # {{2}}
+                            motivo_out,  # {{2}}
                         )
-                    ]
+                    ],
                 )
 
                 self.message_logger.registrar_mensaje_enviado(
                     telefono=usuario.telefono,
                     mensaje=f"Desactivación de usuario - {usuario.nombre}",
                     tipo_mensaje="deactivation",
-                    message_id=getattr(response, 'id', None)
+                    message_id=getattr(response, "id", None),
                 )
 
-                logging.info(f"Notificación de desactivación enviada exitosamente a {usuario.telefono}")
+                logging.info(
+                    f"Notificación de desactivación enviada exitosamente a {usuario.telefono}"
+                )
                 return True
 
             except Exception as template_error:
-                logging.error(f"Error al enviar plantilla de desactivación: {template_error}")
+                logging.error(
+                    f"Error al enviar plantilla de desactivación: {template_error}"
+                )
                 try:
                     self.message_logger.registrar_mensaje_fallido(
                         telefono=usuario.telefono,
                         mensaje=f"Desactivación de usuario - {usuario.nombre}",
                         error=str(template_error),
-                        tipo_mensaje="deactivation"
+                        tipo_mensaje="deactivation",
                     )
                 except Exception:
                     pass
-                return self._enqueue_offline_op('enviar_notificacion_desactivacion', {
-                    'usuario_id': usuario_id,
-                    'motivo': motivo,
-                    'fecha_desactivacion': fecha_desactivacion
-                })
+                return self._enqueue_offline_op(
+                    "enviar_notificacion_desactivacion",
+                    {
+                        "usuario_id": usuario_id,
+                        "motivo": motivo,
+                        "fecha_desactivacion": fecha_desactivacion,
+                    },
+                )
 
         except Exception as e:
             logging.error(f"Error al enviar notificación de desactivación: {e}")
@@ -977,26 +1141,31 @@ class WhatsAppManager:
                 if u and u.telefono:
                     self.message_logger.registrar_mensaje_fallido(
                         telefono=u.telefono,
-                        mensaje=f"Desactivación de usuario - {getattr(u,'nombre','')}",
+                        mensaje=f"Desactivación de usuario - {getattr(u, 'nombre', '')}",
                         error=str(e),
-                        tipo_mensaje="deactivation"
+                        tipo_mensaje="deactivation",
                     )
             except Exception:
                 pass
-            return self._enqueue_offline_op('enviar_notificacion_desactivacion', {
-                'usuario_id': usuario_id,
-                'motivo': motivo,
-                'fecha_desactivacion': fecha_desactivacion
-            })
+            return self._enqueue_offline_op(
+                "enviar_notificacion_desactivacion",
+                {
+                    "usuario_id": usuario_id,
+                    "motivo": motivo,
+                    "fecha_desactivacion": fecha_desactivacion,
+                },
+            )
 
-    def enviar_recordatorio_horario_clase(self, usuario_id: int, clase_info: Dict[str, Any], force_send: bool = False) -> bool:
+    def enviar_recordatorio_horario_clase(
+        self, usuario_id: int, clase_info: Dict[str, Any], force_send: bool = False
+    ) -> bool:
         """Envía recordatorio de horario de clase (tipo, fecha y hora)"""
         try:
             if not self.wa_client:
-                return self._enqueue_offline_op('enviar_recordatorio_horario_clase', {
-                    'usuario_id': usuario_id,
-                    'clase_info': clase_info
-                })
+                return self._enqueue_offline_op(
+                    "enviar_recordatorio_horario_clase",
+                    {"usuario_id": usuario_id, "clase_info": clase_info},
+                )
             usuario = self.db.obtener_usuario(usuario_id)
             if not usuario or not usuario.telefono:
                 logging.warning(f"Usuario {usuario_id} sin teléfono registrado")
@@ -1004,27 +1173,41 @@ class WhatsAppManager:
 
             # Allowlist (permitir forzar en pruebas)
             if not force_send and not self._numero_permitido(usuario.telefono):
-                logging.warning(f"Número no permitido por allowlist: {usuario.telefono}")
+                logging.warning(
+                    f"Número no permitido por allowlist: {usuario.telefono}"
+                )
                 return False
 
             # Verificar anti-spam (permitir forzar en pruebas)
-            if not force_send and not self.message_logger.puede_enviar_mensaje(usuario.telefono):
-                logging.warning(f"Mensaje bloqueado por anti-spam para {usuario.telefono}")
+            if not force_send and not self.message_logger.puede_enviar_mensaje(
+                usuario.telefono
+            ):
+                logging.warning(
+                    f"Mensaje bloqueado por anti-spam para {usuario.telefono}"
+                )
                 return False
 
-            template_name = self._get_meta_template_binding("class_reminder", "ih_class_reminder_v1")
+            template_name = self._get_meta_template_binding(
+                "class_reminder", "ih_class_reminder_v1"
+            )
 
             # Sanitización de parámetros para evitar MissingRequiredParameter
             def _safe_text(val, default):
                 try:
-                    s = (val if val is not None else '').strip() if isinstance(val, str) else str(val or '').strip()
+                    s = (
+                        (val if val is not None else "").strip()
+                        if isinstance(val, str)
+                        else str(val or "").strip()
+                    )
                 except Exception:
-                    s = ''
+                    s = ""
                 return s if s else default
 
-            tipo_clase = _safe_text(clase_info.get('tipo_clase') or clase_info.get('clase_nombre'), 'Clase')
-            fecha = _safe_text(clase_info.get('fecha'), 'Por confirmar')
-            hora = _safe_text(clase_info.get('hora'), 'Por confirmar')
+            tipo_clase = _safe_text(
+                clase_info.get("tipo_clase") or clase_info.get("clase_nombre"), "Clase"
+            )
+            fecha = _safe_text(clase_info.get("fecha"), "Por confirmar")
+            hora = _safe_text(clase_info.get("hora"), "Por confirmar")
 
             try:
                 response = self.wa_client.send_template(
@@ -1033,46 +1216,54 @@ class WhatsAppManager:
                     language=TemplateLanguage.SPANISH_ARG,
                     params=[
                         BodyText.params(
-                            _safe_text(getattr(usuario, 'nombre', None), 'Alumno'),  # {{1}}
-                            tipo_clase,      # {{2}}
-                            fecha,           # {{3}}
-                            hora             # {{4}}
+                            _safe_text(
+                                getattr(usuario, "nombre", None), "Alumno"
+                            ),  # {{1}}
+                            tipo_clase,  # {{2}}
+                            fecha,  # {{3}}
+                            hora,  # {{4}}
                         )
-                    ]
+                    ],
                 )
 
                 self.message_logger.registrar_mensaje_enviado(
                     telefono=usuario.telefono,
                     mensaje=f"Recordatorio de clase - {usuario.nombre}",
                     tipo_mensaje="class_reminder",
-                    message_id=getattr(response, 'id', None)
+                    message_id=getattr(response, "id", None),
                 )
 
-                logging.info(f"Recordatorio de clase enviado exitosamente a {usuario.telefono}")
+                logging.info(
+                    f"Recordatorio de clase enviado exitosamente a {usuario.telefono}"
+                )
                 return True
 
             except Exception as template_error:
-                logging.error(f"Error al enviar plantilla de recordatorio de clase: {template_error}")
-                return self._enqueue_offline_op('enviar_recordatorio_horario_clase', {
-                    'usuario_id': usuario_id,
-                    'clase_info': clase_info
-                })
+                logging.error(
+                    f"Error al enviar plantilla de recordatorio de clase: {template_error}"
+                )
+                return self._enqueue_offline_op(
+                    "enviar_recordatorio_horario_clase",
+                    {"usuario_id": usuario_id, "clase_info": clase_info},
+                )
 
         except Exception as e:
             logging.error(f"Error al enviar recordatorio de clase: {e}")
-            return self._enqueue_offline_op('enviar_recordatorio_horario_clase', {
-                'usuario_id': usuario_id,
-                'clase_info': clase_info
-            })
+            return self._enqueue_offline_op(
+                "enviar_recordatorio_horario_clase",
+                {"usuario_id": usuario_id, "clase_info": clase_info},
+            )
 
-    def enviar_promocion_lista_espera(self, usuario_id: int, clase_info: Dict[str, Any], force_send: bool = False) -> bool:
+    def enviar_promocion_lista_espera(
+        self, usuario_id: int, clase_info: Dict[str, Any], force_send: bool = False
+    ) -> bool:
         """Aviso a primer persona en lista de espera: se liberó un cupo"""
         try:
             if not self.wa_client:
-                return self._enqueue_offline_op('enviar_promocion_lista_espera', {
-                    'usuario_id': usuario_id,
-                    'clase_info': clase_info
-                })
+                return self._enqueue_offline_op(
+                    "enviar_promocion_lista_espera",
+                    {"usuario_id": usuario_id, "clase_info": clase_info},
+                )
             usuario = self.db.obtener_usuario(usuario_id)
             if not usuario or not usuario.telefono:
                 logging.warning(f"Usuario {usuario_id} sin teléfono registrado")
@@ -1080,28 +1271,42 @@ class WhatsAppManager:
 
             # Allowlist (permitir forzar en pruebas)
             if not force_send and not self._numero_permitido(usuario.telefono):
-                logging.warning(f"Número no permitido por allowlist: {usuario.telefono}")
+                logging.warning(
+                    f"Número no permitido por allowlist: {usuario.telefono}"
+                )
                 return False
 
             # Verificar anti-spam (permitir forzar en pruebas)
-            if not force_send and not self.message_logger.puede_enviar_mensaje(usuario.telefono):
-                logging.warning(f"Mensaje bloqueado por anti-spam para {usuario.telefono}")
+            if not force_send and not self.message_logger.puede_enviar_mensaje(
+                usuario.telefono
+            ):
+                logging.warning(
+                    f"Mensaje bloqueado por anti-spam para {usuario.telefono}"
+                )
                 return False
 
             # Plantilla para avisar que hay cupo disponible al primero de la lista de espera
-            template_name = self._get_meta_template_binding("waitlist", "ih_waitlist_spot_available_v1")
+            template_name = self._get_meta_template_binding(
+                "waitlist", "ih_waitlist_spot_available_v1"
+            )
 
             # Sanitización de parámetros para evitar MissingRequiredParameter
             def _safe_text(val, default):
                 try:
-                    s = (val if val is not None else '').strip() if isinstance(val, str) else str(val or '').strip()
+                    s = (
+                        (val if val is not None else "").strip()
+                        if isinstance(val, str)
+                        else str(val or "").strip()
+                    )
                 except Exception:
-                    s = ''
+                    s = ""
                 return s if s else default
 
-            tipo_clase = _safe_text(clase_info.get('tipo_clase') or clase_info.get('clase_nombre'), 'Clase')
-            fecha = _safe_text(clase_info.get('fecha'), 'Por confirmar')
-            hora = _safe_text(clase_info.get('hora'), 'Por confirmar')
+            tipo_clase = _safe_text(
+                clase_info.get("tipo_clase") or clase_info.get("clase_nombre"), "Clase"
+            )
+            fecha = _safe_text(clase_info.get("fecha"), "Por confirmar")
+            hora = _safe_text(clase_info.get("hora"), "Por confirmar")
 
             try:
                 response = self.wa_client.send_template(
@@ -1110,47 +1315,55 @@ class WhatsAppManager:
                     language=TemplateLanguage.SPANISH_ARG,
                     params=[
                         BodyText.params(
-                            _safe_text(getattr(usuario, 'nombre', None), 'Alumno'),  # {{1}}
-                            tipo_clase,      # {{2}}
-                            fecha,           # {{3}}
-                            hora             # {{4}}
+                            _safe_text(
+                                getattr(usuario, "nombre", None), "Alumno"
+                            ),  # {{1}}
+                            tipo_clase,  # {{2}}
+                            fecha,  # {{3}}
+                            hora,  # {{4}}
                         )
-                    ]
+                    ],
                 )
 
                 self.message_logger.registrar_mensaje_enviado(
                     telefono=usuario.telefono,
                     mensaje=f"Cupo disponible (lista de espera) - {usuario.nombre}",
                     tipo_mensaje="waitlist",
-                    message_id=getattr(response, 'id', None)
+                    message_id=getattr(response, "id", None),
                 )
 
-                logging.info(f"Aviso de cupo disponible enviado exitosamente a {usuario.telefono}")
+                logging.info(
+                    f"Aviso de cupo disponible enviado exitosamente a {usuario.telefono}"
+                )
                 return True
 
             except Exception as template_error:
-                logging.error(f"Error al enviar plantilla de cupo disponible: {template_error}")
-                return self._enqueue_offline_op('enviar_promocion_lista_espera', {
-                    'usuario_id': usuario_id,
-                    'clase_info': clase_info
-                })
+                logging.error(
+                    f"Error al enviar plantilla de cupo disponible: {template_error}"
+                )
+                return self._enqueue_offline_op(
+                    "enviar_promocion_lista_espera",
+                    {"usuario_id": usuario_id, "clase_info": clase_info},
+                )
 
         except Exception as e:
             logging.error(f"Error al enviar aviso de cupo disponible: {e}")
-            return self._enqueue_offline_op('enviar_promocion_lista_espera', {
-                'usuario_id': usuario_id,
-                'clase_info': clase_info
-            })
+            return self._enqueue_offline_op(
+                "enviar_promocion_lista_espera",
+                {"usuario_id": usuario_id, "clase_info": clase_info},
+            )
 
-    def enviar_promocion_a_lista_principal(self, usuario_id: int, clase_info: Dict[str, Any], force_send: bool = False) -> bool:
+    def enviar_promocion_a_lista_principal(
+        self, usuario_id: int, clase_info: Dict[str, Any], force_send: bool = False
+    ) -> bool:
         """Aviso cuando un usuario pasa de lista de espera a lista principal"""
         try:
             if not self.wa_client:
                 # Reutilizamos el mismo op offline para no romper el manejador existente
-                return self._enqueue_offline_op('enviar_promocion_lista_espera', {
-                    'usuario_id': usuario_id,
-                    'clase_info': clase_info
-                })
+                return self._enqueue_offline_op(
+                    "enviar_promocion_lista_espera",
+                    {"usuario_id": usuario_id, "clase_info": clase_info},
+                )
             usuario = self.db.obtener_usuario(usuario_id)
             if not usuario or not usuario.telefono:
                 logging.warning(f"Usuario {usuario_id} sin teléfono registrado")
@@ -1158,28 +1371,42 @@ class WhatsAppManager:
 
             # Allowlist (permitir forzar en pruebas)
             if not force_send and not self._numero_permitido(usuario.telefono):
-                logging.warning(f"Número no permitido por allowlist: {usuario.telefono}")
+                logging.warning(
+                    f"Número no permitido por allowlist: {usuario.telefono}"
+                )
                 return False
 
             # Verificar anti-spam (permitir forzar en pruebas)
-            if not force_send and not self.message_logger.puede_enviar_mensaje(usuario.telefono):
-                logging.warning(f"Mensaje bloqueado por anti-spam para {usuario.telefono}")
+            if not force_send and not self.message_logger.puede_enviar_mensaje(
+                usuario.telefono
+            ):
+                logging.warning(
+                    f"Mensaje bloqueado por anti-spam para {usuario.telefono}"
+                )
                 return False
 
             # Plantilla para avisar promoción a lista principal
-            template_name = self._get_meta_template_binding("waitlist", "ih_waitlist_spot_available_v1")
+            template_name = self._get_meta_template_binding(
+                "waitlist", "ih_waitlist_spot_available_v1"
+            )
 
             # Sanitización de parámetros
             def _safe_text(val, default):
                 try:
-                    s = (val if val is not None else '').strip() if isinstance(val, str) else str(val or '').strip()
+                    s = (
+                        (val if val is not None else "").strip()
+                        if isinstance(val, str)
+                        else str(val or "").strip()
+                    )
                 except Exception:
-                    s = ''
+                    s = ""
                 return s if s else default
 
-            tipo_clase = _safe_text(clase_info.get('tipo_clase') or clase_info.get('clase_nombre'), 'Clase')
-            fecha = _safe_text(clase_info.get('fecha'), 'Por confirmar')
-            hora = _safe_text(clase_info.get('hora'), 'Por confirmar')
+            tipo_clase = _safe_text(
+                clase_info.get("tipo_clase") or clase_info.get("clase_nombre"), "Clase"
+            )
+            fecha = _safe_text(clase_info.get("fecha"), "Por confirmar")
+            hora = _safe_text(clase_info.get("hora"), "Por confirmar")
 
             try:
                 response = self.wa_client.send_template(
@@ -1188,71 +1415,83 @@ class WhatsAppManager:
                     language=TemplateLanguage.SPANISH_ARG,
                     params=[
                         BodyText.params(
-                            _safe_text(getattr(usuario, 'nombre', None), 'Alumno'),  # {{1}}
-                            tipo_clase,      # {{2}}
-                            fecha,           # {{3}}
-                            hora             # {{4}}
+                            _safe_text(
+                                getattr(usuario, "nombre", None), "Alumno"
+                            ),  # {{1}}
+                            tipo_clase,  # {{2}}
+                            fecha,  # {{3}}
+                            hora,  # {{4}}
                         )
-                    ]
+                    ],
                 )
 
                 self.message_logger.registrar_mensaje_enviado(
                     telefono=usuario.telefono,
                     mensaje=f"Promoción a lista principal - {usuario.nombre}",
                     tipo_mensaje="waitlist",
-                    message_id=getattr(response, 'id', None)
+                    message_id=getattr(response, "id", None),
                 )
 
-                logging.info(f"Aviso de promoción a lista principal enviado exitosamente a {usuario.telefono}")
+                logging.info(
+                    f"Aviso de promoción a lista principal enviado exitosamente a {usuario.telefono}"
+                )
                 return True
 
             except Exception as template_error:
-                logging.error(f"Error al enviar plantilla de promoción a lista principal: {template_error}")
-                return self._enqueue_offline_op('enviar_promocion_lista_espera', {
-                    'usuario_id': usuario_id,
-                    'clase_info': clase_info
-                })
+                logging.error(
+                    f"Error al enviar plantilla de promoción a lista principal: {template_error}"
+                )
+                return self._enqueue_offline_op(
+                    "enviar_promocion_lista_espera",
+                    {"usuario_id": usuario_id, "clase_info": clase_info},
+                )
 
         except Exception as e:
             logging.error(f"Error al enviar aviso de promoción a lista principal: {e}")
-            return self._enqueue_offline_op('enviar_promocion_lista_espera', {
-                'usuario_id': usuario_id,
-                'clase_info': clase_info
-            })
-    
-    def send_overdue_payment_notification(self, user_data: dict, to: str | None = None) -> bool:
+            return self._enqueue_offline_op(
+                "enviar_promocion_lista_espera",
+                {"usuario_id": usuario_id, "clase_info": clase_info},
+            )
+
+    def send_overdue_payment_notification(
+        self, user_data: dict, to: str | None = None
+    ) -> bool:
         """
         Envía notificación de cuota vencida según documentación de arquitectura
-        
+
         Args:
             user_data: {
                 'phone': str,
-                'name': str, 
+                'name': str,
                 'due_date': str,
                 'amount': float
             }
             to: str opcional, número explícito de destino; si no se proporciona, se usa user_data['phone']
-        
+
         Returns:
             bool: True si el mensaje se envió correctamente
         """
         try:
             if not self.wa_client:
-                return self._enqueue_offline_op('send_overdue_payment_notification', {
-                    'user_data': user_data,
-                    'to': user_data.get('phone')
-                })
-            
+                return self._enqueue_offline_op(
+                    "send_overdue_payment_notification",
+                    {"user_data": user_data, "to": user_data.get("phone")},
+                )
+
             # Verificar anti-spam
-            destino = to or user_data.get('phone')
+            destino = to or user_data.get("phone")
             if self.message_logger.verificar_mensaje_enviado_reciente(
                 destino, "overdue", 24
             ):
-                logging.info(f"Mensaje anti-spam bloqueado para usuario {user_data.get('user_id')}")
+                logging.info(
+                    f"Mensaje anti-spam bloqueado para usuario {user_data.get('user_id')}"
+                )
                 return False
-            
-            template_name = self._get_meta_template_binding("overdue", "ih_membership_overdue_v1")
-            
+
+            template_name = self._get_meta_template_binding(
+                "overdue", "ih_membership_overdue_v1"
+            )
+
             # Usar PyWa para enviar plantilla
             response = self.wa_client.send_template(
                 to=destino,
@@ -1260,33 +1499,33 @@ class WhatsAppManager:
                 language=TemplateLanguage.SPANISH_ARG,
                 params=[
                     BodyText.params(
-                        user_data['name'],  # {{1}}
+                        user_data["name"],  # {{1}}
                     )
-                ]
+                ],
             )
-            
+
             # Registrar mensaje enviado
             self.message_logger.registrar_mensaje_enviado(
                 telefono=destino,
                 mensaje=f"Recordatorio cuota vencida - {user_data.get('name', '')}",
                 tipo_mensaje="overdue",
-                message_id=getattr(response, 'id', None)
+                message_id=getattr(response, "id", None),
             )
-            
+
             logging.info(f"Notificación de cuota vencida enviada a {destino}")
             return True
-            
+
         except Exception as e:
             logging.error(f"Error al enviar notificación de cuota vencida: {e}")
-            return self._enqueue_offline_op('send_overdue_payment_notification', {
-                'user_data': user_data,
-                'to': user_data.get('phone')
-            })
+            return self._enqueue_offline_op(
+                "send_overdue_payment_notification",
+                {"user_data": user_data, "to": user_data.get("phone")},
+            )
 
     def send_payment_confirmation(self, payment_data: dict) -> bool:
         """
         Envía confirmación de pago realizado según documentación de arquitectura
-        
+
         Args:
             payment_data: {
                 'phone': str,
@@ -1294,122 +1533,136 @@ class WhatsAppManager:
                 'amount': float,
                 'date': str
             }
-        
+
         Returns:
             bool: True si el mensaje se envió correctamente
         """
         try:
-            template_name = self._get_meta_template_binding("payment", "ih_payment_confirmed_v1")
+            template_name = self._get_meta_template_binding(
+                "payment", "ih_payment_confirmed_v1"
+            )
             # Si no hay cliente, intentar fallback HTTP
             if not self.wa_client:
                 ok, resp = self._send_template_http_basic(
-                    to=payment_data['phone'],
+                    to=payment_data["phone"],
                     name=template_name,
                     language=TemplateLanguage.SPANISH_ARG,
                     body_params=[
-                        payment_data['name'],
+                        payment_data["name"],
                         f"{payment_data['amount']:,.0f}",
-                        payment_data['date']
-                    ]
+                        payment_data["date"],
+                    ],
                 )
                 if ok:
                     try:
                         self.message_logger.registrar_mensaje_enviado(
-                            telefono=payment_data['phone'],
+                            telefono=payment_data["phone"],
                             mensaje=f"Confirmación de pago - {payment_data.get('name', '')}",
                             tipo_mensaje="payment",
-                            message_id=(resp or {}).get("id")
+                            message_id=(resp or {}).get("id"),
                         )
                     except Exception:
                         pass
-                    logging.info(f"Confirmación de pago enviada (HTTP) a {payment_data['phone']}")
+                    logging.info(
+                        f"Confirmación de pago enviada (HTTP) a {payment_data['phone']}"
+                    )
                     return True
                 else:
                     try:
                         self.message_logger.registrar_mensaje_fallido(
-                            telefono=str(payment_data.get('phone') or ''),
+                            telefono=str(payment_data.get("phone") or ""),
                             mensaje=f"Confirmación de pago - {payment_data.get('name', '')}",
-                            error=str((resp or {}).get('error', 'fallback_http_failed')),
-                            tipo_mensaje="payment"
+                            error=str(
+                                (resp or {}).get("error", "fallback_http_failed")
+                            ),
+                            tipo_mensaje="payment",
                         )
                     except Exception:
                         pass
-                    return self._enqueue_offline_op('send_payment_confirmation', {'payment_data': payment_data})
+                    return self._enqueue_offline_op(
+                        "send_payment_confirmation", {"payment_data": payment_data}
+                    )
 
             # Usar PyWa para enviar plantilla
             ok, response = self._send_template(
-                to=payment_data['phone'],
+                to=payment_data["phone"],
                 name=template_name,
                 language=TemplateLanguage.SPANISH_ARG,
                 params=[
                     BodyText.params(
-                        payment_data['name'],
+                        payment_data["name"],
                         f"{payment_data['amount']:,.0f}",
-                        payment_data['date']
+                        payment_data["date"],
                     )
-                ]
+                ],
             )
             if not ok:
-                logging.warning(f"WhatsApp plantilla confirmación no confirmada inmediatamente para {payment_data['phone']}: {response}")
+                logging.warning(
+                    f"WhatsApp plantilla confirmación no confirmada inmediatamente para {payment_data['phone']}: {response}"
+                )
                 return True
-            
+
             # Registrar mensaje enviado
             self.message_logger.registrar_mensaje_enviado(
-                telefono=payment_data['phone'],
+                telefono=payment_data["phone"],
                 mensaje=f"Confirmación de pago - {payment_data.get('name', '')}",
                 tipo_mensaje="payment",
             )
-            
+
             logging.info(f"Confirmación de pago enviada a {payment_data['phone']}")
             return True
-            
+
         except Exception as e:
             logging.error(f"Error al enviar confirmación de pago: {e}")
             ok, resp = self._send_template_http_basic(
-                to=payment_data.get('phone', ''),
+                to=payment_data.get("phone", ""),
                 name="aviso_de_confirmacion_de_pago_de_cuota_gimnasio_para_usuario_especifico_en_sistema_de_management_de_gimnasios_profesional",
                 language=TemplateLanguage.SPANISH_ARG,
                 body_params=[
-                    payment_data.get('name', ''),
+                    payment_data.get("name", ""),
                     f"{payment_data.get('amount', 0):,.0f}",
-                    payment_data.get('date', '')
-                ]
+                    payment_data.get("date", ""),
+                ],
             )
             if ok:
                 try:
                     self.message_logger.registrar_mensaje_enviado(
-                        telefono=payment_data.get('phone', ''),
+                        telefono=payment_data.get("phone", ""),
                         mensaje=f"Confirmación de pago - {payment_data.get('name', '')}",
                         tipo_mensaje="payment",
-                        message_id=(resp or {}).get("id")
+                        message_id=(resp or {}).get("id"),
                     )
                 except Exception:
                     pass
-                logging.info(f"Confirmación de pago enviada (HTTP) a {payment_data.get('phone', '')}")
+                logging.info(
+                    f"Confirmación de pago enviada (HTTP) a {payment_data.get('phone', '')}"
+                )
                 return True
             else:
                 try:
                     self.message_logger.registrar_mensaje_fallido(
-                        telefono=str(payment_data.get('phone') or ''),
+                        telefono=str(payment_data.get("phone") or ""),
                         mensaje=f"Confirmación de pago - {payment_data.get('name', '')}",
-                        error=str((resp or {}).get('error', 'fallback_http_failed')),
-                        tipo_mensaje="payment"
+                        error=str((resp or {}).get("error", "fallback_http_failed")),
+                        tipo_mensaje="payment",
                     )
                 except Exception:
                     pass
-                return self._enqueue_offline_op('send_payment_confirmation', {'payment_data': payment_data})
+                return self._enqueue_offline_op(
+                    "send_payment_confirmation", {"payment_data": payment_data}
+                )
 
     def send_welcome_message(self, user_data: dict) -> bool:
         """
         Envía mensaje de bienvenida a usuario nuevo según documentación de arquitectura
-        
+
         Args:
             user_data: {
                 'phone': str,
                 'name': str,
                 'gym_name': str
             }
-        
+
         Returns:
             bool: True si el mensaje se envió correctamente
         """
@@ -1421,96 +1674,105 @@ class WhatsAppManager:
             # Si no hay cliente, intentar fallback HTTP
             if not self.wa_client:
                 ok, resp = self._send_template_http_basic(
-                    to=user_data['phone'],
+                    to=user_data["phone"],
                     name=template_name,
                     language=TemplateLanguage.SPANISH_ARG,
-                    body_params=[user_data['name']]
+                    body_params=[user_data["name"]],
                 )
                 if ok:
                     try:
                         self.message_logger.registrar_mensaje_enviado(
-                            telefono=user_data['phone'],
+                            telefono=user_data["phone"],
                             mensaje=f"Mensaje de bienvenida - {user_data.get('name', '')}",
                             tipo_mensaje="welcome",
-                            message_id=(resp or {}).get("id")
+                            message_id=(resp or {}).get("id"),
                         )
                     except Exception:
                         pass
-                    logging.info(f"Mensaje de bienvenida enviado (HTTP) a {user_data['phone']}")
+                    logging.info(
+                        f"Mensaje de bienvenida enviado (HTTP) a {user_data['phone']}"
+                    )
                     return True
                 else:
                     try:
                         self.message_logger.registrar_mensaje_fallido(
-                            telefono=str(user_data.get('phone') or ''),
+                            telefono=str(user_data.get("phone") or ""),
                             mensaje=f"Mensaje de bienvenida - {user_data.get('name', '')}",
-                            error=str((resp or {}).get('error', 'fallback_http_failed')),
-                            tipo_mensaje="welcome"
+                            error=str(
+                                (resp or {}).get("error", "fallback_http_failed")
+                            ),
+                            tipo_mensaje="welcome",
                         )
                     except Exception:
                         pass
-                    return self._enqueue_offline_op('send_welcome_message', {'user_data': user_data})
+                    return self._enqueue_offline_op(
+                        "send_welcome_message", {"user_data": user_data}
+                    )
 
             # Usar PyWa (con timeout/non-blocking control)
             ok, response = self._send_template(
-                to=user_data['phone'],
+                to=user_data["phone"],
                 name=template_name,
                 language=TemplateLanguage.SPANISH_ARG,
-                params=[
-                    BodyText.params(user_data['name'])
-                ]
+                params=[BodyText.params(user_data["name"])],
             )
             if not ok:
-                logging.warning(f"WhatsApp plantilla bienvenida no confirmada inmediatamente para {user_data['phone']}: {response}")
+                logging.warning(
+                    f"WhatsApp plantilla bienvenida no confirmada inmediatamente para {user_data['phone']}: {response}"
+                )
                 return True
-            
+
             # Registrar mensaje enviado
             self.message_logger.registrar_mensaje_enviado(
-                telefono=user_data['phone'],
+                telefono=user_data["phone"],
                 mensaje=f"Mensaje de bienvenida - {user_data.get('name', '')}",
                 tipo_mensaje="welcome",
-                message_id=getattr(response, 'id', None)
+                message_id=getattr(response, "id", None),
             )
-            
+
             logging.info(f"Mensaje de bienvenida enviado a {user_data['phone']}")
             return True
-            
+
         except Exception as e:
             logging.error(f"Error al enviar mensaje de bienvenida: {e}")
             ok, resp = self._send_template_http_basic(
-                to=user_data.get('phone', ''),
+                to=user_data.get("phone", ""),
                 name=template_name,
                 language=TemplateLanguage.SPANISH_ARG,
-                body_params=[user_data.get('name', ''), user_data.get('gym_name', '')],
-                header_image_url=header_img
+                body_params=[user_data.get("name", ""), user_data.get("gym_name", "")],
             )
             if ok:
                 try:
                     self.message_logger.registrar_mensaje_enviado(
-                        telefono=user_data.get('phone', ''),
+                        telefono=user_data.get("phone", ""),
                         mensaje=f"Mensaje de bienvenida - {user_data.get('name', '')}",
                         tipo_mensaje="welcome",
-                        message_id=(resp or {}).get("id")
+                        message_id=(resp or {}).get("id"),
                     )
                 except Exception:
                     pass
-                logging.info(f"Mensaje de bienvenida enviado (HTTP) a {user_data.get('phone', '')}")
+                logging.info(
+                    f"Mensaje de bienvenida enviado (HTTP) a {user_data.get('phone', '')}"
+                )
                 return True
             else:
                 try:
                     self.message_logger.registrar_mensaje_fallido(
-                        telefono=str(user_data.get('phone') or ''),
+                        telefono=str(user_data.get("phone") or ""),
                         mensaje=f"Mensaje de bienvenida - {user_data.get('name', '')}",
-                        error=str((resp or {}).get('error', 'fallback_http_failed')),
-                        tipo_mensaje="welcome"
+                        error=str((resp or {}).get("error", "fallback_http_failed")),
+                        tipo_mensaje="welcome",
                     )
                 except Exception:
                     pass
-                return self._enqueue_offline_op('send_welcome_message', {'user_data': user_data})
+                return self._enqueue_offline_op(
+                    "send_welcome_message", {"user_data": user_data}
+                )
 
     def procesar_usuarios_morosos(self) -> int:
         """[DEPRECADO] Mantenido por compatibilidad. Redirige al PaymentManager."""
         try:
-            if hasattr(self, 'payment_manager') and self.payment_manager:
+            if hasattr(self, "payment_manager") and self.payment_manager:
                 logging.info("Delegando procesamiento de morosos a PaymentManager")
                 return self.payment_manager.procesar_usuarios_morosos()
             logging.warning("PaymentManager no disponible para procesar morosos")
@@ -1518,23 +1780,25 @@ class WhatsAppManager:
         except Exception as e:
             logging.error(f"Error delegando a PaymentManager: {e}")
             return 0
-    
+
     def procesar_recordatorios_proximos_vencimientos(self) -> int:
         """[DEPRECADO] Mantenido por compatibilidad. Redirige al PaymentManager."""
         try:
-            if hasattr(self, 'payment_manager') and self.payment_manager:
+            if hasattr(self, "payment_manager") and self.payment_manager:
                 logging.info("Delegando recordatorios de vencimientos a PaymentManager")
-                return self.payment_manager.procesar_recordatorios_proximos_vencimientos()
+                return (
+                    self.payment_manager.procesar_recordatorios_proximos_vencimientos()
+                )
             logging.warning("PaymentManager no disponible para procesar recordatorios")
             return 0
         except Exception as e:
             logging.error(f"Error delegando recordatorios a PaymentManager: {e}")
             return 0
-    
+
     def send_deactivation_message(self, user_data: dict) -> bool:
         """
         Envía mensaje de desactivación a usuario (preparado para futura implementación)
-        
+
         Args:
             user_data: {
                 'phone': str,
@@ -1542,7 +1806,7 @@ class WhatsAppManager:
                 'reason': str,
                 'gym_name': str
             }
-        
+
         Returns:
             bool: True si el mensaje se envió correctamente
         """
@@ -1550,31 +1814,31 @@ class WhatsAppManager:
             if not self.wa_client:
                 logging.error("Cliente WhatsApp no inicializado")
                 return False
-            
+
             # NOTA: Esta plantilla debe ser creada en el futuro en WhatsApp Business Manager
             # template_name = "mensaje_de_desactivacion_de_usuario_por_morosidad_en_sistema_de_management_de_gimnasios_profesional"
-            
+
             # Por ahora, usar mensaje simple hasta que se cree la plantilla oficial
             mensaje = f"Hola {user_data['name']}, lamentamos informarte que tu membresía en {user_data.get('gym_name', 'nuestro gimnasio')} ha sido suspendida por {user_data.get('reason', 'falta de pago')}. Para reactivar tu cuenta, por favor contacta con recepción."
-            
-            success = self.enviar_mensaje_simple(user_data['phone'], mensaje)
-            
+
+            success = self.enviar_mensaje_simple(user_data["phone"], mensaje)
+
             if success:
                 # Registrar mensaje enviado
                 self.message_logger.registrar_mensaje_enviado(
-                    user_data['phone'],
+                    user_data["phone"],
                     f"Desactivación - {user_data['name']}",
-                    "welcome"  # Usar welcome temporalmente hasta crear nuevo tipo
+                    "welcome",  # Usar welcome temporalmente hasta crear nuevo tipo
                 )
-                
+
                 logging.info(f"Mensaje de desactivación enviado a {user_data['phone']}")
-            
+
             return success
-            
+
         except Exception as e:
             logging.error(f"Error al enviar mensaje de desactivación: {e}")
             return False
-    
+
     def iniciar_servidor_webhook(self):
         """Inicia el servidor webhook en segundo plano para recibir mensajes"""
         if not self.wa_client:
@@ -1604,7 +1868,9 @@ class WhatsAppManager:
                     pass
 
         try:
-            self._server_thread = threading.Thread(target=_run_server, name="WhatsAppWebhookServer", daemon=True)
+            self._server_thread = threading.Thread(
+                target=_run_server, name="WhatsAppWebhookServer", daemon=True
+            )
             self.servidor_activo = True
             self._server_thread.start()
             logging.info("Servidor webhook de WhatsApp iniciado en segundo plano")
@@ -1639,7 +1905,9 @@ class WhatsAppManager:
         try:
             # Validar configuración antes de iniciar
             if not self.verificar_configuracion():
-                logging.error("Configuración de WhatsApp inválida; no se inicia servidor")
+                logging.error(
+                    "Configuración de WhatsApp inválida; no se inicia servidor"
+                )
                 return False
             # Asegurar cliente inicializado
             if not self.wa_client:
@@ -1678,14 +1946,23 @@ class WhatsAppManager:
         try:
             with self.db.get_connection_context() as conn:
                 cur = conn.cursor()
-                cur.execute("SELECT 1 FROM whatsapp_messages WHERE message_id = %s LIMIT 1", (message_id,))
+                cur.execute(
+                    "SELECT 1 FROM whatsapp_messages WHERE message_id = %s LIMIT 1",
+                    (message_id,),
+                )
                 return cur.fetchone() is not None
         except Exception:
             return False
 
-    def _componer_confirmacion_waitlist(self, action: str, usuario: Any, clase_info: Optional[Dict[str, Any]], new_values: Optional[str]) -> str:
+    def _componer_confirmacion_waitlist(
+        self,
+        action: str,
+        usuario: Any,
+        clase_info: Optional[Dict[str, Any]],
+        new_values: Optional[str],
+    ) -> str:
         """Crea el texto de confirmación para SI/NO basándose en acción y datos disponibles."""
-        nombre = str(getattr(usuario, 'nombre', None) or 'Alumno')
+        nombre = str(getattr(usuario, "nombre", None) or "Alumno")
         tipo_clase = None
         fecha = None
         hora = None
@@ -1693,11 +1970,13 @@ class WhatsAppManager:
         try:
             if isinstance(clase_info, dict):
                 # Preferir claves reales de DB: tipo_clase_nombre, clase_nombre, dia_semana, hora_inicio
-                tipo_clase = clase_info.get('tipo_clase_nombre') or clase_info.get('clase_nombre')
-                fecha = clase_info.get('fecha') or clase_info.get('dia_semana')
-                h_in = clase_info.get('hora') or clase_info.get('hora_inicio')
+                tipo_clase = clase_info.get("tipo_clase_nombre") or clase_info.get(
+                    "clase_nombre"
+                )
+                fecha = clase_info.get("fecha") or clase_info.get("dia_semana")
+                h_in = clase_info.get("hora") or clase_info.get("hora_inicio")
                 try:
-                    hora = (str(h_in)[:5] if h_in is not None else None)
+                    hora = str(h_in)[:5] if h_in is not None else None
                 except Exception:
                     hora = str(h_in) if h_in is not None else None
         except Exception:
@@ -1706,9 +1985,14 @@ class WhatsAppManager:
         try:
             if new_values and isinstance(new_values, str):
                 data = json.loads(new_values)
-                tipo_clase = tipo_clase or data.get('tipo_clase_nombre') or data.get('clase_nombre') or data.get('tipo_clase')
-                fecha = fecha or data.get('fecha') or data.get('dia_semana')
-                h_in = data.get('hora') or data.get('hora_inicio')
+                tipo_clase = (
+                    tipo_clase
+                    or data.get("tipo_clase_nombre")
+                    or data.get("clase_nombre")
+                    or data.get("tipo_clase")
+                )
+                fecha = fecha or data.get("fecha") or data.get("dia_semana")
+                h_in = data.get("hora") or data.get("hora_inicio")
                 try:
                     hora = hora or (str(h_in)[:5] if h_in is not None else None)
                 except Exception:
@@ -1716,13 +2000,13 @@ class WhatsAppManager:
         except Exception:
             pass
 
-        tipo = str(tipo_clase or 'Clase')
-        fecha_s = str(fecha or 'por confirmar')
-        hora_s = str(hora or 'por confirmar')
+        tipo = str(tipo_clase or "Clase")
+        fecha_s = str(fecha or "por confirmar")
+        hora_s = str(hora or "por confirmar")
 
-        if action == 'auto_promote_waitlist':
+        if action == "auto_promote_waitlist":
             return f"¡{nombre}! Confirmamos tu promoción desde lista de espera a la clase de {tipo} del {fecha_s} a las {hora_s}. ¡Nos vemos!"
-        elif action == 'decline_waitlist_promotion':
+        elif action == "decline_waitlist_promotion":
             return f"¡Gracias {nombre}! Registramos tu NO a la clase de {tipo} del {fecha_s} a las {hora_s}. Tu lugar en espera se mantiene para otra oportunidad."
         else:
             return "Actualización de lista de espera registrada."
@@ -1751,11 +2035,11 @@ class WhatsAppManager:
 
         enviados = 0
         for row in reversed(rows):
-            audit_id = row.get('id')
-            action = row.get('action')
-            user_id = row.get('user_id')
-            record_id = row.get('record_id')
-            new_values = row.get('new_values')
+            audit_id = row.get("id")
+            action = row.get("action")
+            user_id = row.get("user_id")
+            record_id = row.get("record_id")
+            new_values = row.get("new_values")
 
             message_id = f"audit:{audit_id}"
             if self._mensaje_audit_ya_registrado(message_id):
@@ -1766,29 +2050,33 @@ class WhatsAppManager:
             except Exception:
                 usuario = None
 
-            if not usuario or not getattr(usuario, 'telefono', None):
-                logging.warning(f"Auditoría {audit_id}: usuario {user_id} sin teléfono, se omite")
+            if not usuario or not getattr(usuario, "telefono", None):
+                logging.warning(
+                    f"Auditoría {audit_id}: usuario {user_id} sin teléfono, se omite"
+                )
                 try:
                     self.message_logger.registrar_mensaje_fallido(
-                        telefono=getattr(usuario, 'telefono', '') or '',
+                        telefono=getattr(usuario, "telefono", "") or "",
                         mensaje=f"[{action}] Confirmación no enviada: teléfono faltante",
                         error="telefono_faltante",
                         tipo_mensaje="waitlist",
-                        message_id=message_id
+                        message_id=message_id,
                     )
                 except Exception:
                     pass
                 continue
 
             if not self._numero_permitido(usuario.telefono):
-                logging.warning(f"Número no permitido por allowlist: {usuario.telefono}")
+                logging.warning(
+                    f"Número no permitido por allowlist: {usuario.telefono}"
+                )
                 try:
                     self.message_logger.registrar_mensaje_fallido(
                         telefono=usuario.telefono,
                         mensaje=f"[{action}] Omitido por allowlist",
                         error="allowlist_block",
                         tipo_mensaje="waitlist",
-                        message_id=message_id
+                        message_id=message_id,
                     )
                 except Exception:
                     pass
@@ -1803,30 +2091,52 @@ class WhatsAppManager:
 
             # Realizar promoción desde desktop según auditoría
             texto = None
-            if action == 'auto_promote_waitlist' and record_id and user_id:
+            if action == "auto_promote_waitlist" and record_id and user_id:
                 try:
-                    enrolled = bool(self.db.inscribir_usuario_en_clase(int(record_id), int(user_id)))
+                    enrolled = bool(
+                        self.db.inscribir_usuario_en_clase(int(record_id), int(user_id))
+                    )
                 except Exception as e:
-                    logging.error(f"Error inscribiendo en auto-promoción audit_id={audit_id}: {e}")
+                    logging.error(
+                        f"Error inscribiendo en auto-promoción audit_id={audit_id}: {e}"
+                    )
                     enrolled = False
                 if enrolled:
                     try:
-                        self.db.quitar_de_lista_espera_completo(int(record_id), int(user_id))
+                        self.db.quitar_de_lista_espera_completo(
+                            int(record_id), int(user_id)
+                        )
                     except Exception as e:
-                        logging.error(f"Error quitando de lista de espera audit_id={audit_id}: {e}")
-                    texto = self._componer_confirmacion_waitlist(action, usuario, clase_info, new_values)
+                        logging.error(
+                            f"Error quitando de lista de espera audit_id={audit_id}: {e}"
+                        )
+                    texto = self._componer_confirmacion_waitlist(
+                        action, usuario, clase_info, new_values
+                    )
                 else:
-                    nombre = str(getattr(usuario, 'nombre', None) or 'Alumno')
-                    tipo = str((clase_info or {}).get('tipo_clase_nombre') or (clase_info or {}).get('clase_nombre') or 'Clase')
-                    fecha_s = str((clase_info or {}).get('fecha') or (clase_info or {}).get('dia_semana') or 'por confirmar')
-                    h_in = (clase_info or {}).get('hora') or (clase_info or {}).get('hora_inicio')
+                    nombre = str(getattr(usuario, "nombre", None) or "Alumno")
+                    tipo = str(
+                        (clase_info or {}).get("tipo_clase_nombre")
+                        or (clase_info or {}).get("clase_nombre")
+                        or "Clase"
+                    )
+                    fecha_s = str(
+                        (clase_info or {}).get("fecha")
+                        or (clase_info or {}).get("dia_semana")
+                        or "por confirmar"
+                    )
+                    h_in = (clase_info or {}).get("hora") or (clase_info or {}).get(
+                        "hora_inicio"
+                    )
                     try:
-                        hora_s = str(h_in)[:5] if h_in is not None else 'por confirmar'
+                        hora_s = str(h_in)[:5] if h_in is not None else "por confirmar"
                     except Exception:
-                        hora_s = str(h_in) if h_in is not None else 'por confirmar'
+                        hora_s = str(h_in) if h_in is not None else "por confirmar"
                     texto = f"¡{nombre}! Confirmaste tu lugar para {tipo} del {fecha_s} a las {hora_s}, pero el cupo no está disponible en este momento. Te mantenemos en lista de espera y te avisaremos ante la próxima disponibilidad."
             else:
-                texto = self._componer_confirmacion_waitlist(action, usuario, clase_info, new_values)
+                texto = self._componer_confirmacion_waitlist(
+                    action, usuario, clase_info, new_values
+                )
 
             if not self.message_logger.puede_enviar_mensaje(usuario.telefono):
                 logging.info(f"Anti-spam bloqueó confirmación para {usuario.telefono}")
@@ -1838,62 +2148,67 @@ class WhatsAppManager:
                     telefono=usuario.telefono,
                     mensaje=texto,
                     tipo_mensaje="waitlist",
-                    message_id=message_id if ok else getattr(resp, 'id', None)
+                    message_id=message_id if ok else getattr(resp, "id", None),
                 )
                 enviados += 1 if ok else 0
             except Exception as send_err:
-                logging.error(f"Error enviando confirmación de auditoría {audit_id}: {send_err}")
+                logging.error(
+                    f"Error enviando confirmación de auditoría {audit_id}: {send_err}"
+                )
                 try:
                     self.message_logger.registrar_mensaje_fallido(
                         telefono=usuario.telefono,
                         mensaje=texto,
                         error=str(send_err),
                         tipo_mensaje="waitlist",
-                        message_id=message_id
+                        message_id=message_id,
                     )
                 except Exception:
                     pass
                 continue
 
         return enviados
-    
+
     def verificar_configuracion(self):
         """Verifica que la configuración de WhatsApp esté completa"""
         errores = []
-        
+
         if not self.phone_number_id:
             errores.append("Phone ID no configurado")
-        
+
         if not self.access_token:
             errores.append("Access Token no configurado")
-        
+
         if not self.whatsapp_business_account_id:
             errores.append("WhatsApp Business Account ID no configurado")
-        
+
         if errores:
             print("❌ Errores de configuración de WhatsApp:")
             for error in errores:
                 print(f"   - {error}")
             return False
-        
+
         print("✅ Configuración de WhatsApp verificada correctamente")
         return True
-    
+
     def obtener_estadisticas(self) -> Dict[str, Any]:
         """Obtiene estadísticas del sistema de mensajería"""
         try:
             stats_diarias = self.message_logger.obtener_estadisticas_diarias()
             stats_semanales = self.message_logger.obtener_estadisticas_semanales()
-            
+
             return {
-                'hoy': stats_diarias,
-                'esta_semana': stats_semanales,
-                'plantillas_activas': len(self.db.obtener_plantillas_whatsapp(activas_solo=True)),
-                'configuracion_valida': self.wa_client is not None
+                "hoy": stats_diarias,
+                "esta_semana": stats_semanales,
+                "plantillas_activas": len(
+                    self.db.obtener_plantillas_whatsapp(activas_solo=True)
+                ),
+                "configuracion_valida": self.wa_client is not None,
             }
         except Exception as e:
             logging.error(f"Error al obtener estadísticas: {e}")
             return {}
+
 
 # Función de utilidad para crear instancia global
 def crear_whatsapp_manager(db_manager):

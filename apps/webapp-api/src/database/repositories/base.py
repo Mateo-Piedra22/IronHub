@@ -3,8 +3,14 @@ import logging
 from sqlalchemy.orm import Session
 from ..connection import CacheManager
 
+
 class BaseRepository:
-    def __init__(self, db: Session, cache: Optional[CacheManager] = None, logger: Optional[logging.Logger] = None):
+    def __init__(
+        self,
+        db: Session,
+        cache: Optional[CacheManager] = None,
+        logger: Optional[logging.Logger] = None,
+    ):
         self.db = db
         self.cache = cache
         self.logger = logger or logging.getLogger(__name__)

@@ -6,9 +6,11 @@ import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { Dumbbell, Eye, EyeOff, Loader2, AlertCircle, Lock } from 'lucide-react';
 import { api } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 
 export default function OwnerLoginPage() {
     const router = useRouter();
+    const { checkSession } = useAuth();
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -43,6 +45,7 @@ export default function OwnerLoginPage() {
             const res = await api.ownerLogin(password);
 
             if (res.ok && res.data?.ok !== false) {
+                await checkSession();
                 router.push('/dashboard');
             } else {
                 setError(res.error || res.data?.message || 'Contraseña incorrecta');

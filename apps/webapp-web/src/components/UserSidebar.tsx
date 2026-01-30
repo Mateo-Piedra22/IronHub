@@ -29,9 +29,10 @@ import {
     Loader2,
     FileDown,
     RefreshCw,
+    CreditCard,
 } from 'lucide-react';
 import { Button, Modal, ConfirmModal, Input, useToast } from '@/components/ui';
-import { api, type Usuario, type Etiqueta, type Estado, type Pago, type EstadoTemplate, type Asistencia } from '@/lib/api';
+import { api, type Usuario, type Etiqueta, type Estado, type Pago, type EstadoTemplate, type Asistencia, type Membership, type Sucursal } from '@/lib/api';
 import { formatDate, formatCurrency, getWhatsAppLink, cn } from '@/lib/utils';
 
 interface UserSidebarProps {
@@ -46,7 +47,7 @@ interface UserSidebarProps {
     onCreateRutina?: (usuario: Usuario) => void;
 }
 
-type TabType = 'resumen' | 'notas' | 'etiquetas' | 'estados';
+type TabType = 'resumen' | 'notas' | 'etiquetas' | 'estados' | 'membresia' | 'accesos';
 
 export default function UserSidebar({
     usuario,
@@ -83,6 +84,30 @@ export default function UserSidebar({
 
     // Historial pagos
     const [pagos, setPagos] = useState<Pago[]>([]);
+
+    // Membresía / Pase libre
+    const [membership, setMembership] = useState<Membership | null>(null);
+    const [membershipAllowedSucursales, setMembershipAllowedSucursales] = useState<number[]>([]);
+    const [sucursales, setSucursales] = useState<Sucursal[]>([]);
+    const [membershipLoading, setMembershipLoading] = useState(false);
+    const [membershipSaving, setMembershipSaving] = useState(false);
+    const [membershipForm, setMembershipForm] = useState({
+        plan_name: '',
+        start_date: '',
+        end_date: '',
+        all_sucursales: true,
+        sucursal_ids: [] as number[],
+    });
+
+    const [entitlementsLoading, setEntitlementsLoading] = useState(false);
+    const [entitlementsSaving, setEntitlementsSaving] = useState(false);
+    const [entitlementsSucursalMode, setEntitlementsSucursalMode] = useState<Record<number, { allow: 'none' | 'allow' | 'deny'; motivo: string }>>({});
+    const [entitlementsClaseScope, setEntitlementsClaseScope] = useState<number | null>(null);
+    const [entitlementsClaseTipoId, setEntitlementsClaseTipoId] = useState<number | null>(null);
+    const [entitlementsClaseAllow, setEntitlementsClaseAllow] = useState<'allow' | 'deny'>('allow');
+    const [entitlementsClaseMotivo, setEntitlementsClaseMotivo] = useState('');
+    const [entitlementsClaseRules, setEntitlementsClaseRules] = useState<Array<{ sucursal_id: number | null; target_type: 'tipo_clase'; target_id: number; allow: boolean; motivo?: string }>>([]);
+    const [claseTipos, setClaseTipos] = useState<Array<{ id: number; nombre: string; activo: boolean }>>([]);
 
     // Asistencias list
     const [asistencias, setAsistencias] = useState<Asistencia[]>([]);
@@ -122,6 +147,8 @@ export default function UserSidebar({
             loadEtiquetas();
             loadEstados();
             loadPagos();
+            loadMembership();
+            loadSucursales();
             loadSuggestions();
             loadEstadoTemplates();
             void (async () => {
@@ -141,6 +168,14 @@ export default function UserSidebar({
             if (qrPollRef.current) clearInterval(qrPollRef.current);
         };
     }, [usuario?.id, isOpen]);
+
+    useEffect(() => {
+        if (!usuario || !isOpen) return;
+        if (activeTab !== 'accesos') return;
+        loadSucursales();
+        loadClaseTipos();
+        loadEntitlementsOverrides();
+    }, [activeTab, usuario?.id, isOpen]);
 
     const loadRutinaActiva = async () => {
         if (!usuario) return;
@@ -174,6 +209,166 @@ export default function UserSidebar({
         const res = await api.getPagos({ usuario_id: usuario.id, limit: 10 });
         if (res.ok && res.data) {
             setPagos(res.data.pagos);
+        }
+    };
+
+    const loadSucursales = async () => {
+        try {
+            const res = await api.getSucursales();
+            if (res.ok && res.data?.ok) {
+                setSucursales(res.data.items || []);
+            }
+        } catch {
+        }
+    };
+
+    const loadMembership = async () => {
+        if (!usuario) return;
+        setMembershipLoading(true);
+        try {
+            const res = await api.getUsuarioMembership(usuario.id);
+            if (res.ok && res.data?.ok) {
+                const m = res.data.membership || null;
+                setMembership(m);
+                const allowed = Array.isArray(res.data.sucursales) ? res.data.sucursales : [];
+                setMembershipAllowedSucursales(allowed);
+                setMembershipForm({
+                    plan_name: (m?.plan_name || '') as string,
+                    start_date: (m?.start_date || '') as string,
+                    end_date: (m?.end_date || '') as string,
+                    all_sucursales: m ? Boolean(m.all_sucursales) : true,
+                    sucursal_ids: allowed,
+                });
+            } else {
+                setMembership(null);
+                setMembershipAllowedSucursales([]);
+                setMembershipForm({
+                    plan_name: '',
+                    start_date: '',
+                    end_date: '',
+                    all_sucursales: true,
+                    sucursal_ids: [],
+                });
+            }
+        } finally {
+            setMembershipLoading(false);
+        }
+    };
+
+    const handleSaveMembership = async () => {
+        if (!usuario) return;
+        setMembershipSaving(true);
+        try {
+            const res = await api.setUsuarioMembership(usuario.id, {
+                plan_name: membershipForm.plan_name || null,
+                start_date: membershipForm.start_date || null,
+                end_date: membershipForm.end_date || null,
+                all_sucursales: Boolean(membershipForm.all_sucursales),
+                sucursal_ids: Array.isArray(membershipForm.sucursal_ids) ? membershipForm.sucursal_ids : [],
+            });
+            if (res.ok && res.data?.ok) {
+                success('Membresía guardada');
+                loadMembership();
+                onRefresh();
+            } else {
+                error(res.data?.error || 'Error al guardar membresía');
+            }
+        } catch {
+            error('Error al guardar membresía');
+        } finally {
+            setMembershipSaving(false);
+        }
+    };
+
+    const loadClaseTipos = async () => {
+        try {
+            const res = await api.getClaseTipos();
+            if (res.ok && res.data?.tipos) {
+                const items = (res.data.tipos || []).map((t: any) => ({ id: Number(t.id), nombre: String(t.nombre || ''), activo: Boolean(t.activo) }));
+                setClaseTipos(items.filter((t) => Number.isFinite(t.id)));
+            } else {
+                setClaseTipos([]);
+            }
+        } catch {
+            setClaseTipos([]);
+        }
+    };
+
+    const loadEntitlementsOverrides = async () => {
+        if (!usuario) return;
+        setEntitlementsLoading(true);
+        try {
+            const res = await api.getUsuarioEntitlementsGestion(usuario.id);
+            if (res.ok && res.data?.ok) {
+                const next: Record<number, { allow: 'none' | 'allow' | 'deny'; motivo: string }> = {};
+                const overrides = Array.isArray(res.data.branch_overrides) ? res.data.branch_overrides : [];
+                overrides.forEach((o) => {
+                    const sid = Number((o as any).sucursal_id);
+                    if (!Number.isFinite(sid)) return;
+                    next[sid] = { allow: (o.allow ? 'allow' : 'deny') as 'allow' | 'deny', motivo: String((o as any).motivo || '') };
+                });
+                setEntitlementsSucursalMode(next);
+                const cr = Array.isArray(res.data.class_overrides) ? res.data.class_overrides : [];
+                const rules = cr
+                    .filter((r) => String((r as any).target_type || '').toLowerCase() === 'tipo_clase')
+                    .map((r) => ({
+                        sucursal_id: (r as any).sucursal_id ?? null,
+                        target_type: 'tipo_clase' as const,
+                        target_id: Number((r as any).target_id),
+                        allow: Boolean((r as any).allow),
+                        motivo: String((r as any).motivo || ''),
+                    }))
+                    .filter((r) => Number.isFinite(r.target_id));
+                setEntitlementsClaseRules(rules);
+            } else {
+                setEntitlementsSucursalMode({});
+                setEntitlementsClaseRules([]);
+            }
+        } catch {
+            setEntitlementsSucursalMode({});
+            setEntitlementsClaseRules([]);
+        } finally {
+            setEntitlementsLoading(false);
+        }
+    };
+
+    const handleSaveEntitlementsOverrides = async () => {
+        if (!usuario) return;
+        setEntitlementsSaving(true);
+        try {
+            const branch_overrides = Object.entries(entitlementsSucursalMode || {})
+                .filter(([_, v]) => v && v.allow !== 'none')
+                .map(([sid, v]) => ({
+                    sucursal_id: Number(sid),
+                    allow: v.allow === 'allow',
+                    motivo: v.motivo || undefined,
+                    starts_at: null,
+                    ends_at: null,
+                }))
+                .filter((x) => Number.isFinite(x.sucursal_id));
+
+            const class_overrides = (entitlementsClaseRules || []).map((r) => ({
+                sucursal_id: r.sucursal_id,
+                target_type: r.target_type,
+                target_id: r.target_id,
+                allow: Boolean(r.allow),
+                motivo: r.motivo || undefined,
+                starts_at: null,
+                ends_at: null,
+            }));
+
+            const res = await api.updateUsuarioEntitlementsGestion(usuario.id, { branch_overrides, class_overrides });
+            if (res.ok && res.data?.ok) {
+                success('Accesos guardados');
+                loadEntitlementsOverrides();
+                onRefresh();
+            } else {
+                error(res.error || 'Error al guardar accesos');
+            }
+        } catch {
+            error('Error al guardar accesos');
+        } finally {
+            setEntitlementsSaving(false);
         }
     };
 
@@ -826,6 +1021,8 @@ export default function UserSidebar({
                 <div className="flex border-b border-slate-800 px-4">
                     {[
                         { id: 'resumen', label: 'Resumen', icon: History },
+                        { id: 'membresia', label: 'Membresía', icon: CreditCard },
+                        { id: 'accesos', label: 'Accesos', icon: UserCheck },
                         { id: 'notas', label: 'Notas', icon: FileText },
                         { id: 'etiquetas', label: 'Etiquetas', icon: Tag },
                         { id: 'estados', label: 'Estados', icon: Flag },
@@ -879,6 +1076,278 @@ export default function UserSidebar({
                                     )}
                                 </div>
                             </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'membresia' && (
+                        <div className="space-y-4">
+                            <div className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-2">
+                                <div className="text-xs text-slate-500">Estado</div>
+                                <div className="text-sm text-white">
+                                    {membershipLoading
+                                        ? 'Cargando...'
+                                        : membership
+                                            ? (membership.status || 'active')
+                                            : 'Sin membresía'}
+                                </div>
+                            </div>
+
+                            <Input
+                                value={membershipForm.plan_name}
+                                onChange={(e) => setMembershipForm({ ...membershipForm, plan_name: e.target.value })}
+                                placeholder="Plan (ej. Pase libre)"
+                            />
+
+                            <div className="grid grid-cols-2 gap-2">
+                                <Input
+                                    type="date"
+                                    value={membershipForm.start_date}
+                                    onChange={(e) => setMembershipForm({ ...membershipForm, start_date: e.target.value })}
+                                />
+                                <Input
+                                    type="date"
+                                    value={membershipForm.end_date}
+                                    onChange={(e) => setMembershipForm({ ...membershipForm, end_date: e.target.value })}
+                                />
+                            </div>
+
+                            <label className="flex items-center gap-2 text-sm text-slate-300">
+                                <input
+                                    type="checkbox"
+                                    checked={membershipForm.all_sucursales}
+                                    onChange={(e) => {
+                                        const checked = e.target.checked;
+                                        setMembershipForm({
+                                            ...membershipForm,
+                                            all_sucursales: checked,
+                                            sucursal_ids: checked ? [] : membershipForm.sucursal_ids,
+                                        });
+                                    }}
+                                />
+                                Pase libre (todas las sucursales)
+                            </label>
+
+                            {!membershipForm.all_sucursales && (
+                                <div className="space-y-2">
+                                    <div className="text-xs text-slate-500">Sucursales habilitadas</div>
+                                    <div className="space-y-1">
+                                        {sucursales.map((s) => {
+                                            const checked = membershipForm.sucursal_ids.includes(s.id);
+                                            return (
+                                                <label key={s.id} className="flex items-center gap-2 text-sm text-slate-200">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={checked}
+                                                        onChange={(e) => {
+                                                            const next = e.target.checked
+                                                                ? Array.from(new Set([...membershipForm.sucursal_ids, s.id]))
+                                                                : membershipForm.sucursal_ids.filter((x) => x !== s.id);
+                                                            setMembershipForm({ ...membershipForm, sucursal_ids: next });
+                                                        }}
+                                                    />
+                                                    <span>{s.nombre}</span>
+                                                </label>
+                                            );
+                                        })}
+                                        {sucursales.length === 0 && (
+                                            <div className="text-sm text-slate-500">Sin sucursales</div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex items-center justify-end">
+                                <Button size="sm" onClick={handleSaveMembership} disabled={membershipSaving || membershipLoading}>
+                                    {membershipSaving && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
+                                    Guardar
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'accesos' && (
+                        <div className="space-y-4">
+                            {entitlementsLoading ? (
+                                <div className="text-sm text-slate-500">Cargando…</div>
+                            ) : (
+                                <>
+                                    <div className="rounded-lg bg-slate-800 border border-slate-700 p-3 space-y-3">
+                                        <div>
+                                            <div className="text-xs font-medium text-slate-500">Overrides de sucursales</div>
+                                            <div className="text-xs text-slate-500 mt-1">Permite o bloquea sucursales puntuales para este usuario.</div>
+                                        </div>
+                                        <div className="space-y-2">
+                                            {sucursales.map((s) => {
+                                                const row = entitlementsSucursalMode[s.id] || { allow: 'none' as const, motivo: '' };
+                                                return (
+                                                    <div key={s.id} className="flex flex-col gap-2 rounded-lg bg-slate-900/40 border border-slate-700 p-2">
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <div className="text-sm text-slate-200">{s.nombre}</div>
+                                                            <select
+                                                                className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-sm text-slate-200"
+                                                                value={row.allow}
+                                                                onChange={(e) => {
+                                                                    const v = e.target.value as 'none' | 'allow' | 'deny';
+                                                                    setEntitlementsSucursalMode((prev) => ({
+                                                                        ...prev,
+                                                                        [s.id]: { allow: v, motivo: (prev[s.id]?.motivo || '') as string },
+                                                                    }));
+                                                                }}
+                                                            >
+                                                                <option value="none">Sin override</option>
+                                                                <option value="allow">Permitir</option>
+                                                                <option value="deny">Denegar</option>
+                                                            </select>
+                                                        </div>
+                                                        {row.allow !== 'none' ? (
+                                                            <Input
+                                                                value={row.motivo}
+                                                                onChange={(e) => {
+                                                                    const v = e.target.value;
+                                                                    setEntitlementsSucursalMode((prev) => ({
+                                                                        ...prev,
+                                                                        [s.id]: { allow: row.allow, motivo: v },
+                                                                    }));
+                                                                }}
+                                                                placeholder="Motivo (opcional)"
+                                                            />
+                                                        ) : null}
+                                                    </div>
+                                                );
+                                            })}
+                                            {sucursales.length === 0 ? (
+                                                <div className="text-sm text-slate-500">Sin sucursales</div>
+                                            ) : null}
+                                        </div>
+                                    </div>
+
+                                    <div className="rounded-lg bg-slate-800 border border-slate-700 p-3 space-y-3">
+                                        <div>
+                                            <div className="text-xs font-medium text-slate-500">Overrides de clases (por tipo)</div>
+                                            <div className="text-xs text-slate-500 mt-1">Reglas puntuales para permitir o denegar tipos de clase.</div>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 gap-2">
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                <select
+                                                    className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-200"
+                                                    value={entitlementsClaseScope === null ? '0' : String(entitlementsClaseScope)}
+                                                    onChange={(e) => {
+                                                        const v = e.target.value;
+                                                        setEntitlementsClaseScope(v === '0' ? null : Number(v));
+                                                    }}
+                                                >
+                                                    <option value="0">Todas las sucursales</option>
+                                                    {sucursales.map((s) => (
+                                                        <option key={s.id} value={String(s.id)}>
+                                                            {s.nombre}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                                <select
+                                                    className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-200"
+                                                    value={entitlementsClaseTipoId === null ? '' : String(entitlementsClaseTipoId)}
+                                                    onChange={(e) => {
+                                                        const v = e.target.value;
+                                                        setEntitlementsClaseTipoId(v ? Number(v) : null);
+                                                    }}
+                                                >
+                                                    <option value="">Tipo de clase…</option>
+                                                    {claseTipos.filter((t) => t.activo).map((t) => (
+                                                        <option key={t.id} value={String(t.id)}>
+                                                            {t.nombre}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                <select
+                                                    className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-200"
+                                                    value={entitlementsClaseAllow}
+                                                    onChange={(e) => setEntitlementsClaseAllow(e.target.value as 'allow' | 'deny')}
+                                                >
+                                                    <option value="allow">Permitir</option>
+                                                    <option value="deny">Denegar</option>
+                                                </select>
+                                                <Input
+                                                    value={entitlementsClaseMotivo}
+                                                    onChange={(e) => setEntitlementsClaseMotivo(e.target.value)}
+                                                    placeholder="Motivo (opcional)"
+                                                />
+                                            </div>
+
+                                            <div className="flex justify-end">
+                                                <Button
+                                                    size="sm"
+                                                    onClick={() => {
+                                                        if (!entitlementsClaseTipoId) return;
+                                                        const rule = {
+                                                            sucursal_id: entitlementsClaseScope,
+                                                            target_type: 'tipo_clase' as const,
+                                                            target_id: entitlementsClaseTipoId,
+                                                            allow: entitlementsClaseAllow === 'allow',
+                                                            motivo: entitlementsClaseMotivo || undefined,
+                                                        };
+                                                        setEntitlementsClaseRules((prev) => {
+                                                            const next = prev.filter(
+                                                                (r) =>
+                                                                    !(r.target_type === 'tipo_clase' &&
+                                                                        r.target_id === rule.target_id &&
+                                                                        (r.sucursal_id ?? null) === (rule.sucursal_id ?? null))
+                                                            );
+                                                            next.unshift(rule);
+                                                            return next;
+                                                        });
+                                                        setEntitlementsClaseMotivo('');
+                                                    }}
+                                                >
+                                                    <Plus className="w-3 h-3 mr-1" />
+                                                    Agregar
+                                                </Button>
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            {entitlementsClaseRules.map((r, idx) => {
+                                                const scopeLabel = r.sucursal_id
+                                                    ? (sucursales.find((s) => s.id === r.sucursal_id)?.nombre || `Sucursal ${r.sucursal_id}`)
+                                                    : 'Todas las sucursales';
+                                                const tipoLabel = claseTipos.find((t) => t.id === r.target_id)?.nombre || `Tipo ${r.target_id}`;
+                                                return (
+                                                    <div key={`${r.sucursal_id ?? 0}:${r.target_id}:${idx}`} className="flex items-center justify-between gap-2 rounded-lg bg-slate-900/40 border border-slate-700 px-3 py-2">
+                                                        <div className="min-w-0">
+                                                            <div className="text-sm text-slate-200 truncate">{tipoLabel}</div>
+                                                            <div className="text-xs text-slate-500 truncate">
+                                                                {scopeLabel} · {r.allow ? 'Permitir' : 'Denegar'}
+                                                                {r.motivo ? ` · ${r.motivo}` : ''}
+                                                            </div>
+                                                        </div>
+                                                        <button
+                                                            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                                                            onClick={() => {
+                                                                setEntitlementsClaseRules((prev) => prev.filter((_, i) => i !== idx));
+                                                            }}
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })}
+                                            {entitlementsClaseRules.length === 0 ? (
+                                                <div className="text-sm text-slate-500">Sin reglas.</div>
+                                            ) : null}
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center justify-end">
+                                        <Button size="sm" onClick={handleSaveEntitlementsOverrides} disabled={entitlementsSaving || entitlementsLoading}>
+                                            {entitlementsSaving && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
+                                            Guardar
+                                        </Button>
+                                    </div>
+                                </>
+                            )}
                         </div>
                     )}
 

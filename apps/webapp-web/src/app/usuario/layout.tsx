@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import {
     Dumbbell, LayoutDashboard, CreditCard, Calendar,
-    Clipboard, LogOut, User, Bell
+    Clipboard, LogOut, User, Bell, Shield
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { api } from '@/lib/api';
@@ -16,6 +16,7 @@ const navigation = [
     { name: 'Asistencias', href: '/usuario/attendance', icon: Calendar },
     { name: 'Mi Rutina', href: '/usuario/routines', icon: Clipboard },
     { name: 'Mi Perfil', href: '/usuario/profile', icon: User },
+    { name: 'Mis Accesos', href: '/usuario/accesos', icon: Shield },
 ];
 
 export default function DashboardLayout({

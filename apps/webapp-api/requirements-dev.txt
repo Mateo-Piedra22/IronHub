@@ -1,0 +1,4 @@
+mypy>=1.10.0
+ruff>=0.6.9
+bandit>=1.7.9
+types-requests

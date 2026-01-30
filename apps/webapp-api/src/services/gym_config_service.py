@@ -4,8 +4,10 @@ Gym Configuration Service - SQLAlchemy ORM Implementation
 Handles gym configuration, themes, and system settings.
 Replaces legacy GymService configuration methods.
 """
+
 import json
 import logging
+from datetime import datetime
 from typing import Dict, Any, Optional
 
 from sqlalchemy import select, text
@@ -13,9 +15,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 
 from src.services.base import BaseService
-from src.database.orm_models import GymConfig, Configuracion, CustomTheme, ThemeSchedule
+from src.database.orm_models import GymConfig, Configuracion, CustomTheme
 
 logger = logging.getLogger(__name__)
+
 
 class GymConfigService(BaseService):
     """Service for gym configuration, branding, and themes."""
@@ -29,7 +32,7 @@ class GymConfigService(BaseService):
 
     def obtener_configuracion_gimnasio(self) -> Dict[str, Any]:
         """
-        Get gym configuration merging 'gym_config' table (single row) 
+        Get gym configuration merging 'gym_config' table (single row)
         and 'configuracion' table (key-value pairs).
         """
         config = {}
@@ -37,18 +40,20 @@ class GymConfigService(BaseService):
             # 1. Load from GymConfig table (assuming single row for gym details)
             gym_info = self.db.execute(select(GymConfig).limit(1)).scalar_one_or_none()
             if gym_info:
-                config.update({
-                    'gym_name': gym_info.gym_name,
-                    'gym_slogan': gym_info.gym_slogan,
-                    'gym_address': gym_info.gym_address,
-                    'gym_phone': gym_info.gym_phone,
-                    'gym_email': gym_info.gym_email,
-                    'gym_website': gym_info.gym_website,
-                    'facebook': gym_info.facebook,
-                    'instagram': gym_info.instagram,
-                    'twitter': gym_info.twitter,
-                    'logo_url': gym_info.logo_url,
-                })
+                config.update(
+                    {
+                        "gym_name": gym_info.gym_name,
+                        "gym_slogan": gym_info.gym_slogan,
+                        "gym_address": gym_info.gym_address,
+                        "gym_phone": gym_info.gym_phone,
+                        "gym_email": gym_info.gym_email,
+                        "gym_website": gym_info.gym_website,
+                        "facebook": gym_info.facebook,
+                        "instagram": gym_info.instagram,
+                        "twitter": gym_info.twitter,
+                        "logo_url": gym_info.logo_url,
+                    }
+                )
 
             # 2. Load from Configuracion table (general key-value settings)
             settings = self.db.execute(select(Configuracion)).scalars().all()
@@ -71,33 +76,44 @@ class GymConfigService(BaseService):
         try:
             # Separate updates for GymConfig vs generic Configuracion
             gym_config_fields = [
-                'gym_name', 'gym_slogan', 'gym_address', 'gym_phone', 
-                'gym_email', 'gym_website', 'facebook', 'instagram', 
-                'twitter', 'logo_url'
+                "gym_name",
+                "gym_slogan",
+                "gym_address",
+                "gym_phone",
+                "gym_email",
+                "gym_website",
+                "facebook",
+                "instagram",
+                "twitter",
+                "logo_url",
             ]
-            
+
             gym_updates = {k: v for k, v in updates.items() if k in gym_config_fields}
-            generic_updates = {k: v for k, v in updates.items() if k not in gym_config_fields}
+            generic_updates = {
+                k: v for k, v in updates.items() if k not in gym_config_fields
+            }
 
             # 1. Update GymConfig table
             if gym_updates:
-                gym_info = self.db.execute(select(GymConfig).limit(1)).scalar_one_or_none()
+                gym_info = self.db.execute(
+                    select(GymConfig).limit(1)
+                ).scalar_one_or_none()
                 if not gym_info:
                     gym_info = GymConfig()
                     self.db.add(gym_info)
-                
+
                 for key, value in gym_updates.items():
                     setattr(gym_info, key, value)
 
             # 2. Update Configuracion table
             for key, value in generic_updates.items():
                 valor = json.dumps(value) if not isinstance(value, str) else value
-                stmt = insert(Configuracion).values(
-                    clave=key, 
-                    valor=valor
-                ).on_conflict_do_update(
-                    index_elements=['clave'],
-                    set_={'valor': valor}
+                stmt = (
+                    insert(Configuracion)
+                    .values(clave=key, valor=valor)
+                    .on_conflict_do_update(
+                        index_elements=["clave"], set_={"valor": valor}
+                    )
                 )
                 self.db.execute(stmt)
 
@@ -115,10 +131,9 @@ class GymConfigService(BaseService):
     def actualizar_logo_url(self, url: str) -> bool:
         """Update gym logo URL."""
         # Using the GymConfig field 'logo_url' AND legacy 'gym_logo_url' key for compatibility
-        return self.actualizar_configuracion_gimnasio({
-            'logo_url': url,
-            'gym_logo_url': url
-        })
+        return self.actualizar_configuracion_gimnasio(
+            {"logo_url": url, "gym_logo_url": url}
+        )
 
     # =========================================================================
     # THEMES (CustomTheme & ThemeSchedule)
@@ -135,11 +150,11 @@ class GymConfigService(BaseService):
     def crear_tema(self, datos: Dict[str, Any]) -> CustomTheme:
         """Crear un nuevo tema."""
         tema = CustomTheme(
-            nombre=datos['nombre'],
-            name=datos['name'],
-            colores=datos['colores'],
-            activo=datos.get('activo', True),
-            usuario_creador_id=datos.get('usuario_creador_id')
+            nombre=datos["nombre"],
+            name=datos["name"],
+            colores=datos["colores"],
+            activo=datos.get("activo", True),
+            usuario_creador_id=datos.get("usuario_creador_id"),
         )
         self.db.add(tema)
         self.db.commit()
@@ -156,7 +171,7 @@ class GymConfigService(BaseService):
         try:
             from src.dependencies import get_current_tenant
             from src.database.connection import AdminSessionLocal
-            
+
             tenant = get_current_tenant()
             if not tenant:
                 return {}
@@ -166,14 +181,14 @@ class GymConfigService(BaseService):
                 # 1. Get Gym ID
                 row = admin_db.execute(
                     text("SELECT id, nombre FROM gyms WHERE subdominio = :sub"),
-                    {"sub": tenant}
+                    {"sub": tenant},
                 ).fetchone()
-                
+
                 if not row:
                     return {}
-                
+
                 gym_id = row[0]
-                
+
                 # 2. Get Active Subscription
                 sub_row = admin_db.execute(
                     text("""
@@ -184,21 +199,21 @@ class GymConfigService(BaseService):
                         ORDER BY gs.id DESC
                         LIMIT 1
                     """),
-                    {"gym_id": gym_id}
+                    {"gym_id": gym_id},
                 ).fetchone()
-                
+
                 if not sub_row:
                     return {"status": "inactive", "plan": "None"}
-                
+
                 # Calculate days remaining
                 days_remaining = None
                 valid_until = None
                 if sub_row[2]:
                     today = datetime.now().date()
-                    due_date = sub_row[2] # might be date or datetime
+                    due_date = sub_row[2]  # might be date or datetime
                     if isinstance(due_date, datetime):
                         due_date = due_date.date()
-                    
+
                     days_remaining = (due_date - today).days
                     valid_until = str(due_date)
 
@@ -207,7 +222,7 @@ class GymConfigService(BaseService):
                     "status": sub_row[1],
                     "valid_until": valid_until,
                     "days_remaining": days_remaining,
-                    "start_date": str(sub_row[3]) if sub_row[3] else None
+                    "start_date": str(sub_row[3]) if sub_row[3] else None,
                 }
             finally:
                 admin_db.close()

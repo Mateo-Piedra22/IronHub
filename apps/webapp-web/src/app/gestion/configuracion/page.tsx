@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
     Settings,
@@ -20,7 +21,8 @@ import {
     useToast,
     Input,
 } from '@/components/ui';
-import { api, type TipoCuota, type MetodoPago, type ConceptoPago } from '@/lib/api';
+import { api, type TipoCuota, type MetodoPago, type ConceptoPago, type FeatureFlags, type Sucursal, type ClaseTipo } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { formatCurrency, cn } from '@/lib/utils';
 
 // Config section tabs
@@ -28,6 +30,7 @@ const tabs = [
     { id: 'cuotas', label: 'Tipos de Cuota', icon: DollarSign },
     { id: 'metodos', label: 'Métodos de Pago', icon: CreditCard },
     { id: 'conceptos', label: 'Conceptos', icon: FileText },
+    { id: 'modulos', label: 'Módulos', icon: Settings },
 ];
 
 // === TipoCuota Form Modal ===
@@ -261,17 +264,253 @@ function SimpleFormModal({ isOpen, onClose, item, type, onSuccess }: SimpleFormM
     );
 }
 
+interface CuotaEntitlementsModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    item: TipoCuota | null;
+}
+
+function CuotaEntitlementsModal({ isOpen, onClose, item }: CuotaEntitlementsModalProps) {
+    const { success, error } = useToast();
+    const [loading, setLoading] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [sucursales, setSucursales] = useState<Sucursal[]>([]);
+    const [claseTipos, setClaseTipos] = useState<ClaseTipo[]>([]);
+    const [allSucursales, setAllSucursales] = useState(true);
+    const [selectedSucursales, setSelectedSucursales] = useState<number[]>([]);
+    const [scopeKey, setScopeKey] = useState<string>('0');
+    const [classRulesByScope, setClassRulesByScope] = useState<Record<string, number[]>>({});
+
+    useEffect(() => {
+        if (!isOpen || !item) return;
+        setLoading(true);
+        void (async () => {
+            try {
+                const [entRes, sucRes, tiposRes] = await Promise.all([
+                    api.getTipoCuotaEntitlements(item.id),
+                    api.getSucursales(),
+                    api.getClaseTipos(),
+                ]);
+                if (sucRes.ok && sucRes.data?.ok) {
+                    setSucursales((sucRes.data.items || []).filter((s) => !!s.activa));
+                } else {
+                    setSucursales([]);
+                }
+                if (tiposRes.ok && tiposRes.data?.tipos) {
+                    setClaseTipos((tiposRes.data.tipos || []).filter((t) => !!t.activo));
+                } else {
+                    setClaseTipos([]);
+                }
+                if (entRes.ok && entRes.data?.ok) {
+                    setAllSucursales(Boolean(entRes.data.tipo_cuota?.all_sucursales));
+                    setSelectedSucursales(Array.isArray(entRes.data.sucursal_ids) ? entRes.data.sucursal_ids : []);
+                    const map: Record<string, number[]> = {};
+                    const rules = Array.isArray(entRes.data.class_rules) ? entRes.data.class_rules : [];
+                    rules
+                        .filter((r) => String(r.target_type || '').toLowerCase() === 'tipo_clase' && Boolean(r.allow))
+                        .forEach((r) => {
+                            const k = r.sucursal_id ? String(r.sucursal_id) : '0';
+                            const arr = map[k] || [];
+                            arr.push(Number(r.target_id));
+                            map[k] = arr;
+                        });
+                    Object.keys(map).forEach((k) => {
+                        map[k] = Array.from(new Set(map[k].filter((x) => Number.isFinite(x)))).sort((a, b) => a - b);
+                    });
+                    setClassRulesByScope(map);
+                    setScopeKey('0');
+                } else {
+                    setAllSucursales(true);
+                    setSelectedSucursales([]);
+                    setClassRulesByScope({});
+                    setScopeKey('0');
+                }
+            } catch {
+                setAllSucursales(true);
+                setSelectedSucursales([]);
+                setClassRulesByScope({});
+                setScopeKey('0');
+                setSucursales([]);
+                setClaseTipos([]);
+            } finally {
+                setLoading(false);
+            }
+        })();
+    }, [isOpen, item?.id]);
+
+    const toggleSucursal = (sid: number) => {
+        setSelectedSucursales((prev) => {
+            const set = new Set(prev);
+            if (set.has(sid)) set.delete(sid);
+            else set.add(sid);
+            return Array.from(set).sort((a, b) => a - b);
+        });
+    };
+
+    const toggleTipoClase = (tipoId: number) => {
+        setClassRulesByScope((prev) => {
+            const current = new Set(prev[scopeKey] || []);
+            if (current.has(tipoId)) current.delete(tipoId);
+            else current.add(tipoId);
+            const next = { ...prev, [scopeKey]: Array.from(current).sort((a, b) => a - b) };
+            return next;
+        });
+    };
+
+    const handleSave = async () => {
+        if (!item) return;
+        setSaving(true);
+        try {
+            const class_rules: { sucursal_id?: number | null; target_type: 'tipo_clase'; target_id: number; allow: boolean }[] = [];
+            Object.entries(classRulesByScope || {}).forEach(([k, ids]) => {
+                const sid = k === '0' ? null : Number(k);
+                (ids || []).forEach((id) => {
+                    class_rules.push({ sucursal_id: Number.isFinite(sid as any) ? (sid as any) : null, target_type: 'tipo_clase', target_id: Number(id), allow: true });
+                });
+            });
+            const res = await api.updateTipoCuotaEntitlements(item.id, {
+                all_sucursales: Boolean(allSucursales),
+                sucursal_ids: allSucursales ? [] : selectedSucursales,
+                class_rules,
+            });
+            if (res.ok && res.data?.ok) {
+                success('Accesos actualizados');
+                onClose();
+            } else {
+                error(res.error || 'Error al guardar accesos');
+            }
+        } catch {
+            error('Error de conexión');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const scopeOptions: { key: string; label: string }[] = [
+        { key: '0', label: 'Todas las sucursales' },
+        ...sucursales.map((s) => ({ key: String(s.id), label: s.nombre })),
+    ];
+
+    return (
+        <Modal
+            isOpen={isOpen}
+            onClose={onClose}
+            title={item ? `Accesos: ${item.nombre}` : 'Accesos'}
+            size="lg"
+            footer={
+                <>
+                    <Button variant="secondary" onClick={onClose} disabled={saving}>
+                        Cerrar
+                    </Button>
+                    <Button onClick={handleSave} isLoading={saving} disabled={loading || saving || !item}>
+                        Guardar
+                    </Button>
+                </>
+            }
+        >
+            {loading ? (
+                <div className="text-sm text-slate-400">Cargando…</div>
+            ) : !item ? (
+                <div className="text-sm text-slate-400">Seleccioná un tipo de cuota.</div>
+            ) : (
+                <div className="space-y-5">
+                    <div className="card p-4">
+                        <label className="flex items-center justify-between gap-3">
+                            <div>
+                                <div className="text-sm font-medium text-white">Acceso a sucursales</div>
+                                <div className="text-xs text-slate-400">Si desactivás “todas”, elegís una lista permitida.</div>
+                            </div>
+                            <input
+                                type="checkbox"
+                                checked={allSucursales}
+                                onChange={(e) => setAllSucursales(e.target.checked)}
+                            />
+                        </label>
+                        {!allSucursales ? (
+                            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {sucursales.map((s) => (
+                                    <label key={s.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-800/60 bg-slate-950/40 px-3 py-2">
+                                        <span className="text-sm text-slate-200">{s.nombre}</span>
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedSucursales.includes(s.id)}
+                                            onChange={() => toggleSucursal(s.id)}
+                                        />
+                                    </label>
+                                ))}
+                            </div>
+                        ) : null}
+                    </div>
+
+                    <div className="card p-4">
+                        <div className="text-sm font-medium text-white mb-1">Permisos de clases</div>
+                        <div className="text-xs text-slate-400 mb-3">Definí allowlist por tipo de clase y por sucursal (o global).</div>
+
+                        <div className="flex items-center gap-2 mb-3">
+                            <span className="text-xs text-slate-400">Ámbito:</span>
+                            <select
+                                className="bg-slate-950/40 border border-slate-800/60 rounded-lg px-2 py-1 text-sm text-slate-200"
+                                value={scopeKey}
+                                onChange={(e) => setScopeKey(e.target.value)}
+                            >
+                                {scopeOptions.map((o) => (
+                                    <option key={o.key} value={o.key}>
+                                        {o.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {claseTipos.length ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {claseTipos.map((t) => {
+                                    const selected = (classRulesByScope[scopeKey] || []).includes(t.id);
+                                    return (
+                                        <label key={t.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-800/60 bg-slate-950/40 px-3 py-2">
+                                            <span className="text-sm text-slate-200">{t.nombre}</span>
+                                            <input type="checkbox" checked={selected} onChange={() => toggleTipoClase(t.id)} />
+                                        </label>
+                                    );
+                                })}
+                            </div>
+                        ) : (
+                            <div className="text-sm text-slate-400">No hay tipos de clase activos.</div>
+                        )}
+                    </div>
+                </div>
+            )}
+        </Modal>
+    );
+}
+
 export default function ConfiguracionPage() {
     const { success, error } = useToast();
+    const router = useRouter();
+    const pathname = usePathname();
+    const { user, isLoading: authLoading } = useAuth();
+
+    useEffect(() => {
+        const p = pathname || '';
+        if (!p.startsWith('/gestion/configuracion')) return;
+        if (authLoading) return;
+        const rol = String(user?.rol || '').toLowerCase();
+        if (rol === 'owner' || rol === 'admin') {
+            router.replace('/dashboard/configuracion');
+        } else {
+            router.replace('/gestion');
+        }
+    }, [pathname, authLoading, user?.rol, router]);
 
     // State
     const [loading, setLoading] = useState(true);
     const [gymNombre, setGymNombre] = useState<string>('');
     const [gymLogoUrl, setGymLogoUrl] = useState<string>('');
     const [logoUploading, setLogoUploading] = useState(false);
-    const [activeTab, setActiveTab] = useState<'cuotas' | 'metodos' | 'conceptos'>('cuotas');
+    const [activeTab, setActiveTab] = useState<'cuotas' | 'metodos' | 'conceptos' | 'modulos'>('cuotas');
     const [cuotaFormOpen, setCuotaFormOpen] = useState(false);
     const [cuotaToEdit, setCuotaToEdit] = useState<TipoCuota | null>(null);
+    const [cuotaEntitlementsOpen, setCuotaEntitlementsOpen] = useState(false);
+    const [cuotaEntitlementsItem, setCuotaEntitlementsItem] = useState<TipoCuota | null>(null);
     const [simpleFormOpen, setSimpleFormOpen] = useState(false);
     const [simpleItemToEdit, setSimpleItemToEdit] = useState<MetodoPago | ConceptoPago | null>(null);
     const [deleteOpen, setDeleteOpen] = useState(false);
@@ -282,6 +521,9 @@ export default function ConfiguracionPage() {
     const [tiposCuota, setTiposCuota] = useState<TipoCuota[]>([]);
     const [metodosPago, setMetodosPago] = useState<MetodoPago[]>([]);
     const [conceptos, setConceptos] = useState<ConceptoPago[]>([]);
+    const [featureFlags, setFeatureFlags] = useState<FeatureFlags>({ modules: {} });
+    const [featureFlagsLoading, setFeatureFlagsLoading] = useState(false);
+    const [featureFlagsSaving, setFeatureFlagsSaving] = useState(false);
 
     const logoInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -303,12 +545,39 @@ export default function ConfiguracionPage() {
             if (cuotasRes.ok && cuotasRes.data) setTiposCuota(cuotasRes.data.tipos);
             if (metodosRes.ok && metodosRes.data) setMetodosPago(metodosRes.data.metodos);
             if (conceptosRes.ok && conceptosRes.data) setConceptos(conceptosRes.data.conceptos);
+
+            setFeatureFlagsLoading(true);
+            try {
+                const ffRes = await api.getFeatureFlags();
+                if (ffRes.ok && ffRes.data?.ok) {
+                    setFeatureFlags(ffRes.data.flags || { modules: {} });
+                }
+            } finally {
+                setFeatureFlagsLoading(false);
+            }
         } catch {
             error('Error al cargar configuración');
         } finally {
             setLoading(false);
         }
     }, [error]);
+
+    const handleSaveFeatureFlags = async () => {
+        setFeatureFlagsSaving(true);
+        try {
+            const res = await api.setFeatureFlags(featureFlags || { modules: {} });
+            if (res.ok && res.data?.ok) {
+                success('Módulos actualizados');
+                setFeatureFlags(res.data.flags || { modules: {} });
+            } else {
+                error(res.error || 'Error al guardar módulos');
+            }
+        } catch {
+            error('Error de conexión');
+        } finally {
+            setFeatureFlagsSaving(false);
+        }
+    };
 
     const handleLogoSelected = async (file: File | null) => {
         if (!file) return;
@@ -385,6 +654,21 @@ export default function ConfiguracionPage() {
         }
     };
 
+    const moduleOptions = [
+        { key: 'usuarios', label: 'Usuarios' },
+        { key: 'pagos', label: 'Pagos' },
+        { key: 'profesores', label: 'Profesores' },
+        { key: 'empleados', label: 'Empleados' },
+        { key: 'rutinas', label: 'Rutinas' },
+        { key: 'ejercicios', label: 'Ejercicios' },
+        { key: 'clases', label: 'Clases' },
+        { key: 'asistencias', label: 'Asistencias' },
+        { key: 'whatsapp', label: 'WhatsApp' },
+        { key: 'configuracion', label: 'Configuración' },
+        { key: 'reportes', label: 'Reportes' },
+        { key: 'entitlements_v2', label: 'Accesos avanzados (multi-sucursal y clases)' },
+    ];
+
     // Render item list
     const renderItemList = () => {
         if (loading) {
@@ -395,6 +679,45 @@ export default function ConfiguracionPage() {
                             <div className="h-5 bg-slate-800 rounded w-1/3" />
                         </div>
                     ))}
+                </div>
+            );
+        }
+
+        if (activeTab === 'modulos') {
+            const modules = (featureFlags && featureFlags.modules) || {};
+            return (
+                <div className="space-y-3">
+                    <div className="card p-4">
+                        <div className="text-sm text-slate-300">
+                            Activá o desactivá módulos del panel de gestión. Desactivar Configuración puede ocultar esta pantalla.
+                        </div>
+                    </div>
+                    <div className="card p-4 space-y-3">
+                        {moduleOptions.map((m) => (
+                            <label key={m.key} className="flex items-center justify-between gap-3 py-1">
+                                <span className="text-sm text-white">{m.label}</span>
+                                <input
+                                    type="checkbox"
+                                    checked={modules[m.key] !== false}
+                                    onChange={(e) => {
+                                        const next = { ...(featureFlags.modules || {}) };
+                                        next[m.key] = e.target.checked;
+                                        setFeatureFlags({ ...(featureFlags || { modules: {} }), modules: next });
+                                    }}
+                                />
+                            </label>
+                        ))}
+                        <div className="flex items-center justify-end pt-2">
+                            <Button
+                                size="sm"
+                                onClick={handleSaveFeatureFlags}
+                                isLoading={featureFlagsSaving}
+                                disabled={featureFlagsSaving || featureFlagsLoading}
+                            >
+                                Guardar
+                            </Button>
+                        </div>
+                    </div>
                 </div>
             );
         }
@@ -456,6 +779,17 @@ export default function ConfiguracionPage() {
                             >
                                 <Edit className="w-4 h-4" />
                             </button>
+                            {activeTab === 'cuotas' ? (
+                                <button
+                                    onClick={() => {
+                                        setCuotaEntitlementsItem(item as TipoCuota);
+                                        setCuotaEntitlementsOpen(true);
+                                    }}
+                                    className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                                >
+                                    <Settings className="w-4 h-4" />
+                                </button>
+                            ) : null}
                             <button
                                 onClick={() => {
                                     setItemToDelete({
@@ -551,7 +885,7 @@ export default function ConfiguracionPage() {
                 {tabs.map((tab) => (
                     <button
                         key={tab.id}
-                        onClick={() => setActiveTab(tab.id as 'cuotas' | 'metodos' | 'conceptos')}
+                        onClick={() => setActiveTab(tab.id as 'cuotas' | 'metodos' | 'conceptos' | 'modulos')}
                         className={cn(
                             'flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium transition-all duration-200',
                             activeTab === tab.id
@@ -576,21 +910,23 @@ export default function ConfiguracionPage() {
                     <h2 className="text-lg font-semibold text-white">
                         {tabs.find((t) => t.id === activeTab)?.label}
                     </h2>
-                    <Button
-                        size="sm"
-                        leftIcon={<Plus className="w-4 h-4" />}
-                        onClick={() => {
-                            if (activeTab === 'cuotas') {
-                                setCuotaToEdit(null);
-                                setCuotaFormOpen(true);
-                            } else {
-                                setSimpleItemToEdit(null);
-                                setSimpleFormOpen(true);
-                            }
-                        }}
-                    >
-                        Agregar
-                    </Button>
+                    {activeTab !== 'modulos' && (
+                        <Button
+                            size="sm"
+                            leftIcon={<Plus className="w-4 h-4" />}
+                            onClick={() => {
+                                if (activeTab === 'cuotas') {
+                                    setCuotaToEdit(null);
+                                    setCuotaFormOpen(true);
+                                } else {
+                                    setSimpleItemToEdit(null);
+                                    setSimpleFormOpen(true);
+                                }
+                            }}
+                        >
+                            Agregar
+                        </Button>
+                    )}
                 </div>
 
                 {renderItemList()}
@@ -605,6 +941,15 @@ export default function ConfiguracionPage() {
                 }}
                 item={cuotaToEdit}
                 onSuccess={loadData}
+            />
+
+            <CuotaEntitlementsModal
+                isOpen={cuotaEntitlementsOpen}
+                onClose={() => {
+                    setCuotaEntitlementsOpen(false);
+                    setCuotaEntitlementsItem(null);
+                }}
+                item={cuotaEntitlementsItem}
             />
 
             {/* Simple Form Modal (Metodo/Concepto) */}

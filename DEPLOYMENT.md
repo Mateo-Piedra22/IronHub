@@ -1,123 +1,20 @@
-# IronHub Deployment Guide
+# Deploy (runbook)
 
-This document describes how to deploy each application to Vercel.
+Este archivo es un índice. La guía enterprise y los runbooks viven en:
 
-## Prerequisites
+- [Deploy y operaciones](docs/operations/deployment.md)
+- [Migraciones (Alembic)](docs/database/migrations.md)
 
-- Vercel CLI installed: `npm i -g vercel`
-- Vercel account connected: `vercel login`
-- PostgreSQL database provisioned (Neon, Supabase, or similar)
-- Backblaze B2 bucket configured
-- Cloudflare CDN configured
+## Paso obligatorio: migraciones tenant
 
-## Applications Overview
-
-| App | Type | Domain |
-|-----|------|--------|
-| landing | Next.js | ironhub.motiona.xyz |
-| admin-web | Next.js | admin.ironhub.motiona.xyz |
-| admin-api | Python/FastAPI | api-admin.ironhub.motiona.xyz |
-| webapp-web | Next.js | *.ironhub.motiona.xyz |
-| webapp-api | Python/FastAPI | api.ironhub.motiona.xyz |
-
----
-
-## 1. Landing Page
-
-```bash
-cd apps/landing
-vercel --prod
-```
-
-### Environment Variables
-None required for static landing page.
-
-### Domain Configuration
-- Add custom domain: `ironhub.motiona.xyz`
-
----
-
-## 2. Admin Web Dashboard
-
-```bash
-cd apps/admin-web
-vercel --prod
-```
-
-### Environment Variables
-```
-NEXT_PUBLIC_API_URL=https://api-admin.ironhub.motiona.xyz
-```
-
-### Domain Configuration
-- Add custom domain: `admin.ironhub.motiona.xyz`
-
----
-
-## 3. Admin API
-
-```bash
-cd apps/admin-api
-vercel --prod
-```
-
-### Environment Variables
-```
-ADMIN_DB_HOST=your-db-host
-ADMIN_DB_PORT=5432
-ADMIN_DB_NAME=ironhub_admin
-ADMIN_DB_USER=your-user
-ADMIN_DB_PASSWORD=your-password
-ADMIN_DB_SSLMODE=require
-SESSION_SECRET=generate-secure-secret
-```
-
-### Domain Configuration
-- Add custom domain: `api-admin.ironhub.motiona.xyz`
-
----
-
-## 4. Webapp Web (Tenant Dashboard)
-
-```bash
-cd apps/webapp-web
-vercel --prod
-```
-
-### Environment Variables
-```
-NEXT_PUBLIC_API_URL=https://api.ironhub.motiona.xyz
-```
-
-### Domain Configuration
-- Add wildcard domain: `*.ironhub.motiona.xyz`
-- This enables subdomain routing per tenant
-
----
-
-## 5. Webapp API (Tenant Backend)
+En cada deploy que afecte a `webapp-api`, ejecutar:
 
 ```bash
 cd apps/webapp-api
-vercel --prod
+python -m src.cli.migrate
 ```
 
-### Environment Variables
-```
-DB_HOST=your-db-host
-DB_PORT=5432
-DB_USER=your-user
-DB_PASSWORD=your-password
-DB_SSLMODE=require
-
-ADMIN_DB_HOST=your-admin-db-host
-ADMIN_DB_NAME=ironhub_admin
-ADMIN_DB_USER=your-user
-ADMIN_DB_PASSWORD=your-password
-
-B2_KEY_ID=your-b2-key
-B2_APP_KEY=your-b2-app-key
-B2_BUCKET_NAME=your-bucket
+Si falla, el deploy debe detenerse.
 B2_BUCKET_ID=your-bucket-id
 CLOUDFLARE_CDN_URL=https://cdn.ironhub.motiona.xyz
 

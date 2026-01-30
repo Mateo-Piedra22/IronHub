@@ -15,6 +15,7 @@ try:
     import boto3
     from botocore.config import Config
     from botocore.exceptions import ClientError
+
     HAS_BOTO3 = True
 except ImportError:
     HAS_BOTO3 = False
@@ -84,7 +85,7 @@ def _normalize_key_layout(key: str) -> str:
         prefix = f"{B2_MEDIA_PREFIX}/"
         if not s.startswith(prefix):
             return s
-        rest = s[len(prefix):]
+        rest = s[len(prefix) :]
         parts = rest.split("/", 2)
         if len(parts) < 2:
             return s
@@ -108,24 +109,23 @@ def get_s3_client():
     if not HAS_BOTO3:
         logger.warning("boto3 not installed, B2 uploads disabled")
         return None
-    
+
     if not B2_KEY_ID or not B2_APPLICATION_KEY:
         logger.warning("B2 credentials not configured")
         return None
-    
+
     try:
         endpoint = str(B2_ENDPOINT_URL or "").strip()
-        if endpoint and not (endpoint.startswith("http://") or endpoint.startswith("https://")):
+        if endpoint and not (
+            endpoint.startswith("http://") or endpoint.startswith("https://")
+        ):
             endpoint = f"https://{endpoint}"
         return boto3.client(
-            's3',
+            "s3",
             endpoint_url=endpoint,
             aws_access_key_id=B2_KEY_ID,
             aws_secret_access_key=B2_APPLICATION_KEY,
-            config=Config(
-                signature_version='s3v4',
-                s3={'addressing_style': 'path'}
-            )
+            config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
         )
     except Exception as e:
         logger.error(f"Failed to create B2 client: {e}")
@@ -136,10 +136,10 @@ def get_cdn_url(file_path: str) -> str:
     """
     Get the CDN URL for a file stored in B2.
     Uses Cloudflare CDN if configured, otherwise falls back to B2 direct URL.
-    
+
     Args:
         file_path: The path of the file in B2 (relative to bucket root)
-    
+
     Returns:
         Full URL to access the file
     """
@@ -178,18 +178,18 @@ def upload_file(
     filename: str,
     tenant: str,
     folder: str = "uploads",
-    content_type: str = "application/octet-stream"
+    content_type: str = "application/octet-stream",
 ) -> Tuple[bool, str, Optional[str]]:
     """
     Upload a file to B2 storage.
-    
+
     Args:
         file_content: The file content as bytes
         filename: Original filename
         tenant: The gym/tenant subdomain for folder organization
         folder: Subfolder within tenant (uploads, logos, videos, etc.)
         content_type: MIME type of the file
-    
+
     Returns:
         Tuple of (success, cdn_url or error_message, file_key)
     """
@@ -204,7 +204,7 @@ def upload_file(
             return False, "File too large", None
     except Exception:
         return False, "Invalid file", None
-    
+
     # Generate unique filename with hash to avoid collisions
     file_hash = hashlib.md5(file_content).hexdigest()[:8]
     tenant_safe = _sanitize_tenant(tenant)
@@ -218,11 +218,13 @@ def upload_file(
     stem = Path(raw_name).stem
     stem = stem[:80] if stem else "file"
     safe_filename = f"{stem}{ext}".lower()
-    
+
     # Build the full path: assets/{tenant}-assets/{folder}/{hash}_{filename}
     tenant_folder = f"{tenant_safe}-assets"
-    file_key = f"{B2_MEDIA_PREFIX}/{tenant_folder}/{folder_safe}/{file_hash}_{safe_filename}"
-    
+    file_key = (
+        f"{B2_MEDIA_PREFIX}/{tenant_folder}/{folder_safe}/{file_hash}_{safe_filename}"
+    )
+
     try:
         client.put_object(
             Bucket=B2_BUCKET_NAME,
@@ -230,14 +232,14 @@ def upload_file(
             Body=file_content,
             ContentType=content_type,
             # Make file publicly readable and cacheable
-            ACL='public-read',
-            CacheControl='max-age=31536000'
+            ACL="public-read",
+            CacheControl="max-age=31536000",
         )
-        
+
         cdn_url = get_cdn_url(file_key)
         logger.info(f"Uploaded file to B2: {file_key}")
         return True, cdn_url, file_key
-        
+
     except ClientError as e:
         error_msg = str(e)
         logger.error(f"B2 upload failed: {error_msg}")
@@ -251,10 +253,10 @@ def upload_file(
 def delete_file(file_key: str) -> Tuple[bool, str]:
     """
     Delete a file from B2 storage.
-    
+
     Args:
         file_key: The full path of the file in B2
-    
+
     Returns:
         Tuple of (success, message)
     """
@@ -270,7 +272,7 @@ def delete_file(file_key: str) -> Tuple[bool, str]:
             return False, "Invalid key"
     except Exception:
         return False, "Invalid key"
-    
+
     try:
         client.delete_object(Bucket=B2_BUCKET_NAME, Key=key)
         logger.info(f"Deleted file from B2: {file_key}")
@@ -288,42 +290,46 @@ def delete_file(file_key: str) -> Tuple[bool, str]:
 def list_tenant_files(tenant: str, folder: str = "") -> list:
     """
     List all files for a tenant in B2.
-    
+
     Args:
         tenant: The gym subdomain
         folder: Optional subfolder to filter
-    
+
     Returns:
         List of file objects with key, size, last_modified
     """
     client = get_s3_client()
     if not client:
         return []
-    
+
     tenant_safe = _sanitize_tenant(tenant)
     tenant_folder = f"{tenant_safe}-assets"
     prefix = f"{B2_MEDIA_PREFIX}/{tenant_folder}/"
     if folder:
         folder_safe = _sanitize_folder(folder)
         prefix += f"{folder_safe}/"
-    
+
     try:
         files = []
         token = None
         while True:
             if token:
-                response = client.list_objects_v2(Bucket=B2_BUCKET_NAME, Prefix=prefix, ContinuationToken=token)
+                response = client.list_objects_v2(
+                    Bucket=B2_BUCKET_NAME, Prefix=prefix, ContinuationToken=token
+                )
             else:
                 response = client.list_objects_v2(Bucket=B2_BUCKET_NAME, Prefix=prefix)
-            for obj in response.get('Contents', []):
-                files.append({
-                    'key': obj['Key'],
-                    'size': obj['Size'],
-                    'last_modified': obj['LastModified'].isoformat(),
-                    'url': get_cdn_url(obj['Key'])
-                })
-            if response.get('IsTruncated'):
-                token = response.get('NextContinuationToken')
+            for obj in response.get("Contents", []):
+                files.append(
+                    {
+                        "key": obj["Key"],
+                        "size": obj["Size"],
+                        "last_modified": obj["LastModified"].isoformat(),
+                        "url": get_cdn_url(obj["Key"]),
+                    }
+                )
+            if response.get("IsTruncated"):
+                token = response.get("NextContinuationToken")
                 if not token:
                     break
             else:
@@ -337,48 +343,52 @@ def list_tenant_files(tenant: str, folder: str = "") -> list:
 def upload_logo(file_content: bytes, filename: str, tenant: str) -> Tuple[bool, str]:
     """
     Upload a gym logo.
-    
+
     Args:
         file_content: Image bytes
         filename: Original filename
         tenant: Gym subdomain
-    
+
     Returns:
         Tuple of (success, cdn_url or error_message)
     """
     content_type = "image/png"
     ext = Path(filename).suffix.lower()
-    if ext in ['.jpg', '.jpeg']:
+    if ext in [".jpg", ".jpeg"]:
         content_type = "image/jpeg"
-    elif ext == '.webp':
+    elif ext == ".webp":
         content_type = "image/webp"
-    elif ext == '.svg':
+    elif ext == ".svg":
         content_type = "image/svg+xml"
-    
+
     success, url, _ = upload_file(file_content, filename, tenant, "logos", content_type)
     return success, url
 
 
-def upload_exercise_video(file_content: bytes, filename: str, tenant: str) -> Tuple[bool, str]:
+def upload_exercise_video(
+    file_content: bytes, filename: str, tenant: str
+) -> Tuple[bool, str]:
     """
     Upload an exercise video.
-    
+
     Args:
         file_content: Video bytes
         filename: Original filename
         tenant: Gym subdomain
-    
+
     Returns:
         Tuple of (success, cdn_url or error_message)
     """
     content_type = "video/mp4"
     ext = Path(filename).suffix.lower()
-    if ext == '.webm':
+    if ext == ".webm":
         content_type = "video/webm"
-    elif ext == '.mov':
+    elif ext == ".mov":
         content_type = "video/quicktime"
-    
-    success, url, _ = upload_file(file_content, filename, tenant, "videos", content_type)
+
+    success, url, _ = upload_file(
+        file_content, filename, tenant, "videos", content_type
+    )
     return success, url
 
 
@@ -386,21 +396,19 @@ def upload_exercise_video(file_content: bytes, filename: str, tenant: str) -> Tu
 # Compatibility Layer (for code using old StorageService interface)
 # ============================================================================
 
+
 def simple_upload(
-    file_data: bytes,
-    file_name: str,
-    content_type: str,
-    subfolder: str = ""
+    file_data: bytes, file_name: str, content_type: str, subfolder: str = ""
 ) -> Optional[str]:
     """
     Simple upload function compatible with old StorageService.upload_file() interface.
-    
+
     Args:
         file_data: File content as bytes
         file_name: Original filename
         content_type: MIME type
         subfolder: Path like "exercises/tenant" or "logos/tenant"
-    
+
     Returns:
         CDN URL if successful, None if failed
     """
@@ -414,7 +422,7 @@ def simple_upload(
     else:
         folder = "uploads"
         tenant = "common"
-    
+
     success, url, _ = upload_file(file_data, file_name, tenant, folder, content_type)
     return url if success else None
 
@@ -422,13 +430,13 @@ def simple_upload(
 def get_file_url(file_path: str) -> str:
     """
     Get public URL for a file. Compatible with old StorageService.get_file_url().
-    
+
     If the path is already a full URL, returns it unchanged.
     Otherwise, constructs CDN URL.
     """
     if not file_path:
         return ""
-    
+
     # Local/static paths
     if file_path.startswith("/"):
         return file_path
@@ -451,7 +459,10 @@ def get_file_url(file_path: str) -> str:
                 key2 = path.lstrip("/")
                 if key2.startswith(f"{B2_MEDIA_PREFIX}/") and ".." not in key2:
                     # Be conservative: only rewrite if it looks like our media layout
-                    if any(seg in key2.split("/") for seg in ("logos", "videos", "exercises", "uploads")):
+                    if any(
+                        seg in key2.split("/")
+                        for seg in ("logos", "videos", "exercises", "uploads")
+                    ):
                         return get_cdn_url(_normalize_key_layout(key2))
             except Exception:
                 pass
@@ -490,7 +501,6 @@ def extract_file_key(file_url_or_key: str) -> Optional[str]:
 
         parsed = urllib.parse.urlparse(s)
         path = parsed.path or ""
-        netloc = (parsed.netloc or "").lower()
 
         # Case 1: Direct B2 URL pattern
         # https://<host>/file/<bucket>/<key>
@@ -505,7 +515,10 @@ def extract_file_key(file_url_or_key: str) -> Optional[str]:
         try:
             key2 = path.lstrip("/")
             if key2.startswith(prefix) and ".." not in key2:
-                if any(seg in key2.split("/") for seg in ("logos", "videos", "exercises", "uploads")):
+                if any(
+                    seg in key2.split("/")
+                    for seg in ("logos", "videos", "exercises", "uploads")
+                ):
                     return _normalize_key_layout(key2)
         except Exception:
             pass
@@ -514,4 +527,3 @@ def extract_file_key(file_url_or_key: str) -> Optional[str]:
         return None
     except Exception:
         return None
-

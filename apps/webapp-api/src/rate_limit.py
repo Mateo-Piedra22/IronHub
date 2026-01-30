@@ -10,6 +10,7 @@ import time
 import threading
 from typing import Dict
 from fastapi import Request
+from src.rate_limit_store import incr_and_check, get_rate_limit_store, InMemoryRateLimitStore
 
 
 # --- Thread-safe storage and lock ---
@@ -21,12 +22,17 @@ _login_attempts_by_dni: Dict[str, list] = {}
 def _get_client_ip(request: Request) -> str:
     """
     Extract client IP address from request, respecting proxy headers when enabled.
-    
+
     Checks X-Forwarded-For and X-Real-IP headers if PROXY_HEADERS_ENABLED is set.
     Falls back to request.client.host otherwise.
     """
     try:
-        trust_proxy = str(os.getenv("PROXY_HEADERS_ENABLED", "0")).strip().lower() in ("1", "true", "yes", "on")
+        trust_proxy = str(os.getenv("PROXY_HEADERS_ENABLED", "0")).strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
         if trust_proxy:
             xff = request.headers.get("x-forwarded-for")
             if xff:
@@ -63,16 +69,18 @@ def _prune_attempts(store: Dict[str, list], window_s: int) -> None:
         pass
 
 
-def _is_rate_limited(key: str, store: Dict[str, list], max_attempts: int, window_s: int) -> bool:
+def _is_rate_limited(
+    key: str, store: Dict[str, list], max_attempts: int, window_s: int
+) -> bool:
     """
     Check if the key (IP or DNI) has exceeded max_attempts within window_s seconds.
-    
+
     Args:
         key: Identifier string (e.g., "ip:192.168.1.1" or "dni:12345678")
         store: The attempts dictionary to check
         max_attempts: Maximum allowed attempts
         window_s: Time window in seconds
-        
+
     Returns:
         True if rate limited, False otherwise
     """
@@ -118,43 +126,54 @@ def _clear_attempts(key: str, store: Dict[str, list]) -> None:
 
 # --- Convenience functions with default limits ---
 
-def is_ip_rate_limited(request: Request, max_attempts: int = 10, window_s: int = 300) -> bool:
+
+def is_ip_rate_limited(
+    request: Request, max_attempts: int = 10, window_s: int = 300
+) -> bool:
     """Check if the request IP is rate limited (default: 10 attempts per 5 minutes)."""
     ip = _get_client_ip(request)
-    key = f"ip:{ip}"
-    return _is_rate_limited(key, _login_attempts_by_ip, max_attempts, window_s)
+    key = f"login:ip:{ip}"
+    limited, count = incr_and_check(key, window_s, max_attempts)
+    try:
+        store = get_rate_limit_store()
+        if isinstance(store, InMemoryRateLimitStore) and (count % 50 == 0):
+            store.cleanup(window_s)
+    except Exception:
+        pass
+    return bool(limited)
 
 
 def is_dni_rate_limited(dni: str, max_attempts: int = 5, window_s: int = 300) -> bool:
     """Check if the DNI is rate limited (default: 5 attempts per 5 minutes)."""
-    key = f"dni:{dni}"
-    return _is_rate_limited(key, _login_attempts_by_dni, max_attempts, window_s)
+    key = f"login:dni:{str(dni or '').strip()}"
+    limited, count = incr_and_check(key, window_s, max_attempts)
+    try:
+        store = get_rate_limit_store()
+        if isinstance(store, InMemoryRateLimitStore) and (count % 50 == 0):
+            store.cleanup(window_s)
+    except Exception:
+        pass
+    return bool(limited)
 
 
 def register_ip_attempt(request: Request) -> None:
     """Register a login attempt for the request IP."""
-    ip = _get_client_ip(request)
-    key = f"ip:{ip}"
-    _register_attempt(key, _login_attempts_by_ip)
+    return
 
 
 def register_dni_attempt(dni: str) -> None:
     """Register a login attempt for the DNI."""
-    key = f"dni:{dni}"
-    _register_attempt(key, _login_attempts_by_dni)
+    return
 
 
 def clear_ip_attempts(request: Request) -> None:
     """Clear all attempts for the request IP (on successful login)."""
-    ip = _get_client_ip(request)
-    key = f"ip:{ip}"
-    _clear_attempts(key, _login_attempts_by_ip)
+    return
 
 
 def clear_dni_attempts(dni: str) -> None:
     """Clear all attempts for the DNI (on successful login)."""
-    key = f"dni:{dni}"
-    _clear_attempts(key, _login_attempts_by_dni)
+    return
 
 
 def is_rate_limited_login(request: Request, dni: str) -> bool:
@@ -162,19 +181,19 @@ def is_rate_limited_login(request: Request, dni: str) -> bool:
     Combined rate limit check for login attempts.
     Returns True if EITHER IP or DNI is rate limited.
     """
-    return is_ip_rate_limited(request) or is_dni_rate_limited(dni)
+    ip_limited = is_ip_rate_limited(request)
+    dni_limited = is_dni_rate_limited(dni)
+    return bool(ip_limited or dni_limited)
 
 
 def register_login_attempt(request: Request, dni: str) -> None:
     """Register a login attempt for both IP and DNI."""
-    register_ip_attempt(request)
-    register_dni_attempt(dni)
+    return
 
 
 def clear_login_attempts(request: Request, dni: str) -> None:
     """Clear attempts for both IP and DNI (on successful login)."""
-    clear_ip_attempts(request)
-    clear_dni_attempts(dni)
+    return
 
 
 # --- Global API Rate Limiting ---
@@ -211,68 +230,68 @@ _write_requests_by_ip: Dict[str, list] = {}
 def is_global_rate_limited(request: Request) -> bool:
     """
     Check if the request IP has exceeded the global rate limit for API requests.
-    
+
     Returns:
         True if rate limited, False otherwise
     """
     ip = _get_client_ip(request)
-    key = f"api:{ip}"
-    return _is_rate_limited(key, _api_requests_by_ip, _GLOBAL_RATE_LIMIT_MAX, _GLOBAL_RATE_LIMIT_WINDOW)
+    tenant = str(request.headers.get("x-tenant") or "").strip().lower()
+    key = f"api:{tenant}:{ip}"
+    limited, count = incr_and_check(key, _GLOBAL_RATE_LIMIT_WINDOW, _GLOBAL_RATE_LIMIT_MAX)
+    try:
+        store = get_rate_limit_store()
+        if isinstance(store, InMemoryRateLimitStore) and (count % 200 == 0):
+            store.cleanup(_GLOBAL_RATE_LIMIT_WINDOW)
+    except Exception:
+        pass
+    return bool(limited)
 
 
 def is_write_rate_limited(request: Request) -> bool:
     """
     Check if the request IP has exceeded the rate limit for write operations (POST/PUT/DELETE).
-    
+
     Returns:
         True if rate limited, False otherwise
     """
     ip = _get_client_ip(request)
-    key = f"write:{ip}"
-    return _is_rate_limited(key, _write_requests_by_ip, _WRITE_RATE_LIMIT_MAX, _WRITE_RATE_LIMIT_WINDOW)
+    tenant = str(request.headers.get("x-tenant") or "").strip().lower()
+    key = f"write:{tenant}:{ip}"
+    limited, count = incr_and_check(key, _WRITE_RATE_LIMIT_WINDOW, _WRITE_RATE_LIMIT_MAX)
+    try:
+        store = get_rate_limit_store()
+        if isinstance(store, InMemoryRateLimitStore) and (count % 50 == 0):
+            store.cleanup(_WRITE_RATE_LIMIT_WINDOW)
+    except Exception:
+        pass
+    return bool(limited)
 
 
 def register_api_request(request: Request) -> None:
     """Register an API request for the given IP."""
-    ip = _get_client_ip(request)
-    key = f"api:{ip}"
-    _register_attempt(key, _api_requests_by_ip)
+    return
 
 
 def register_write_request(request: Request) -> None:
     """Register a write operation (POST/PUT/DELETE) for the given IP."""
-    ip = _get_client_ip(request)
-    key = f"write:{ip}"
-    _register_attempt(key, _write_requests_by_ip)
+    return
 
 
 def get_rate_limit_status(request: Request) -> dict:
     """
     Get the current rate limit status for a request.
     Useful for including in response headers.
-    
+
     Returns:
         Dict with rate limit information
     """
     ip = _get_client_ip(request)
-    api_key = f"api:{ip}"
-    write_key = f"write:{ip}"
-    
-    now = time.time()
-    
-    with _login_attempts_lock:
-        _prune_attempts(_api_requests_by_ip, _GLOBAL_RATE_LIMIT_WINDOW)
-        _prune_attempts(_write_requests_by_ip, _WRITE_RATE_LIMIT_WINDOW)
-        
-        api_count = len(_api_requests_by_ip.get(api_key, []))
-        write_count = len(_write_requests_by_ip.get(write_key, []))
-    
+    tenant = str(request.headers.get("x-tenant") or "").strip().lower()
     return {
         "api_limit": _GLOBAL_RATE_LIMIT_MAX,
-        "api_remaining": max(0, _GLOBAL_RATE_LIMIT_MAX - api_count),
         "api_window": _GLOBAL_RATE_LIMIT_WINDOW,
         "write_limit": _WRITE_RATE_LIMIT_MAX,
-        "write_remaining": max(0, _WRITE_RATE_LIMIT_MAX - write_count),
         "write_window": _WRITE_RATE_LIMIT_WINDOW,
+        "ip": ip,
+        "tenant": tenant,
     }
-

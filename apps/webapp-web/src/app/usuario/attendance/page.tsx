@@ -188,6 +188,7 @@ export default function AttendancePage() {
                                         </div>
                                         <div className="text-xs text-slate-500">
                                             Check-in {a.hora ? `a las ${String(a.hora).slice(0, 8)}` : ''}
+                                            {a.sucursal_nombre ? ` • ${a.sucursal_nombre}` : ''}
                                         </div>
                                     </div>
                                 </div>

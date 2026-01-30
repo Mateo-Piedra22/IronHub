@@ -5,14 +5,16 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { Dumbbell, LogIn, Eye, EyeOff, Shield, Users, KeyRound, Loader2 } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, type Sucursal } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 
-interface ProfesorBasico {
+type LoginProfile = {
+    kind: 'owner' | 'user';
+    id: string | number;
     nombre: string;
-    profesor_id: number;
-}
+    rol: string;
+};
 
 export default function GestionLoginPage() {
     const router = useRouter();
@@ -21,31 +23,65 @@ export default function GestionLoginPage() {
     const [error, setError] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [gymLogoUrl, setGymLogoUrl] = useState<string>('');
+    const [step, setStep] = useState<'auth' | 'branch'>('auth');
+    const [sucursales, setSucursales] = useState<Sucursal[]>([]);
+    const [selectedSucursalId, setSelectedSucursalId] = useState<number>(0);
+    const [branchLoading, setBranchLoading] = useState(false);
+    const [branchError, setBranchError] = useState('');
 
-    // Professors list
-    const [profesores, setProfesores] = useState<ProfesorBasico[]>([]);
-    const [loadingProfesores, setLoadingProfesores] = useState(true);
+    const [profiles, setProfiles] = useState<LoginProfile[]>([]);
+    const [profilesLoading, setProfilesLoading] = useState(true);
+    const [profileOpen, setProfileOpen] = useState(false);
 
     // Form data
     const [selectedProfile, setSelectedProfile] = useState('__OWNER__');
     const [pin, setPin] = useState('');
     const [ownerPassword, setOwnerPassword] = useState('');
 
-    // Load professors on mount
+    const selectedProfileItem = profiles.find((p) => String(p.id) === String(selectedProfile)) || null;
+    const selectedRole = String(selectedProfileItem?.rol || (selectedProfile === '__OWNER__' ? 'owner' : '')).toLowerCase();
+
+    const roleLabel = (rol: string) => {
+        const r = String(rol || '').trim().toLowerCase();
+        if (r === 'owner' || r === 'dueño' || r === 'dueno') return 'Dueño';
+        if (r === 'admin' || r === 'administrador') return 'Admin';
+        if (r === 'profesor') return 'Profesor';
+        if (r === 'recepcionista') return 'Recepción';
+        if (r === 'empleado') return 'Empleado';
+        if (r === 'staff') return 'Staff';
+        return r ? r : '—';
+    };
+
+    const roleBadgeClass = (rol: string) => {
+        const r = String(rol || '').trim().toLowerCase();
+        if (r === 'owner' || r === 'dueño' || r === 'dueno') return 'bg-gold-500/15 text-gold-300 border-gold-500/30';
+        if (r === 'admin' || r === 'administrador') return 'bg-primary-500/15 text-primary-200 border-primary-500/30';
+        if (r === 'profesor') return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+        if (r === 'recepcionista') return 'bg-sky-500/15 text-sky-300 border-sky-500/30';
+        if (r === 'empleado') return 'bg-slate-500/15 text-slate-200 border-slate-500/30';
+        if (r === 'staff') return 'bg-violet-500/15 text-violet-300 border-violet-500/30';
+        return 'bg-slate-500/10 text-slate-300 border-slate-700/60';
+    };
+
+    // Load profiles on mount
     useEffect(() => {
-        const loadProfesores = async () => {
+        const loadProfiles = async () => {
             try {
-                const res = await api.getProfesoresBasico();
-                if (res.ok && Array.isArray(res.data)) {
-                    setProfesores(res.data);
+                const res = await api.getGestionLoginProfiles();
+                if (res.ok && res.data?.ok) {
+                    const items = Array.isArray(res.data.items) ? (res.data.items as LoginProfile[]) : [];
+                    setProfiles(items);
+                    const first = items[0]?.id;
+                    if (first !== undefined && first !== null) {
+                        setSelectedProfile(String(first));
+                    }
                 }
-            } catch (err) {
-                console.error('Error loading professors:', err);
+            } catch {
             } finally {
-                setLoadingProfesores(false);
+                setProfilesLoading(false);
             }
         };
-        loadProfesores();
+        loadProfiles();
     }, []);
 
     useEffect(() => {
@@ -61,7 +97,66 @@ export default function GestionLoginPage() {
         loadBranding();
     }, []);
 
-    const isOwnerSelected = selectedProfile === '__OWNER__';
+    const isOwnerSelected = selectedProfile === '__OWNER__' || selectedRole === 'owner';
+
+    const loadSucursalesAfterLogin = async () => {
+        setBranchLoading(true);
+        setBranchError('');
+        try {
+            const res = await api.getSucursales();
+            if (!res.ok || !res.data?.ok) {
+                throw new Error(res.error || 'No se pudieron cargar sucursales');
+            }
+            const items = (res.data.items || []).filter((s) => !!s.activa);
+            setSucursales(items);
+            const current = Number(res.data.sucursal_actual_id || 0);
+            const first = Number(items[0]?.id || 0);
+            setSelectedSucursalId(current || first);
+            if (items.length === 1 && Number(items[0]?.id)) {
+                const selRes = await api.seleccionarSucursal(Number(items[0].id));
+                if (selRes.ok && selRes.data?.ok) {
+                    await checkSession();
+                    router.push('/gestion/usuarios');
+                    return;
+                }
+                throw new Error(selRes.error || selRes.data?.error || 'No se pudo seleccionar sucursal');
+            }
+            if (items.length === 0) {
+                setBranchError('No tenés sucursales asignadas. Pedile al dueño que te habilite una.');
+                try { await api.logoutGestion(); } catch { }
+                return;
+            }
+            setStep('branch');
+        } catch (e) {
+            setBranchError(e instanceof Error ? e.message : 'Error cargando sucursales');
+            try { await api.logoutGestion(); } catch { }
+        } finally {
+            setBranchLoading(false);
+        }
+    };
+
+    const handleSelectSucursal = async () => {
+        setBranchError('');
+        const sid = Number(selectedSucursalId || 0);
+        if (!sid) {
+            setBranchError('Seleccioná una sucursal');
+            return;
+        }
+        setBranchLoading(true);
+        try {
+            const res = await api.seleccionarSucursal(sid);
+            if (res.ok && res.data?.ok) {
+                await checkSession();
+                router.push('/gestion/usuarios');
+            } else {
+                setBranchError(res.error || res.data?.error || 'No se pudo seleccionar sucursal');
+            }
+        } catch {
+            setBranchError('Error al seleccionar sucursal');
+        } finally {
+            setBranchLoading(false);
+        }
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -89,13 +184,13 @@ export default function GestionLoginPage() {
         try {
             const credentials = isOwnerSelected
                 ? { usuario_id: '__OWNER__', owner_password: ownerPassword }
-                : { profesor_id: selectedProfile, pin };
+                : { usuario_id: selectedProfile, pin };
 
             const res = await api.gestionLogin(credentials);
 
             if (res.ok && res.data?.ok !== false) {
                 await checkSession();
-                router.push('/gestion/usuarios');
+                await loadSucursalesAfterLogin();
             } else {
                 setError(res.error || res.data?.message || 'Credenciales incorrectas');
             }
@@ -139,7 +234,7 @@ export default function GestionLoginPage() {
                         )}
                     </motion.div>
                     <h1 className="text-2xl font-display font-bold text-white">Panel de Gestión</h1>
-                    <p className="text-slate-400 mt-1">Acceso para profesores o dueño</p>
+                    <p className="text-slate-400 mt-1">Acceso para personal autorizado</p>
                 </div>
 
                 {/* Form Card */}
@@ -149,37 +244,72 @@ export default function GestionLoginPage() {
                     transition={{ delay: 0.2 }}
                     className="card p-8"
                 >
-                    <form onSubmit={handleSubmit} className="space-y-6">
+                    {step === 'auth' ? (
+                        <form onSubmit={handleSubmit} className="space-y-6">
                         {/* Profile Selector */}
                         <div className="space-y-2">
                             <label htmlFor="profile" className="block text-sm font-medium text-slate-300">
                                 Seleccionar perfil
                             </label>
                             <div className="relative">
-                                <select
+                                <button
                                     id="profile"
-                                    value={selectedProfile}
-                                    onChange={(e) => {
-                                        setSelectedProfile(e.target.value);
-                                        setError('');
-                                        setPin('');
-                                        setOwnerPassword('');
-                                    }}
-                                    disabled={loadingProfesores}
-                                    className="w-full px-4 py-3 pl-11 rounded-xl bg-slate-900 border border-slate-800 text-white appearance-none focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all disabled:opacity-50"
+                                    type="button"
+                                    disabled={profilesLoading}
+                                    onClick={() => setProfileOpen((v) => !v)}
+                                    className={cn(
+                                        'w-full px-4 py-3 pl-11 pr-10 rounded-xl bg-slate-900 border border-slate-800 text-white text-left',
+                                        'focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all disabled:opacity-50'
+                                    )}
                                 >
-                                    <option value="__OWNER__">👑 Dueño</option>
-                                    {profesores.map((p) => (
-                                        <option key={p.profesor_id} value={String(p.profesor_id)}>
-                                            {p.nombre || `Profesor ${p.profesor_id}`}
-                                        </option>
-                                    ))}
-                                </select>
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div className="truncate">
+                                            {selectedProfileItem?.nombre || (profilesLoading ? 'Cargando…' : 'Seleccioná un perfil')}
+                                        </div>
+                                        <span className={cn('shrink-0 text-xs px-2 py-0.5 rounded-full border', roleBadgeClass(selectedProfileItem?.rol || (selectedProfile === '__OWNER__' ? 'owner' : '')))}>
+                                            {roleLabel(selectedProfileItem?.rol || (selectedProfile === '__OWNER__' ? 'owner' : ''))}
+                                        </span>
+                                    </div>
+                                </button>
                                 <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
-                                {loadingProfesores && (
+                                {profilesLoading && (
                                     <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 animate-spin" />
                                 )}
+                                {!profilesLoading && (
+                                    <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500">
+                                        <span className={cn('block w-2 h-2 border-r-2 border-b-2 border-slate-500 rotate-45', profileOpen ? '-translate-y-0.5' : 'translate-y-0')} />
+                                    </div>
+                                )}
                             </div>
+                            {profileOpen && !profilesLoading && (
+                                <div className="mt-2 rounded-xl border border-slate-800/60 bg-slate-950/60 backdrop-blur-lg overflow-hidden">
+                                    <div className="max-h-72 overflow-auto">
+                                        {profiles.map((p) => (
+                                            <button
+                                                key={`${p.kind}:${String(p.id)}`}
+                                                type="button"
+                                                onClick={() => {
+                                                    setSelectedProfile(String(p.id));
+                                                    setProfileOpen(false);
+                                                    setError('');
+                                                    setPin('');
+                                                    setOwnerPassword('');
+                                                }}
+                                                className={cn(
+                                                    'w-full px-4 py-3 flex items-center justify-between gap-3 text-left',
+                                                    'hover:bg-slate-900/50 transition-colors',
+                                                    String(selectedProfile) === String(p.id) ? 'bg-slate-900/60' : ''
+                                                )}
+                                            >
+                                                <div className="truncate text-sm text-slate-200">{p.nombre}</div>
+                                                <span className={cn('shrink-0 text-xs px-2 py-0.5 rounded-full border', roleBadgeClass(p.rol))}>
+                                                    {roleLabel(p.rol)}
+                                                </span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         {/* Conditional: PIN for professors */}
@@ -264,7 +394,7 @@ export default function GestionLoginPage() {
                         {/* Submit */}
                         <button
                             type="submit"
-                            disabled={loading || loadingProfesores}
+                            disabled={loading || profilesLoading}
                             className={cn(
                                 'w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold text-white',
                                 'bg-gradient-to-r from-primary-600 to-primary-500',
@@ -281,7 +411,80 @@ export default function GestionLoginPage() {
                                 </>
                             )}
                         </button>
-                    </form>
+                        </form>
+                    ) : (
+                        <div className="space-y-6">
+                            <div className="space-y-2">
+                                <label className="block text-sm font-medium text-slate-300">
+                                    Sucursal
+                                </label>
+                                <div className="relative">
+                                    <select
+                                        value={String(selectedSucursalId || '')}
+                                        onChange={(e) => setSelectedSucursalId(Number(e.target.value) || 0)}
+                                        disabled={branchLoading}
+                                        className="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-800 text-white appearance-none focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all disabled:opacity-50"
+                                    >
+                                        <option value="">Seleccioná una sucursal</option>
+                                        {sucursales.map((s) => (
+                                            <option key={s.id} value={String(s.id)}>
+                                                {s.nombre}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {branchLoading && (
+                                        <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 animate-spin" />
+                                    )}
+                                </div>
+                            </div>
+
+                            {(branchError || error) && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: -10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className="p-3 rounded-xl bg-danger-500/10 border border-danger-500/30 text-danger-400 text-sm"
+                                >
+                                    {branchError || error}
+                                </motion.div>
+                            )}
+
+                            <button
+                                type="button"
+                                onClick={handleSelectSucursal}
+                                disabled={branchLoading}
+                                className={cn(
+                                    'w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold text-white',
+                                    'bg-gradient-to-r from-primary-600 to-primary-500',
+                                    'hover:shadow-md transition-all duration-300',
+                                    'disabled:opacity-50 disabled:cursor-not-allowed'
+                                )}
+                            >
+                                {branchLoading ? (
+                                    <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                ) : (
+                                    <>
+                                        <LogIn className="w-5 h-5" />
+                                        Entrar
+                                    </>
+                                )}
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    try { await api.logoutGestion(); } catch { }
+                                    setStep('auth');
+                                    setSucursales([]);
+                                    setSelectedSucursalId(0);
+                                    setBranchError('');
+                                }}
+                                className="w-full py-3 rounded-xl font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 text-center transition-all text-sm"
+                                disabled={branchLoading}
+                            >
+                                Volver
+                            </button>
+                        </div>
+                    )}
 
                     {/* Admin notice */}
                     <div className="mt-6 pt-6 border-t border-slate-800">

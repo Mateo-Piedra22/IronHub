@@ -1,15 +1,15 @@
 'use client';
 
 import { useState, useEffect, use, useMemo, useRef } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
     Loader2, ArrowLeft, MessageSquare, Wrench, Palette, CreditCard,
-    Key, Activity, FileText, Save, Send, Check, X, AlertCircle, Upload, Trash2
+    Key, Activity, FileText, Save, Send, Check, X, AlertCircle, Upload, Trash2, MapPin, Plus, Pencil, ListChecks
 } from 'lucide-react';
 import Link from 'next/link';
-import { api, type Gym, type GymDetails, type WhatsAppConfig, type Payment, type WhatsAppTemplateCatalogItem } from '@/lib/api';
+import { api, type Gym, type WhatsAppConfig, type Payment, type WhatsAppTemplateCatalogItem, type FeatureFlags, type GymBranch, type GymTipoClaseItem, type GymTipoCuotaItem, type TipoCuotaEntitlementsUpdate, type GymBranchCreateInput, type GymBranchUpdateInput, type GymOnboardingStatus } from '@/lib/api';
 
-type Section = 'subscription' | 'payments' | 'whatsapp' | 'maintenance' | 'attendance' | 'branding' | 'health' | 'password';
+type Section = 'onboarding' | 'subscription' | 'branches' | 'payments' | 'whatsapp' | 'maintenance' | 'attendance' | 'modules' | 'entitlements' | 'branding' | 'health' | 'password';
 
 interface BrandingConfig {
     nombre_publico: string;
@@ -27,9 +27,12 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
 
     const [gym, setGym] = useState<Gym | null>(null);
     const [loading, setLoading] = useState(true);
-    const [activeSection, setActiveSection] = useState<Section>('subscription');
+    const [activeSection, setActiveSection] = useState<Section>('onboarding');
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState('');
+    const [onboarding, setOnboarding] = useState<GymOnboardingStatus | null>(null);
+    const [onboardingLoading, setOnboardingLoading] = useState(false);
+    const [prodReadySaving, setProdReadySaving] = useState(false);
 
     // Plans & Subscription Manual Assignment
     const [plans, setPlans] = useState<any[]>([]);
@@ -55,6 +58,46 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     const [attendancePolicySaving, setAttendancePolicySaving] = useState(false);
     const [auditItems, setAuditItems] = useState<any[]>([]);
     const [auditLoading, setAuditLoading] = useState(false);
+
+    const [branches, setBranches] = useState<GymBranch[]>([]);
+    const [branchSaving, setBranchSaving] = useState(false);
+    const [branchCreateOpen, setBranchCreateOpen] = useState(false);
+    const [branchEditOpen, setBranchEditOpen] = useState(false);
+    const [branchBulkOpen, setBranchBulkOpen] = useState(false);
+    const [branchConfirm, setBranchConfirm] = useState<GymBranch | null>(null);
+    const [branchSyncing, setBranchSyncing] = useState(false);
+    const [bulkText, setBulkText] = useState('');
+    const [bulkItems, setBulkItems] = useState<GymBranchCreateInput[]>([]);
+    const [bulkSubmitting, setBulkSubmitting] = useState(false);
+    const [branchDraft, setBranchDraft] = useState<GymBranchCreateInput>({
+        name: '',
+        code: '',
+        address: '',
+        timezone: '',
+    });
+    const [editingBranchId, setEditingBranchId] = useState<number>(0);
+    const [editBranchDraft, setEditBranchDraft] = useState<GymBranchUpdateInput>({
+        name: '',
+        code: '',
+        address: '',
+        timezone: '',
+        status: 'active',
+    });
+    const [featureFlagsScope, setFeatureFlagsScope] = useState<'gym' | 'branch'>('gym');
+    const [featureFlagsBranchId, setFeatureFlagsBranchId] = useState<number>(0);
+    const [featureFlags, setFeatureFlags] = useState<FeatureFlags>({ modules: {} });
+    const [featureFlagsLoading, setFeatureFlagsLoading] = useState(false);
+    const [featureFlagsSaving, setFeatureFlagsSaving] = useState(false);
+
+    const [entTiposCuota, setEntTiposCuota] = useState<GymTipoCuotaItem[]>([]);
+    const [entTiposClases, setEntTiposClases] = useState<GymTipoClaseItem[]>([]);
+    const [entTipoCuotaId, setEntTipoCuotaId] = useState<number>(0);
+    const [entLoading, setEntLoading] = useState(false);
+    const [entSaving, setEntSaving] = useState(false);
+    const [entAllSucursales, setEntAllSucursales] = useState(true);
+    const [entSelectedSucursales, setEntSelectedSucursales] = useState<number[]>([]);
+    const [entScopeKey, setEntScopeKey] = useState<string>('0');
+    const [entRulesByScope, setEntRulesByScope] = useState<Record<string, number[]>>({});
 
     // WhatsApp test
     const [waTestPhone, setWaTestPhone] = useState('');
@@ -149,6 +192,39 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                 if (auditRes.ok && auditRes.data?.ok) {
                     setAuditItems((auditRes.data.items || []) as any[]);
                 }
+                const brRes = await api.listGymBranches(gymId);
+                if (brRes.ok && brRes.data?.ok) {
+                    setBranches(brRes.data.items || []);
+                }
+                try {
+                    const obRes = await api.getGymOnboardingStatus(gymId);
+                    if (obRes.ok && obRes.data?.ok) {
+                        setOnboarding(obRes.data);
+                    }
+                } catch {
+                }
+                setFeatureFlagsLoading(true);
+                try {
+                    const ffRes = await api.getGymFeatureFlags(gymId, { scope: 'gym' });
+                    if (ffRes.ok && ffRes.data?.ok && ffRes.data.flags) {
+                        setFeatureFlags(ffRes.data.flags);
+                        setFeatureFlagsScope('gym');
+                        setFeatureFlagsBranchId(0);
+                    }
+                } finally {
+                    setFeatureFlagsLoading(false);
+                }
+                const tcRes = await api.listGymTiposCuota(gymId);
+                if (tcRes.ok && tcRes.data?.ok) {
+                    const items = (tcRes.data.items || []) as any[];
+                    setEntTiposCuota(items as any);
+                    const first = items.find((x) => x && x.activo)?.id || items[0]?.id || 0;
+                    if (first) setEntTipoCuotaId(Number(first));
+                }
+                const tclRes = await api.listGymTiposClases(gymId);
+                if (tclRes.ok && tclRes.data?.ok) {
+                    setEntTiposClases((tclRes.data.items || []) as any[]);
+                }
                 // Load branding
                 const brandRes = await api.getGymBranding(gymId);
                 if (brandRes.ok && brandRes.data?.branding) {
@@ -190,6 +266,12 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         load();
     }, [gymId]);
 
+    useEffect(() => {
+        if (activeSection !== 'entitlements') return;
+        if (!entTipoCuotaId) return;
+        void loadTipoCuotaEntitlements(entTipoCuotaId);
+    }, [activeSection, entTipoCuotaId]);
+
     const refresh = async () => {
         setLoading(true);
         try {
@@ -200,6 +282,14 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
             const payRes = await api.getGymPayments(gymId);
             if (payRes.ok && payRes.data) {
                 setPayments(payRes.data.payments || []);
+            }
+            try {
+                await reloadBranches();
+            } catch {
+            }
+            try {
+                await reloadOnboarding();
+            } catch {
             }
         } catch {
             // Ignore
@@ -227,6 +317,330 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     const showMessage = (msg: string) => {
         setMessage(msg);
         setTimeout(() => setMessage(''), 3000);
+    };
+
+    const reloadOnboarding = async () => {
+        setOnboardingLoading(true);
+        try {
+            const res = await api.getGymOnboardingStatus(gymId);
+            if (res.ok && res.data?.ok) {
+                setOnboarding(res.data);
+            }
+        } catch {
+        } finally {
+            setOnboardingLoading(false);
+        }
+    };
+
+    const setProductionReady = async (ready: boolean) => {
+        setProdReadySaving(true);
+        try {
+            const res = await api.setGymProductionReady(gymId, ready);
+            if (res.ok && res.data?.ok) {
+                showMessage(ready ? 'Marcado como listo para producción' : 'Desmarcado');
+                await reloadOnboarding();
+            } else {
+                showMessage(res.data?.error || res.error || 'Error');
+            }
+        } catch {
+            showMessage('Error');
+        } finally {
+            setProdReadySaving(false);
+        }
+    };
+
+    const reloadBranches = async () => {
+        try {
+            const brRes = await api.listGymBranches(gymId);
+            if (brRes.ok && brRes.data?.ok) {
+                setBranches(brRes.data.items || []);
+            }
+        } catch {
+        }
+    };
+
+    const startEditBranch = (b: GymBranch) => {
+        setEditingBranchId(Number(b.id) || 0);
+        setEditBranchDraft({
+            name: String(b.name || ''),
+            code: String(b.code || ''),
+            address: b.address ?? '',
+            timezone: b.timezone ?? '',
+            status: (String(b.status || '').toLowerCase() === 'inactive') ? 'inactive' : 'active',
+        });
+        setBranchEditOpen(true);
+    };
+
+    const cancelEditBranch = () => {
+        setEditingBranchId(0);
+        setEditBranchDraft({
+            name: '',
+            code: '',
+            address: '',
+            timezone: '',
+            status: 'active',
+        });
+        setBranchEditOpen(false);
+    };
+
+    const openCreateBranch = () => {
+        setBranchDraft({
+            name: '',
+            code: '',
+            address: '',
+            timezone: 'America/Argentina/Buenos_Aires',
+        });
+        setBranchCreateOpen(true);
+    };
+
+    const createBranch = async () => {
+        setBranchSaving(true);
+        try {
+            const payload: GymBranchCreateInput = {
+                name: String(branchDraft.name || '').trim(),
+                code: String(branchDraft.code || '').trim(),
+                address: String(branchDraft.address || '').trim() ? String(branchDraft.address || '').trim() : null,
+                timezone: String(branchDraft.timezone || '').trim() ? String(branchDraft.timezone || '').trim() : null,
+            };
+            const res = await api.createGymBranch(gymId, payload);
+            if (res.ok && res.data?.ok) {
+                showMessage('Sucursal creada');
+                setBranchDraft({ name: '', code: '', address: '', timezone: '' });
+                setBranchCreateOpen(false);
+                await reloadBranches();
+            } else {
+                const err = res.data?.error || res.error || 'Error al crear sucursal';
+                showMessage(err === 'code_already_exists' ? 'El código ya existe' : err);
+            }
+        } finally {
+            setBranchSaving(false);
+        }
+    };
+
+    const updateBranch = async () => {
+        if (!editingBranchId) return;
+        setBranchSaving(true);
+        try {
+            const payload: GymBranchUpdateInput = {
+                name: editBranchDraft.name ? String(editBranchDraft.name).trim() : undefined,
+                code: editBranchDraft.code ? String(editBranchDraft.code).trim() : undefined,
+                address: editBranchDraft.address === null ? null : (String(editBranchDraft.address || '').trim() ? String(editBranchDraft.address || '').trim() : null),
+                timezone: editBranchDraft.timezone === null ? null : (String(editBranchDraft.timezone || '').trim() ? String(editBranchDraft.timezone || '').trim() : null),
+                status: editBranchDraft.status,
+            };
+            const res = await api.updateGymBranch(gymId, editingBranchId, payload);
+            if (res.ok && res.data?.ok) {
+                showMessage('Sucursal actualizada');
+                cancelEditBranch();
+                await reloadBranches();
+            } else {
+                const err = res.data?.error || res.error || 'Error al actualizar sucursal';
+                if (err === 'cannot_delete_last_branch') {
+                    showMessage('No se puede desactivar la última sucursal activa');
+                } else {
+                    showMessage(err === 'code_already_exists' ? 'El código ya existe' : err);
+                }
+            }
+        } finally {
+            setBranchSaving(false);
+        }
+    };
+
+    const toggleBranchStatus = async (b: GymBranch) => {
+        const next = String(b.status || '').toLowerCase() === 'inactive' ? 'active' : 'inactive';
+        setBranchSaving(true);
+        try {
+            const res = await api.updateGymBranch(gymId, Number(b.id), { status: next as any });
+            if (res.ok && res.data?.ok) {
+                showMessage(next === 'active' ? 'Sucursal activada' : 'Sucursal desactivada');
+                await reloadBranches();
+            } else {
+                const err = res.data?.error || res.error || 'Error';
+                if (err === 'cannot_delete_last_branch') {
+                    showMessage('No se puede desactivar la última sucursal activa');
+                } else {
+                    showMessage(err);
+                }
+            }
+        } finally {
+            setBranchSaving(false);
+        }
+    };
+
+    const deleteBranch = async (b: GymBranch) => {
+        setBranchConfirm(b);
+    };
+
+    const confirmDeleteBranch = async () => {
+        if (!branchConfirm) return;
+        setBranchSaving(true);
+        try {
+            const res = await api.deleteGymBranch(gymId, Number(branchConfirm.id));
+            if (res.ok && res.data?.ok) {
+                showMessage('Sucursal desactivada');
+                setBranchConfirm(null);
+                await reloadBranches();
+            } else {
+                const err = res.data?.error || res.error || 'Error';
+                if (err === 'cannot_delete_last_branch') {
+                    showMessage('No se puede desactivar la última sucursal activa');
+                } else {
+                    showMessage(err);
+                }
+            }
+        } finally {
+            setBranchSaving(false);
+        }
+    };
+
+    const parseBulk = (raw: string) => {
+        const lines = String(raw || '')
+            .split(/\r?\n/g)
+            .map((l) => l.trim())
+            .filter((l) => l && !l.startsWith('#'));
+        const items: GymBranchCreateInput[] = [];
+        for (const line of lines) {
+            const delim = line.includes('\t') ? '\t' : (line.includes(';') ? ';' : ',');
+            const parts = line.split(delim).map((p) => p.trim());
+            const name = parts[0] || '';
+            const code = (parts[1] || '').toLowerCase().replace(/[^a-z0-9_-]/g, '');
+            const timezone = parts[2] || '';
+            const address = parts.slice(3).join(delim).trim();
+            if (!name || !code) continue;
+            items.push({
+                name,
+                code,
+                timezone: timezone ? timezone : null,
+                address: address ? address : null,
+            });
+        }
+        setBulkItems(items);
+    };
+
+    const submitBulk = async () => {
+        if (!bulkItems.length) return;
+        setBulkSubmitting(true);
+        try {
+            const res = await api.bulkCreateGymBranches(gymId, bulkItems);
+            if (res.ok && res.data?.ok) {
+                showMessage(`Sucursales creadas: ${res.data.created} · Fallidas: ${res.data.failed}`);
+                setBranchBulkOpen(false);
+                setBulkText('');
+                setBulkItems([]);
+                await reloadBranches();
+            } else {
+                showMessage(res.data?.error || res.error || 'Error');
+            }
+        } finally {
+            setBulkSubmitting(false);
+        }
+    };
+
+    const syncBranches = async () => {
+        setBranchSyncing(true);
+        try {
+            const res = await api.syncGymBranches(gymId);
+            if (res.ok && res.data?.ok && res.data.items) {
+                setBranches(res.data.items as any);
+                showMessage('Sucursales sincronizadas');
+            } else {
+                showMessage(res.data?.error || res.error || 'Error');
+            }
+        } finally {
+            setBranchSyncing(false);
+        }
+    };
+
+    const loadFeatureFlags = async (scope: 'gym' | 'branch', branchId: number) => {
+        setFeatureFlagsLoading(true);
+        try {
+            const res = await api.getGymFeatureFlags(gymId, { scope, branch_id: scope === 'branch' ? branchId : undefined });
+            if (res.ok && res.data?.ok && res.data.flags) {
+                setFeatureFlags(res.data.flags);
+            }
+        } finally {
+            setFeatureFlagsLoading(false);
+        }
+    };
+
+    const saveFeatureFlags = async () => {
+        setFeatureFlagsSaving(true);
+        try {
+            const res = await api.setGymFeatureFlags(gymId, featureFlags, {
+                scope: featureFlagsScope,
+                branch_id: featureFlagsScope === 'branch' ? featureFlagsBranchId : undefined,
+            });
+            if (res.ok && res.data?.ok && res.data.flags) {
+                setFeatureFlags(res.data.flags);
+                showMessage('Módulos guardados');
+            } else {
+                showMessage(res.error || 'Error al guardar');
+            }
+        } finally {
+            setFeatureFlagsSaving(false);
+        }
+    };
+
+    const loadTipoCuotaEntitlements = async (tipoCuotaId: number) => {
+        if (!tipoCuotaId) return;
+        setEntLoading(true);
+        try {
+            const res = await api.getGymTipoCuotaEntitlements(gymId, tipoCuotaId);
+            if (res.ok && res.data?.ok && res.data.tipo_cuota) {
+                setEntAllSucursales(Boolean(res.data.tipo_cuota.all_sucursales));
+                setEntSelectedSucursales(Array.isArray(res.data.sucursal_ids) ? res.data.sucursal_ids : []);
+                const map: Record<string, number[]> = {};
+                const rules = Array.isArray(res.data.class_rules) ? res.data.class_rules : [];
+                rules
+                    .filter((r) => String(r.target_type || '').toLowerCase() === 'tipo_clase' && Boolean(r.allow))
+                    .forEach((r) => {
+                        const k = r.sucursal_id ? String(r.sucursal_id) : '0';
+                        const arr = map[k] || [];
+                        arr.push(Number(r.target_id));
+                        map[k] = arr;
+                    });
+                Object.keys(map).forEach((k) => {
+                    map[k] = Array.from(new Set(map[k].filter((x) => Number.isFinite(x)))).sort((a, b) => a - b);
+                });
+                setEntRulesByScope(map);
+                setEntScopeKey('0');
+            } else {
+                setEntAllSucursales(true);
+                setEntSelectedSucursales([]);
+                setEntRulesByScope({});
+                setEntScopeKey('0');
+            }
+        } finally {
+            setEntLoading(false);
+        }
+    };
+
+    const saveTipoCuotaEntitlements = async () => {
+        if (!entTipoCuotaId) return;
+        setEntSaving(true);
+        try {
+            const class_rules: TipoCuotaEntitlementsUpdate['class_rules'] = [];
+            Object.entries(entRulesByScope || {}).forEach(([k, ids]) => {
+                const sid = k === '0' ? null : Number(k);
+                (ids || []).forEach((id) => {
+                    class_rules.push({ sucursal_id: Number.isFinite(sid as any) ? (sid as any) : null, target_type: 'tipo_clase', target_id: Number(id), allow: true });
+                });
+            });
+            const payload: TipoCuotaEntitlementsUpdate = {
+                all_sucursales: Boolean(entAllSucursales),
+                sucursal_ids: entAllSucursales ? [] : entSelectedSucursales,
+                class_rules,
+            };
+            const res = await api.setGymTipoCuotaEntitlements(gymId, entTipoCuotaId, payload);
+            if (res.ok && res.data?.ok) {
+                showMessage('Accesos guardados');
+                void loadTipoCuotaEntitlements(entTipoCuotaId);
+            } else {
+                showMessage(res.error || 'Error al guardar accesos');
+            }
+        } finally {
+            setEntSaving(false);
+        }
     };
 
     const countMetaParams = (bodyText: string) => {
@@ -731,12 +1145,46 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         }
     };
 
+    const moduleDefaults: Record<string, boolean> = {
+        usuarios: true,
+        pagos: true,
+        profesores: true,
+        empleados: true,
+        rutinas: true,
+        ejercicios: true,
+        clases: true,
+        asistencias: true,
+        whatsapp: true,
+        configuracion: true,
+        reportes: true,
+        entitlements_v2: false,
+    };
+
+    const moduleOptions: Array<{ key: string; label: string }> = [
+        { key: 'usuarios', label: 'Usuarios' },
+        { key: 'pagos', label: 'Pagos' },
+        { key: 'profesores', label: 'Profesores' },
+        { key: 'empleados', label: 'Empleados' },
+        { key: 'rutinas', label: 'Rutinas' },
+        { key: 'ejercicios', label: 'Ejercicios' },
+        { key: 'clases', label: 'Clases' },
+        { key: 'asistencias', label: 'Asistencias' },
+        { key: 'whatsapp', label: 'WhatsApp' },
+        { key: 'configuracion', label: 'Configuración' },
+        { key: 'reportes', label: 'Reportes' },
+        { key: 'entitlements_v2', label: 'Accesos avanzados (multi-sucursal y clases)' },
+    ];
+
     const sections: { id: Section; name: string; icon: React.ComponentType<{ className?: string }> }[] = [
+        { id: 'onboarding', name: 'Primeros pasos', icon: ListChecks },
         { id: 'subscription', name: 'Suscripción', icon: CreditCard },
+        { id: 'branches', name: 'Sucursales', icon: MapPin },
         { id: 'payments', name: 'Pagos', icon: CreditCard },
         { id: 'whatsapp', name: 'WhatsApp', icon: MessageSquare },
         { id: 'maintenance', name: 'Mantenimiento', icon: Wrench },
         { id: 'attendance', name: 'Asistencias', icon: Activity },
+        { id: 'modules', name: 'Módulos', icon: Activity },
+        { id: 'entitlements', name: 'Accesos', icon: Key },
         { id: 'branding', name: 'Branding', icon: Palette },
         { id: 'health', name: 'Salud', icon: FileText },
         { id: 'password', name: 'Contraseña dueño', icon: Key },
@@ -811,6 +1259,197 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
 
             {/* Content */}
             <div className="card p-6">
+                {activeSection === 'onboarding' && (
+                    <div className="space-y-6">
+                        <div className="flex items-center justify-between gap-3">
+                            <h2 className="text-lg font-semibold text-white">Primeros pasos</h2>
+                            <button onClick={reloadOnboarding} disabled={onboardingLoading} className="btn-secondary flex items-center gap-2">
+                                {onboardingLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Actualizar'}
+                            </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                            <div className="p-4 bg-slate-800/50 rounded-lg border border-slate-700 space-y-2">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="text-white font-medium">Estado del gimnasio</div>
+                                    {String(onboarding?.gym_status || gym.status) === 'active' ? (
+                                        <div className="flex items-center gap-2 text-success-400">
+                                            <Check className="w-4 h-4" />
+                                            Activo
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-2 text-warning-400">
+                                            <AlertCircle className="w-4 h-4" />
+                                            {String(onboarding?.gym_status || gym.status)}
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="text-xs text-slate-500">
+                                    Para producción: estado activo y suscripción al día.
+                                </div>
+                                <div className="flex justify-end">
+                                    <button onClick={() => setActiveSection('maintenance')} className="btn-secondary">
+                                        Ver mantenimiento
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="p-4 bg-slate-800/50 rounded-lg border border-slate-700 space-y-2">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="text-white font-medium">URL del tenant</div>
+                                    {onboarding?.tenant_url ? (
+                                        <a className="text-primary-400 hover:text-primary-300 text-sm" href={String(onboarding.tenant_url)} target="_blank" rel="noreferrer">
+                                            Abrir
+                                        </a>
+                                    ) : null}
+                                </div>
+                                <div className="text-sm text-slate-300 break-all">
+                                    {String(onboarding?.tenant_url || `https://${gym.subdominio}.${process.env.NEXT_PUBLIC_TENANT_DOMAIN || 'ironhub.motiona.xyz'}`)}
+                                </div>
+                                <div className="text-xs text-slate-500">
+                                    Verificá que el DNS/certificado del subdominio esté listo.
+                                </div>
+                            </div>
+
+                            <div className="p-4 bg-slate-800/50 rounded-lg border border-slate-700 space-y-2">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="text-white font-medium">Listo para producción</div>
+                                    {Boolean(onboarding?.production_ready) ? (
+                                        <div className="flex items-center gap-2 text-success-400">
+                                            <Check className="w-4 h-4" />
+                                            Sí
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-2 text-slate-400">
+                                            <AlertCircle className="w-4 h-4" />
+                                            No
+                                        </div>
+                                    )}
+                                </div>
+                                {onboarding?.production_ready_at ? (
+                                    <div className="text-xs text-slate-500">
+                                        Marcado: {String(onboarding.production_ready_at).slice(0, 19).replace('T', ' ')}
+                                    </div>
+                                ) : (
+                                    <div className="text-xs text-slate-500">
+                                        Marcá cuando el gimnasio esté “apto prod” (sucursales, owner, pagos/plan, WhatsApp si aplica).
+                                    </div>
+                                )}
+                                <div className="flex justify-end">
+                                    <button
+                                        onClick={() => setProductionReady(!Boolean(onboarding?.production_ready))}
+                                        disabled={prodReadySaving}
+                                        className={Boolean(onboarding?.production_ready) ? 'btn-secondary' : 'btn-primary'}
+                                    >
+                                        {prodReadySaving ? <Loader2 className="w-4 h-4 animate-spin" /> : (Boolean(onboarding?.production_ready) ? 'Desmarcar' : 'Marcar listo')}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="p-4 bg-slate-800/50 rounded-lg border border-slate-700 space-y-2">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="text-white font-medium">Sucursales</div>
+                                    {Number(onboarding?.branches_active ?? 0) > 0 ? (
+                                        <div className="flex items-center gap-2 text-success-400">
+                                            <Check className="w-4 h-4" />
+                                            OK
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-2 text-danger-400">
+                                            <X className="w-4 h-4" />
+                                            Falta
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="text-sm text-slate-300">
+                                    Activas: <span className="text-white font-medium">{Number(onboarding?.branches_active ?? branches.filter((b) => String(b.status || '').toLowerCase() !== 'inactive').length)}</span>
+                                    {' · '}
+                                    Total: <span className="text-white font-medium">{Number(onboarding?.branches_total ?? branches.length)}</span>
+                                </div>
+                                <div className="text-xs text-slate-500">
+                                    No se puede dejar al gimnasio sin sucursales activas.
+                                </div>
+                                <div className="flex justify-end">
+                                    <button onClick={() => setActiveSection('branches')} className="btn-secondary">
+                                        Gestionar sucursales
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="p-4 bg-slate-800/50 rounded-lg border border-slate-700 space-y-2">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="text-white font-medium">Contraseña Owner</div>
+                                    {Boolean(onboarding?.owner_password_set) ? (
+                                        <div className="flex items-center gap-2 text-success-400">
+                                            <Check className="w-4 h-4" />
+                                            Seteada
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-2 text-danger-400">
+                                            <X className="w-4 h-4" />
+                                            Pendiente
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="text-xs text-slate-500">
+                                    Recomendación: rotar credenciales cuando el cliente tome control.
+                                </div>
+                                <div className="flex justify-end">
+                                    <button onClick={() => setActiveSection('password')} className="btn-secondary">
+                                        Gestionar contraseña
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="p-4 bg-slate-800/50 rounded-lg border border-slate-700 space-y-2">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="text-white font-medium">WhatsApp</div>
+                                    {Boolean(onboarding?.whatsapp_configured) ? (
+                                        <div className="flex items-center gap-2 text-success-400">
+                                            <Check className="w-4 h-4" />
+                                            Configurado
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-2 text-slate-400">
+                                            <AlertCircle className="w-4 h-4" />
+                                            Opcional
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="text-xs text-slate-500">
+                                    Si lo usás: configurar credenciales, provisionar templates y hacer health-check.
+                                </div>
+                                <div className="flex justify-end">
+                                    <button onClick={() => setActiveSection('whatsapp')} className="btn-secondary">
+                                        Abrir WhatsApp
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="p-4 bg-slate-800/50 rounded-lg border border-slate-700 space-y-2">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="text-white font-medium">Módulos y accesos</div>
+                                    <div className="flex items-center gap-2 text-slate-300">
+                                        <ListChecks className="w-4 h-4" />
+                                        Revisar
+                                    </div>
+                                </div>
+                                <div className="text-xs text-slate-500">
+                                    Ajustar módulos y accesos por sucursal/plan si aplica.
+                                </div>
+                                <div className="flex justify-end gap-2">
+                                    <button onClick={() => setActiveSection('modules')} className="btn-secondary">
+                                        Módulos
+                                    </button>
+                                    <button onClick={() => setActiveSection('entitlements')} className="btn-secondary">
+                                        Accesos
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {activeSection === 'subscription' && (
                     <div className="space-y-6">
                         <h2 className="text-lg font-semibold text-white">Suscripción</h2>
@@ -912,6 +1551,300 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                 </button>
                             </div>
                         </div>
+                    </div>
+                )}
+
+                {activeSection === 'branches' && (
+                    <div className="space-y-6">
+                        <div className="flex items-center justify-between gap-3">
+                            <h2 className="text-lg font-semibold text-white">Sucursales</h2>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <button onClick={openCreateBranch} disabled={branchSaving} className="btn-primary flex items-center gap-2">
+                                    {branchSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                                    Nueva
+                                </button>
+                                <button onClick={() => { setBulkText(''); setBulkItems([]); setBranchBulkOpen(true); }} disabled={branchSaving} className="btn-secondary flex items-center gap-2">
+                                    <Upload className="w-4 h-4" />
+                                    Carga masiva
+                                </button>
+                                <button onClick={syncBranches} disabled={branchSaving || branchSyncing} className="btn-secondary">
+                                    {branchSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Sincronizar'}
+                                </button>
+                                <button onClick={reloadBranches} disabled={branchSaving} className="btn-secondary">
+                                    Recargar
+                                </button>
+                            </div>
+                        </div>
+
+                        {branches.length === 0 ? (
+                            <p className="text-slate-500">Sin sucursales</p>
+                        ) : (
+                            <table className="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Nombre</th>
+                                        <th>Código</th>
+                                        <th>Estado</th>
+                                        <th>Timezone</th>
+                                        <th>Dirección</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {branches.map((b) => {
+                                        const st = String(b.status || 'active').toLowerCase() === 'inactive' ? 'inactive' : 'active';
+                                        return (
+                                            <tr key={b.id}>
+                                                <td>{b.id}</td>
+                                                <td className="text-white">{b.name}</td>
+                                                <td>{b.code}</td>
+                                                <td>
+                                                    <span className={`badge ${st === 'active' ? 'badge-success' : 'badge-danger'}`}>
+                                                        {st}
+                                                    </span>
+                                                </td>
+                                                <td>{b.timezone || '—'}</td>
+                                                <td className="max-w-[320px] truncate" title={b.address || ''}>{b.address || '—'}</td>
+                                                <td className="text-right">
+                                                    <div className="flex justify-end gap-2">
+                                                        <button
+                                                            onClick={() => startEditBranch(b)}
+                                                            className="btn-secondary flex items-center gap-2"
+                                                            disabled={branchSaving}
+                                                            title="Editar"
+                                                        >
+                                                            <Pencil className="w-4 h-4" />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => toggleBranchStatus(b)}
+                                                            className="btn-secondary"
+                                                            disabled={branchSaving}
+                                                        >
+                                                            {st === 'active' ? 'Desactivar' : 'Activar'}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => deleteBranch(b)}
+                                                            className="btn-danger flex items-center gap-2"
+                                                            disabled={branchSaving}
+                                                            title="Eliminar/Desactivar"
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        )}
+
+                        <AnimatePresence>
+                            {branchCreateOpen && (
+                                <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 overflow-y-auto"
+                                    onClick={() => setBranchCreateOpen(false)}
+                                >
+                                    <motion.div
+                                        initial={{ scale: 0.95, opacity: 0 }}
+                                        animate={{ scale: 1, opacity: 1 }}
+                                        exit={{ scale: 0.95, opacity: 0 }}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="card w-full max-w-lg p-6 my-8"
+                                    >
+                                        <h3 className="text-lg font-semibold text-white mb-4">Nueva sucursal</h3>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="text-xs text-slate-400 block mb-1">Nombre</label>
+                                                <input className="input w-full" value={String(branchDraft.name || '')} onChange={(e) => setBranchDraft({ ...branchDraft, name: e.target.value })} />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-slate-400 block mb-1">Código</label>
+                                                <input className="input w-full" value={String(branchDraft.code || '')} onChange={(e) => setBranchDraft({ ...branchDraft, code: e.target.value })} />
+                                                <div className="text-[11px] text-slate-500 mt-1">Minúsculas, sin espacios. Ej: principal, centro, sede-norte</div>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-slate-400 block mb-1">Timezone</label>
+                                                <input className="input w-full" placeholder="America/Argentina/Buenos_Aires" value={String(branchDraft.timezone || '')} onChange={(e) => setBranchDraft({ ...branchDraft, timezone: e.target.value })} />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-slate-400 block mb-1">Dirección</label>
+                                                <input className="input w-full" value={String(branchDraft.address || '')} onChange={(e) => setBranchDraft({ ...branchDraft, address: e.target.value })} />
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center justify-end gap-2 pt-5">
+                                            <button onClick={() => setBranchCreateOpen(false)} disabled={branchSaving} className="btn-secondary">Cancelar</button>
+                                            <button onClick={createBranch} disabled={branchSaving || !String(branchDraft.name || '').trim() || !String(branchDraft.code || '').trim()} className="btn-primary flex items-center gap-2">
+                                                {branchSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                                                Crear
+                                            </button>
+                                        </div>
+                                    </motion.div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+
+                        <AnimatePresence>
+                            {branchEditOpen && editingBranchId ? (
+                                <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 overflow-y-auto"
+                                    onClick={cancelEditBranch}
+                                >
+                                    <motion.div
+                                        initial={{ scale: 0.95, opacity: 0 }}
+                                        animate={{ scale: 1, opacity: 1 }}
+                                        exit={{ scale: 0.95, opacity: 0 }}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="card w-full max-w-lg p-6 my-8"
+                                    >
+                                        <h3 className="text-lg font-semibold text-white mb-4">Editar sucursal #{editingBranchId}</h3>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="text-xs text-slate-400 block mb-1">Nombre</label>
+                                                <input className="input w-full" value={String(editBranchDraft.name || '')} onChange={(e) => setEditBranchDraft({ ...editBranchDraft, name: e.target.value })} />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-slate-400 block mb-1">Código</label>
+                                                <input className="input w-full" value={String(editBranchDraft.code || '')} onChange={(e) => setEditBranchDraft({ ...editBranchDraft, code: e.target.value })} />
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-slate-400 block mb-1">Estado</label>
+                                                <select className="input w-full" value={String(editBranchDraft.status || 'active')} onChange={(e) => setEditBranchDraft({ ...editBranchDraft, status: e.target.value as any })}>
+                                                    <option value="active">active</option>
+                                                    <option value="inactive">inactive</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-slate-400 block mb-1">Timezone</label>
+                                                <input className="input w-full" value={String(editBranchDraft.timezone || '')} onChange={(e) => setEditBranchDraft({ ...editBranchDraft, timezone: e.target.value })} />
+                                            </div>
+                                            <div className="md:col-span-2">
+                                                <label className="text-xs text-slate-400 block mb-1">Dirección</label>
+                                                <input className="input w-full" value={String(editBranchDraft.address || '')} onChange={(e) => setEditBranchDraft({ ...editBranchDraft, address: e.target.value })} />
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center justify-end gap-2 pt-5">
+                                            <button onClick={cancelEditBranch} disabled={branchSaving} className="btn-secondary flex items-center gap-2">
+                                                <X className="w-4 h-4" />
+                                                Cancelar
+                                            </button>
+                                            <button onClick={updateBranch} disabled={branchSaving} className="btn-primary flex items-center gap-2">
+                                                {branchSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                                Guardar
+                                            </button>
+                                        </div>
+                                    </motion.div>
+                                </motion.div>
+                            ) : null}
+                        </AnimatePresence>
+
+                        <AnimatePresence>
+                            {branchBulkOpen && (
+                                <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 overflow-y-auto"
+                                    onClick={() => setBranchBulkOpen(false)}
+                                >
+                                    <motion.div
+                                        initial={{ scale: 0.95, opacity: 0 }}
+                                        animate={{ scale: 1, opacity: 1 }}
+                                        exit={{ scale: 0.95, opacity: 0 }}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="card w-full max-w-2xl p-6 my-8"
+                                    >
+                                        <h3 className="text-lg font-semibold text-white mb-2">Carga masiva de sucursales</h3>
+                                        <div className="text-xs text-slate-500 mb-3">
+                                            Formato: nombre;codigo;timezone;direccion (una por línea). Separador recomendado: ; o tab. El código debe ser único y en minúsculas.
+                                        </div>
+                                        <textarea
+                                            className="input w-full min-h-[160px] font-mono text-sm"
+                                            value={bulkText}
+                                            onChange={(e) => {
+                                                const v = e.target.value;
+                                                setBulkText(v);
+                                                parseBulk(v);
+                                            }}
+                                            placeholder={"Principal;principal;America/Argentina/Buenos_Aires;Calle 123\nCentro;centro;America/Argentina/Buenos_Aires;Av. Siempre Viva 742"}
+                                        />
+                                        <div className="mt-3 text-sm text-slate-300">
+                                            Items detectados: <span className="text-white font-medium">{bulkItems.length}</span>
+                                        </div>
+                                        {bulkItems.length ? (
+                                            <div className="mt-3 border border-slate-800 rounded-xl overflow-hidden">
+                                                <table className="w-full text-sm">
+                                                    <thead className="bg-slate-900/60">
+                                                        <tr className="text-left text-slate-400">
+                                                            <th className="p-2">Nombre</th>
+                                                            <th className="p-2">Código</th>
+                                                            <th className="p-2">Timezone</th>
+                                                            <th className="p-2">Dirección</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {bulkItems.slice(0, 6).map((it, idx) => (
+                                                            <tr key={idx} className="border-t border-slate-800">
+                                                                <td className="p-2 text-white">{it.name}</td>
+                                                                <td className="p-2">{it.code}</td>
+                                                                <td className="p-2">{it.timezone || '—'}</td>
+                                                                <td className="p-2">{it.address || '—'}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        ) : null}
+                                        <div className="flex items-center justify-end gap-2 pt-5">
+                                            <button onClick={() => setBranchBulkOpen(false)} disabled={bulkSubmitting} className="btn-secondary">Cancelar</button>
+                                            <button onClick={submitBulk} disabled={bulkSubmitting || !bulkItems.length} className="btn-primary flex items-center gap-2 disabled:opacity-50">
+                                                {bulkSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                                                Importar
+                                            </button>
+                                        </div>
+                                    </motion.div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+
+                        <AnimatePresence>
+                            {branchConfirm && (
+                                <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60"
+                                    onClick={() => setBranchConfirm(null)}
+                                >
+                                    <motion.div
+                                        initial={{ scale: 0.95, opacity: 0 }}
+                                        animate={{ scale: 1, opacity: 1 }}
+                                        exit={{ scale: 0.95, opacity: 0 }}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="card w-full max-w-sm p-6"
+                                    >
+                                        <h3 className="text-lg font-semibold text-white mb-2">Desactivar sucursal</h3>
+                                        <p className="text-slate-400 mb-4">
+                                            ¿Desactivar <span className="text-white font-medium">{branchConfirm.name}</span>? No se elimina físicamente.
+                                        </p>
+                                        <div className="flex items-center justify-end gap-2">
+                                            <button onClick={() => setBranchConfirm(null)} disabled={branchSaving} className="btn-secondary">Cancelar</button>
+                                            <button onClick={confirmDeleteBranch} disabled={branchSaving} className="btn-danger flex items-center gap-2">
+                                                {branchSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                                                Desactivar
+                                            </button>
+                                        </div>
+                                    </motion.div>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
                     </div>
                 )}
 
@@ -1510,6 +2443,227 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                     </tbody>
                                 </table>
                             </div>
+                        </div>
+                    </div>
+                )}
+
+                {activeSection === 'modules' && (
+                    <div className="space-y-6">
+                        <div className="flex items-center justify-between gap-3">
+                            <h2 className="text-lg font-semibold text-white">Módulos / Feature Flags</h2>
+                            <button
+                                onClick={saveFeatureFlags}
+                                disabled={featureFlagsSaving || featureFlagsLoading}
+                                className="btn-primary flex items-center gap-2"
+                            >
+                                {featureFlagsSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                Guardar
+                            </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div>
+                                <label className="label">Ámbito</label>
+                                <select
+                                    className="input"
+                                    value={featureFlagsScope}
+                                    onChange={(e) => {
+                                        const v = e.target.value === 'branch' ? 'branch' : 'gym';
+                                        setFeatureFlagsScope(v);
+                                        if (v === 'gym') {
+                                            setFeatureFlagsBranchId(0);
+                                            void loadFeatureFlags('gym', 0);
+                                        } else {
+                                            const first = branches && branches.length ? Number(branches[0].id) : 0;
+                                            setFeatureFlagsBranchId(first);
+                                            if (first) void loadFeatureFlags('branch', first);
+                                        }
+                                    }}
+                                >
+                                    <option value="gym">Gimnasio</option>
+                                    <option value="branch">Sucursal</option>
+                                </select>
+                            </div>
+                            <div className="md:col-span-2">
+                                <label className="label">Sucursal</label>
+                                <select
+                                    className="input"
+                                    disabled={featureFlagsScope !== 'branch'}
+                                    value={featureFlagsBranchId ? String(featureFlagsBranchId) : ''}
+                                    onChange={(e) => {
+                                        const bid = Number(e.target.value);
+                                        setFeatureFlagsBranchId(bid);
+                                        if (bid && featureFlagsScope === 'branch') void loadFeatureFlags('branch', bid);
+                                    }}
+                                >
+                                    <option value="">Seleccionar…</option>
+                                    {branches.map((b) => (
+                                        <option key={b.id} value={String(b.id)}>
+                                            {b.name} ({b.code})
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+
+                        {featureFlagsLoading ? (
+                            <div className="flex items-center gap-2 text-slate-400">
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                Cargando…
+                            </div>
+                        ) : (
+                            <div className="space-y-2">
+                                {moduleOptions.map((m) => {
+                                    const v = (featureFlags.modules as any)?.[m.key];
+                                    const checked = typeof v === 'boolean' ? v : Boolean(moduleDefaults[m.key]);
+                                    return (
+                                        <label key={m.key} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-slate-800/40 border border-slate-700">
+                                            <span className="text-sm text-slate-200">{m.label}</span>
+                                            <input
+                                                type="checkbox"
+                                                checked={checked}
+                                                onChange={(e) => {
+                                                    const next = { ...(featureFlags.modules || {}) } as Record<string, boolean>;
+                                                    next[m.key] = Boolean(e.target.checked);
+                                                    setFeatureFlags({ ...(featureFlags || { modules: {} }), modules: next });
+                                                }}
+                                            />
+                                        </label>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {activeSection === 'entitlements' && (
+                    <div className="space-y-6">
+                        <div className="flex items-center justify-between gap-3">
+                            <h2 className="text-lg font-semibold text-white">Accesos por tipo de cuota</h2>
+                            <button
+                                onClick={saveTipoCuotaEntitlements}
+                                disabled={entSaving || entLoading || !entTipoCuotaId}
+                                className="btn-primary flex items-center gap-2"
+                            >
+                                {entSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                                Guardar
+                            </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div>
+                                <label className="label">Tipo de cuota</label>
+                                <select
+                                    className="input"
+                                    value={entTipoCuotaId ? String(entTipoCuotaId) : ''}
+                                    onChange={(e) => {
+                                        const id = Number(e.target.value);
+                                        setEntTipoCuotaId(id);
+                                        if (id) void loadTipoCuotaEntitlements(id);
+                                    }}
+                                >
+                                    <option value="">Seleccionar…</option>
+                                    {entTiposCuota.map((t) => (
+                                        <option key={t.id} value={String(t.id)}>
+                                            {t.nombre}{t.activo ? '' : ' (inactiva)'}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="flex items-end">
+                                <label className="flex items-center gap-2 text-sm text-slate-300">
+                                    <input
+                                        type="checkbox"
+                                        checked={entAllSucursales}
+                                        onChange={(e) => {
+                                            const checked = e.target.checked;
+                                            setEntAllSucursales(checked);
+                                            if (checked) setEntSelectedSucursales([]);
+                                        }}
+                                    />
+                                    Todas las sucursales
+                                </label>
+                            </div>
+                        </div>
+
+                        {!entAllSucursales ? (
+                            <div className="space-y-2">
+                                <div className="text-xs text-slate-500">Sucursales habilitadas</div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                    {branches.map((b) => {
+                                        const checked = entSelectedSucursales.includes(b.id);
+                                        return (
+                                            <label key={b.id} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-slate-800/40 border border-slate-700">
+                                                <span className="text-sm text-slate-200">{b.name}</span>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={checked}
+                                                    onChange={(e) => {
+                                                        const next = e.target.checked
+                                                            ? Array.from(new Set([...entSelectedSucursales, b.id]))
+                                                            : entSelectedSucursales.filter((x) => x !== b.id);
+                                                        setEntSelectedSucursales(next.sort((a, c) => a - c));
+                                                    }}
+                                                />
+                                            </label>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        ) : null}
+
+                        <div className="space-y-3">
+                            <div className="flex items-center justify-between gap-3">
+                                <div>
+                                    <div className="text-sm font-medium text-white">Permisos de clases (tipo de clase)</div>
+                                    <div className="text-xs text-slate-500">Allowlist global o por sucursal.</div>
+                                </div>
+                                <select
+                                    className="input max-w-xs"
+                                    value={entScopeKey}
+                                    onChange={(e) => setEntScopeKey(e.target.value)}
+                                >
+                                    <option value="0">Todas las sucursales</option>
+                                    {branches.map((b) => (
+                                        <option key={b.id} value={String(b.id)}>
+                                            {b.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {entLoading ? (
+                                <div className="flex items-center gap-2 text-slate-400">
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    Cargando…
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                    {entTiposClases.filter((t) => t.activo).map((t) => {
+                                        const selected = (entRulesByScope[entScopeKey] || []).includes(t.id);
+                                        return (
+                                            <label key={t.id} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-slate-800/40 border border-slate-700">
+                                                <span className="text-sm text-slate-200">{t.nombre}</span>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selected}
+                                                    onChange={() => {
+                                                        setEntRulesByScope((prev) => {
+                                                            const current = new Set(prev[entScopeKey] || []);
+                                                            if (current.has(t.id)) current.delete(t.id);
+                                                            else current.add(t.id);
+                                                            return { ...prev, [entScopeKey]: Array.from(current).sort((a, c) => a - c) };
+                                                        });
+                                                    }}
+                                                />
+                                            </label>
+                                        );
+                                    })}
+                                    {entTiposClases.filter((t) => t.activo).length === 0 ? (
+                                        <div className="text-sm text-slate-500">No hay tipos de clase activos.</div>
+                                    ) : null}
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}

@@ -29,10 +29,8 @@ import threading
 import time
 from datetime import datetime, date
 from typing import Dict, List, Any, Optional, Tuple
-import json
 from pathlib import Path
 import re
-import math
 import subprocess
 import urllib.request
 import urllib.parse
@@ -42,13 +40,20 @@ from xlsxtpl.writerx import BookWriter
 import openpyxl
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.cell.cell import MergedCell
-from reportlab.lib.pagesizes import letter, A4, landscape
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Table,
+    TableStyle,
+    Paragraph,
+    Spacer,
+    PageBreak,
+)
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.enums import TA_CENTER
 from openpyxl.drawing.image import Image as XLImage
+
 try:
     from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
     from openpyxl.drawing.xdr import XDRPositiveSize2D
@@ -57,7 +62,7 @@ except Exception:
 from openpyxl.utils import get_column_letter, column_index_from_string
 
 # Importaciones del proyecto
-from .models import Rutina, RutinaEjercicio, Usuario, Ejercicio
+from .models import Rutina, RutinaEjercicio, Usuario
 from .database import DatabaseManager
 from .utils import resource_path, get_webapp_base_url
 
@@ -71,24 +76,42 @@ class RoutineTemplateManager:
     Gestor de plantillas de rutinas mejorado que usa xlsxtpl para un procesamiento
     más simple y robusto de las plantillas Excel.
     """
-    
-    def __init__(self, template_path: str = None, database_manager: DatabaseManager = None):
+
+    def __init__(
+        self, template_path: str = None, database_manager: DatabaseManager = None
+    ):
         """
         Inicializa el gestor de plantillas.
-        
+
         Args:
             template_path: Ruta al archivo template Excel base (opcional)
             database_manager: Instancia del gestor de base de datos
         """
         # Configurar logging
         self.logger = logging.getLogger(__name__)
-        
+
         # Rutas a las plantillas específicas por número de días (versiones perfectas)
         self.template_paths = {
-            2: Path(resource_path(os.path.join("assets", "templates", "Plantilla_2_dias.xlsx"))),
-            3: Path(resource_path(os.path.join("assets", "templates", "Plantilla_3_dias.xlsx"))), 
-            4: Path(resource_path(os.path.join("assets", "templates", "Plantilla_4_dias.xlsx"))),
-            5: Path(resource_path(os.path.join("assets", "templates", "Plantilla_5_dias.xlsx")))
+            2: Path(
+                resource_path(
+                    os.path.join("assets", "templates", "Plantilla_2_dias.xlsx")
+                )
+            ),
+            3: Path(
+                resource_path(
+                    os.path.join("assets", "templates", "Plantilla_3_dias.xlsx")
+                )
+            ),
+            4: Path(
+                resource_path(
+                    os.path.join("assets", "templates", "Plantilla_4_dias.xlsx")
+                )
+            ),
+            5: Path(
+                resource_path(
+                    os.path.join("assets", "templates", "Plantilla_5_dias.xlsx")
+                )
+            ),
         }
         try:
             src_dir = Path(__file__).resolve().parent
@@ -111,9 +134,10 @@ class RoutineTemplateManager:
                         continue
         except Exception:
             pass
-        
+
         # Directorios de salida con soporte de entorno y fallback a temporal si FS es de solo lectura
         pref_rutinas = os.environ.get("RUTINAS_DIR", "rutinas_exportadas")
+
         def _ensure_writable_dir(dir_path: str, fallback_subdir: str) -> Path:
             try:
                 p = Path(dir_path)
@@ -131,71 +155,81 @@ class RoutineTemplateManager:
         self.output_dir_pdf = _ensure_writable_dir(pref_rutinas, "rutinas_exportadas")
         self.logger.info(f"Directorio Excel: '{self.output_dir_excel}'")
         self.logger.info(f"Directorio PDF: '{self.output_dir_pdf}'")
-        
+
         # Guardar referencia al database manager
         self.db_manager = database_manager
-        
+
         # Guardar template opcional (si lo pasan) aunque por defecto se seleccionan las plantillas perfectas
         self.custom_template_path = Path(template_path) if template_path else None
-        
+
         self.logger.info("RoutineTemplateManager inicializado correctamente")
 
-    def validate_routine_data(self, rutina: Rutina, usuario: Usuario, 
-                            exercises_by_day: Dict[int, List[RutinaEjercicio]]) -> Tuple[bool, List[str]]:
+    def validate_routine_data(
+        self,
+        rutina: Rutina,
+        usuario: Usuario,
+        exercises_by_day: Dict[int, List[RutinaEjercicio]],
+    ) -> Tuple[bool, List[str]]:
         """
         Valida los datos de la rutina antes de procesarla.
-        
+
         Args:
             rutina: Objeto Rutina
             usuario: Objeto Usuario
             exercises_by_day: Ejercicios organizados por día
-            
+
         Returns:
             Tupla (es_válido, lista_errores)
         """
         errors = []
-        
+
         try:
             # Validar rutina
             if not rutina:
                 errors.append("Rutina no proporcionada")
-            elif not getattr(rutina, 'nombre_rutina', None):
+            elif not getattr(rutina, "nombre_rutina", None):
                 errors.append("Rutina sin nombre")
-            
+
             # Validar usuario
             if not usuario:
                 errors.append("Usuario no proporcionado")
             # Permitir usuario sin nombre; el nombre puede venir vacío en exportaciones reales
-            
+
             # Validar ejercicios
             if not exercises_by_day:
                 errors.append("No hay ejercicios en la rutina")
             else:
-                total_exercises = sum(len(exercises) for exercises in exercises_by_day.values())
+                total_exercises = sum(
+                    len(exercises) for exercises in exercises_by_day.values()
+                )
                 if total_exercises == 0:
                     errors.append("La rutina no contiene ejercicios")
-                
+
                 # Validar cada día
                 for day, exercises in exercises_by_day.items():
                     if not isinstance(day, int) or day < 1:
                         errors.append(f"Día inválido: {day}")
-                    
+
                     for i, exercise in enumerate(exercises):
                         # Aceptar nombre proveniente de 'ejercicio.nombre' o del atributo personalizado 'nombre_ejercicio'
                         nombre_ok = False
                         try:
-                            if getattr(exercise, 'nombre_ejercicio', None):
+                            if getattr(exercise, "nombre_ejercicio", None):
                                 nombre_ok = True
-                            elif getattr(exercise, 'ejercicio', None) and getattr(exercise.ejercicio, 'nombre', None):
+                            elif getattr(exercise, "ejercicio", None) and getattr(
+                                exercise.ejercicio, "nombre", None
+                            ):
                                 nombre_ok = True
                         except Exception:
                             nombre_ok = False
                         if not nombre_ok:
-                            errors.append(f"Ejercicio {i+1} del día {day} sin nombre")
-            
-            self.logger.info(f"Validación completada. Errores encontrados: {len(errors)}")
+                            errors.append(f"Ejercicio {i + 1} del día {day} sin nombre")
+
+            self.logger.info(
+                f"Validación completada. Errores encontrados: {len(errors)}"
+            )
             return len(errors) == 0, errors
-            
+
         except Exception as e:
             self.logger.error(f"Error durante validación: {e}")
             errors.append(f"Error de validación: {str(e)}")
@@ -206,6 +240,7 @@ class RoutineTemplateManager:
             tenant = None
             try:
                 from src.database.tenant_connection import get_current_tenant
+
                 tenant = get_current_tenant()
             except Exception:
                 tenant = None
@@ -224,7 +259,9 @@ class RoutineTemplateManager:
             session = None
             try:
                 try:
-                    from src.database.tenant_connection import get_tenant_session_factory
+                    from src.database.tenant_connection import (
+                        get_tenant_session_factory,
+                    )
                     from src.database.connection import SessionLocal
                     from src.services.gym_config_service import GymConfigService
 
@@ -236,8 +273,12 @@ class RoutineTemplateManager:
                         factory = None
 
                     session = factory() if factory else SessionLocal()
-                    cfg = GymConfigService(session).obtener_configuracion_gimnasio() or {}
-                    logo_url = str(cfg.get("logo_url") or cfg.get("gym_logo_url") or "").strip()
+                    cfg = (
+                        GymConfigService(session).obtener_configuracion_gimnasio() or {}
+                    )
+                    logo_url = str(
+                        cfg.get("logo_url") or cfg.get("gym_logo_url") or ""
+                    ).strip()
                 except Exception:
                     logo_url = ""
             finally:
@@ -248,15 +289,20 @@ class RoutineTemplateManager:
                     pass
 
             try:
-                if logo_url and not str(logo_url).startswith("http") and not str(logo_url).startswith("/"):
+                if (
+                    logo_url
+                    and not str(logo_url).startswith("http")
+                    and not str(logo_url).startswith("/")
+                ):
                     from src.services.b2_storage import get_file_url
+
                     logo_url = get_file_url(str(logo_url))
             except Exception:
                 pass
 
             if not logo_url:
                 try:
-                    fallback = resource_path(os.path.join('assets', 'gym_logo.png'))
+                    fallback = resource_path(os.path.join("assets", "gym_logo.png"))
                     if os.path.exists(fallback):
                         return fallback
                 except Exception:
@@ -309,18 +355,20 @@ class RoutineTemplateManager:
         except Exception:
             return None
 
-    def convert_excel_to_pdf(self, xlsx_path: str | Path, pdf_path: Optional[str | Path] = None) -> str:
+    def convert_excel_to_pdf(
+        self, xlsx_path: str | Path, pdf_path: Optional[str | Path] = None
+    ) -> str:
         try:
             self.logger.info("Iniciando conversión de Excel a PDF")
             xlsx = Path(xlsx_path)
             if not xlsx.exists():
                 raise FileNotFoundError(f"Archivo Excel no encontrado: {xlsx}")
-            target_pdf = Path(pdf_path) if pdf_path else xlsx.with_suffix('.pdf')
+            target_pdf = Path(pdf_path) if pdf_path else xlsx.with_suffix(".pdf")
 
-            com_err = None
-            if os.name == 'nt':
+            if os.name == "nt":
                 try:
                     import win32com.client as win32
+
                     excel = win32.DispatchEx("Excel.Application")
                     excel.Visible = False
                     excel.DisplayAlerts = False
@@ -328,33 +376,53 @@ class RoutineTemplateManager:
                     wb.ExportAsFixedFormat(0, str(target_pdf.resolve()))
                     wb.Close(False)
                     excel.Quit()
-                    self.logger.info(f"Conversión Excel→PDF exitosa con COM: {target_pdf}")
+                    self.logger.info(
+                        f"Conversión Excel→PDF exitosa con COM: {target_pdf}"
+                    )
                     return str(target_pdf)
                 except Exception as e:
-                    com_err = e
-                    self.logger.warning(f"Fallo conversión con COM, intentando LibreOffice: {e}")
+                    self.logger.warning(
+                        f"Fallo conversión con COM, intentando LibreOffice: {e}"
+                    )
             else:
-                self.logger.info("Entorno no Windows: se omite COM y se usa LibreOffice.")
+                self.logger.info(
+                    "Entorno no Windows: se omite COM y se usa LibreOffice."
+                )
 
             try:
                 import shutil
+
                 soffice = shutil.which("soffice") or shutil.which("soffice.exe")
                 if not soffice:
                     raise RuntimeError("LibreOffice no encontrado en el sistema")
                 outdir = str(target_pdf.parent.resolve())
-                cmd = [soffice, "--headless", "--convert-to", "pdf:calc_pdf_Export", "--outdir", outdir, str(xlsx.resolve())]
+                cmd = [
+                    soffice,
+                    "--headless",
+                    "--convert-to",
+                    "pdf:calc_pdf_Export",
+                    "--outdir",
+                    outdir,
+                    str(xlsx.resolve()),
+                ]
                 subprocess.run(cmd, check=True)
-                converted = xlsx.with_suffix('.pdf')
+                converted = xlsx.with_suffix(".pdf")
                 if converted.exists() and converted != target_pdf:
                     try:
                         converted.replace(target_pdf)
                     except Exception:
                         pass
-                self.logger.info(f"Conversión Excel→PDF exitosa con LibreOffice: {target_pdf}")
+                self.logger.info(
+                    f"Conversión Excel→PDF exitosa con LibreOffice: {target_pdf}"
+                )
                 return str(target_pdf)
             except Exception as lo_err:
-                self.logger.warning(f"LibreOffice no disponible o falló la conversión: {lo_err}")
-                self.logger.info("Aplicando fallback con ReportLab para generar PDF básico desde Excel")
+                self.logger.warning(
+                    f"LibreOffice no disponible o falló la conversión: {lo_err}"
+                )
+                self.logger.info(
+                    "Aplicando fallback con ReportLab para generar PDF básico desde Excel"
+                )
                 try:
                     return self._excel_to_pdf_reportlab_fallback(xlsx, target_pdf)
                 except Exception as rb_err:
@@ -375,6 +443,7 @@ class RoutineTemplateManager:
             from openpyxl.utils import get_column_letter, column_index_from_string
             import re
             from typing import Optional
+
             wb = openpyxl.load_workbook(str(xlsx.resolve()), data_only=True)
 
             doc = SimpleDocTemplate(
@@ -392,13 +461,17 @@ class RoutineTemplateManager:
                 try:
                     if not oc:
                         return None
-                    rgb = getattr(oc, 'rgb', None)
+                    rgb = getattr(oc, "rgb", None)
                     if rgb and len(rgb) == 8:
                         return f"#{rgb[2:]}"
-                    rgb2 = getattr(oc, 'fgColor', None)
-                    if rgb2 and getattr(rgb2, 'rgb', None):
+                    rgb2 = getattr(oc, "fgColor", None)
+                    if rgb2 and getattr(rgb2, "rgb", None):
                         v = rgb2.rgb
-                        return f"#{v[2:]}" if len(v) == 8 else (f"#{v}" if len(v) == 6 else None)
+                        return (
+                            f"#{v[2:]}"
+                            if len(v) == 8
+                            else (f"#{v}" if len(v) == 6 else None)
+                        )
                     return None
                 except Exception:
                     return None
@@ -407,20 +480,34 @@ class RoutineTemplateManager:
                 min_row, min_col, max_row, max_col = None, None, 0, 0
                 for r in ws.iter_rows():
                     for c in r:
-                        if (c.value is not None) or (c.fill and getattr(getattr(c.fill, 'fgColor', None), 'rgb', None)):
+                        if (c.value is not None) or (
+                            c.fill
+                            and getattr(getattr(c.fill, "fgColor", None), "rgb", None)
+                        ):
                             rr, cc = c.row, c.column
-                            min_row = rr if (min_row is None or rr < min_row) else min_row
-                            min_col = cc if (min_col is None or cc < min_col) else min_col
+                            min_row = (
+                                rr if (min_row is None or rr < min_row) else min_row
+                            )
+                            min_col = (
+                                cc if (min_col is None or cc < min_col) else min_col
+                            )
                             max_row = rr if rr > max_row else max_row
                             max_col = cc if cc > max_col else max_col
                 if min_row is None:
-                    min_row, min_col, max_row, max_col = 1, 1, min(ws.max_row or 1, 120), min(ws.max_column or 1, 40)
+                    min_row, min_col, max_row, max_col = (
+                        1,
+                        1,
+                        min(ws.max_row or 1, 120),
+                        min(ws.max_column or 1, 40),
+                    )
 
                 max_row = min(max_row, 200)
                 max_col = min(max_col, 40)
 
                 data = []
-                for row in ws.iter_rows(min_row=min_row, max_row=max_row, min_col=min_col, max_col=max_col):
+                for row in ws.iter_rows(
+                    min_row=min_row, max_row=max_row, min_col=min_col, max_col=max_col
+                ):
                     row_vals = []
                     for cell in row:
                         val = cell.value
@@ -441,7 +528,7 @@ class RoutineTemplateManager:
                 for c in range(min_col, max_col + 1):
                     col_letter = get_column_letter(c)
                     dim = ws.column_dimensions.get(col_letter)
-                    excel_w = (getattr(dim, 'width', None) or 8.43)
+                    excel_w = getattr(dim, "width", None) or 8.43
                     raw_widths.append(float(excel_w) * 7.2)
                 sum_widths = sum(raw_widths) if raw_widths else page_width
                 scale = page_width / sum_widths if sum_widths > 0 else 1.0
@@ -450,21 +537,30 @@ class RoutineTemplateManager:
                 raw_heights = []
                 for r in range(min_row, max_row + 1):
                     dim = ws.row_dimensions.get(r)
-                    excel_h = (getattr(dim, 'height', None) or 15.0)
+                    excel_h = getattr(dim, "height", None) or 15.0
                     raw_heights.append(float(excel_h))
 
-                table = Table(data, colWidths=col_widths, rowHeights=raw_heights, repeatRows=1)
-                ts = TableStyle([
-                    ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ])
+                table = Table(
+                    data, colWidths=col_widths, rowHeights=raw_heights, repeatRows=1
+                )
+                ts = TableStyle(
+                    [
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ]
+                )
 
                 try:
                     for rng in ws.merged_cells.ranges:
                         cr = rng.coord
                         m = re.match(r"([A-Z]+)(\d+):([A-Z]+)(\d+)", cr)
                         if m:
-                            c1, r1, c2, r2 = m.group(1), int(m.group(2)), m.group(3), int(m.group(4))
+                            c1, r1, c2, r2 = (
+                                m.group(1),
+                                int(m.group(2)),
+                                m.group(3),
+                                int(m.group(4)),
+                            )
                             sc = column_index_from_string(c1) - min_col
                             sr = r1 - min_row
                             ec = column_index_from_string(c2) - min_col
@@ -479,31 +575,40 @@ class RoutineTemplateManager:
                         tr = rr - min_row
                         tc = cc - min_col
                         try:
-                            fill = getattr(cell, 'fill', None)
-                            if fill and getattr(fill, 'fill_type', None) and getattr(fill, 'fgColor', None):
+                            fill = getattr(cell, "fill", None)
+                            if (
+                                fill
+                                and getattr(fill, "fill_type", None)
+                                and getattr(fill, "fgColor", None)
+                            ):
                                 hx = _hex_color(fill.fgColor)
                                 if hx:
-                                    ts.add("BACKGROUND", (tc, tr), (tc, tr), colors.HexColor(hx))
+                                    ts.add(
+                                        "BACKGROUND",
+                                        (tc, tr),
+                                        (tc, tr),
+                                        colors.HexColor(hx),
+                                    )
                         except Exception:
                             pass
                         try:
-                            font = getattr(cell, 'font', None)
-                            if font and getattr(font, 'bold', False):
+                            font = getattr(cell, "font", None)
+                            if font and getattr(font, "bold", False):
                                 ts.add("FONTNAME", (tc, tr), (tc, tr), "Helvetica-Bold")
-                            fs = getattr(font, 'size', None)
+                            fs = getattr(font, "size", None)
                             if fs:
                                 ts.add("FONTSIZE", (tc, tr), (tc, tr), float(fs))
                         except Exception:
                             pass
                         try:
-                            align = getattr(cell, 'alignment', None)
-                            h = getattr(align, 'horizontal', None)
+                            align = getattr(cell, "alignment", None)
+                            h = getattr(align, "horizontal", None)
                             if h:
-                                ali = 'LEFT'
-                                if str(h).lower() == 'center':
-                                    ali = 'CENTER'
-                                elif str(h).lower() == 'right':
-                                    ali = 'RIGHT'
+                                ali = "LEFT"
+                                if str(h).lower() == "center":
+                                    ali = "CENTER"
+                                elif str(h).lower() == "right":
+                                    ali = "RIGHT"
                                 ts.add("ALIGN", (tc, tr), (tc, tr), ali)
                         except Exception:
                             pass
@@ -514,20 +619,24 @@ class RoutineTemplateManager:
                     elements.append(PageBreak())
 
             doc.build(elements)
-            self.logger.info(f"Conversión Excel→PDF (renderer Python) generada: {target_pdf}")
+            self.logger.info(
+                f"Conversión Excel→PDF (renderer Python) generada: {target_pdf}"
+            )
             return str(target_pdf)
         except Exception as e:
-            self.logger.error(f"Error en fallback ReportLab, sin generar PDF genérico: {e}")
+            self.logger.error(
+                f"Error en fallback ReportLab, sin generar PDF genérico: {e}"
+            )
             # Forzar error para garantizar uso obligatorio de plantillas y flujo Excel→PDF
             raise e
-    
+
     def _select_template_by_days(self, num_days: int) -> Path:
         """
         Selecciona la plantilla correcta según el número de días.
-        
+
         Args:
             num_days: Número de días de la rutina
-            
+
         Returns:
             Path a la plantilla seleccionada
         """
@@ -540,33 +649,45 @@ class RoutineTemplateManager:
             template_key = 4
         else:
             template_key = 5
-        
+
         template_path = self.template_paths[template_key]
         if not template_path.exists():
             raise FileNotFoundError(f"Plantilla no encontrada: {template_path}")
-        
-        self.logger.info(f"Plantilla seleccionada: {template_path} para {num_days} días")
+
+        self.logger.info(
+            f"Plantilla seleccionada: {template_path} para {num_days} días"
+        )
         return template_path
-    
-    def _prepare_template_data(self, rutina: Rutina, usuario: Usuario, 
-                             exercises_by_day: Dict[int, List[RutinaEjercicio]], 
-                             weeks: int = 1) -> Dict[str, Any]:
+
+    def _prepare_template_data(
+        self,
+        rutina: Rutina,
+        usuario: Usuario,
+        exercises_by_day: Dict[int, List[RutinaEjercicio]],
+        weeks: int = 1,
+    ) -> Dict[str, Any]:
         """
         Prepara los datos para la plantilla Excel con variables específicas para plantillas perfectas.
-        
+
         Args:
             rutina: Objeto Rutina
-            usuario: Objeto Usuario  
+            usuario: Objeto Usuario
             exercises_by_day: Diccionario con ejercicios por día
             weeks: Número de semanas
-            
+
         Returns:
             Diccionario con datos formateados para la plantilla
         """
-        self.logger.info("Preparando datos para plantilla Excel con variables específicas por día")
-        
+        self.logger.info(
+            "Preparando datos para plantilla Excel con variables específicas por día"
+        )
+
         # Determinar semana actual de forma robusta
-        current_week = getattr(rutina, 'semana', None) or getattr(rutina, 'semana_actual', None) or 1
+        current_week = (
+            getattr(rutina, "semana", None)
+            or getattr(rutina, "semana_actual", None)
+            or 1
+        )
         try:
             current_week = int(current_week)
         except Exception:
@@ -577,65 +698,75 @@ class RoutineTemplateManager:
             current_week = 1
         if current_week > weeks:
             current_week = weeks
-        
+
         # Datos básicos del usuario y rutina
         template_data = {
-            'nombre_usuario': getattr(usuario, 'nombre', '') or '',
-            'nombre_completo': getattr(usuario, 'nombre', '') or '',
-            'Nombre': getattr(usuario, 'nombre', '') or '',
-            'rutina_nombre': getattr(rutina, 'nombre_rutina', '') or '',
-            'nombre_rutina': getattr(rutina, 'nombre_rutina', '') or '',
-            'Rutina': getattr(rutina, 'nombre_rutina', '') or '',
-            'fecha_creacion': datetime.now().strftime("%d/%m/%Y"),
-            'fecha': datetime.now().strftime("%d/%m"),
-            'año': datetime.now().year,
-            'semana': f"Semana {current_week}",  # Ajuste: usar current_week
-            'semana_num': current_week,          # Valor numérico disponible si lo requieren plantillas
-            'logo_gimnasio': '__GYM_LOGO__',
+            "nombre_usuario": getattr(usuario, "nombre", "") or "",
+            "nombre_completo": getattr(usuario, "nombre", "") or "",
+            "Nombre": getattr(usuario, "nombre", "") or "",
+            "rutina_nombre": getattr(rutina, "nombre_rutina", "") or "",
+            "nombre_rutina": getattr(rutina, "nombre_rutina", "") or "",
+            "Rutina": getattr(rutina, "nombre_rutina", "") or "",
+            "fecha_creacion": datetime.now().strftime("%d/%m/%Y"),
+            "fecha": datetime.now().strftime("%d/%m"),
+            "año": datetime.now().year,
+            "semana": f"Semana {current_week}",  # Ajuste: usar current_week
+            "semana_num": current_week,  # Valor numérico disponible si lo requieren plantillas
+            "logo_gimnasio": "__GYM_LOGO__",
             # Datos de contacto
-            'dni': getattr(usuario, 'dni', '') or '',
-            'DNI': getattr(usuario, 'dni', '') or '',
-            'telefono': getattr(usuario, 'telefono', '') or '',
-            'Teléfono': getattr(usuario, 'telefono', '') or '',
+            "dni": getattr(usuario, "dni", "") or "",
+            "DNI": getattr(usuario, "dni", "") or "",
+            "telefono": getattr(usuario, "telefono", "") or "",
+            "Teléfono": getattr(usuario, "telefono", "") or "",
         }
 
         # Estructuras anidadas para compatibilidad con plantillas que usan .get
-        template_data['usuario'] = {
-            'nombre': getattr(usuario, 'nombre', '') or '',
-            'dni': getattr(usuario, 'dni', '') or '',
-            'telefono': getattr(usuario, 'telefono', '') or '',
+        template_data["usuario"] = {
+            "nombre": getattr(usuario, "nombre", "") or "",
+            "dni": getattr(usuario, "dni", "") or "",
+            "telefono": getattr(usuario, "telefono", "") or "",
         }
-        template_data['rutina'] = {
-            'nombre': getattr(rutina, 'nombre_rutina', '') or '',
-            'fecha': template_data['fecha'],
-            'semana': template_data['semana_num'],
-            'semana_texto': template_data['semana'],  # "Semana x"
-            'Semana': template_data['semana'],        # Alias "Semana x"
-            'uuid': getattr(rutina, 'uuid_rutina', '') or getattr(rutina, 'uuid', '') or ''
+        template_data["rutina"] = {
+            "nombre": getattr(rutina, "nombre_rutina", "") or "",
+            "fecha": template_data["fecha"],
+            "semana": template_data["semana_num"],
+            "semana_texto": template_data["semana"],  # "Semana x"
+            "Semana": template_data["semana"],  # Alias "Semana x"
+            "uuid": getattr(rutina, "uuid_rutina", "")
+            or getattr(rutina, "uuid", "")
+            or "",
         }
-        
+
         # Variables específicas para plantillas perfectas (formato requerido)
-        template_data.update({
-            'Nombre completo': getattr(usuario, 'nombre', '') or '',
-            'Nombre_completo': getattr(usuario, 'nombre', '') or '',
-            'Año': datetime.now().year,
-            'Fecha': datetime.now().strftime("%d/%m"),
-            'Logo Gimnasio': '__GYM_LOGO__',
-            'Logo_Gimnasio': '__GYM_LOGO__',
-            'Semana': f"Semana {current_week}",  # Ajuste: usar current_week
-            'current_week': current_week,        # Valor numérico de semana actual
-            'Week': current_week,
-            'Semana_num': current_week,
-            'Semana_numero': current_week,
-        })
+        template_data.update(
+            {
+                "Nombre completo": getattr(usuario, "nombre", "") or "",
+                "Nombre_completo": getattr(usuario, "nombre", "") or "",
+                "Año": datetime.now().year,
+                "Fecha": datetime.now().strftime("%d/%m"),
+                "Logo Gimnasio": "__GYM_LOGO__",
+                "Logo_Gimnasio": "__GYM_LOGO__",
+                "Semana": f"Semana {current_week}",  # Ajuste: usar current_week
+                "current_week": current_week,  # Valor numérico de semana actual
+                "Week": current_week,
+                "Semana_num": current_week,
+                "Semana_numero": current_week,
+            }
+        )
 
         # Construir enlace para QR usando uuid_rutina si disponible (con fallback a uuid)
         try:
-            base_url = (os.getenv("API_BASE_URL") or os.getenv("NEXT_PUBLIC_API_URL") or get_webapp_base_url() or "http://127.0.0.1:8000")
+            base_url = (
+                os.getenv("API_BASE_URL")
+                or os.getenv("NEXT_PUBLIC_API_URL")
+                or get_webapp_base_url()
+                or "http://127.0.0.1:8000"
+            )
         except Exception:
             base_url = "http://127.0.0.1:8000"
         try:
             from src.database.tenant_connection import get_current_tenant
+
             tenant = str(get_current_tenant() or "").strip().lower()
         except Exception:
             tenant = ""
@@ -645,79 +776,109 @@ class RoutineTemplateManager:
                 tenant_qs = f"?tenant={urllib.parse.quote(tenant, safe='')}"
             except Exception:
                 tenant_qs = f"?tenant={tenant}"
-        uuid_val = (getattr(rutina, 'uuid_rutina', '') or getattr(rutina, 'uuid', '') or '')
-        qr_link = ''
+        uuid_val = (
+            getattr(rutina, "uuid_rutina", "") or getattr(rutina, "uuid", "") or ""
+        )
+        qr_link = ""
         if isinstance(uuid_val, str) and uuid_val:
             try:
-                is_preview = bool(getattr(rutina, 'qr_is_preview', False))
+                is_preview = bool(getattr(rutina, "qr_is_preview", False))
             except Exception:
                 is_preview = False
             if is_preview:
                 qr_link = f"{base_url.rstrip('/')}/api/rutinas/preview/qr_scan/{uuid_val}{tenant_qs}"
             else:
-                qr_link = f"{base_url.rstrip('/')}/api/rutinas/qr_scan/{uuid_val}{tenant_qs}"
-        template_data['uuid_rutina'] = uuid_val
+                qr_link = (
+                    f"{base_url.rstrip('/')}/api/rutinas/qr_scan/{uuid_val}{tenant_qs}"
+                )
+        template_data["uuid_rutina"] = uuid_val
         # Refuerzo: si el objeto tiene uuid pero no uuid_rutina, propagar para consistencia
         try:
-            if not getattr(rutina, 'uuid_rutina', '') and getattr(rutina, 'uuid', ''):
-                setattr(rutina, 'uuid_rutina', getattr(rutina, 'uuid'))
+            if not getattr(rutina, "uuid_rutina", "") and getattr(rutina, "uuid", ""):
+                setattr(rutina, "uuid_rutina", getattr(rutina, "uuid"))
         except Exception:
             pass
-        template_data['qr_link'] = qr_link
-        
+        template_data["qr_link"] = qr_link
+
         # Generar variables específicas por día para plantillas perfectas
         for day_num in sorted(exercises_by_day.keys()):
             exercises = exercises_by_day[day_num]
-            
+
             # Variables para el día actual
             dia_key = f"dia_{day_num}"
             ejercicio_key = f"ejercicio_dia_{day_num}"
             series_key = f"series_dia_{day_num}"
             repeticiones_key = f"repeticiones_dia_{day_num}"
-            
+
             # Nombre del día
             template_data[dia_key] = f"Dia {day_num}"  # Ajuste: texto "Dia x" sin tilde
-            template_data[f" {dia_key}"] = f"Dia {day_num}"  # Con espacio para compatibilidad
-            
+            template_data[f" {dia_key}"] = (
+                f"Dia {day_num}"  # Con espacio para compatibilidad
+            )
+
             # Listas para ejercicios, series y repeticiones del día
             ejercicios_dia = []
             series_dia = []
             repeticiones_dia = []
-            
+
             # Listas para cada semana específica
             series_por_semana = {f"S{i}": [] for i in range(1, weeks + 1)}
             repeticiones_por_semana = {f"S{i}": [] for i in range(1, weeks + 1)}
-            
+
             for ejercicio in exercises:
                 # Nombre del ejercicio preferentemente desde atributo personalizado si existe
                 nombre_ejercicio = (
-                    getattr(ejercicio, 'nombre_ejercicio', None)
-                    or (ejercicio.ejercicio.nombre if getattr(ejercicio, 'ejercicio', None) else None)
+                    getattr(ejercicio, "nombre_ejercicio", None)
+                    or (
+                        ejercicio.ejercicio.nombre
+                        if getattr(ejercicio, "ejercicio", None)
+                        else None
+                    )
                     or f"Ejercicio {getattr(ejercicio, 'ejercicio_id', '')}"
                 )
                 ejercicios_dia.append(nombre_ejercicio)
-                
+
                 # Parsear series y repeticiones por semana
-                series_semanas = self._parse_weekly_values(getattr(ejercicio, 'series', ''), weeks)
-                repeticiones_semanas = self._parse_weekly_values(getattr(ejercicio, 'repeticiones', ''), weeks)
-                
+                series_semanas = self._parse_weekly_values(
+                    getattr(ejercicio, "series", ""), weeks
+                )
+                repeticiones_semanas = self._parse_weekly_values(
+                    getattr(ejercicio, "repeticiones", ""), weeks
+                )
+
                 # Usar exclusivamente la semana actual para las variables básicas; si falta, dejar vacío
                 idx_sem_actual = max(0, min(weeks - 1, current_week - 1))
-                series_valor = series_semanas[idx_sem_actual] if 0 <= idx_sem_actual < len(series_semanas) else ""
-                repeticiones_valor = repeticiones_semanas[idx_sem_actual] if 0 <= idx_sem_actual < len(repeticiones_semanas) else ""
-                
+                series_valor = (
+                    series_semanas[idx_sem_actual]
+                    if 0 <= idx_sem_actual < len(series_semanas)
+                    else ""
+                )
+                repeticiones_valor = (
+                    repeticiones_semanas[idx_sem_actual]
+                    if 0 <= idx_sem_actual < len(repeticiones_semanas)
+                    else ""
+                )
+
                 series_dia.append(series_valor)
                 repeticiones_dia.append(repeticiones_valor)
-                
+
                 # Agregar valores por semana específica SIN rellenar vacíos desde valores planos u otras semanas
                 for week_idx in range(weeks):
                     semana_key = f"S{week_idx + 1}"
-                    series_semana = series_semanas[week_idx] if week_idx < len(series_semanas) else ""
-                    reps_semana = repeticiones_semanas[week_idx] if week_idx < len(repeticiones_semanas) else ""
-                    
+                    series_semana = (
+                        series_semanas[week_idx]
+                        if week_idx < len(series_semanas)
+                        else ""
+                    )
+                    reps_semana = (
+                        repeticiones_semanas[week_idx]
+                        if week_idx < len(repeticiones_semanas)
+                        else ""
+                    )
+
                     series_por_semana[semana_key].append(series_semana)
                     repeticiones_por_semana[semana_key].append(reps_semana)
-            
+
             # Guardar listas crudas para distribución por filas (fallback)
             template_data[f"lista_ejercicios_dia_{day_num}"] = ejercicios_dia
             template_data[f"lista_series_dia_{day_num}"] = series_dia
@@ -726,63 +887,81 @@ class RoutineTemplateManager:
                 template_data[f"lista_series_dia_{day_num}_{semana_key}"] = lista
             for semana_key, lista in repeticiones_por_semana.items():
                 template_data[f"lista_repeticiones_dia_{day_num}_{semana_key}"] = lista
-            
+
             # Convertir listas a strings para las plantillas
-            template_data[ejercicio_key] = '\n'.join(map(str, ejercicios_dia))
-            template_data[series_key] = '\n'.join(map(str, series_dia))
-            template_data[repeticiones_key] = '\n'.join(map(str, repeticiones_dia))
-            
+            template_data[ejercicio_key] = "\n".join(map(str, ejercicios_dia))
+            template_data[series_key] = "\n".join(map(str, series_dia))
+            template_data[repeticiones_key] = "\n".join(map(str, repeticiones_dia))
+
             # Variables con espacio para compatibilidad con plantillas
-            template_data[f" {ejercicio_key}"] = '\n'.join(map(str, ejercicios_dia))
-            template_data[f" {series_key}"] = '\n'.join(map(str, series_dia))
-            template_data[f" {repeticiones_key}"] = '\n'.join(map(str, repeticiones_dia))
-            
+            template_data[f" {ejercicio_key}"] = "\n".join(map(str, ejercicios_dia))
+            template_data[f" {series_key}"] = "\n".join(map(str, series_dia))
+            template_data[f" {repeticiones_key}"] = "\n".join(
+                map(str, repeticiones_dia)
+            )
+
             # Generar variables específicas por semana para cada día
             for semana_key in series_por_semana.keys():
                 # Variables de series por semana
                 series_semana_key = f"series_dia_{day_num}_{semana_key}"
-                template_data[series_semana_key] = '\n'.join(map(str, series_por_semana[semana_key]))
-                template_data[f" {series_semana_key}"] = '\n'.join(map(str, series_por_semana[semana_key]))
-                
+                template_data[series_semana_key] = "\n".join(
+                    map(str, series_por_semana[semana_key])
+                )
+                template_data[f" {series_semana_key}"] = "\n".join(
+                    map(str, series_por_semana[semana_key])
+                )
+
                 # Variables de repeticiones por semana
                 reps_semana_key = f"repeticiones_dia_{day_num}_{semana_key}"
-                template_data[reps_semana_key] = '\n'.join(map(str, repeticiones_por_semana[semana_key]))
-                template_data[f" {reps_semana_key}"] = '\n'.join(map(str, repeticiones_por_semana[semana_key]))
-            
-            self.logger.info(f"Generadas variables para {dia_key}: {len(ejercicios_dia)} ejercicios, {weeks} semanas")
-        
+                template_data[reps_semana_key] = "\n".join(
+                    map(str, repeticiones_por_semana[semana_key])
+                )
+                template_data[f" {reps_semana_key}"] = "\n".join(
+                    map(str, repeticiones_por_semana[semana_key])
+                )
+
+            self.logger.info(
+                f"Generadas variables para {dia_key}: {len(ejercicios_dia)} ejercicios, {weeks} semanas"
+            )
+
         # Mantener estructura de días para compatibilidad con código existente
-        template_data['dias'] = []
+        template_data["dias"] = []
         for day_num in sorted(exercises_by_day.keys()):
             exercises = exercises_by_day[day_num]
-            day_data = {
-                'numero': day_num,
-                'nombre': f"Día {day_num}",
-                'ejercicios': []
-            }
-            
+            day_data = {"numero": day_num, "nombre": f"Día {day_num}", "ejercicios": []}
+
             for ejercicio in exercises:
-                series_semanas = self._parse_weekly_values(getattr(ejercicio, 'series', ''), weeks)
-                repeticiones_semanas = self._parse_weekly_values(getattr(ejercicio, 'repeticiones', ''), weeks)
-                
+                series_semanas = self._parse_weekly_values(
+                    getattr(ejercicio, "series", ""), weeks
+                )
+                repeticiones_semanas = self._parse_weekly_values(
+                    getattr(ejercicio, "repeticiones", ""), weeks
+                )
+
                 exercise_data = {
-                    'nombre': (
-                        getattr(ejercicio, 'nombre_ejercicio', None)
-                        or (ejercicio.ejercicio.nombre if getattr(ejercicio, 'ejercicio', None) else f"Ejercicio {getattr(ejercicio, 'ejercicio_id', '')}")
+                    "nombre": (
+                        getattr(ejercicio, "nombre_ejercicio", None)
+                        or (
+                            ejercicio.ejercicio.nombre
+                            if getattr(ejercicio, "ejercicio", None)
+                            else f"Ejercicio {getattr(ejercicio, 'ejercicio_id', '')}"
+                        )
                     ),
-                    'series': getattr(ejercicio, 'series', ''),
-                    'repeticiones': getattr(ejercicio, 'repeticiones', ''),
-                    'series_semanas': series_semanas,
-                    'repeticiones_semanas': repeticiones_semanas,
-                    'notas': getattr(ejercicio, 'notas', '') or ""
+                    "series": getattr(ejercicio, "series", ""),
+                    "repeticiones": getattr(ejercicio, "repeticiones", ""),
+                    "series_semanas": series_semanas,
+                    "repeticiones_semanas": repeticiones_semanas,
+                    "notas": getattr(ejercicio, "notas", "") or "",
                 }
-                day_data['ejercicios'].append(exercise_data)
-            
-            template_data['dias'].append(day_data)
-        
-        self.logger.info(f"Datos preparados para {len(template_data['dias'])} días con variables específicas por día")
+                day_data["ejercicios"].append(exercise_data)
+
+            template_data["dias"].append(day_data)
+
+        self.logger.info(
+            f"Datos preparados para {len(template_data['dias'])} días con variables específicas por día"
+        )
         return template_data
-    
+
     def _parse_weekly_values(self, value_string: str, weeks: int) -> List[str]:
         """
         Parsea una cadena de valores separados por comas para múltiples semanas.
@@ -809,7 +988,7 @@ class RoutineTemplateManager:
             values.append("")
         # Si hay más valores que semanas, tomar solo los primeros
         return values[:weeks]
-    
+
     def _sanitize_template_for_jinja(self, template_path: Path) -> Path:
         """
         Crea una copia temporal de la plantilla reemplazando variables con espacios
@@ -824,13 +1003,15 @@ class RoutineTemplateManager:
                 for row in sh.iter_rows():
                     for cell in row:
                         v = cell.value
-                        if isinstance(v, str) and '{{' in v and '}}' in v:
+                        if isinstance(v, str) and "{{" in v and "}}" in v:
+
                             def _repl(m):
                                 inner = m.group(1)
                                 if any(ch in inner for ch in "[]()'\".:}|{"):
                                     return "{{ " + inner.strip() + " }}"
                                 normalized = re.sub(r"\s+", "_", inner.strip())
                                 return "{{ " + normalized + " }}"
+
                             new_v = re.sub(r"\{\{\s*([^}]+?)\s*\}\}", _repl, v)
                             if new_v != v:
                                 cell.value = new_v
@@ -840,36 +1021,46 @@ class RoutineTemplateManager:
             self.logger.info(f"Plantilla sanitizada para Jinja: {sanitized_path}")
             return sanitized_path
         except Exception as e:
-            self.logger.warning(f"No se pudo sanitizar plantilla para Jinja ({e}), usando original")
+            self.logger.warning(
+                f"No se pudo sanitizar plantilla para Jinja ({e}), usando original"
+            )
             return template_path
 
-    def generate_routine_excel(self, rutina: Rutina, usuario: Usuario,
-                             exercises_by_day: Dict[int, List[RutinaEjercicio]], 
-                             output_path: str = None, weeks: int = 1,
-                             qr_mode: str = "sheet", sheet: Optional[str] = None) -> str:
+    def generate_routine_excel(
+        self,
+        rutina: Rutina,
+        usuario: Usuario,
+        exercises_by_day: Dict[int, List[RutinaEjercicio]],
+        output_path: str = None,
+        weeks: int = 1,
+        qr_mode: str = "sheet",
+        sheet: Optional[str] = None,
+    ) -> str:
         """
         Genera un archivo Excel de rutina usando xlsxtpl.
-        
+
         Args:
             rutina: Objeto Rutina
             usuario: Objeto Usuario
             exercises_by_day: Diccionario con ejercicios por día
             output_path: Ruta de salida personalizada
             weeks: Número de semanas
-            
+
         Returns:
             Ruta del archivo generado
         """
         try:
             self.logger.info("Iniciando generación de Excel de rutina")
-            
+
             # Validar datos
-            is_valid, errors = self.validate_routine_data(rutina, usuario, exercises_by_day)
+            is_valid, errors = self.validate_routine_data(
+                rutina, usuario, exercises_by_day
+            )
             if not is_valid:
                 error_msg = f"Datos de rutina inválidos: {', '.join(errors)}"
                 self.logger.error(error_msg)
                 raise ValueError(error_msg)
-            
+
             # Clamp days to max 5 and exercises per day to max 8, luego seleccionar plantilla
             try:
                 if exercises_by_day:
@@ -882,25 +1073,33 @@ class RoutineTemplateManager:
                 pass
             num_days = len(exercises_by_day)
             template_path = self._select_template_by_days(num_days)
-            
+
             if not template_path.exists():
                 raise FileNotFoundError(f"Plantilla no encontrada: {template_path}")
-            
+
             # Generar nombre de archivo si no se proporciona
             if not output_path:
                 # Formato: rutina_{nombreRutina}_{CantDias}_{Nombre_Apellido}_{dd-mm-aaaa}.xlsx
-                rname = (getattr(rutina, "nombre_rutina", None) or getattr(rutina, "nombre", None) or "Rutina")
+                rname = (
+                    getattr(rutina, "nombre_rutina", None)
+                    or getattr(rutina, "nombre", None)
+                    or "Rutina"
+                )
                 uname = (getattr(usuario, "nombre", "") or "").strip()
                 parts = re.split(r"\s+", uname) if uname else []
                 first = parts[0] if parts else ""
                 last = parts[-1] if len(parts) > 1 else ""
+
                 def _safe_slug(s: str) -> str:
                     s = (s or "").strip()
                     s = re.sub(r"[^\w\s-]", "", s)
                     s = re.sub(r"\s+", "_", s)
                     return s
+
                 base = _safe_slug(rname) or "Rutina"
-                user_seg = _safe_slug(first) + (("_" + _safe_slug(last)) if last else "")
+                user_seg = _safe_slug(first) + (
+                    ("_" + _safe_slug(last)) if last else ""
+                )
                 # Cantidad de días profesional y entendible, clamped a 1-5 (NO CLAMPEAR A MENOS DE 1 NI A MÁS DE 5) (En cuyo caso, hay que hacer más templates)
                 try:
                     days_count = max(1, min(5, int(num_days)))
@@ -915,22 +1114,27 @@ class RoutineTemplateManager:
                         fecha_str = datetime.now().strftime("%d-%m-%Y")
                 except Exception:
                     fecha_str = datetime.now().strftime("%d-%m-%Y")
-                filename = f"rutina_{base}_{days_seg}_{user_seg or 'Usuario'}_{fecha_str}.xlsx"
+                filename = (
+                    f"rutina_{base}_{days_seg}_{user_seg or 'Usuario'}_{fecha_str}.xlsx"
+                )
                 output_path = self.output_dir_excel / filename
             else:
                 output_path = Path(output_path)
-            
+
             # Preparar datos para la plantilla
             # Inferir semanas efectivas a partir de los datos si el parámetro es impreciso
             weeks_effective = weeks if isinstance(weeks, int) and weeks > 0 else 0
             try:
                 max_weeks_detected = 0
                 for day_exs in (exercises_by_day or {}).values():
-                    for ej in (day_exs or []):
-                        for raw in [getattr(ej, 'series', ''), getattr(ej, 'repeticiones', '')]:
-                            s = str(raw) if raw is not None else ''
+                    for ej in day_exs or []:
+                        for raw in [
+                            getattr(ej, "series", ""),
+                            getattr(ej, "repeticiones", ""),
+                        ]:
+                            s = str(raw) if raw is not None else ""
                             if s.strip():
-                                count = len([v.strip() for v in s.split(',')])
+                                count = len([v.strip() for v in s.split(",")])
                                 if count > max_weeks_detected:
                                     max_weeks_detected = count
                 if weeks_effective <= 0:
@@ -944,17 +1148,27 @@ class RoutineTemplateManager:
                 weeks_effective = max(1, min(int(weeks_effective), 4))
             except Exception:
                 weeks_effective = 1
-            
-            template_data = self._prepare_template_data(rutina, usuario, exercises_by_day, weeks_effective)
-            
+
+            template_data = self._prepare_template_data(
+                rutina, usuario, exercises_by_day, weeks_effective
+            )
+
             self.logger.info(f"Procesando plantilla: {template_path}")
             self.logger.info(f"Datos preparados con {len(template_data['dias'])} días")
-            
+
             # Si la plantilla repite placeholders por fila, usar fallback para distribuir por filas
             if self._template_has_repeated_day_placeholders(template_path):
-                self.logger.info("Detectadas variables por día repetidas en plantilla; usando método fallback de distribución por filas")
-                return self._generate_excel_fallback(template_path, template_data, Path(output_path), qr_mode=qr_mode, sheet=sheet)
-        
+                self.logger.info(
+                    "Detectadas variables por día repetidas en plantilla; usando método fallback de distribución por filas"
+                )
+                return self._generate_excel_fallback(
+                    template_path,
+                    template_data,
+                    Path(output_path),
+                    qr_mode=qr_mode,
+                    sheet=sheet,
+                )
+
             # Usar xlsxtpl para procesar la plantilla
             try:
                 # Sanitizar variables inválidas para Jinja y crear el writer
@@ -963,34 +1177,44 @@ class RoutineTemplateManager:
                 # Endurecer el entorno Jinja: evitar variables indefinidas silenciosas y globals peligrosos
                 try:
                     from jinja2 import StrictUndefined as _StrictUndefined
+
                     writer.jinja_env.undefined = _StrictUndefined
                     # Asegurar que no haya helpers peligrosos expuestos
-                    for _k in list(getattr(writer.jinja_env, 'globals', {}).keys()):
-                        if _k in ('dir', 'getattr', '__import__', 'eval', 'exec', 'open'):
+                    for _k in list(getattr(writer.jinja_env, "globals", {}).keys()):
+                        if _k in (
+                            "dir",
+                            "getattr",
+                            "__import__",
+                            "eval",
+                            "exec",
+                            "open",
+                        ):
                             try:
                                 del writer.jinja_env.globals[_k]
                             except Exception:
                                 pass
                 except Exception:
                     pass
-                
+
                 # Preparar datos para xlsxtpl (incluir estructura completa por si hay bucles Jinja)
                 xlsxtpl_data = template_data
-                
+
                 # Renderizar la plantilla con los datos
                 writer.render_book(payloads=[xlsxtpl_data])
-                
+
                 # Guardar el archivo
                 writer.save(str(output_path))
-                
+
                 # Validar que el archivo generado sea un XLSX (ZIP) válido
                 try:
                     if not zipfile.is_zipfile(str(output_path)):
-                        raise RuntimeError("Archivo Excel generado inválido (no es ZIP).")
+                        raise RuntimeError(
+                            "Archivo Excel generado inválido (no es ZIP)."
+                        )
                 except Exception as _zip_err:
                     # Forzar manejo en el catch general para activar fallback
                     raise _zip_err
-                
+
                 # Aplicar anchos de columna en todas las hojas (semanas) tras guardar
                 try:
                     wb = openpyxl.load_workbook(str(output_path))
@@ -1005,35 +1229,52 @@ class RoutineTemplateManager:
                                     if isinstance(v, str):
                                         t = v.strip()
                                         if t == "Series":
-                                             cell.value = "Ser"
+                                            cell.value = "Ser"
                                         elif t == "Repeticiones":
-                                             cell.value = "Rep"
+                                            cell.value = "Rep"
                     except Exception:
                         pass
                     # Insertar imágenes de logo donde corresponda
                     try:
-                        logo_path = self._get_logo_file_for_current_tenant() or resource_path(os.path.join('assets', 'gym_logo.png'))
+                        logo_path = (
+                            self._get_logo_file_for_current_tenant()
+                            or resource_path(os.path.join("assets", "gym_logo.png"))
+                        )
                         if os.path.exists(logo_path):
-                            SENTINEL = '__GYM_LOGO__'
+                            SENTINEL = "__GYM_LOGO__"
                             for ws in wb.worksheets:
                                 for row in ws.iter_rows():
                                     for cell in row:
                                         if isinstance(cell, MergedCell):
                                             continue
                                         v = cell.value
-                                        if isinstance(v, str) and (SENTINEL in v or ("{{" in v and "}}" in v and ("logo" in v.lower()) and ("gimnasio" in v.lower()))):
+                                        if isinstance(v, str) and (
+                                            SENTINEL in v
+                                            or (
+                                                "{{" in v
+                                                and "}}" in v
+                                                and ("logo" in v.lower())
+                                                and ("gimnasio" in v.lower())
+                                            )
+                                        ):
                                             try:
-                                                cell.value = ''
+                                                cell.value = ""
                                             except Exception:
                                                 pass
                                             try:
-                                                self._insert_logo_in_cell(ws, cell, logo_path)
+                                                self._insert_logo_in_cell(
+                                                    ws, cell, logo_path
+                                                )
                                             except Exception:
                                                 pass
                     except Exception:
                         pass
-                    _apply_column_widths_all_sheets(self, wb, 'A', 'K', 4.57, pixel_width=37)
-                    _apply_column_widths_all_sheets(self, wb, 'L', 'AA', 3.71, pixel_width=31)
+                    _apply_column_widths_all_sheets(
+                        self, wb, "A", "K", 4.57, pixel_width=37
+                    )
+                    _apply_column_widths_all_sheets(
+                        self, wb, "L", "AA", 3.71, pixel_width=31
+                    )
                     # Ocultar filas en blanco específicas para preservar bordes y fusiones
                     try:
                         for ws in wb.worksheets:
@@ -1048,12 +1289,12 @@ class RoutineTemplateManager:
                     try:
                         for ws in wb.worksheets:
                             try:
-                                if getattr(ws, 'sheet_format', None) is not None:
+                                if getattr(ws, "sheet_format", None) is not None:
                                     ws.sheet_format.defaultRowHeight = 12.75
                             except Exception:
                                 pass
                             try:
-                                max_r = getattr(ws, 'max_row', 0) or 0
+                                max_r = getattr(ws, "max_row", 0) or 0
                                 for r in range(1, max_r + 1):
                                     ws.row_dimensions[r].height = 12.75
                             except Exception:
@@ -1069,18 +1310,22 @@ class RoutineTemplateManager:
                 try:
                     wb3 = openpyxl.load_workbook(str(output_path))
                     try:
-                        _apply_column_widths_all_sheets(self, wb3, 'A', 'K', 4.57, pixel_width=37)
-                        _apply_column_widths_all_sheets(self, wb3, 'L', 'AA', 3.71, pixel_width=31)
+                        _apply_column_widths_all_sheets(
+                            self, wb3, "A", "K", 4.57, pixel_width=37
+                        )
+                        _apply_column_widths_all_sheets(
+                            self, wb3, "L", "AA", 3.71, pixel_width=31
+                        )
                         # Reforzar altura de filas 17px (≈12.75pt)
                         try:
                             for ws in wb3.worksheets:
                                 try:
-                                    if getattr(ws, 'sheet_format', None) is not None:
+                                    if getattr(ws, "sheet_format", None) is not None:
                                         ws.sheet_format.defaultRowHeight = 12.75
                                 except Exception:
                                     pass
                                 try:
-                                    max_r = getattr(ws, 'max_row', 0) or 0
+                                    max_r = getattr(ws, "max_row", 0) or 0
                                     for r in range(1, max_r + 1):
                                         ws.row_dimensions[r].height = 12.75
                                 except Exception:
@@ -1100,7 +1345,7 @@ class RoutineTemplateManager:
                 # Insertar QR según modo seleccionado y ajustar hoja activa si corresponde
                 try:
                     mode = (qr_mode or "").strip().lower()
-                    qr_link_val = template_data.get('qr_link')
+                    qr_link_val = template_data.get("qr_link")
                     if mode in ("sheet", "none"):
                         try:
                             self._remove_qr_footer_band(str(output_path))
@@ -1109,12 +1354,21 @@ class RoutineTemplateManager:
                     if qr_link_val and mode in ("inline", "sheet"):
                         if mode == "sheet":
                             try:
-                                self._add_qr_sheet(str(output_path), qr_link_val, "QR", template_data.get('uuid_rutina'))
+                                self._add_qr_sheet(
+                                    str(output_path),
+                                    qr_link_val,
+                                    "QR",
+                                    template_data.get("uuid_rutina"),
+                                )
                             except Exception:
                                 pass
                         else:
                             try:
-                                self._add_qr_footer_band(str(output_path), qr_link_val, template_data.get('uuid_rutina'))
+                                self._add_qr_footer_band(
+                                    str(output_path),
+                                    qr_link_val,
+                                    template_data.get("uuid_rutina"),
+                                )
                             except Exception:
                                 pass
                     if isinstance(sheet, str) and sheet.strip():
@@ -1123,7 +1377,7 @@ class RoutineTemplateManager:
                             title_norm = sheet.strip()
                             idx_to_set = None
                             for i, ws in enumerate(wbset.worksheets):
-                                if (getattr(ws, 'title', '') or '') == title_norm:
+                                if (getattr(ws, "title", "") or "") == title_norm:
                                     idx_to_set = i
                                     break
                             if idx_to_set is not None:
@@ -1140,28 +1394,38 @@ class RoutineTemplateManager:
                             pass
                 except Exception:
                     pass
-                
+
                 # Intentar eliminar plantilla temporal
                 try:
-                    if sanitized_template != template_path and os.path.exists(sanitized_template):
+                    if sanitized_template != template_path and os.path.exists(
+                        sanitized_template
+                    ):
                         os.remove(sanitized_template)
                 except Exception:
                     pass
-                
+
                 self.logger.info(f"Rutina Excel generada exitosamente: {output_path}")
                 return str(output_path)
-                 
+
             except Exception as template_error:
-                self.logger.exception(f"Error procesando plantilla con xlsxtpl: {template_error}")
-                
+                self.logger.exception(
+                    f"Error procesando plantilla con xlsxtpl: {template_error}"
+                )
+
                 # Fallback: usar método tradicional con openpyxl
                 self.logger.info("Usando método fallback con openpyxl")
-                return self._generate_excel_fallback(template_path, template_data, output_path, qr_mode=qr_mode, sheet=sheet)
-            
+                return self._generate_excel_fallback(
+                    template_path,
+                    template_data,
+                    output_path,
+                    qr_mode=qr_mode,
+                    sheet=sheet,
+                )
+
         except Exception as e:
             self.logger.error(f"Error al generar Excel de rutina: {e}")
             raise e
-    
+
     def _template_has_repeated_day_placeholders(self, template_path: Path) -> bool:
         """
         Detecta si la plantilla contiene placeholders de día (ejercicio/series/repeticiones)
@@ -1178,15 +1442,23 @@ class RoutineTemplateManager:
                             v = cell.value
                             if isinstance(v, str):
                                 s = v.strip()
-                                if ('{% for' in s) or ('{%\nfor' in s) or ('{{ dias' in s) or ('{{ dias.' in s) or ('{{ dias[' in s):
+                                if (
+                                    ("{% for" in s)
+                                    or ("{%\nfor" in s)
+                                    or ("{{ dias" in s)
+                                    or ("{{ dias." in s)
+                                    or ("{{ dias[" in s)
+                                ):
                                     wb.close()
                                     return False
             except Exception:
                 pass
             patterns = {
-                'ejercicio': re.compile(r"\{\{\s*ejercicio_dia_(\d+)\s*\}\}"),
-                'series': re.compile(r"\{\{\s*series_dia_(\d+)(?:_S\d+)?\s*\}\}"),
-                'repeticiones': re.compile(r"\{\{\s*repeticiones_dia_(\d+)(?:_S\d+)?\s*\}\}")
+                "ejercicio": re.compile(r"\{\{\s*ejercicio_dia_(\d+)\s*\}\}"),
+                "series": re.compile(r"\{\{\s*series_dia_(\d+)(?:_S\d+)?\s*\}\}"),
+                "repeticiones": re.compile(
+                    r"\{\{\s*repeticiones_dia_(\d+)(?:_S\d+)?\s*\}\}"
+                ),
             }
             for sh in wb.worksheets:
                 # Mapear (tipo, dia) -> conjunto de filas distintas donde aparece en ESTA hoja
@@ -1194,7 +1466,7 @@ class RoutineTemplateManager:
                 for row in sh.iter_rows():
                     for cell in row:
                         v = cell.value
-                        if isinstance(v, str) and '{{' in v and '}}' in v:
+                        if isinstance(v, str) and "{{" in v and "}}" in v:
                             for kind, rx in patterns.items():
                                 for match in rx.findall(v):
                                     key = (kind, int(match))
@@ -1207,19 +1479,27 @@ class RoutineTemplateManager:
             wb.close()
             return False
         except Exception as e:
-            self.logger.warning(f"No se pudo analizar plantilla para repetición de placeholders: {e}")
+            self.logger.warning(
+                f"No se pudo analizar plantilla para repetición de placeholders: {e}"
+            )
             return False
 
-    def _generate_excel_fallback(self, template_path: Path, template_data: Dict[str, Any], 
-                              output_path: Path, qr_mode: str = "sheet", sheet: Optional[str] = None) -> str:
+    def _generate_excel_fallback(
+        self,
+        template_path: Path,
+        template_data: Dict[str, Any],
+        output_path: Path,
+        qr_mode: str = "sheet",
+        sheet: Optional[str] = None,
+    ) -> str:
         """
         Método fallback para generar Excel usando openpyxl directamente.
-        
+
         Args:
             template_path: Ruta a la plantilla
             template_data: Datos preparados
             output_path: Ruta de salida
-            
+
         Returns:
             Ruta del archivo generado
         """
@@ -1233,28 +1513,46 @@ class RoutineTemplateManager:
             self._replace_basic_variables(ws_active, template_data)
 
             # Cargar ejercicios de forma secuencial
-            self._load_exercises_sequential(ws_active, template_data['dias'], template_data.get('current_week'))
-            
+            self._load_exercises_sequential(
+                ws_active, template_data["dias"], template_data.get("current_week")
+            )
+
             # Aplicar anchos de columna A..K = 4.57 y L..AA = 3.71 en todas las hojas antes de guardar
             try:
-                _apply_column_widths_all_sheets(self, workbook, 'A', 'K', 4.57, pixel_width=37)
-                _apply_column_widths_all_sheets(self, workbook, 'L', 'AA', 3.71, pixel_width=31)
+                _apply_column_widths_all_sheets(
+                    self, workbook, "A", "K", 4.57, pixel_width=37
+                )
+                _apply_column_widths_all_sheets(
+                    self, workbook, "L", "AA", 3.71, pixel_width=31
+                )
             except Exception:
                 pass
             # Insertar imágenes de logo donde corresponda
             try:
-                logo_path = self._get_logo_file_for_current_tenant() or resource_path(os.path.join('assets', 'gym_logo.png'))
+                logo_path = self._get_logo_file_for_current_tenant() or resource_path(
+                    os.path.join("assets", "gym_logo.png")
+                )
                 if os.path.exists(logo_path):
-                    SENTINEL = '__GYM_LOGO__'
+                    SENTINEL = "__GYM_LOGO__"
                     for ws in workbook.worksheets:
                         for row in ws.iter_rows():
                             for cell in row:
                                 if isinstance(cell, MergedCell):
                                     continue
                                 v = cell.value
-                                if isinstance(v, str) and (SENTINEL in v or ('{{' in v and '}}' in v and (('logo' in v.lower()) and ('gimnasio' in v.lower())))):
+                                if isinstance(v, str) and (
+                                    SENTINEL in v
+                                    or (
+                                        "{{" in v
+                                        and "}}" in v
+                                        and (
+                                            ("logo" in v.lower())
+                                            and ("gimnasio" in v.lower())
+                                        )
+                                    )
+                                ):
                                     try:
-                                        cell.value = ''
+                                        cell.value = ""
                                     except Exception:
                                         pass
                                     try:
@@ -1283,12 +1581,12 @@ class RoutineTemplateManager:
             try:
                 for ws in workbook.worksheets:
                     try:
-                        if getattr(ws, 'sheet_format', None) is not None:
+                        if getattr(ws, "sheet_format", None) is not None:
                             ws.sheet_format.defaultRowHeight = 12.75
                     except Exception:
                         pass
                     try:
-                        max_r = getattr(ws, 'max_row', 0) or 0
+                        max_r = getattr(ws, "max_row", 0) or 0
                         for r in range(1, max_r + 1):
                             ws.row_dimensions[r].height = 12.75
                     except Exception:
@@ -1317,20 +1615,24 @@ class RoutineTemplateManager:
             try:
                 wb2 = openpyxl.load_workbook(str(output_path))
                 try:
-                    _apply_column_widths_all_sheets(self, wb2, 'A', 'K', 4.57, pixel_width=37)
-                    _apply_column_widths_all_sheets(self, wb2, 'L', 'AA', 3.71, pixel_width=31)
+                    _apply_column_widths_all_sheets(
+                        self, wb2, "A", "K", 4.57, pixel_width=37
+                    )
+                    _apply_column_widths_all_sheets(
+                        self, wb2, "L", "AA", 3.71, pixel_width=31
+                    )
                 except Exception:
                     pass
                 # Reforzar altura de filas a 17px (≈12.75pt) tras reabrir
                 try:
                     for ws in wb2.worksheets:
                         try:
-                            if getattr(ws, 'sheet_format', None) is not None:
+                            if getattr(ws, "sheet_format", None) is not None:
                                 ws.sheet_format.defaultRowHeight = 12.75
                         except Exception:
                             pass
                         try:
-                            max_r = getattr(ws, 'max_row', 0) or 0
+                            max_r = getattr(ws, "max_row", 0) or 0
                             for r in range(1, max_r + 1):
                                 ws.row_dimensions[r].height = 12.75
                         except Exception:
@@ -1348,7 +1650,7 @@ class RoutineTemplateManager:
             # Insertar QR según modo seleccionado y ajustar hoja activa en fallback
             try:
                 mode = (qr_mode or "").strip().lower()
-                qr_link_val = template_data.get('qr_link')
+                qr_link_val = template_data.get("qr_link")
                 if mode in ("sheet", "none"):
                     try:
                         self._remove_qr_footer_band(str(output_path))
@@ -1357,12 +1659,21 @@ class RoutineTemplateManager:
                 if qr_link_val and mode in ("inline", "sheet"):
                     if mode == "sheet":
                         try:
-                            self._add_qr_sheet(str(output_path), qr_link_val, "QR", template_data.get('uuid_rutina'))
+                            self._add_qr_sheet(
+                                str(output_path),
+                                qr_link_val,
+                                "QR",
+                                template_data.get("uuid_rutina"),
+                            )
                         except Exception:
                             pass
                     else:
                         try:
-                            self._add_qr_footer_band(str(output_path), qr_link_val, template_data.get('uuid_rutina'))
+                            self._add_qr_footer_band(
+                                str(output_path),
+                                qr_link_val,
+                                template_data.get("uuid_rutina"),
+                            )
                         except Exception:
                             pass
                 if isinstance(sheet, str) and sheet.strip():
@@ -1371,7 +1682,7 @@ class RoutineTemplateManager:
                         title_norm = sheet.strip()
                         idx_to_set = None
                         for i, ws in enumerate(wbset.worksheets):
-                            if (getattr(ws, 'title', '') or '') == title_norm:
+                            if (getattr(ws, "title", "") or "") == title_norm:
                                 idx_to_set = i
                                 break
                         if idx_to_set is not None:
@@ -1388,104 +1699,115 @@ class RoutineTemplateManager:
                         pass
             except Exception:
                 pass
-            
+
             self.logger.info(f"Excel generado con método fallback: {output_path}")
             return str(output_path)
-            
+
         except Exception as e:
             self.logger.error(f"Error en método fallback: {e}")
             raise e
-    
+
     def _replace_basic_variables(self, sheet, template_data: Dict[str, Any]):
         """
         Reemplaza variables básicas y específicas por día en la hoja de Excel.
-        
+
         Args:
             sheet: Hoja de Excel
             template_data: Datos de la plantilla
         """
         # Mapeo de variables comunes
         variable_mapping = {
-            '{{nombre_completo}}': template_data.get('nombre_completo', ''),
-            '{{Nombre completo}}': template_data.get('Nombre completo', ''),
-            '{{Nombre}}': template_data.get('Nombre', ''),
-            '{{rutina_nombre}}': template_data.get('rutina_nombre', ''),
-            '{{nombre_rutina}}': template_data.get('nombre_rutina', ''),
-            '{{Rutina}}': template_data.get('Rutina', ''),
-            '{{fecha}}': template_data.get('fecha', ''),
-            '{{Fecha}}': template_data.get('Fecha', ''),
-            '{{año}}': template_data.get('año', ''),
-            '{{Año}}': template_data.get('Año', ''),
+            "{{nombre_completo}}": template_data.get("nombre_completo", ""),
+            "{{Nombre completo}}": template_data.get("Nombre completo", ""),
+            "{{Nombre}}": template_data.get("Nombre", ""),
+            "{{rutina_nombre}}": template_data.get("rutina_nombre", ""),
+            "{{nombre_rutina}}": template_data.get("nombre_rutina", ""),
+            "{{Rutina}}": template_data.get("Rutina", ""),
+            "{{fecha}}": template_data.get("fecha", ""),
+            "{{Fecha}}": template_data.get("Fecha", ""),
+            "{{año}}": template_data.get("año", ""),
+            "{{Año}}": template_data.get("Año", ""),
             # '{{semana}}' y '{{Semana}}' se manejan de forma contextual por columna; evitamos reemplazo global aquí
             # '{{semana}}': template_data.get('semana', ''),
             # '{{Semana}}': template_data.get('Semana', ''),
-            '{{semana_num}}': template_data.get('semana_num', ''),
-            '{{Semana_num}}': template_data.get('Semana_num', ''),
-            '{{Semana_numero}}': template_data.get('Semana_numero', ''),
-            '{{current_week}}': template_data.get('current_week', ''),
-            '{{Week}}': template_data.get('Week', ''),
-            '{{logo_gimnasio}}': template_data.get('logo_gimnasio', ''),
-            '{{Logo Gimnasio}}': template_data.get('Logo Gimnasio', ''),
-            '{{Logo_Gimnasio}}': template_data.get('Logo_Gimnasio', ''),
-            '{{dni}}': template_data.get('dni', ''),
-            '{{DNI}}': template_data.get('DNI', ''),
-            '{{telefono}}': template_data.get('telefono', ''),
-            '{{Teléfono}}': template_data.get('Teléfono', ''),
+            "{{semana_num}}": template_data.get("semana_num", ""),
+            "{{Semana_num}}": template_data.get("Semana_num", ""),
+            "{{Semana_numero}}": template_data.get("Semana_numero", ""),
+            "{{current_week}}": template_data.get("current_week", ""),
+            "{{Week}}": template_data.get("Week", ""),
+            "{{logo_gimnasio}}": template_data.get("logo_gimnasio", ""),
+            "{{Logo Gimnasio}}": template_data.get("Logo Gimnasio", ""),
+            "{{Logo_Gimnasio}}": template_data.get("Logo_Gimnasio", ""),
+            "{{dni}}": template_data.get("dni", ""),
+            "{{DNI}}": template_data.get("DNI", ""),
+            "{{telefono}}": template_data.get("telefono", ""),
+            "{{Teléfono}}": template_data.get("Teléfono", ""),
         }
-        
+
         # También contemplar variantes con espacios (inmediatamente después de '{{' y antes de '}}')
         base_keys_with_space = {}
         base_keys_trailing_space = {}
         for k, v in list(variable_mapping.items()):
             # Insertar variante con espacio inmediatamente después de '{{'
-            if k.startswith('{{') and not k.startswith('{{ '):
-                base_keys_with_space['{{ ' + k[2:]] = v
+            if k.startswith("{{") and not k.startswith("{{ "):
+                base_keys_with_space["{{ " + k[2:]] = v
             # Insertar variante con espacio antes de '}}'
-            if k.endswith('}}') and not k.endswith(' }}'):
-                base_keys_trailing_space[k[:-2] + ' }}'] = v
+            if k.endswith("}}") and not k.endswith(" }}"):
+                base_keys_trailing_space[k[:-2] + " }}"] = v
         variable_mapping.update(base_keys_with_space)
         variable_mapping.update(base_keys_trailing_space)
-        
+
         # Agregar variables específicas por día (sustitución global de texto)
         for key, value in template_data.items():
-            if key.startswith(('dia_', 'ejercicio_dia_', 'series_dia_', 'repeticiones_dia_')):
+            if key.startswith(
+                ("dia_", "ejercicio_dia_", "series_dia_", "repeticiones_dia_")
+            ):
                 # Sin espacios
-                variable_mapping[f'{{{{{key}}}}}'] = str(value)
+                variable_mapping[f"{{{{{key}}}}}"] = str(value)
                 # Espacio después de '{{'
-                variable_mapping[f'{{{{ {key}}}}}'] = str(value)
+                variable_mapping[f"{{{{ {key}}}}}"] = str(value)
                 # Espacio antes de '}}'
-                variable_mapping[f'{{{{{key} }}}}'] = str(value)
+                variable_mapping[f"{{{{{key} }}}}"] = str(value)
                 # Espacio en ambos lados
-                variable_mapping[f'{{{{ {key} }}}}'] = str(value)
-        
+                variable_mapping[f"{{{{ {key} }}}}"] = str(value)
+
         # Preparar estructuras para distribución por filas (cuando la celda es exactamente el placeholder)
-        dias_list = template_data.get('dias', []) or []
+        dias_list = template_data.get("dias", []) or []
         ejercicios_por_dia: Dict[int, List[Dict[str, Any]]] = {}
         puntero_por_dia: Dict[int, int] = {}
         for d in dias_list:
             # Aceptar tanto 'numero' (actual) como 'dia' (anterior)
-            day_num = d.get('numero') if isinstance(d, dict) else None
+            day_num = d.get("numero") if isinstance(d, dict) else None
             if day_num is None:
-                day_num = d.get('dia') if isinstance(d, dict) else None
+                day_num = d.get("dia") if isinstance(d, dict) else None
             if isinstance(day_num, int):
-                ejercicios_por_dia[day_num] = d.get('ejercicios', []) or []
+                ejercicios_por_dia[day_num] = d.get("ejercicios", []) or []
                 puntero_por_dia[day_num] = 0
-        
+
         # Calcular número de semanas disponible para acotar current_week_idx
         try:
             weeks_count = 1
             for d in dias_list:
-                for ej in d.get('ejercicios', []) or []:
-                    sw = ej.get('series_semanas') or []
-                    rw = ej.get('repeticiones_semanas') or []
-                    weeks_count = max(weeks_count, len(sw) if isinstance(sw, list) else 0, len(rw) if isinstance(rw, list) else 0)
+                for ej in d.get("ejercicios", []) or []:
+                    sw = ej.get("series_semanas") or []
+                    rw = ej.get("repeticiones_semanas") or []
+                    weeks_count = max(
+                        weeks_count,
+                        len(sw) if isinstance(sw, list) else 0,
+                        len(rw) if isinstance(rw, list) else 0,
+                    )
             if weeks_count <= 0:
                 weeks_count = 1
         except Exception:
             weeks_count = 1
 
         # Determinar semana actual (índice base 0)
-        cw = template_data.get('current_week') or template_data.get('Semana_num') or template_data.get('semana_num') or 1
+        cw = (
+            template_data.get("current_week")
+            or template_data.get("Semana_num")
+            or template_data.get("semana_num")
+            or 1
+        )
         try:
             cw = int(cw)
         except Exception:
@@ -1510,7 +1832,7 @@ class RoutineTemplateManager:
         rx_ejercicio_any_sp = re.compile(r"\{\{\s+ejercicio_dia_(\d+)\s*\}\}")
         rx_series_any_sp = re.compile(r"\{\{\s+series_dia_(\d+)(?:_S(\d+))?\s*\}\}")
         rx_reps_any_sp = re.compile(r"\{\{\s+repeticiones_dia_(\d+)(?:_S(\d+))?\s*\}\}")
-        
+
         # Patrones para 'semana' contextuales (con o sin mayúscula y espacios)
         rx_semana_any = re.compile(r"\{\{\s*(?:semana|Semana)\s*\}\}")
         # Pre-escanear columnas que contienen '{{ semana }}' para asignar números por posición izquierda->derecha
@@ -1524,9 +1846,9 @@ class RoutineTemplateManager:
                 v = cell_scan.value
                 if isinstance(v, str) and rx_semana_any.search(v):
                     try:
-                        col_idx = getattr(cell_scan, 'col_idx', None)
+                        col_idx = getattr(cell_scan, "col_idx", None)
                         if col_idx is None:
-                            c = getattr(cell_scan, 'column', None)
+                            c = getattr(cell_scan, "column", None)
                             if isinstance(c, int):
                                 col_idx = c
                             elif isinstance(c, str) and column_index_from_string:
@@ -1536,8 +1858,10 @@ class RoutineTemplateManager:
                     except Exception:
                         pass
         semana_columns.sort()
-        semana_col_to_num: Dict[int, int] = {c: i + 1 for i, c in enumerate(semana_columns)}
-        
+        semana_col_to_num: Dict[int, int] = {
+            c: i + 1 for i, c in enumerate(semana_columns)
+        }
+
         # Recorrer todas las celdas y reemplazar variables
         for row in sheet.iter_rows():
             # Llevar registro si en esta fila avanzamos el puntero de algún día
@@ -1545,19 +1869,24 @@ class RoutineTemplateManager:
             for cell in row:
                 if cell.value and isinstance(cell.value, str):
                     # Verificar si es una celda combinada
-                    if hasattr(cell, '__class__') and cell.__class__.__name__ == 'MergedCell':
-                        self.logger.warning(f"Celda combinada encontrada en {cell.coordinate}, saltando")
+                    if (
+                        hasattr(cell, "__class__")
+                        and cell.__class__.__name__ == "MergedCell"
+                    ):
+                        self.logger.warning(
+                            f"Celda combinada encontrada en {cell.coordinate}, saltando"
+                        )
                         continue
-                    
+
                     original_value = cell.value
                     stripped = original_value.strip()
 
                     # Reemplazo contextual de '{{ semana }}' por columna (si corresponde)
                     if rx_semana_any.search(original_value):
                         try:
-                            col_idx = getattr(cell, 'col_idx', None)
+                            col_idx = getattr(cell, "col_idx", None)
                             if col_idx is None:
-                                c = getattr(cell, 'column', None)
+                                c = getattr(cell, "column", None)
                                 if isinstance(c, int):
                                     col_idx = c
                                 elif isinstance(c, str) and column_index_from_string:
@@ -1570,93 +1899,131 @@ class RoutineTemplateManager:
                                     try:
                                         cell.value = new_text
                                     except Exception as e:
-                                        self.logger.warning(f"No se pudo actualizar celda {cell.coordinate}: {e}")
+                                        self.logger.warning(
+                                            f"No se pudo actualizar celda {cell.coordinate}: {e}"
+                                        )
                                 original_value = cell.value
                                 stripped = original_value.strip()
                         except Exception:
                             pass
-                    
+
                     # 1) Distribución por filas si la celda es EXACTAMENTE el placeholder
                     m_e = rx_ejercicio.match(stripped)
                     if m_e:
                         day = int(m_e.group(1))
                         ejercicios = ejercicios_por_dia.get(day, [])
                         idx = puntero_por_dia.get(day, 0)
-                        nombre = ejercicios[idx]['nombre'] if idx < len(ejercicios) else ''
+                        nombre = (
+                            ejercicios[idx]["nombre"] if idx < len(ejercicios) else ""
+                        )
                         try:
                             cell.value = nombre
                         except Exception as e:
-                            self.logger.warning(f"No se pudo actualizar celda {cell.coordinate}: {e}")
+                            self.logger.warning(
+                                f"No se pudo actualizar celda {cell.coordinate}: {e}"
+                            )
                         incrementar_dias[day] = True
                         continue
-                    
+
                     m_s = rx_series.match(stripped) or rx_series_sp.match(stripped)
                     if m_s:
                         day = int(m_s.group(1))
-                        semana_idx = int(m_s.group(2)) - 1 if m_s.group(2) else current_week_idx
+                        semana_idx = (
+                            int(m_s.group(2)) - 1 if m_s.group(2) else current_week_idx
+                        )
                         ejercicios = ejercicios_por_dia.get(day, [])
                         idx = puntero_por_dia.get(day, 0)
                         if idx < len(ejercicios):
-                            series_weeks = ejercicios[idx].get('series_semanas') or []
-                            valor = series_weeks[semana_idx] if semana_idx < len(series_weeks) else ''
+                            series_weeks = ejercicios[idx].get("series_semanas") or []
+                            valor = (
+                                series_weeks[semana_idx]
+                                if semana_idx < len(series_weeks)
+                                else ""
+                            )
                         else:
-                            valor = ''
+                            valor = ""
                         try:
                             cell.value = valor
                         except Exception as e:
-                            self.logger.warning(f"No se pudo actualizar celda {cell.coordinate}: {e}")
+                            self.logger.warning(
+                                f"No se pudo actualizar celda {cell.coordinate}: {e}"
+                            )
                         continue
-                    
+
                     m_r = rx_reps.match(stripped) or rx_reps_sp.match(stripped)
                     if m_r:
                         day = int(m_r.group(1))
-                        semana_idx = int(m_r.group(2)) - 1 if m_r.group(2) else current_week_idx
+                        semana_idx = (
+                            int(m_r.group(2)) - 1 if m_r.group(2) else current_week_idx
+                        )
                         ejercicios = ejercicios_por_dia.get(day, [])
                         idx = puntero_por_dia.get(day, 0)
                         if idx < len(ejercicios):
-                            reps_weeks = ejercicios[idx].get('repeticiones_semanas') or []
-                            valor = reps_weeks[semana_idx] if semana_idx < len(reps_weeks) else ''
+                            reps_weeks = (
+                                ejercicios[idx].get("repeticiones_semanas") or []
+                            )
+                            valor = (
+                                reps_weeks[semana_idx]
+                                if semana_idx < len(reps_weeks)
+                                else ""
+                            )
                         else:
-                            valor = ''
+                            valor = ""
                         try:
                             cell.value = valor
                         except Exception as e:
-                            self.logger.warning(f"No se pudo actualizar celda {cell.coordinate}: {e}")
+                            self.logger.warning(
+                                f"No se pudo actualizar celda {cell.coordinate}: {e}"
+                            )
                         continue
-                    
+
                     # 1b) Reemplazos incrustados en cadenas para ejercicio/series/repeticiones y variantes con espacios
                     new_value = original_value
                     replaced_embedded = False
                     if rx_ejercicio_any.search(new_value):
+
                         def _repl_ej(m):
                             day = int(m.group(1))
                             ejercicios = ejercicios_por_dia.get(day, [])
                             idx = puntero_por_dia.get(day, 0)
-                            return ejercicios[idx]['nombre'] if idx < len(ejercicios) else ''
+                            return (
+                                ejercicios[idx]["nombre"]
+                                if idx < len(ejercicios)
+                                else ""
+                            )
+
                         new_value = rx_ejercicio_any.sub(_repl_ej, new_value)
                         replaced_embedded = True
                     if rx_series_any.search(new_value):
+
                         def _repl_series(m):
                             day = int(m.group(1))
-                            semana_idx = int(m.group(2)) - 1 if m.group(2) else current_week_idx
+                            semana_idx = (
+                                int(m.group(2)) - 1 if m.group(2) else current_week_idx
+                            )
                             ejercicios = ejercicios_por_dia.get(day, [])
                             idx = puntero_por_dia.get(day, 0)
                             if idx < len(ejercicios):
-                                sw = ejercicios[idx].get('series_semanas') or []
-                                return sw[semana_idx] if semana_idx < len(sw) else ''
-                            return ''
+                                sw = ejercicios[idx].get("series_semanas") or []
+                                return sw[semana_idx] if semana_idx < len(sw) else ""
+                            return ""
+
                         new_value = rx_series_any.sub(_repl_series, new_value)
                         replaced_embedded = True
                     if rx_reps_any.search(new_value):
+
                         def _repl_reps(m):
                             day = int(m.group(1))
-                            semana_idx = int(m.group(2)) - 1 if m.group(2) else current_week_idx
+                            semana_idx = (
+                                int(m.group(2)) - 1 if m.group(2) else current_week_idx
+                            )
                             ejercicios = ejercicios_por_dia.get(day, [])
                             idx = puntero_por_dia.get(day, 0)
                             if idx < len(ejercicios):
-                                rw = ejercicios[idx].get('repeticiones_semanas') or []
-                                return rw[semana_idx] if semana_idx < len(rw) else ''
-                            return ''
+                                rw = ejercicios[idx].get("repeticiones_semanas") or []
+                                return rw[semana_idx] if semana_idx < len(rw) else ""
+                            return ""
+
                         new_value = rx_reps_any.sub(_repl_reps, new_value)
                         replaced_embedded = True
                     # variantes con espacios
@@ -1669,37 +2036,56 @@ class RoutineTemplateManager:
                     if rx_reps_any_sp.search(new_value):
                         new_value = rx_reps_any_sp.sub(_repl_reps, new_value)
                         replaced_embedded = True
-                    
+
                     # 2) Si no hubo reemplazos por día incrustados, hacer reemplazos globales de texto
                     if not replaced_embedded:
                         new_value2 = original_value
                         for variable, replacement in variable_mapping.items():
                             if variable in new_value2:
-                                new_value2 = new_value2.replace(variable, str(replacement))
+                                new_value2 = new_value2.replace(
+                                    variable, str(replacement)
+                                )
                         if new_value2 != cell.value:
                             try:
                                 cell.value = new_value2
-                                self.logger.debug(f"Reemplazado en {cell.coordinate}: '{cell.value}' -> '{new_value2}'")
+                                self.logger.debug(
+                                    f"Reemplazado en {cell.coordinate}: '{cell.value}' -> '{new_value2}'"
+                                )
                             except Exception as e:
-                                self.logger.warning(f"No se pudo actualizar celda {cell.coordinate}: {e}")
+                                self.logger.warning(
+                                    f"No se pudo actualizar celda {cell.coordinate}: {e}"
+                                )
                     else:
                         # Si hubo reemplazos incrustados por día, también aplicar reemplazos globales restantes
                         final_value = new_value
                         for variable, replacement in variable_mapping.items():
                             if variable in final_value:
-                                final_value = final_value.replace(variable, str(replacement))
+                                final_value = final_value.replace(
+                                    variable, str(replacement)
+                                )
                         if final_value != cell.value:
                             try:
                                 cell.value = final_value
-                                self.logger.debug(f"Reemplazado en {cell.coordinate}: '{cell.value}' -> '{final_value}'")
+                                self.logger.debug(
+                                    f"Reemplazado en {cell.coordinate}: '{cell.value}' -> '{final_value}'"
+                                )
                             except Exception as e:
-                                self.logger.warning(f"No se pudo actualizar celda {cell.coordinate}: {e}")
-            
+                                self.logger.warning(
+                                    f"No se pudo actualizar celda {cell.coordinate}: {e}"
+                                )
+
             # Avanzar puntero por día una vez por fila si hubo un 'ejercicio' en esa fila
             for d in incrementar_dias.keys():
                 puntero_por_dia[d] = puntero_por_dia.get(d, 0) + 1
 
-    def _insert_logo_in_cell(self, ws, cell, logo_path: str, max_height_px: Optional[int] = None, max_width_px: Optional[int] = None) -> None:
+    def _insert_logo_in_cell(
+        self,
+        ws,
+        cell,
+        logo_path: str,
+        max_height_px: Optional[int] = None,
+        max_width_px: Optional[int] = None,
+    ) -> None:
         """
         Inserta el logo centrado en el área de destino (celda o rango combinado si aplica),
         manteniendo la proporción y ajustándolo para que quepa dentro del área disponible.
@@ -1707,9 +2093,9 @@ class RoutineTemplateManager:
         """
         try:
             # Determinar el índice de columna de la celda (compatibilidad distintas versiones)
-            col_idx = getattr(cell, 'col_idx', None)
+            col_idx = getattr(cell, "col_idx", None)
             if col_idx is None:
-                c = getattr(cell, 'column', None)
+                c = getattr(cell, "column", None)
                 if isinstance(c, int):
                     col_idx = c
                 elif isinstance(c, str):
@@ -1727,9 +2113,11 @@ class RoutineTemplateManager:
             target_max_col = col_idx
 
             try:
-                for rng in getattr(ws.merged_cells, 'ranges', []) or []:
+                for rng in getattr(ws.merged_cells, "ranges", []) or []:
                     # Comprobar si la celda está dentro del merge por límites
-                    if (rng.min_row <= cell.row <= rng.max_row) and (rng.min_col <= col_idx <= rng.max_col):
+                    if (rng.min_row <= cell.row <= rng.max_row) and (
+                        rng.min_col <= col_idx <= rng.max_col
+                    ):
                         target_min_row = rng.min_row
                         target_max_row = rng.max_row
                         target_min_col = rng.min_col
@@ -1772,8 +2160,8 @@ class RoutineTemplateManager:
 
             # Cargar imagen y obtener tamaño original
             img = XLImage(logo_path)
-            orig_w = float(getattr(img, 'width', 1)) or 1.0
-            orig_h = float(getattr(img, 'height', 1)) or 1.0
+            orig_w = float(getattr(img, "width", 1)) or 1.0
+            orig_h = float(getattr(img, "height", 1)) or 1.0
 
             # Escalado manteniendo aspecto: llenar altura hasta donde se pueda y quepa en ancho
             scale_h = total_height_px / orig_h if orig_h > 0 else 1.0
@@ -1795,10 +2183,16 @@ class RoutineTemplateManager:
 
             try:
                 if AnchorMarker and OneCellAnchor and XDRPositiveSize2D:
+
                     def _px_to_emu(px: float) -> int:
                         return int(round(px * 9525))
-                    marker = AnchorMarker(col=target_min_col - 1, colOff=_px_to_emu(offset_x_px),
-                                          row=target_min_row - 1, rowOff=_px_to_emu(offset_y_px))
+
+                    marker = AnchorMarker(
+                        col=target_min_col - 1,
+                        colOff=_px_to_emu(offset_x_px),
+                        row=target_min_row - 1,
+                        rowOff=_px_to_emu(offset_y_px),
+                    )
                     ext = XDRPositiveSize2D(cx=_px_to_emu(new_w), cy=_px_to_emu(new_h))
                     img.anchor = OneCellAnchor(_from=marker, ext=ext)
                     ws.add_image(img)
@@ -1808,11 +2202,19 @@ class RoutineTemplateManager:
                 ws.add_image(img, anchor_coord)
         except Exception as e:
             try:
-                self.logger.warning(f"No se pudo insertar el logo en {cell.coordinate}: {e}")
+                self.logger.warning(
+                    f"No se pudo insertar el logo en {cell.coordinate}: {e}"
+                )
             except Exception:
                 pass
 
-    def _add_qr_sheet(self, xlsx_path: str, qr_link: str, sheet_title: str = "QR", uuid_text: Optional[str] = None) -> None:
+    def _add_qr_sheet(
+        self,
+        xlsx_path: str,
+        qr_link: str,
+        sheet_title: str = "QR",
+        uuid_text: Optional[str] = None,
+    ) -> None:
         try:
             wb = openpyxl.load_workbook(xlsx_path)
         except Exception:
@@ -1820,18 +2222,25 @@ class RoutineTemplateManager:
         qr_png_path = None
         try:
             import segno  # type: ignore
-            qrcode = segno.make(qr_link, error='h')
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+
+            qrcode = segno.make(qr_link, error="h")
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
             tmp.close()
-            qrcode.save(tmp.name, kind='png', scale=12, border=2)
+            qrcode.save(tmp.name, kind="png", scale=12, border=2)
             qr_png_path = tmp.name
         except Exception:
             try:
                 import qrcode  # type: ignore
                 from qrcode.constants import ERROR_CORRECT_H  # type: ignore
-                tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
                 tmp.close()
-                qr = qrcode.QRCode(version=None, error_correction=ERROR_CORRECT_H, box_size=10, border=2)
+                qr = qrcode.QRCode(
+                    version=None,
+                    error_correction=ERROR_CORRECT_H,
+                    box_size=10,
+                    border=2,
+                )
                 qr.add_data(qr_link)
                 qr.make(fit=True)
                 img = qr.make_image(fill_color="black", back_color="white")
@@ -1842,22 +2251,30 @@ class RoutineTemplateManager:
         try:
             if qr_png_path and os.path.exists(qr_png_path):
                 from PIL import Image, ImageOps  # type: ignore
-                qr_img = Image.open(qr_png_path).convert('RGBA')
-                logo_path = self._get_logo_file_for_current_tenant() or resource_path(os.path.join('assets', 'gym_logo.png'))
+
+                qr_img = Image.open(qr_png_path).convert("RGBA")
+                logo_path = self._get_logo_file_for_current_tenant() or resource_path(
+                    os.path.join("assets", "gym_logo.png")
+                )
                 if not os.path.exists(logo_path):
-                    alt_logo = resource_path(os.path.join('assets', 'gym_logo.ico'))
+                    alt_logo = resource_path(os.path.join("assets", "gym_logo.ico"))
                     logo_path = alt_logo if os.path.exists(alt_logo) else logo_path
                 if os.path.exists(logo_path):
-                    logo_img = Image.open(logo_path).convert('RGBA')
+                    logo_img = Image.open(logo_path).convert("RGBA")
                     qr_w, qr_h = qr_img.size
                     target_w = int(min(max(qr_w * 0.22, 48), 96))
                     logo_img.thumbnail((target_w, target_w), Image.LANCZOS)
                     pad = max(6, int(round(target_w * 0.12)))
                     # Añadir borde blanco alrededor del logo para mejorar contraste y evitar confusiones del lector
-                    padded = ImageOps.expand(logo_img, border=pad, fill=(255, 255, 255, 255))
-                    pos = (int((qr_w - padded.size[0]) / 2), int((qr_h - padded.size[1]) / 2))
+                    padded = ImageOps.expand(
+                        logo_img, border=pad, fill=(255, 255, 255, 255)
+                    )
+                    pos = (
+                        int((qr_w - padded.size[0]) / 2),
+                        int((qr_h - padded.size[1]) / 2),
+                    )
                     qr_img.alpha_composite(padded, dest=pos)
-                    qr_img = qr_img.convert('RGB')
+                    qr_img = qr_img.convert("RGB")
                     qr_img.save(qr_png_path)
         except Exception:
             pass
@@ -1865,7 +2282,7 @@ class RoutineTemplateManager:
             title_norm = (sheet_title or "QR").strip() or "QR"
             ws = None
             for _ws in wb.worksheets:
-                if (getattr(_ws, 'title', '') or '') == title_norm:
+                if (getattr(_ws, "title", "") or "") == title_norm:
                     ws = _ws
                     break
             if ws is None:
@@ -1885,10 +2302,19 @@ class RoutineTemplateManager:
                     img.width = 192
                     img.height = 192
                     if AnchorMarker and OneCellAnchor and XDRPositiveSize2D:
+
                         def _px_to_emu(px: float) -> int:
                             return int(round(px * 9525))
-                        marker = AnchorMarker(col=4 - 1, colOff=_px_to_emu(0), row=4 - 1, rowOff=_px_to_emu(0))
-                        ext = XDRPositiveSize2D(cx=_px_to_emu(img.width), cy=_px_to_emu(img.height))
+
+                        marker = AnchorMarker(
+                            col=4 - 1,
+                            colOff=_px_to_emu(0),
+                            row=4 - 1,
+                            rowOff=_px_to_emu(0),
+                        )
+                        ext = XDRPositiveSize2D(
+                            cx=_px_to_emu(img.width), cy=_px_to_emu(img.height)
+                        )
                         img.anchor = OneCellAnchor(_from=marker, ext=ext)
                         ws.add_image(img)
                     else:
@@ -1919,7 +2345,9 @@ class RoutineTemplateManager:
         except Exception:
             pass
 
-    def _add_qr_footer_band(self, xlsx_path: str, qr_link: str, uuid_text: Optional[str] = None) -> None:
+    def _add_qr_footer_band(
+        self, xlsx_path: str, qr_link: str, uuid_text: Optional[str] = None
+    ) -> None:
         """Añade una banda de pie con QR y texto informativo en todas las hojas del XLSX.
 
         Cambios de estilo:
@@ -1941,22 +2369,29 @@ class RoutineTemplateManager:
         qr_png_path = None
         try:
             import segno  # type: ignore
+
             # Usar corrección de error alta para permitir overlay del logo
-            qrcode = segno.make(qr_link, error='h')
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+            qrcode = segno.make(qr_link, error="h")
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
             tmp.close()
             # Aumentar escala para mejorar nitidez del QR en Excel
             # scale≈12 produce ~300px, mantiene bordes nítidos sin suavizado
-            qrcode.save(tmp.name, kind='png', scale=12, border=2)
+            qrcode.save(tmp.name, kind="png", scale=12, border=2)
             qr_png_path = tmp.name
         except Exception:
             try:
                 import qrcode  # type: ignore
                 from qrcode.constants import ERROR_CORRECT_H  # type: ignore
-                tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.png')
+
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
                 tmp.close()
                 # Corrección de error alta para permitir overlay del logo
-                qr = qrcode.QRCode(version=None, error_correction=ERROR_CORRECT_H, box_size=10, border=2)
+                qr = qrcode.QRCode(
+                    version=None,
+                    error_correction=ERROR_CORRECT_H,
+                    box_size=10,
+                    border=2,
+                )
                 qr.add_data(qr_link)
                 qr.make(fit=True)
                 img = qr.make_image(fill_color="black", back_color="white")
@@ -1964,19 +2399,22 @@ class RoutineTemplateManager:
                 qr_png_path = tmp.name
             except Exception:
                 qr_png_path = None
-        
+
         # Superponer el logo del gimnasio centrado sobre el QR (si existe)
         try:
             if qr_png_path and os.path.exists(qr_png_path):
                 from PIL import Image, ImageOps  # type: ignore
-                qr_img = Image.open(qr_png_path).convert('RGBA')
-                logo_path = self._get_logo_file_for_current_tenant() or resource_path(os.path.join('assets', 'gym_logo.png'))
+
+                qr_img = Image.open(qr_png_path).convert("RGBA")
+                logo_path = self._get_logo_file_for_current_tenant() or resource_path(
+                    os.path.join("assets", "gym_logo.png")
+                )
                 if not os.path.exists(logo_path):
                     # Fallback de nombre alternativo
-                    alt_logo = resource_path(os.path.join('assets', 'gym_logo.ico'))
+                    alt_logo = resource_path(os.path.join("assets", "gym_logo.ico"))
                     logo_path = alt_logo if os.path.exists(alt_logo) else logo_path
                 if os.path.exists(logo_path):
-                    logo_img = Image.open(logo_path).convert('RGBA')
+                    logo_img = Image.open(logo_path).convert("RGBA")
                     # Tamaño del logo: ~22% del ancho del QR, limitado
                     qr_w, qr_h = qr_img.size
                     target_w = int(min(max(qr_w * 0.22, 48), 96))
@@ -1984,19 +2422,26 @@ class RoutineTemplateManager:
                     logo_img.thumbnail((target_w, target_w), Image.LANCZOS)
                     # Borde blanco más visible para estándares de lectura
                     pad = max(6, int(round(target_w * 0.12)))
-                    padded = ImageOps.expand(logo_img, border=pad, fill=(255, 255, 255, 255))
+                    padded = ImageOps.expand(
+                        logo_img, border=pad, fill=(255, 255, 255, 255)
+                    )
                     # Posición centrada sobre el QR
-                    pos = (int((qr_w - padded.size[0]) / 2), int((qr_h - padded.size[1]) / 2))
+                    pos = (
+                        int((qr_w - padded.size[0]) / 2),
+                        int((qr_h - padded.size[1]) / 2),
+                    )
                     qr_img.alpha_composite(padded, dest=pos)
                     # Guardar de vuelta el PNG
-                    qr_img = qr_img.convert('RGB')
+                    qr_img = qr_img.convert("RGB")
                     qr_img.save(qr_png_path)
         except Exception:
             # Si falla overlay, continuar con QR original
             pass
 
         # Estilos de banda
-        band_fill = PatternFill(fill_type="solid", start_color="FFFFFF", end_color="FFFFFF")
+        band_fill = PatternFill(
+            fill_type="solid", start_color="FFFFFF", end_color="FFFFFF"
+        )
         band_font = Font(size=9, bold=False, color="333333")
         band_align = Alignment(horizontal="center", vertical="center", wrap_text=False)
 
@@ -2015,25 +2460,31 @@ class RoutineTemplateManager:
                             val = c.value
                             has_fill = False
                             try:
-                                fc = getattr(getattr(c.fill, 'fgColor', None), 'rgb', None)
+                                fc = getattr(
+                                    getattr(c.fill, "fgColor", None), "rgb", None
+                                )
                                 has_fill = bool(fc)
                             except Exception:
                                 has_fill = False
-                            if (val is not None and str(val) != '') or has_fill:
+                            if (val is not None and str(val) != "") or has_fill:
                                 if c.row > max_row_detected:
                                     max_row_detected = c.row
                 except Exception:
                     # Fallback si falla: usar max_row de hoja
-                    max_row_detected = int(getattr(ws, 'max_row', 0) or 0)
+                    max_row_detected = int(getattr(ws, "max_row", 0) or 0)
 
                 # Considerar celdas combinadas
                 try:
-                    for rng in getattr(ws, 'merged_cells', []).ranges:
+                    for rng in getattr(ws, "merged_cells", []).ranges:
                         max_row_detected = max(max_row_detected, rng.max_row)
                 except Exception:
                     pass
 
-                blank_row = (max_row_detected if max_row_detected > 0 else int(getattr(ws, 'max_row', 0) or 0)) + 1
+                blank_row = (
+                    max_row_detected
+                    if max_row_detected > 0
+                    else int(getattr(ws, "max_row", 0) or 0)
+                ) + 1
                 band_row = blank_row + 1
 
                 # Crear fila en blanco y fila de banda
@@ -2048,7 +2499,12 @@ class RoutineTemplateManager:
                 start_col = 1
                 end_col = 9
                 try:
-                    ws.merge_cells(start_row=band_row, start_column=start_col, end_row=band_row, end_column=end_col)
+                    ws.merge_cells(
+                        start_row=band_row,
+                        start_column=start_col,
+                        end_row=band_row,
+                        end_column=end_col,
+                    )
                 except Exception:
                     pass
                 cell_text = ws.cell(row=band_row, column=start_col)
@@ -2060,7 +2516,9 @@ class RoutineTemplateManager:
                 try:
                     cell_text.font = band_font
                     cell_text.alignment = band_align
-                    for c in range(start_col, 11 + 1):  # Extender el fondo hasta la columna K
+                    for c in range(
+                        start_col, 11 + 1
+                    ):  # Extender el fondo hasta la columna K
                         ws.cell(row=band_row, column=c).fill = band_fill
                     # Línea superior sutil para separar banda
                     for c in range(start_col, 11 + 1):
@@ -2089,12 +2547,20 @@ class RoutineTemplateManager:
                         img.height = 128
                         # Usar anclaje OneCellAnchor cuando esté disponible para mayor compatibilidad
                         if AnchorMarker and OneCellAnchor and XDRPositiveSize2D:
+
                             def _px_to_emu(px: float) -> int:
                                 return int(round(px * 9525))
+
                             # Columna K es índice 11 (base 1), OneCellAnchor usa base 0
-                            marker = AnchorMarker(col=11 - 1, colOff=_px_to_emu(0),
-                                                  row=band_row - 1, rowOff=_px_to_emu(0))
-                            ext = XDRPositiveSize2D(cx=_px_to_emu(img.width), cy=_px_to_emu(img.height))
+                            marker = AnchorMarker(
+                                col=11 - 1,
+                                colOff=_px_to_emu(0),
+                                row=band_row - 1,
+                                rowOff=_px_to_emu(0),
+                            )
+                            ext = XDRPositiveSize2D(
+                                cx=_px_to_emu(img.width), cy=_px_to_emu(img.height)
+                            )
                             img.anchor = OneCellAnchor(_from=marker, ext=ext)
                             ws.add_image(img)
                         else:
@@ -2105,7 +2571,9 @@ class RoutineTemplateManager:
                         image_inserted = False
                 if not image_inserted:
                     try:
-                        link_cell = ws.cell(row=band_row, column=11, value=f"QR: {qr_link}")
+                        link_cell = ws.cell(
+                            row=band_row, column=11, value=f"QR: {qr_link}"
+                        )
                         try:
                             link_cell.hyperlink = qr_link
                             link_cell.font = Font(color="0000EE", underline="single")
@@ -2114,7 +2582,9 @@ class RoutineTemplateManager:
                     except Exception:
                         pass
                 try:
-                    self.logger.info(f"QR footer insertado en hoja '{getattr(ws, 'title', '?')}' en fila {band_row}. QR imagen: {'sí' if (qr_png_path and os.path.exists(qr_png_path)) else 'no'}")
+                    self.logger.info(
+                        f"QR footer insertado en hoja '{getattr(ws, 'title', '?')}' en fila {band_row}. QR imagen: {'sí' if (qr_png_path and os.path.exists(qr_png_path)) else 'no'}"
+                    )
                 except Exception:
                     pass
             except Exception:
@@ -2154,12 +2624,15 @@ class RoutineTemplateManager:
                     for row in ws.iter_rows():
                         for cell in row:
                             try:
-                                if isinstance(cell, MergedCellClass):
+                                if isinstance(cell, MergedCell):
                                     continue
                             except Exception:
                                 pass
-                            val = getattr(cell, 'value', None)
-                            if isinstance(val, str) and val.strip() == "Escaneá para ver rutina":
+                            val = getattr(cell, "value", None)
+                            if (
+                                isinstance(val, str)
+                                and val.strip() == "Escaneá para ver rutina"
+                            ):
                                 rows_to_delete.append(cell.row)
                                 # Limpiar posible celda de link en columna K (11)
                                 try:
@@ -2174,25 +2647,26 @@ class RoutineTemplateManager:
 
                 # Retirar imágenes ancladas a las filas detectadas
                 try:
-                    imgs = list(getattr(ws, '_images', []) or [])
+                    imgs = list(getattr(ws, "_images", []) or [])
                     keep = []
                     for img in imgs:
                         remove = False
                         try:
-                            anc = getattr(img, 'anchor', None)
+                            anc = getattr(img, "anchor", None)
                             # OneCellAnchor con _from.row (base 0)
-                            if hasattr(anc, '_from') and hasattr(anc._from, 'row'):
+                            if hasattr(anc, "_from") and hasattr(anc._from, "row"):
                                 r0 = int(anc._from.row) + 1
                                 if r0 in rows_to_delete:
                                     remove = True
                             # AnchorMarker-like con row (base 0)
-                            elif hasattr(anc, 'row'):
+                            elif hasattr(anc, "row"):
                                 r0 = int(anc.row) + 1
                                 if r0 in rows_to_delete:
                                     remove = True
                             # Anclaje por referencia de celda "K{row}"
                             elif isinstance(anc, str):
                                 import re as _re
+
                                 m = _re.match(r"^[A-Z]+(\d+)$", anc)
                                 if m:
                                     r = int(m.group(1))
@@ -2213,19 +2687,22 @@ class RoutineTemplateManager:
                             if r > 1:
                                 prev_blank = True
                                 try:
-                                    for cell in ws[r-1]:
+                                    for cell in ws[r - 1]:
                                         try:
-                                            if isinstance(cell, MergedCellClass):
+                                            if isinstance(cell, MergedCell):
                                                 continue
                                         except Exception:
                                             pass
-                                        if getattr(cell, 'value', None) not in (None, ''):
+                                        if getattr(cell, "value", None) not in (
+                                            None,
+                                            "",
+                                        ):
                                             prev_blank = False
                                             break
                                 except Exception:
                                     prev_blank = False
                                 if prev_blank:
-                                    ws.delete_rows(r-1, 2)
+                                    ws.delete_rows(r - 1, 2)
                                     continue
                         except Exception:
                             pass
@@ -2244,11 +2721,13 @@ class RoutineTemplateManager:
         except Exception:
             pass
 
-    def _load_exercises_sequential(self, sheet, dias_data: List[Dict[str, Any]], current_week: Optional[int] = None):
+    def _load_exercises_sequential(
+        self, sheet, dias_data: List[Dict[str, Any]], current_week: Optional[int] = None
+    ):
         """
         Rellena una tabla anterior sin placeholders Jinja buscando encabezados comunes
         (Ejercicio, Series, Repeticiones) y completando fila por fila.
-        
+
         Args:
             sheet: Hoja de Excel
             dias_data: Datos de los días con ejercicios
@@ -2260,47 +2739,63 @@ class RoutineTemplateManager:
             col_ejercicio = None
             col_series = None
             col_reps = None
-            series_week_cols: Dict[int, int] = {}   # semana -> col
-            reps_week_cols: Dict[int, int] = {}     # semana -> col
+            series_week_cols: Dict[int, int] = {}  # semana -> col
+            reps_week_cols: Dict[int, int] = {}  # semana -> col
             max_rows_scan = min(sheet.max_row, 200)
             for r in range(1, max_rows_scan + 1):
                 row_vals = []
                 for c in range(1, sheet.max_column + 1):
                     v = sheet.cell(row=r, column=c).value
                     row_vals.append(v)
-                row_text = [str(v).strip() for v in row_vals if isinstance(v, str) and v.strip()]
-                lower_map = {i+1: row_vals[i].strip().lower() if isinstance(row_vals[i], str) else '' for i in range(len(row_vals))}
-                if any('ejercicio' in t for t in (v.lower() for v in row_text)):
+                row_text = [
+                    str(v).strip() for v in row_vals if isinstance(v, str) and v.strip()
+                ]
+                lower_map = {
+                    i + 1: row_vals[i].strip().lower()
+                    if isinstance(row_vals[i], str)
+                    else ""
+                    for i in range(len(row_vals))
+                }
+                if any("ejercicio" in t for t in (v.lower() for v in row_text)):
                     header_row_idx = r
                     # Identificar columnas por nombre
                     for col_idx, text in lower_map.items():
                         if not text:
                             continue
-                        if 'ejercicio' in text and col_ejercicio is None:
+                        if "ejercicio" in text and col_ejercicio is None:
                             col_ejercicio = col_idx
-                        if 'serie' in text and col_series is None and not re.search(r'\br\d+\b', text):
+                        if (
+                            "serie" in text
+                            and col_series is None
+                            and not re.search(r"\br\d+\b", text)
+                        ):
                             # Evitar confundir con R1, R2
                             col_series = col_idx
-                        if any(x in text for x in ['repet', 'repes']) and col_reps is None:
+                        if (
+                            any(x in text for x in ["repet", "repes"])
+                            and col_reps is None
+                        ):
                             col_reps = col_idx
                         # Series por semana: S1, S2, Series S1
-                        m_s = re.match(r'^(?:series\s*)?s(\d+)$', text)
+                        m_s = re.match(r"^(?:series\s*)?s(\d+)$", text)
                         if m_s:
                             semana = int(m_s.group(1))
                             series_week_cols[semana] = col_idx
                         # Reps por semana: R1, Reps S1, Repeticiones S1 o R1
-                        m_r = re.match(r'^(?:reps?|repeticiones?\s*)s?(\d+)$', text)
+                        m_r = re.match(r"^(?:reps?|repeticiones?\s*)s?(\d+)$", text)
                         if m_r:
                             semana = int(m_r.group(1))
                             reps_week_cols[semana] = col_idx
                         else:
-                            m_r_short = re.match(r'^r(\d+)$', text)
+                            m_r_short = re.match(r"^r(\d+)$", text)
                             if m_r_short:
                                 semana = int(m_r_short.group(1))
                                 reps_week_cols[semana] = col_idx
                     break
             if header_row_idx is None or col_ejercicio is None:
-                self.logger.info("No se encontraron encabezados de tabla anteriores (Ejercicio/Series/Repeticiones). Omitiendo secuencial.")
+                self.logger.info(
+                    "No se encontraron encabezados de tabla anteriores (Ejercicio/Series/Repeticiones). Omitiendo secuencial."
+                )
                 return
             start_row = header_row_idx + 1
             write_row = start_row
@@ -2326,7 +2821,10 @@ class RoutineTemplateManager:
                             # Encontrar el rango fusionado que cubre esta celda
                             for rng in sheet.merged_cells.ranges:
                                 min_col, min_row, max_col, max_row = rng.bounds
-                                if min_row <= row <= max_row and min_col <= _c <= max_col:
+                                if (
+                                    min_row <= row <= max_row
+                                    and min_col <= _c <= max_col
+                                ):
                                     adjusted = max(adjusted, max_row + 1)
                                     break
                     if adjusted == row:
@@ -2334,54 +2832,66 @@ class RoutineTemplateManager:
                     row = adjusted
 
             # Escribir ejercicios secuencialmente
-            days_sorted = sorted(dias_data, key=lambda d: d.get('numero') or d.get('dia') or 0)
+            days_sorted = sorted(
+                dias_data, key=lambda d: d.get("numero") or d.get("dia") or 0
+            )
             for di, day in enumerate(days_sorted):
-                ejercicios = day.get('ejercicios', []) or []
+                ejercicios = day.get("ejercicios", []) or []
                 for ej in ejercicios:
-                    nombre = ej.get('nombre', '')
+                    nombre = ej.get("nombre", "")
                     # Valores semanales
-                    s_weeks = ej.get('series_semanas') or []
-                    r_weeks = ej.get('repeticiones_semanas') or []
+                    s_weeks = ej.get("series_semanas") or []
+                    r_weeks = ej.get("repeticiones_semanas") or []
                     # Derivar valores base a partir de la semana actual si está disponible
-                    if current_week is not None and isinstance(current_week, int) and current_week > 0:
+                    if (
+                        current_week is not None
+                        and isinstance(current_week, int)
+                        and current_week > 0
+                    ):
                         idx_curr = current_week - 1
-                        series_val = s_weeks[idx_curr] if idx_curr < len(s_weeks) else ''
-                        reps_val = r_weeks[idx_curr] if idx_curr < len(r_weeks) else ''
+                        series_val = (
+                            s_weeks[idx_curr] if idx_curr < len(s_weeks) else ""
+                        )
+                        reps_val = r_weeks[idx_curr] if idx_curr < len(r_weeks) else ""
                     else:
                         # Si no hay semana actual, no rellenar desde valores planos; dejar vacío
-                        series_val = ''
-                        reps_val = ''
+                        series_val = ""
+                        reps_val = ""
                     try:
                         # Mover write_row a la siguiente fila libre no fusionada en las columnas objetivo
                         write_row = _adjust_to_unmerged_row(write_row)
                         sheet.cell(row=write_row, column=col_ejercicio).value = nombre
                         if col_series:
-                            sheet.cell(row=write_row, column=col_series).value = series_val
+                            sheet.cell(
+                                row=write_row, column=col_series
+                            ).value = series_val
                         if col_reps:
                             sheet.cell(row=write_row, column=col_reps).value = reps_val
                         # Series por semana si existen columnas S1..Sn
                         if s_weeks:
                             for semana, col_idx in series_week_cols.items():
                                 idx = semana - 1
-                                val = s_weeks[idx] if idx < len(s_weeks) else ''
+                                val = s_weeks[idx] if idx < len(s_weeks) else ""
                                 cell = sheet.cell(row=write_row, column=col_idx)
                                 if isinstance(cell, MergedCell):
                                     # Saltar escritura en celdas fusionadas específicas de semana
                                     continue
                                 sheet.cell(row=write_row, column=col_idx).value = val
                         # Repeticiones por semana si existen columnas R1..Rn o similares
-                        r_weeks = ej.get('repeticiones_semanas') or []
+                        r_weeks = ej.get("repeticiones_semanas") or []
                         if r_weeks:
                             for semana, col_idx in reps_week_cols.items():
                                 idx = semana - 1
-                                val = r_weeks[idx] if idx < len(r_weeks) else ''
+                                val = r_weeks[idx] if idx < len(r_weeks) else ""
                                 cell = sheet.cell(row=write_row, column=col_idx)
                                 if isinstance(cell, MergedCell):
                                     # Saltar escritura en celdas fusionadas específicas de semana
                                     continue
                                 sheet.cell(row=write_row, column=col_idx).value = val
                     except Exception as e:
-                        self.logger.warning(f"No se pudo escribir ejercicio en fila {write_row}: {e}")
+                        self.logger.warning(
+                            f"No se pudo escribir ejercicio en fila {write_row}: {e}"
+                        )
                     write_row += 1
                 # Rellenar hasta 8 filas por día con filas en blanco para respetar el bloque por día
                 try:
@@ -2398,52 +2908,68 @@ class RoutineTemplateManager:
                 if di < len(days_sorted) - 1:
                     write_row = _adjust_to_unmerged_row(write_row)
                     write_row += 1
-            self.logger.info(f"Tabla anterior completada desde fila {start_row} hasta {write_row-1}")
+            self.logger.info(
+                f"Tabla anterior completada desde fila {start_row} hasta {write_row - 1}"
+            )
         except Exception as e:
             self.logger.exception(f"Error en _load_exercises_sequential: {e}")
             # No relanzar para no romper exportación cuando este método no aplica
             return
 
-    def generate_routine_pdf(self, rutina: Rutina, usuario: Usuario,
-                           exercises_by_day: Dict[int, List[RutinaEjercicio]], 
-                           output_path: str = None) -> str:
+    def generate_routine_pdf(
+        self,
+        rutina: Rutina,
+        usuario: Usuario,
+        exercises_by_day: Dict[int, List[RutinaEjercicio]],
+        output_path: str = None,
+    ) -> str:
         """
         Genera un archivo PDF de rutina.
-        
+
         Args:
             rutina: Objeto Rutina
             usuario: Objeto Usuario
             exercises_by_day: Diccionario con ejercicios por día
             output_path: Ruta de salida personalizada
-            
+
         Returns:
             Ruta del archivo generado
         """
         try:
             self.logger.info("Iniciando generación de PDF de rutina")
-            
+
             # Validar datos
-            is_valid, errors = self.validate_routine_data(rutina, usuario, exercises_by_day)
+            is_valid, errors = self.validate_routine_data(
+                rutina, usuario, exercises_by_day
+            )
             if not is_valid:
                 error_msg = f"Datos de rutina inválidos: {', '.join(errors)}"
                 self.logger.error(error_msg)
                 raise ValueError(error_msg)
-            
+
             # Generar nombre de archivo si no se proporciona
             if not output_path:
                 # Formato: rutina_{nombreRutina}_{CantDias}_{Nombre_Apellido}_{dd-mm-aaaa}.pdf
-                rname = (getattr(rutina, "nombre_rutina", None) or getattr(rutina, "nombre", None) or "Rutina")
+                rname = (
+                    getattr(rutina, "nombre_rutina", None)
+                    or getattr(rutina, "nombre", None)
+                    or "Rutina"
+                )
                 uname = (getattr(usuario, "nombre", "") or "").strip()
                 parts = re.split(r"\s+", uname) if uname else []
                 first = parts[0] if parts else ""
                 last = parts[-1] if len(parts) > 1 else ""
+
                 def _safe_slug(s: str) -> str:
                     s = (s or "").strip()
                     s = re.sub(r"[^\w\s-]", "", s)
                     s = re.sub(r"\s+", "_", s)
                     return s
+
                 base = _safe_slug(rname) or "Rutina"
-                user_seg = _safe_slug(first) + (("_" + _safe_slug(last)) if last else "")
+                user_seg = _safe_slug(first) + (
+                    ("_" + _safe_slug(last)) if last else ""
+                )
                 # Cantidad de días profesional y entendible, clamped a 1-5
                 try:
                     num_days_pdf = len(exercises_by_day)
@@ -2459,94 +2985,122 @@ class RoutineTemplateManager:
                         fecha_str = datetime.now().strftime("%d-%m-%Y")
                 except Exception:
                     fecha_str = datetime.now().strftime("%d-%m-%Y")
-                filename = f"rutina_{base}_{days_seg}_{user_seg or 'Usuario'}_{fecha_str}.pdf"
+                filename = (
+                    f"rutina_{base}_{days_seg}_{user_seg or 'Usuario'}_{fecha_str}.pdf"
+                )
                 output_path = self.output_dir_pdf / filename
             else:
                 output_path = Path(output_path)
-            
+
             # Crear documento PDF en orientación horizontal
             doc = SimpleDocTemplate(str(output_path), pagesize=landscape(A4))
             styles = getSampleStyleSheet()
             story = []
-            
+
             # Título
             title_style = ParagraphStyle(
-                'CustomTitle',
-                parent=styles['Heading1'],
+                "CustomTitle",
+                parent=styles["Heading1"],
                 fontSize=18,
                 spaceAfter=30,
-                alignment=TA_CENTER
+                alignment=TA_CENTER,
             )
-            #Este titulo hay que corregirlo, porque van a haber problemas cuando trabaje con + gimnasios.
-            story.append(Paragraph("ZURKA FITNESS - RUTINA PERSONALIZADA", title_style)) 
-            
+            # Este titulo hay que corregirlo, porque van a haber problemas cuando trabaje con + gimnasios.
+            story.append(Paragraph("ZURKA FITNESS - RUTINA PERSONALIZADA", title_style))
+
             # Información del usuario
-            info_style = styles['Normal']
+            info_style = styles["Normal"]
             story.append(Paragraph(f"<b>Cliente:</b> {usuario.nombre}", info_style))
-            story.append(Paragraph(f"<b>Rutina:</b> {rutina.nombre_rutina}", info_style))
-            story.append(Paragraph(f"<b>Fecha:</b> {datetime.now().strftime('%d/%m/%Y')}", info_style))
+            story.append(
+                Paragraph(f"<b>Rutina:</b> {rutina.nombre_rutina}", info_style)
+            )
+            story.append(
+                Paragraph(
+                    f"<b>Fecha:</b> {datetime.now().strftime('%d/%m/%Y')}", info_style
+                )
+            )
             story.append(Spacer(1, 20))
-            
+
             # Ejercicios por día
             for day_num in sorted(exercises_by_day.keys()):
                 exercises = exercises_by_day[day_num]
-                
+
                 # Título del día
-                day_title = Paragraph(f"<b>DÍA {day_num}</b>", styles['Heading2'])
+                day_title = Paragraph(f"<b>DÍA {day_num}</b>", styles["Heading2"])
                 story.append(day_title)
-                
+
                 # Tabla de ejercicios
-                table_data = [['Ejercicio', 'Series', 'Repeticiones']]
-                
+                table_data = [["Ejercicio", "Series", "Repeticiones"]]
+
                 for exercise in exercises:
                     # Igual que en Excel, soportar atributo personalizado
-                    nombre_e = getattr(exercise, 'nombre_ejercicio', None) or (exercise.ejercicio.nombre if getattr(exercise, 'ejercicio', None) else 'Sin nombre')
-                    table_data.append([
-                        nombre_e,
-                        getattr(exercise, 'series', '') or '',
-                        getattr(exercise, 'repeticiones', '') or ''
-                    ])
-                
+                    nombre_e = getattr(exercise, "nombre_ejercicio", None) or (
+                        exercise.ejercicio.nombre
+                        if getattr(exercise, "ejercicio", None)
+                        else "Sin nombre"
+                    )
+                    table_data.append(
+                        [
+                            nombre_e,
+                            getattr(exercise, "series", "") or "",
+                            getattr(exercise, "repeticiones", "") or "",
+                        ]
+                    )
+
                 table = Table(table_data)
-                table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0, 0), (-1, 0), 14),
-                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                    ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                    ('GRID', (0, 0), (-1, -1), 1, colors.black)
-                ]))
-                
+                table.setStyle(
+                    TableStyle(
+                        [
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+                            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+                            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                            ("FONTSIZE", (0, 0), (-1, 0), 14),
+                            ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
+                            ("BACKGROUND", (0, 1), (-1, -1), colors.beige),
+                            ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                        ]
+                    )
+                )
+
                 story.append(table)
                 story.append(Spacer(1, 20))
-            
+
             # Construir PDF
             doc.build(story)
-            
+
             self.logger.info(f"Rutina PDF generada exitosamente: {output_path}")
             return str(output_path)
-            
+
         except Exception as e:
             self.logger.error(f"Error al generar PDF de rutina: {e}")
             raise e
 
+
 # Mantener compatibilidad con código existente
-def create_routine_manager(database_manager: DatabaseManager = None) -> RoutineTemplateManager:
+def create_routine_manager(
+    database_manager: DatabaseManager = None,
+) -> RoutineTemplateManager:
     """
     Factory function para crear una instancia del gestor de rutinas.
-    
+
     Args:
         database_manager: Instancia del gestor de base de datos
-        
+
     Returns:
         Instancia de RoutineTemplateManager
     """
     return RoutineTemplateManager(database_manager=database_manager)
 
 
-def _apply_column_widths_all_sheets(self, workbook, start_col_letter: str = 'L', end_col_letter: str = 'AA', width: float = 3.71, pixel_width: Optional[int] = None) -> None:
+def _apply_column_widths_all_sheets(
+    self,
+    workbook,
+    start_col_letter: str = "L",
+    end_col_letter: str = "AA",
+    width: float = 3.71,
+    pixel_width: Optional[int] = None,
+) -> None:
     """Aplica un ancho fijo a columnas desde start_col_letter hasta end_col_letter en todas las hojas
     y además fuerza alineaciones de tabla (Ejercicio/Series/Repeticiones) según requerimientos.
 
@@ -2560,13 +3114,14 @@ def _apply_column_widths_all_sheets(self, workbook, start_col_letter: str = 'L',
     try:
         from openpyxl.utils import column_index_from_string, get_column_letter
         from openpyxl.cell.cell import MergedCell as _MergedCell
+
         # 1) Aplicar anchos
         start_idx = column_index_from_string(start_col_letter)
         end_idx = column_index_from_string(end_col_letter)
-        for sh in getattr(workbook, 'worksheets', []):
+        for sh in getattr(workbook, "worksheets", []):
             # Reajustar configuración de hoja para evitar autoajuste global
             try:
-                fmt = getattr(sh, 'sheet_format', None)
+                fmt = getattr(sh, "sheet_format", None)
                 if fmt is not None:
                     try:
                         fmt.defaultColWidth = 8.43
@@ -2577,14 +3132,14 @@ def _apply_column_widths_all_sheets(self, workbook, start_col_letter: str = 'L',
                 pass
             # Apagar bestFit en columnas existentes y neutralizar rangos que se solapen
             try:
-                dims = list(getattr(sh, 'column_dimensions', {}).values())
+                dims = list(getattr(sh, "column_dimensions", {}).values())
                 for _dim in dims:
                     try:
                         # Desactivar autoajuste en cualquier dimensión
                         _dim.bestFit = False
                         # Si es un rango (min..max) que interseca con nuestro objetivo, eliminar su ancho para no sobrescribir
-                        dmin = getattr(_dim, 'min', None)
-                        dmax = getattr(_dim, 'max', None)
+                        dmin = getattr(_dim, "min", None)
+                        dmax = getattr(_dim, "max", None)
                         if isinstance(dmin, int) and isinstance(dmax, int):
                             # Intersección con [start_idx, end_idx]
                             if not (dmax < start_idx or dmin > end_idx):
@@ -2596,7 +3151,9 @@ def _apply_column_widths_all_sheets(self, workbook, start_col_letter: str = 'L',
                                     pass
                         else:
                             # Mantener customWidth cuando ya exista un width establecido a nivel de columna
-                            _dim.customWidth = bool(getattr(_dim, 'width', None) is not None)
+                            _dim.customWidth = bool(
+                                getattr(_dim, "width", None) is not None
+                            )
                     except Exception:
                         continue
             except Exception:
@@ -2608,6 +3165,7 @@ def _apply_column_widths_all_sheets(self, workbook, start_col_letter: str = 'L',
                     col_dim = sh.column_dimensions[letter]
                     try:
                         import math as _math
+
                         if pixel_width is not None:
                             # Ajuste para que el tooltip de Excel muestre exactamente los píxeles pedidos
                             # (en muchos entornos el tooltip usa px ≈ floor(7 * width))
@@ -2627,7 +3185,7 @@ def _apply_column_widths_all_sheets(self, workbook, start_col_letter: str = 'L',
                         col_dim.customWidth = True
                         try:
                             # Algunas versiones exponen auto_size
-                            setattr(col_dim, 'auto_size', False)
+                            setattr(col_dim, "auto_size", False)
                         except Exception:
                             pass
                     except Exception:
@@ -2637,25 +3195,29 @@ def _apply_column_widths_all_sheets(self, workbook, start_col_letter: str = 'L',
                     continue
         # 2) Centrar todas las celdas en el rango de columnas solicitado (L..AA por defecto)
         from openpyxl.styles import Alignment as _Alignment
+
         # Solo centrar todas las celdas cuando el rango solicitado sea exactamente L..AA
-        if (str(start_col_letter).upper() == 'L' and str(end_col_letter).upper() == 'AA'):
-            for sh in getattr(workbook, 'worksheets', []):
+        if str(start_col_letter).upper() == "L" and str(end_col_letter).upper() == "AA":
+            for sh in getattr(workbook, "worksheets", []):
                 try:
-                    max_rows = getattr(sh, 'max_row', 0) or 0
+                    max_rows = getattr(sh, "max_row", 0) or 0
                     if max_rows > 0:
                         for col_idx in range(start_idx, end_idx + 1):
                             for r in range(1, max_rows + 1):
                                 try:
                                     cell = sh.cell(row=r, column=col_idx)
                                     if not isinstance(cell, _MergedCell):
-                                        cell.alignment = _Alignment(horizontal='center', vertical='center')
+                                        cell.alignment = _Alignment(
+                                            horizontal="center", vertical="center"
+                                        )
                                 except Exception:
                                     continue
                 except Exception:
                     continue
         # 3) Forzar alineaciones de tabla (si detectamos encabezados)
         import re as _re
-        for sh in getattr(workbook, 'worksheets', []):
+
+        for sh in getattr(workbook, "worksheets", []):
             try:
                 header_row_idx = None
                 col_ejercicio = None
@@ -2663,33 +3225,47 @@ def _apply_column_widths_all_sheets(self, workbook, start_col_letter: str = 'L',
                 col_reps = None
                 series_week_cols = {}
                 reps_week_cols = {}
-                max_rows_scan = min(getattr(sh, 'max_row', 0) or 0, 200)
+                max_rows_scan = min(getattr(sh, "max_row", 0) or 0, 200)
                 if max_rows_scan <= 0:
                     continue
                 for r in range(1, max_rows_scan + 1):
-                    row_vals = [sh.cell(row=r, column=c).value for c in range(1, sh.max_column + 1)]
-                    texts_lower = {i+1: (str(v).strip().lower() if isinstance(v, str) else '') for i, v in enumerate(row_vals)}
-                    if any(('ejercicio' in t) for t in texts_lower.values() if t):
+                    row_vals = [
+                        sh.cell(row=r, column=c).value
+                        for c in range(1, sh.max_column + 1)
+                    ]
+                    texts_lower = {
+                        i + 1: (str(v).strip().lower() if isinstance(v, str) else "")
+                        for i, v in enumerate(row_vals)
+                    }
+                    if any(("ejercicio" in t) for t in texts_lower.values() if t):
                         header_row_idx = r
                         for col_idx, text in texts_lower.items():
                             if not text:
                                 continue
-                            if ('ejercicio' in text) and col_ejercicio is None:
+                            if ("ejercicio" in text) and col_ejercicio is None:
                                 col_ejercicio = col_idx
-                            if ('serie' in text) and (col_series is None) and (not _re.search(r'\br\d+\b', text)):
+                            if (
+                                ("serie" in text)
+                                and (col_series is None)
+                                and (not _re.search(r"\br\d+\b", text))
+                            ):
                                 col_series = col_idx
-                            if (('repet' in text) or ('repes' in text)) and col_reps is None:
+                            if (
+                                ("repet" in text) or ("repes" in text)
+                            ) and col_reps is None:
                                 col_reps = col_idx
-                            m_s = _re.match(r'^(?:series\s*)?s(\d+)$', text)
+                            m_s = _re.match(r"^(?:series\s*)?s(\d+)$", text)
                             if m_s:
                                 semana = int(m_s.group(1))
                                 series_week_cols[semana] = col_idx
-                            m_r = _re.match(r'^(?:reps?|repeticiones?\s*)s?(\d+)$', text)
+                            m_r = _re.match(
+                                r"^(?:reps?|repeticiones?\s*)s?(\d+)$", text
+                            )
                             if m_r:
                                 semana = int(m_r.group(1))
                                 reps_week_cols[semana] = col_idx
                             else:
-                                m_r_short = _re.match(r'^r(\d+)$', text)
+                                m_r_short = _re.match(r"^r(\d+)$", text)
                                 if m_r_short:
                                     semana = int(m_r_short.group(1))
                                     reps_week_cols[semana] = col_idx
@@ -2697,7 +3273,7 @@ def _apply_column_widths_all_sheets(self, workbook, start_col_letter: str = 'L',
                 if header_row_idx is None:
                     continue
                 start_row = header_row_idx + 1
-                last_row = getattr(sh, 'max_row', 0) or 0
+                last_row = getattr(sh, "max_row", 0) or 0
                 if last_row <= start_row:
                     continue
                 # Alineaciones según requerimiento
@@ -2706,23 +3282,33 @@ def _apply_column_widths_all_sheets(self, workbook, start_col_letter: str = 'L',
                         if col_ejercicio:
                             cell = sh.cell(row=r, column=col_ejercicio)
                             if not isinstance(cell, _MergedCell):
-                                cell.alignment = _Alignment(horizontal='left', vertical='center', wrap_text=True)
+                                cell.alignment = _Alignment(
+                                    horizontal="left", vertical="center", wrap_text=True
+                                )
                         if col_series:
                             cell = sh.cell(row=r, column=col_series)
                             if not isinstance(cell, _MergedCell):
-                                cell.alignment = _Alignment(horizontal='center', vertical='center')
+                                cell.alignment = _Alignment(
+                                    horizontal="center", vertical="center"
+                                )
                         if col_reps:
                             cell = sh.cell(row=r, column=col_reps)
                             if not isinstance(cell, _MergedCell):
-                                cell.alignment = _Alignment(horizontal='center', vertical='center')
+                                cell.alignment = _Alignment(
+                                    horizontal="center", vertical="center"
+                                )
                         for _c in series_week_cols.values():
                             cell = sh.cell(row=r, column=_c)
                             if not isinstance(cell, _MergedCell):
-                                cell.alignment = _Alignment(horizontal='center', vertical='center')
+                                cell.alignment = _Alignment(
+                                    horizontal="center", vertical="center"
+                                )
                         for _c in reps_week_cols.values():
                             cell = sh.cell(row=r, column=_c)
                             if not isinstance(cell, _MergedCell):
-                                cell.alignment = _Alignment(horizontal='center', vertical='center')
+                                cell.alignment = _Alignment(
+                                    horizontal="center", vertical="center"
+                                )
                     except Exception:
                         continue
             except Exception:
@@ -2730,6 +3316,8 @@ def _apply_column_widths_all_sheets(self, workbook, start_col_letter: str = 'L',
     except Exception as e:
         # No romper generación si no se pueden aplicar anchos/alineaciones
         try:
-            self.logger.warning(f"No se pudieron aplicar anchos/alineaciones de columna ({start_col_letter}:{end_col_letter}): {e}")
+            self.logger.warning(
+                f"No se pudieron aplicar anchos/alineaciones de columna ({start_col_letter}:{end_col_letter}): {e}"
+            )
         except Exception:
             pass

@@ -13,7 +13,12 @@ router = APIRouter()
 
 
 def _api_version() -> str:
-    return (os.getenv("META_GRAPH_API_VERSION") or os.getenv("WHATSAPP_API_VERSION") or "v19.0").strip()
+    return (
+        os.getenv("META_GRAPH_API_VERSION")
+        or os.getenv("WHATSAPP_API_VERSION")
+        or "v19.0"
+    ).strip()
+
 
 def _normalize_e164_digits(phone: str) -> str:
     s = re.sub(r"[^\d]", "", str(phone or ""))
@@ -57,10 +62,18 @@ async def meta_review_send_text(
         "text": {"preview_url": False, "body": body},
     }
     try:
-        resp = requests.post(url, headers=headers, json=data, timeout=st._timeout_seconds())
+        resp = requests.post(
+            url, headers=headers, json=data, timeout=st._timeout_seconds()
+        )
         out = resp.json() if resp.content else {}
         if resp.status_code >= 400:
-            return JSONResponse({"ok": False, "error": out.get("error") or out or f"HTTP {resp.status_code}"}, status_code=400)
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": out.get("error") or out or f"HTTP {resp.status_code}",
+                },
+                status_code=400,
+            )
         return {"ok": True, "result": out}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
@@ -79,7 +92,11 @@ async def meta_review_send_template(
 
     to = str((payload or {}).get("to") or "").strip()
     template_name = str((payload or {}).get("template_name") or "").strip()
-    language = str((payload or {}).get("language") or os.getenv("WHATSAPP_TEMPLATE_LANGUAGE") or "es_AR").strip()
+    language = str(
+        (payload or {}).get("language")
+        or os.getenv("WHATSAPP_TEMPLATE_LANGUAGE")
+        or "es_AR"
+    ).strip()
     params = (payload or {}).get("params") or []
 
     if not to or not template_name:
@@ -115,17 +132,27 @@ async def meta_review_send_template(
         "template": {
             "name": template_name,
             "language": {"code": language},
-            "components": [{"type": "body", "parameters": body_params}] if body_params else [],
+            "components": [{"type": "body", "parameters": body_params}]
+            if body_params
+            else [],
         },
     }
     if not data["template"]["components"]:
         data["template"].pop("components", None)
 
     try:
-        resp = requests.post(url, headers=headers, json=data, timeout=st._timeout_seconds())
+        resp = requests.post(
+            url, headers=headers, json=data, timeout=st._timeout_seconds()
+        )
         out = resp.json() if resp.content else {}
         if resp.status_code >= 400:
-            return JSONResponse({"ok": False, "error": out.get("error") or out or f"HTTP {resp.status_code}"}, status_code=400)
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": out.get("error") or out or f"HTTP {resp.status_code}",
+                },
+                status_code=400,
+            )
         return {"ok": True, "result": out}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
@@ -144,7 +171,11 @@ async def meta_review_create_template(
     name = str((payload or {}).get("name") or "").strip()
     body_text = str((payload or {}).get("body_text") or "").strip()
     category = str((payload or {}).get("category") or "UTILITY").strip().upper()
-    language = str((payload or {}).get("language") or os.getenv("WHATSAPP_TEMPLATE_LANGUAGE") or "es_AR").strip()
+    language = str(
+        (payload or {}).get("language")
+        or os.getenv("WHATSAPP_TEMPLATE_LANGUAGE")
+        or "es_AR"
+    ).strip()
     examples = (payload or {}).get("examples") or []
 
     if not name or not body_text:
@@ -172,10 +203,18 @@ async def meta_review_create_template(
     if isinstance(examples, list) and examples:
         data["components"][0]["example"] = {"body_text": [examples]}
     try:
-        resp = requests.post(url, headers=headers, json=data, timeout=st._timeout_seconds())
+        resp = requests.post(
+            url, headers=headers, json=data, timeout=st._timeout_seconds()
+        )
         out = resp.json() if resp.content else {}
         if resp.status_code >= 400:
-            return JSONResponse({"ok": False, "error": out.get("error") or out or f"HTTP {resp.status_code}"}, status_code=400)
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": out.get("error") or out or f"HTTP {resp.status_code}",
+                },
+                status_code=400,
+            )
         return {"ok": True, "result": out}
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)

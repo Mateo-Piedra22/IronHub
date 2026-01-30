@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Send, RefreshCw, Trash2, MessageSquare, Clock, Check, X, AlertCircle } from "lucide-react";
 import { Modal, Button, useToast, Select } from "@/components/ui";
 import { cn } from "@/lib/utils";
+import { getCurrentTenant, getCsrfTokenFromCookie } from "@/lib/tenant";
 
 interface WhatsAppMessage {
     id: number;
@@ -49,8 +50,12 @@ export function WhatsAppUserHistory({ isOpen, onClose, userId, userName }: Whats
         if (!userId) return;
         setLoading(true);
         try {
+            const headers: Record<string, string> = {
+                "X-Tenant": typeof window !== "undefined" ? getCurrentTenant() : "",
+            };
             const res = await fetch(`/api/usuarios/${userId}/whatsapp/historial?limit=50`, {
                 credentials: "include",
+                headers,
             });
             if (res.ok) {
                 const data = await res.json();
@@ -124,10 +129,18 @@ export function WhatsAppUserHistory({ isOpen, onClose, userId, userName }: Whats
                     return;
             }
 
+            const headers: Record<string, string> = { "Content-Type": "application/json" };
+            try {
+                if (typeof document !== 'undefined') {
+                    const csrf = getCsrfTokenFromCookie();
+                    if (csrf) headers['X-CSRF-Token'] = csrf;
+                }
+            } catch {}
+            headers["X-Tenant"] = typeof window !== "undefined" ? getCurrentTenant() : "";
             const res = await fetch(url, {
                 method: "POST",
                 credentials: "include",
-                headers: { "Content-Type": "application/json" },
+                headers,
                 body: Object.keys(body).length ? JSON.stringify(body) : undefined,
             });
 

@@ -1,6 +1,6 @@
-from typing import Generic, TypeVar, Type, Optional, List, Any
 from sqlalchemy.orm import Session
 from src.database.connection import SessionLocal
+
 
 class BaseService:
     def __init__(self, db: Session = None):

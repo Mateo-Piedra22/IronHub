@@ -1,4 +1,5 @@
 """WhatsApp Router - WhatsApp messaging API (tenant-scoped)."""
+
 import logging
 import os
 import json
@@ -11,49 +12,36 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text, select
 
 from src.dependencies import (
-    require_gestion_access, require_owner, 
-    get_whatsapp_service, get_whatsapp_dispatch_service, get_whatsapp_settings_service, get_db_session
+    require_gestion_access,
+    require_owner,
+    get_whatsapp_service,
+    get_whatsapp_dispatch_service,
+    get_whatsapp_settings_service,
+    get_db_session,
+    require_feature,
+    get_audit_service,
+    require_scope_gestion,
 )
 from src.services.whatsapp_service import WhatsAppService
 from src.services.whatsapp_dispatch_service import WhatsAppDispatchService
 from src.services.whatsapp_settings_service import WhatsAppSettingsService
+from src.services.audit_service import AuditService
 from src.services.payment_service import PaymentService
 from src.models.orm_models import Configuracion
 from src.database.orm_models import Usuario
-from src.database.tenant_connection import validate_tenant_name, set_current_tenant, tenant_session_scope
+from src.database.tenant_connection import (
+    validate_tenant_name,
+    set_current_tenant,
+    tenant_session_scope,
+)
 
-router = APIRouter()
+router = APIRouter(
+    dependencies=[
+        Depends(require_feature("whatsapp")),
+        Depends(require_scope_gestion("whatsapp:read")),
+    ]
+)
 logger = logging.getLogger(__name__)
-
-
-def _ensure_triggers_table(db: Session) -> None:
-    db.execute(text("""
-        CREATE TABLE IF NOT EXISTS whatsapp_triggers (
-            id SERIAL PRIMARY KEY,
-            trigger_key VARCHAR(80) UNIQUE NOT NULL,
-            enabled BOOLEAN DEFAULT FALSE,
-            template_name VARCHAR(255),
-            cooldown_minutes INTEGER DEFAULT 1440,
-            last_run_at TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """))
-    db.commit()
-
-
-def _ensure_templates_table(db: Session) -> None:
-    db.execute(text("""
-        CREATE TABLE IF NOT EXISTS whatsapp_templates (
-            id SERIAL PRIMARY KEY,
-            template_name VARCHAR(255) UNIQUE NOT NULL,
-            header_text VARCHAR(60),
-            body_text TEXT NOT NULL,
-            variables JSONB,
-            active BOOLEAN DEFAULT TRUE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """))
-    db.commit()
 
 
 def _is_owner_role(role: str) -> bool:
@@ -61,7 +49,9 @@ def _is_owner_role(role: str) -> bool:
     return r in ("dueño", "dueno", "owner", "admin", "administrador")
 
 
-def _redact_whatsapp_state_for_role(request: Request, state: Dict[str, Any]) -> Dict[str, Any]:
+def _redact_whatsapp_state_for_role(
+    request: Request, state: Dict[str, Any]
+) -> Dict[str, Any]:
     """Redact sensitive fields (like access_token) for non-owner roles."""
     try:
         role = str(request.session.get("role") or "")
@@ -83,24 +73,36 @@ def _redact_whatsapp_state_for_role(request: Request, state: Dict[str, Any]) -> 
 async def api_whatsapp_state(
     request: Request,
     _=Depends(require_gestion_access),
-    st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service)
+    st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service),
 ):
     try:
         state = st.get_state()
-        available = bool(state.get('disponible'))
-        config_valid = bool(state.get('configuracion_valida'))
-        enabled = bool(state.get('habilitado') and config_valid)
-        server_ok = bool(state.get('servidor_activo'))
+        available = bool(state.get("disponible"))
+        config_valid = bool(state.get("configuracion_valida"))
+        enabled = bool(state.get("habilitado") and config_valid)
+        server_ok = bool(state.get("servidor_activo"))
         payload = {
-            'available': available,
-            'enabled': enabled,
-            'server_ok': server_ok,
-            'config_valid': config_valid,
+            "available": available,
+            "enabled": enabled,
+            "server_ok": server_ok,
+            "config_valid": config_valid,
         }
-        return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", **payload}
+        return {
+            "ok": True,
+            "mensaje": "OK",
+            "success": True,
+            "message": "OK",
+            **payload,
+        }
     except Exception as e:
         return JSONResponse(
-            {"ok": False, "mensaje": str(e), "success": False, "message": str(e), "error": str(e)},
+            {
+                "ok": False,
+                "mensaje": str(e),
+                "success": False,
+                "message": str(e),
+                "error": str(e),
+            },
             status_code=500,
         )
 
@@ -108,18 +110,30 @@ async def api_whatsapp_state(
 @router.get("/api/whatsapp/stats")
 async def api_whatsapp_stats(
     _=Depends(require_owner),
-    st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service)
+    st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service),
 ):
     try:
         data = st.get_stats()
         if isinstance(data, dict) and "ok" not in data:
             ok_val = "error" not in data
             msg = "OK" if ok_val else str(data.get("error") or "Error")
-            data = {"ok": ok_val, "mensaje": msg, "success": ok_val, "message": msg, **data}
+            data = {
+                "ok": ok_val,
+                "mensaje": msg,
+                "success": ok_val,
+                "message": msg,
+                **data,
+            }
         return data
     except Exception as e:
         return JSONResponse(
-            {"ok": False, "mensaje": str(e), "success": False, "message": str(e), "error": str(e)},
+            {
+                "ok": False,
+                "mensaje": str(e),
+                "success": False,
+                "message": str(e),
+                "error": str(e),
+            },
             status_code=500,
         )
 
@@ -128,7 +142,7 @@ async def api_whatsapp_stats(
 async def api_whatsapp_pendings(
     request: Request,
     _=Depends(require_owner),
-    svc: WhatsAppService = Depends(get_whatsapp_service)
+    svc: WhatsAppService = Depends(get_whatsapp_service),
 ):
     try:
         dias = int(request.query_params.get("dias") or 30)
@@ -140,11 +154,12 @@ async def api_whatsapp_pendings(
 
 # === Frontend-compatible alias endpoints ===
 
+
 @router.get("/api/whatsapp/pendientes")
 async def api_whatsapp_pendientes(
     request: Request,
     _=Depends(require_owner),
-    svc: WhatsAppService = Depends(get_whatsapp_service)
+    svc: WhatsAppService = Depends(get_whatsapp_service),
 ):
     """Alias for /api/whatsapp/pendings - returns {mensajes: []}."""
     try:
@@ -155,59 +170,156 @@ async def api_whatsapp_pendientes(
     items = svc.obtener_resumen_mensajes(dias, limite)
 
     def map_tipo(t: str) -> str:
-        s = (t or '').strip().lower()
-        if s in ('bienvenida', 'welcome'):
-            return 'welcome'
-        if s in ('pago', 'payment', 'payment_confirmation'):
-            return 'payment'
-        if s in ('desactivacion', 'deactivation'):
-            return 'deactivation'
-        if s in ('overdue', 'recordatorio_vencida', 'payment_reminder'):
-            return 'overdue'
-        if s in ('class_reminder', 'recordatorio_clase'):
-            return 'class_reminder'
-        if s in ('waitlist', 'lista_espera'):
-            return 'class_reminder'
-        return s or 'welcome'
+        s = (t or "").strip().lower()
+        if s in ("bienvenida", "welcome"):
+            return "welcome"
+        if s in ("pago", "payment", "payment_confirmation"):
+            return "payment"
+        if s in ("desactivacion", "deactivation"):
+            return "deactivation"
+        if s in ("overdue", "recordatorio_vencida", "payment_reminder"):
+            return "overdue"
+        if s in ("class_reminder", "recordatorio_clase"):
+            return "class_reminder"
+        if s in ("waitlist", "lista_espera"):
+            return "class_reminder"
+        return s or "welcome"
 
     def map_estado(st: str) -> str:
-        s = (st or '').strip().lower()
-        if s == 'failed':
-            return 'failed'
-        if s in ('sent', 'delivered', 'read'):
-            return 'sent'
-        if s == 'received':
-            return 'sent'
-        return 'pending'
+        s = (st or "").strip().lower()
+        if s == "failed":
+            return "failed"
+        if s in ("sent", "delivered", "read"):
+            return "sent"
+        if s == "received":
+            return "sent"
+        return "pending"
 
     mensajes = []
     totals_by_estado: dict[str, int] = {"pending": 0, "sent": 0, "failed": 0}
     totals_by_tipo: dict[str, int] = {}
     for m in items:
-        tipo = map_tipo(m.get('message_type') or '')
-        estado = map_estado(m.get('status') or '')
+        tipo = map_tipo(m.get("message_type") or "")
+        estado = map_estado(m.get("status") or "")
         totals_by_estado[estado] = int(totals_by_estado.get(estado, 0) or 0) + 1
         totals_by_tipo[tipo] = int(totals_by_tipo.get(tipo, 0) or 0) + 1
-        mensajes.append({
-            'id': m.get('id'),
-            'usuario_id': m.get('user_id') or 0,
-            'usuario_nombre': m.get('usuario_nombre') or '',
-            'telefono': m.get('usuario_telefono') or m.get('phone_number') or '',
-            'tipo': tipo,
-            'estado': estado,
-            'contenido': m.get('message_content') or '',
-            'error_detail': None,
-            'fecha_envio': m.get('sent_at'),
-            'created_at': m.get('created_at'),
-        })
-    return {"mensajes": mensajes, "totals": {"by_estado": totals_by_estado, "by_tipo": totals_by_tipo}}
+        mensajes.append(
+            {
+                "id": m.get("id"),
+                "usuario_id": m.get("user_id") or 0,
+                "usuario_nombre": m.get("usuario_nombre") or "",
+                "telefono": m.get("usuario_telefono") or m.get("phone_number") or "",
+                "tipo": tipo,
+                "estado": estado,
+                "contenido": m.get("message_content") or "",
+                "error_detail": None,
+                "fecha_envio": m.get("sent_at"),
+                "created_at": m.get("created_at"),
+            }
+        )
+    return {
+        "mensajes": mensajes,
+        "totals": {"by_estado": totals_by_estado, "by_tipo": totals_by_tipo},
+    }
+
+
+@router.get("/api/whatsapp/mensajes")
+async def api_whatsapp_mensajes(
+    request: Request,
+    _=Depends(require_owner),
+    svc: WhatsAppService = Depends(get_whatsapp_service),
+    dias: int = 30,
+    status: str = "",
+    page: int = 1,
+    limit: int = 25,
+    scope: str = "branch",
+):
+    try:
+        sid = None
+        if str(scope or "").strip().lower() in ("branch", "sucursal"):
+            sid = request.session.get("sucursal_id")
+        data = svc.list_messages(
+            dias=int(dias),
+            status=str(status or "").strip() or None,
+            page=int(page),
+            limit=int(limit),
+            sucursal_id=int(sid) if sid is not None else None,
+        )
+        if not isinstance(data, dict) or not data.get("ok"):
+            return data
+
+        def map_tipo(t: str) -> str:
+            s = (t or "").strip().lower()
+            if s in ("bienvenida", "welcome"):
+                return "welcome"
+            if s in ("pago", "payment", "payment_confirmation"):
+                return "payment"
+            if s in ("desactivacion", "deactivation"):
+                return "deactivation"
+            if s in ("overdue", "recordatorio_vencida", "payment_reminder"):
+                return "overdue"
+            if s in ("class_reminder", "recordatorio_clase"):
+                return "class_reminder"
+            if s in ("waitlist", "lista_espera"):
+                return "class_reminder"
+            return s or "welcome"
+
+        def map_estado(stt: str) -> str:
+            s = (stt or "").strip().lower()
+            if s == "failed":
+                return "failed"
+            if s in ("sent", "delivered", "read"):
+                return "sent"
+            if s == "received":
+                return "sent"
+            return "pending"
+
+        totals_by_estado: dict[str, int] = {"pending": 0, "sent": 0, "failed": 0}
+        for k, c in (data.get("totals_by_status") or {}).items():
+            estado = map_estado(str(k or ""))
+            totals_by_estado[estado] = int(totals_by_estado.get(estado, 0) or 0) + int(c or 0)
+        totals_by_tipo: dict[str, int] = {}
+        for k, c in (data.get("totals_by_type") or {}).items():
+            tipo = map_tipo(str(k or ""))
+            totals_by_tipo[tipo] = int(totals_by_tipo.get(tipo, 0) or 0) + int(c or 0)
+
+        mensajes = []
+        for m in data.get("items") or []:
+            tipo = map_tipo(m.get("message_type") or "")
+            estado = map_estado(m.get("status") or "")
+            mensajes.append(
+                {
+                    "id": m.get("id"),
+                    "usuario_id": m.get("user_id") or 0,
+                    "usuario_nombre": m.get("usuario_nombre") or "",
+                    "telefono": m.get("usuario_telefono") or m.get("phone_number") or "",
+                    "tipo": tipo,
+                    "estado": estado,
+                    "contenido": m.get("message_content") or "",
+                    "error_detail": None,
+                    "fecha_envio": m.get("sent_at"),
+                    "created_at": m.get("created_at"),
+                    "sucursal_id": m.get("sucursal_id"),
+                }
+            )
+        return {
+            "ok": True,
+            "mensajes": mensajes,
+            "total": int(data.get("total") or 0),
+            "page": int(data.get("page") or 1),
+            "limit": int(data.get("limit") or 25),
+            "dias": int(data.get("dias") or int(dias)),
+            "totals": {"by_estado": totals_by_estado, "by_tipo": totals_by_tipo},
+        }
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e), "items": [], "total": 0}, status_code=500)
 
 
 @router.get("/api/whatsapp/status")
 async def api_whatsapp_status(
     request: Request,
     _=Depends(require_gestion_access),
-    st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service)
+    st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service),
 ):
     """Alias for /api/whatsapp/state."""
     try:
@@ -218,16 +330,30 @@ async def api_whatsapp_status(
 
 @router.get("/api/whatsapp/config")
 async def api_whatsapp_config_get(
+    request: Request,
     _=Depends(require_owner),
-    st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service)
+    st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service),
+    scope: str = "branch",
 ):
     """GET endpoint for WhatsApp config."""
     try:
-        cfg = st.get_ui_config()
+        sid = None
+        try:
+            if str(scope or "").strip().lower() in ("branch", "sucursal"):
+                sid = request.session.get("sucursal_id")
+        except Exception:
+            sid = None
+        cfg = st.get_ui_config(sucursal_id=sid)
         return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", **cfg}
     except Exception as e:
         return JSONResponse(
-            {"ok": False, "mensaje": str(e), "success": False, "message": str(e), "error": str(e)},
+            {
+                "ok": False,
+                "mensaje": str(e),
+                "success": False,
+                "message": str(e),
+                "error": str(e),
+            },
             status_code=500,
         )
 
@@ -236,7 +362,9 @@ async def api_whatsapp_config_get(
 async def api_whatsapp_config_put(
     request: Request,
     _=Depends(require_owner),
-    st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service)
+    st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service),
+    audit: AuditService = Depends(get_audit_service),
+    scope: str = "branch",
 ):
     try:
         try:
@@ -248,28 +376,76 @@ async def api_whatsapp_config_put(
             raise HTTPException(status_code=400, detail="Payload inválido")
 
         cfg_in: Dict[str, Any] = {}
-        if 'phone_number_id' in payload:
-            cfg_in['phone_number_id'] = payload.get('phone_number_id')
-        if 'whatsapp_business_account_id' in payload:
-            cfg_in['whatsapp_business_account_id'] = payload.get('whatsapp_business_account_id')
-        if 'waba_id' in payload and 'whatsapp_business_account_id' not in payload:
-            cfg_in['whatsapp_business_account_id'] = payload.get('waba_id')
-        if 'access_token' in payload:
-            cfg_in['access_token'] = payload.get('access_token')
-        if 'enabled' in payload:
-            cfg_in['enabled'] = bool(payload.get('enabled'))
-        if 'webhook_enabled' in payload:
-            cfg_in['webhook_enabled'] = bool(payload.get('webhook_enabled'))
-        if 'webhook_verify_token' in payload:
-            cfg_in['webhook_verify_token'] = str(payload.get('webhook_verify_token') or '')
+        if "phone_number_id" in payload:
+            cfg_in["phone_number_id"] = payload.get("phone_number_id")
+        if "whatsapp_business_account_id" in payload:
+            cfg_in["whatsapp_business_account_id"] = payload.get(
+                "whatsapp_business_account_id"
+            )
+        if "waba_id" in payload and "whatsapp_business_account_id" not in payload:
+            cfg_in["whatsapp_business_account_id"] = payload.get("waba_id")
+        if "access_token" in payload:
+            cfg_in["access_token"] = payload.get("access_token")
+        if "enabled" in payload:
+            cfg_in["enabled"] = bool(payload.get("enabled"))
+        if "webhook_enabled" in payload:
+            cfg_in["webhook_enabled"] = bool(payload.get("webhook_enabled"))
+        if "webhook_verify_token" in payload:
+            cfg_in["webhook_verify_token"] = str(
+                payload.get("webhook_verify_token") or ""
+            )
 
-        _ = st.upsert_manual_config(cfg_in)
-        return await api_whatsapp_config_get(st=st)
+        sid = None
+        try:
+            if str(scope or "").strip().lower() in ("branch", "sucursal"):
+                sid = request.session.get("sucursal_id")
+        except Exception:
+            sid = None
+        old_cfg = {}
+        try:
+            old_cfg = st.get_ui_config(sucursal_id=sid) or {}
+        except Exception:
+            old_cfg = {}
+        _ = st.upsert_manual_config(cfg_in, sucursal_id=sid)
+        new_cfg = {}
+        try:
+            new_cfg = st.get_ui_config(sucursal_id=sid) or {}
+        except Exception:
+            new_cfg = {}
+
+        def redact_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
+            out: Dict[str, Any] = {}
+            for k, v in (cfg or {}).items():
+                if k in ("access_token",):
+                    continue
+                out[k] = v
+            out["access_token_present"] = bool((cfg or {}).get("access_token_present"))
+            return out
+
+        try:
+            audit.log_from_request(
+                request=request,
+                action=AuditService.ACTION_CONFIG_CHANGE,
+                table_name="configuracion",
+                record_id=int(sid) if sid is not None else None,
+                old_values=redact_cfg(old_cfg),
+                new_values=redact_cfg(new_cfg),
+                extra_details={"scope": scope, "target": "whatsapp"},
+            )
+        except Exception:
+            pass
+        return await api_whatsapp_config_get(request, st=st, scope=scope)
     except HTTPException:
         raise
     except Exception as e:
         return JSONResponse(
-            {"ok": False, "mensaje": str(e), "success": False, "message": str(e), "error": str(e)},
+            {
+                "ok": False,
+                "mensaje": str(e),
+                "success": False,
+                "message": str(e),
+                "error": str(e),
+            },
             status_code=500,
         )
 
@@ -280,13 +456,31 @@ async def api_whatsapp_embedded_signup_config(
 ):
     app_id = (os.getenv("META_APP_ID") or os.getenv("FACEBOOK_APP_ID") or "").strip()
     config_id = (os.getenv("META_WA_EMBEDDED_SIGNUP_CONFIG_ID") or "").strip()
-    api_version = (os.getenv("META_GRAPH_API_VERSION") or os.getenv("WHATSAPP_API_VERSION") or "v19.0").strip()
+    api_version = (
+        os.getenv("META_GRAPH_API_VERSION")
+        or os.getenv("WHATSAPP_API_VERSION")
+        or "v19.0"
+    ).strip()
     if not app_id or not config_id:
         return JSONResponse(
-            {"ok": False, "mensaje": "Falta configuración", "success": False, "message": "Falta configuración", "error": "Missing config"},
+            {
+                "ok": False,
+                "mensaje": "Falta configuración",
+                "success": False,
+                "message": "Falta configuración",
+                "error": "Missing config",
+            },
             status_code=503,
         )
-    return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", "app_id": app_id, "config_id": config_id, "api_version": api_version}
+    return {
+        "ok": True,
+        "mensaje": "OK",
+        "success": True,
+        "message": "OK",
+        "app_id": app_id,
+        "config_id": config_id,
+        "api_version": api_version,
+    }
 
 
 @router.get("/api/whatsapp/embedded-signup/readiness")
@@ -294,9 +488,15 @@ async def api_whatsapp_embedded_signup_readiness(
     _=Depends(require_owner),
 ):
     app_id = (os.getenv("META_APP_ID") or os.getenv("FACEBOOK_APP_ID") or "").strip()
-    app_secret = (os.getenv("META_APP_SECRET") or os.getenv("FACEBOOK_APP_SECRET") or "").strip()
+    app_secret = (
+        os.getenv("META_APP_SECRET") or os.getenv("FACEBOOK_APP_SECRET") or ""
+    ).strip()
     config_id = (os.getenv("META_WA_EMBEDDED_SIGNUP_CONFIG_ID") or "").strip()
-    api_version = (os.getenv("META_GRAPH_API_VERSION") or os.getenv("WHATSAPP_API_VERSION") or "v19.0").strip()
+    api_version = (
+        os.getenv("META_GRAPH_API_VERSION")
+        or os.getenv("WHATSAPP_API_VERSION")
+        or "v19.0"
+    ).strip()
     redirect_uri = (os.getenv("META_OAUTH_REDIRECT_URI") or "").strip()
     enc_key = (os.getenv("WABA_ENCRYPTION_KEY") or "").strip()
 
@@ -342,12 +542,30 @@ async def api_whatsapp_embedded_signup_complete(
     waba_id = str((payload or {}).get("waba_id") or "").strip()
     phone_number_id = str((payload or {}).get("phone_number_id") or "").strip()
     if not code or not waba_id or not phone_number_id:
-        raise HTTPException(status_code=400, detail="code/waba_id/phone_number_id requeridos")
+        raise HTTPException(
+            status_code=400, detail="code/waba_id/phone_number_id requeridos"
+        )
     access_token = st.exchange_code_for_access_token(code)
-    st.set_credentials_from_embedded_signup(waba_id=waba_id, phone_number_id=phone_number_id, access_token=access_token)
+    st.set_credentials_from_embedded_signup(
+        waba_id=waba_id, phone_number_id=phone_number_id, access_token=access_token
+    )
     provision = st.provision_meta_templates_for_current_config()
     health = st.meta_health_check()
-    return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", "provision": provision, "health": health}
+    reconcile = {"ok": False}
+    try:
+        reconcile = st.reconcile_onboarding()
+    except Exception:
+        reconcile = {"ok": False}
+    return {
+        "ok": True,
+        "mensaje": "OK",
+        "success": True,
+        "message": "OK",
+        "provision": provision,
+        "health": health,
+        "reconcile": reconcile,
+    }
+
 
 @router.get("/api/whatsapp/onboarding/status")
 async def api_whatsapp_onboarding_status(
@@ -357,18 +575,35 @@ async def api_whatsapp_onboarding_status(
 ):
     health = st.meta_health_check()
     try:
-        enabled_count = db.execute(text("SELECT COUNT(*) FROM configuracion WHERE clave LIKE 'wa_action_enabled_%'")).scalar() or 0
+        enabled_count = (
+            db.execute(
+                text(
+                    "SELECT COUNT(*) FROM configuracion WHERE clave LIKE 'wa_action_enabled_%'"
+                )
+            ).scalar()
+            or 0
+        )
     except Exception:
         enabled_count = 0
     try:
-        template_count = db.execute(text("SELECT COUNT(*) FROM configuracion WHERE clave LIKE 'wa_meta_template_%'")).scalar() or 0
+        template_count = (
+            db.execute(
+                text(
+                    "SELECT COUNT(*) FROM configuracion WHERE clave LIKE 'wa_meta_template_%'"
+                )
+            ).scalar()
+            or 0
+        )
     except Exception:
         template_count = 0
     return {
         "ok": True,
         "connected": bool(health.get("ok")),
         "health": health,
-        "actions": {"enabled_keys": int(enabled_count), "template_keys": int(template_count)},
+        "actions": {
+            "enabled_keys": int(enabled_count),
+            "template_keys": int(template_count),
+        },
     }
 
 
@@ -401,7 +636,10 @@ async def internal_cron_whatsapp_reconcile(
     secret = (os.getenv("INTERNAL_CRON_SECRET") or "").strip()
     incoming = (request.headers.get("X-Internal-Cron-Secret") or "").strip()
     if not secret:
-        return JSONResponse({"ok": False, "error": "INTERNAL_CRON_SECRET not configured"}, status_code=503)
+        return JSONResponse(
+            {"ok": False, "error": "INTERNAL_CRON_SECRET not configured"},
+            status_code=503,
+        )
     if incoming != secret:
         return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
 
@@ -458,12 +696,31 @@ async def internal_cron_whatsapp_reconcile(
             with tenant_session_scope(tenant) as tdb:
                 st = WhatsAppSettingsService(tdb)
                 r = st.reconcile_onboarding()
-            results.append({"gym_id": gid, "tenant": tenant, "ok": bool(r.get("ok")), "error": r.get("error")})
+            results.append(
+                {
+                    "gym_id": gid,
+                    "tenant": tenant,
+                    "ok": bool(r.get("ok")),
+                    "error": r.get("error"),
+                }
+            )
             next_cursor = gid
         except Exception as e:
-            results.append({"gym_id": int((row or [0, ""])[0] or 0), "tenant": str((row or [0, ""])[1] or ""), "ok": False, "error": str(e)})
+            results.append(
+                {
+                    "gym_id": int((row or [0, ""])[0] or 0),
+                    "tenant": str((row or [0, ""])[1] or ""),
+                    "ok": False,
+                    "error": str(e),
+                }
+            )
 
-    return {"ok": True, "processed": len(results), "results": results, "next_cursor": next_cursor}
+    return {
+        "ok": True,
+        "processed": len(results),
+        "results": results,
+        "next_cursor": next_cursor,
+    }
 
 
 @router.get("/api/whatsapp/templates")
@@ -471,13 +728,24 @@ async def api_whatsapp_templates_list(
     _=Depends(require_owner),
     db: Session = Depends(get_db_session),
 ):
-    _ensure_templates_table(db)
-    rows = db.execute(text("""
+    rows = db.execute(
+        text("""
         SELECT template_name, body_text, active, created_at
         FROM whatsapp_templates
         ORDER BY template_name ASC
-    """)).fetchall()
-    return {"templates": [{"template_name": r[0], "body_text": r[1], "active": bool(r[2]), "created_at": str(r[3]) if r[3] else None} for r in rows]}
+    """)
+    ).fetchall()
+    return {
+        "templates": [
+            {
+                "template_name": r[0],
+                "body_text": r[1],
+                "active": bool(r[2]),
+                "created_at": str(r[3]) if r[3] else None,
+            }
+            for r in rows
+        ]
+    }
 
 
 @router.put("/api/whatsapp/templates/{template_name}")
@@ -486,8 +754,8 @@ async def api_whatsapp_templates_upsert(
     request: Request,
     _=Depends(require_owner),
     db: Session = Depends(get_db_session),
+    audit: AuditService = Depends(get_audit_service),
 ):
-    _ensure_templates_table(db)
     try:
         payload = await request.json()
     except Exception:
@@ -496,6 +764,14 @@ async def api_whatsapp_templates_upsert(
     if not body_text:
         raise HTTPException(status_code=400, detail="body_text requerido")
     active = bool(payload.get("active", True))
+    old_row = None
+    try:
+        old_row = db.execute(
+            text("SELECT template_name, active FROM whatsapp_templates WHERE template_name = :name"),
+            {"name": template_name},
+        ).fetchone()
+    except Exception:
+        old_row = None
     db.execute(
         text("""
             INSERT INTO whatsapp_templates (template_name, body_text, active)
@@ -507,18 +783,52 @@ async def api_whatsapp_templates_upsert(
         {"name": template_name, "body": body_text, "active": active},
     )
     db.commit()
+    try:
+        audit.log_from_request(
+            request=request,
+            action=AuditService.ACTION_UPDATE if old_row else AuditService.ACTION_CREATE,
+            table_name="whatsapp_templates",
+            record_id=None,
+            old_values={"template_name": old_row[0], "active": bool(old_row[1])} if old_row else {},
+            new_values={"template_name": template_name, "active": active},
+        )
+    except Exception:
+        pass
     return {"ok": True}
 
 
 @router.delete("/api/whatsapp/templates/{template_name}")
 async def api_whatsapp_templates_delete(
     template_name: str,
+    request: Request,
     _=Depends(require_owner),
     db: Session = Depends(get_db_session),
+    audit: AuditService = Depends(get_audit_service),
 ):
-    _ensure_templates_table(db)
-    r = db.execute(text("DELETE FROM whatsapp_templates WHERE template_name = :name"), {"name": template_name})
+    old_row = None
+    try:
+        old_row = db.execute(
+            text("SELECT template_name, active FROM whatsapp_templates WHERE template_name = :name"),
+            {"name": template_name},
+        ).fetchone()
+    except Exception:
+        old_row = None
+    r = db.execute(
+        text("DELETE FROM whatsapp_templates WHERE template_name = :name"),
+        {"name": template_name},
+    )
     db.commit()
+    try:
+        audit.log_from_request(
+            request=request,
+            action=AuditService.ACTION_DELETE,
+            table_name="whatsapp_templates",
+            record_id=None,
+            old_values={"template_name": old_row[0], "active": bool(old_row[1])} if old_row else {"template_name": template_name},
+            new_values={},
+        )
+    except Exception:
+        pass
     return {"ok": True, "deleted": int(r.rowcount or 0)}
 
 
@@ -527,19 +837,25 @@ async def api_whatsapp_triggers_list(
     _=Depends(require_owner),
     db: Session = Depends(get_db_session),
 ):
-    _ensure_triggers_table(db)
-    rows = db.execute(text("""
+    rows = db.execute(
+        text("""
         SELECT trigger_key, enabled, template_name, cooldown_minutes, last_run_at
         FROM whatsapp_triggers
         ORDER BY trigger_key ASC
-    """)).fetchall()
-    return {"triggers": [{
-        "trigger_key": r[0],
-        "enabled": bool(r[1]),
-        "template_name": r[2],
-        "cooldown_minutes": int(r[3] or 0),
-        "last_run_at": str(r[4]) if r[4] else None,
-    } for r in rows]}
+    """)
+    ).fetchall()
+    return {
+        "triggers": [
+            {
+                "trigger_key": r[0],
+                "enabled": bool(r[1]),
+                "template_name": r[2],
+                "cooldown_minutes": int(r[3] or 0),
+                "last_run_at": str(r[4]) if r[4] else None,
+            }
+            for r in rows
+        ]
+    }
 
 
 @router.put("/api/whatsapp/triggers/{trigger_key}")
@@ -548,8 +864,8 @@ async def api_whatsapp_triggers_upsert(
     request: Request,
     _=Depends(require_owner),
     db: Session = Depends(get_db_session),
+    audit: AuditService = Depends(get_audit_service),
 ):
-    _ensure_triggers_table(db)
     try:
         payload = await request.json()
     except Exception:
@@ -557,8 +873,18 @@ async def api_whatsapp_triggers_upsert(
     enabled = bool(payload.get("enabled", False))
     template_name = payload.get("template_name")
     cooldown_minutes = payload.get("cooldown_minutes")
+    old_row = None
     try:
-        cooldown_minutes = int(cooldown_minutes) if cooldown_minutes is not None else 1440
+        old_row = db.execute(
+            text("SELECT trigger_key, enabled, template_name, cooldown_minutes FROM whatsapp_triggers WHERE trigger_key = :k"),
+            {"k": trigger_key},
+        ).fetchone()
+    except Exception:
+        old_row = None
+    try:
+        cooldown_minutes = (
+            int(cooldown_minutes) if cooldown_minutes is not None else 1440
+        )
     except Exception:
         cooldown_minutes = 1440
     db.execute(
@@ -573,6 +899,31 @@ async def api_whatsapp_triggers_upsert(
         {"k": trigger_key, "en": enabled, "tpl": template_name, "cd": cooldown_minutes},
     )
     db.commit()
+    try:
+        audit.log_from_request(
+            request=request,
+            action=AuditService.ACTION_UPDATE if old_row else AuditService.ACTION_CREATE,
+            table_name="whatsapp_triggers",
+            record_id=None,
+            old_values=(
+                {
+                    "trigger_key": old_row[0],
+                    "enabled": bool(old_row[1]),
+                    "template_name": old_row[2],
+                    "cooldown_minutes": int(old_row[3] or 0),
+                }
+                if old_row
+                else {}
+            ),
+            new_values={
+                "trigger_key": trigger_key,
+                "enabled": enabled,
+                "template_name": template_name,
+                "cooldown_minutes": cooldown_minutes,
+            },
+        )
+    except Exception:
+        pass
     return {"ok": True}
 
 
@@ -582,8 +933,8 @@ async def api_whatsapp_automation_run(
     _=Depends(require_owner),
     db: Session = Depends(get_db_session),
     wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service),
+    audit: AuditService = Depends(get_audit_service),
 ):
-    _ensure_triggers_table(db)
     try:
         payload = await request.json()
     except Exception:
@@ -594,11 +945,20 @@ async def api_whatsapp_automation_run(
     if trigger_keys and not isinstance(trigger_keys, list):
         trigger_keys = None
 
-    triggers = db.execute(text("""
+    triggers = db.execute(
+        text("""
         SELECT trigger_key, enabled, cooldown_minutes, last_run_at
         FROM whatsapp_triggers
-    """)).fetchall()
-    trig_map = {r[0]: {"enabled": bool(r[1]), "cooldown_minutes": int(r[2] or 0), "last_run_at": r[3]} for r in triggers}
+    """)
+    ).fetchall()
+    trig_map = {
+        r[0]: {
+            "enabled": bool(r[1]),
+            "cooldown_minutes": int(r[2] or 0),
+            "last_run_at": r[3],
+        }
+        for r in triggers
+    }
 
     def _selected(k: str) -> bool:
         return (trigger_keys is None) or (k in set(str(x) for x in trigger_keys))
@@ -610,11 +970,15 @@ async def api_whatsapp_automation_run(
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     if _selected("overdue_daily") and trig_map.get("overdue_daily", {}).get("enabled"):
-        cooldown = int(trig_map.get("overdue_daily", {}).get("cooldown_minutes") or 1440)
+        cooldown = int(
+            trig_map.get("overdue_daily", {}).get("cooldown_minutes") or 1440
+        )
         last_run_at = trig_map.get("overdue_daily", {}).get("last_run_at")
         if (not ignore_last_run) and last_run_at:
             try:
-                if isinstance(last_run_at, datetime) and last_run_at >= (now - timedelta(minutes=cooldown)):
+                if isinstance(last_run_at, datetime) and last_run_at >= (
+                    now - timedelta(minutes=cooldown)
+                ):
                     skipped["overdue_daily"] = "cooldown_global"
             except Exception:
                 pass
@@ -625,7 +989,8 @@ async def api_whatsapp_automation_run(
                 except Exception:
                     morosity_processing = {"error": "morosity_processing_failed"}
             since = now - timedelta(minutes=cooldown)
-            users = db.execute(text("""
+            users = db.execute(
+                text("""
             SELECT u.id, u.telefono
             FROM usuarios u
             WHERE u.activo = TRUE
@@ -639,30 +1004,44 @@ async def api_whatsapp_automation_run(
                   AND wm.message_type = 'overdue'
                   AND wm.sent_at >= :since
               )
-            """), {"since": since}).fetchall()
+            """),
+                {"since": since},
+            ).fetchall()
             scanned += len(users)
             for uid, _tel in users:
                 if dry_run:
                     sent += 1
                     continue
-                if wa.send_overdue_reminder(int(uid)):
+                if wa.send_overdue_reminder(int(uid), request.session.get("sucursal_id")):
                     sent += 1
             if not dry_run:
-                db.execute(text("UPDATE whatsapp_triggers SET last_run_at = :now WHERE trigger_key = 'overdue_daily'"), {"now": now})
+                db.execute(
+                    text(
+                        "UPDATE whatsapp_triggers SET last_run_at = :now WHERE trigger_key = 'overdue_daily'"
+                    ),
+                    {"now": now},
+                )
                 db.commit()
 
-    if _selected("due_today_daily") and trig_map.get("due_today_daily", {}).get("enabled"):
-        cooldown = int(trig_map.get("due_today_daily", {}).get("cooldown_minutes") or 1440)
+    if _selected("due_today_daily") and trig_map.get("due_today_daily", {}).get(
+        "enabled"
+    ):
+        cooldown = int(
+            trig_map.get("due_today_daily", {}).get("cooldown_minutes") or 1440
+        )
         last_run_at = trig_map.get("due_today_daily", {}).get("last_run_at")
         if (not ignore_last_run) and last_run_at:
             try:
-                if isinstance(last_run_at, datetime) and last_run_at >= (now - timedelta(minutes=cooldown)):
+                if isinstance(last_run_at, datetime) and last_run_at >= (
+                    now - timedelta(minutes=cooldown)
+                ):
                     skipped["due_today_daily"] = "cooldown_global"
             except Exception:
                 pass
         if not skipped.get("due_today_daily"):
             since = now - timedelta(minutes=cooldown)
-            users = db.execute(text("""
+            users = db.execute(
+                text("""
                 SELECT u.id, u.telefono, u.fecha_proximo_vencimiento
                 FROM usuarios u
                 WHERE u.activo = TRUE
@@ -674,7 +1053,9 @@ async def api_whatsapp_automation_run(
                       AND wm.message_type = 'membership_due_today'
                       AND wm.sent_at >= :since
                   )
-            """), {"since": since}).fetchall()
+            """),
+                {"since": since},
+            ).fetchall()
             scanned += len(users)
             for uid, _tel, f in users:
                 if dry_run:
@@ -684,24 +1065,38 @@ async def api_whatsapp_automation_run(
                     fecha_txt = f.isoformat() if hasattr(f, "isoformat") else str(f)
                 except Exception:
                     fecha_txt = str(f)
-                if wa.send_membership_due_today(int(uid), str(fecha_txt or "")):
+                if wa.send_membership_due_today(
+                    int(uid), str(fecha_txt or ""), request.session.get("sucursal_id")
+                ):
                     sent += 1
             if not dry_run:
-                db.execute(text("UPDATE whatsapp_triggers SET last_run_at = :now WHERE trigger_key = 'due_today_daily'"), {"now": now})
+                db.execute(
+                    text(
+                        "UPDATE whatsapp_triggers SET last_run_at = :now WHERE trigger_key = 'due_today_daily'"
+                    ),
+                    {"now": now},
+                )
                 db.commit()
 
-    if _selected("due_soon_daily") and trig_map.get("due_soon_daily", {}).get("enabled"):
-        cooldown = int(trig_map.get("due_soon_daily", {}).get("cooldown_minutes") or 1440)
+    if _selected("due_soon_daily") and trig_map.get("due_soon_daily", {}).get(
+        "enabled"
+    ):
+        cooldown = int(
+            trig_map.get("due_soon_daily", {}).get("cooldown_minutes") or 1440
+        )
         last_run_at = trig_map.get("due_soon_daily", {}).get("last_run_at")
         if (not ignore_last_run) and last_run_at:
             try:
-                if isinstance(last_run_at, datetime) and last_run_at >= (now - timedelta(minutes=cooldown)):
+                if isinstance(last_run_at, datetime) and last_run_at >= (
+                    now - timedelta(minutes=cooldown)
+                ):
                     skipped["due_soon_daily"] = "cooldown_global"
             except Exception:
                 pass
         if not skipped.get("due_soon_daily"):
             since = now - timedelta(minutes=cooldown)
-            users = db.execute(text("""
+            users = db.execute(
+                text("""
                 SELECT u.id, u.telefono, u.fecha_proximo_vencimiento
                 FROM usuarios u
                 WHERE u.activo = TRUE
@@ -715,7 +1110,9 @@ async def api_whatsapp_automation_run(
                       AND wm.message_type = 'membership_due_soon'
                       AND wm.sent_at >= :since
                   )
-            """), {"since": since}).fetchall()
+            """),
+                {"since": since},
+            ).fetchall()
             scanned += len(users)
             for uid, _tel, f in users:
                 if dry_run:
@@ -725,20 +1122,48 @@ async def api_whatsapp_automation_run(
                     fecha_txt = f.isoformat() if hasattr(f, "isoformat") else str(f)
                 except Exception:
                     fecha_txt = str(f)
-                if wa.send_membership_due_soon(int(uid), str(fecha_txt or "")):
+                if wa.send_membership_due_soon(
+                    int(uid), str(fecha_txt or ""), request.session.get("sucursal_id")
+                ):
                     sent += 1
             if not dry_run:
-                db.execute(text("UPDATE whatsapp_triggers SET last_run_at = :now WHERE trigger_key = 'due_soon_daily'"), {"now": now})
+                db.execute(
+                    text(
+                        "UPDATE whatsapp_triggers SET last_run_at = :now WHERE trigger_key = 'due_soon_daily'"
+                    ),
+                    {"now": now},
+                )
                 db.commit()
 
-    return {"ok": True, "scanned": scanned, "sent": sent, "dry_run": dry_run, "skipped": skipped, "morosity_processing": morosity_processing}
+    try:
+        audit.log_from_request(
+            request=request,
+            action=AuditService.ACTION_BULK_ACTION,
+            table_name="whatsapp_automation",
+            record_id=None,
+            old_values={},
+            new_values={"scanned": scanned, "sent": sent, "dry_run": dry_run},
+            extra_details={"trigger_keys": trigger_keys, "ignore_last_run": ignore_last_run},
+        )
+    except Exception:
+        pass
+    return {
+        "ok": True,
+        "scanned": scanned,
+        "sent": sent,
+        "dry_run": dry_run,
+        "skipped": skipped,
+        "morosity_processing": morosity_processing,
+    }
 
 
 @router.post("/api/whatsapp/retry-all")
 async def api_whatsapp_retry_all(
+    request: Request,
     _=Depends(require_owner),
     svc: WhatsAppService = Depends(get_whatsapp_service),
-    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service)
+    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service),
+    audit: AuditService = Depends(get_audit_service),
 ):
     """Retry all failed WhatsApp messages."""
     try:
@@ -747,7 +1172,7 @@ async def api_whatsapp_retry_all(
         skipped = 0
         errors: list[dict[str, Any]] = []
         for msg in failed_messages:
-            uid = msg.get('user_id')
+            uid = msg.get("user_id")
             try:
                 uid_int = int(uid) if uid is not None else None
             except Exception:
@@ -756,48 +1181,98 @@ async def api_whatsapp_retry_all(
                 skipped += 1
                 continue
 
-            mtype = (msg.get('message_type') or '').strip().lower()
+            mtype = (msg.get("message_type") or "").strip().lower()
             try:
                 ok = False
                 if mtype in ("welcome", "bienvenida"):
-                    ok = wa.send_welcome(int(uid_int))
+                    ok = wa.send_welcome(int(uid_int), request.session.get("sucursal_id"))
                 elif mtype in ("payment", "pago", "payment_confirmation"):
-                    ok = wa.send_payment_confirmation(int(uid_int))
+                    ok = wa.send_payment_confirmation(
+                        int(uid_int), sucursal_id=request.session.get("sucursal_id")
+                    )
                 elif mtype in ("deactivation", "desactivacion"):
-                    ok = wa.send_deactivation(int(uid_int), "Por decisión del administrador")
+                    ok = wa.send_deactivation(
+                        int(uid_int), "Por decisión del administrador"
+                    )
                 elif mtype in ("overdue", "recordatorio_vencida", "payment_reminder"):
-                    ok = wa.send_overdue_reminder(int(uid_int))
+                    ok = wa.send_overdue_reminder(
+                        int(uid_int), request.session.get("sucursal_id")
+                    )
                 elif mtype in ("membership_due_today", "due_today"):
                     u = wa.db.get(Usuario, int(uid_int))
                     fecha = getattr(u, "fecha_proximo_vencimiento", None) if u else None
                     if not fecha:
                         skipped += 1
                         continue
-                    fecha_txt = fecha.isoformat() if hasattr(fecha, "isoformat") else str(fecha)
-                    ok = wa.send_membership_due_today(int(uid_int), str(fecha_txt))
+                    fecha_txt = (
+                        fecha.isoformat() if hasattr(fecha, "isoformat") else str(fecha)
+                    )
+                    ok = wa.send_membership_due_today(
+                        int(uid_int), str(fecha_txt), request.session.get("sucursal_id")
+                    )
                 elif mtype in ("membership_due_soon", "due_soon"):
                     u = wa.db.get(Usuario, int(uid_int))
                     fecha = getattr(u, "fecha_proximo_vencimiento", None) if u else None
                     if not fecha:
                         skipped += 1
                         continue
-                    fecha_txt = fecha.isoformat() if hasattr(fecha, "isoformat") else str(fecha)
-                    ok = wa.send_membership_due_soon(int(uid_int), str(fecha_txt))
+                    fecha_txt = (
+                        fecha.isoformat() if hasattr(fecha, "isoformat") else str(fecha)
+                    )
+                    ok = wa.send_membership_due_soon(
+                        int(uid_int), str(fecha_txt), request.session.get("sucursal_id")
+                    )
                 elif mtype in ("membership_reactivated", "reactivated"):
-                    ok = wa.send_membership_reactivated(int(uid_int))
+                    ok = wa.send_membership_reactivated(
+                        int(uid_int), request.session.get("sucursal_id")
+                    )
                 else:
                     skipped += 1
                     continue
                 if ok:
                     retried += 1
                 else:
-                    errors.append({"user_id": uid_int, "message_type": mtype, "error": "send_failed"})
+                    errors.append(
+                        {
+                            "user_id": uid_int,
+                            "message_type": mtype,
+                            "error": "send_failed",
+                        }
+                    )
             except Exception as e:
-                errors.append({"user_id": uid_int, "message_type": mtype, "error": str(e)})
-        return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", "retried": retried, "skipped": skipped, "errors": errors}
+                errors.append(
+                    {"user_id": uid_int, "message_type": mtype, "error": str(e)}
+                )
+        try:
+            audit.log_from_request(
+                request=request,
+                action=AuditService.ACTION_BULK_ACTION,
+                table_name="whatsapp_messages",
+                record_id=None,
+                old_values={},
+                new_values={"retried": retried, "skipped": skipped},
+                extra_details={"op": "retry_all_failed", "errors": len(errors)},
+            )
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "mensaje": "OK",
+            "success": True,
+            "message": "OK",
+            "retried": retried,
+            "skipped": skipped,
+            "errors": errors,
+        }
     except Exception as e:
         return JSONResponse(
-            {"ok": False, "mensaje": str(e), "success": False, "message": str(e), "error": str(e)},
+            {
+                "ok": False,
+                "mensaje": str(e),
+                "success": False,
+                "message": str(e),
+                "error": str(e),
+            },
             status_code=500,
         )
 
@@ -806,7 +1281,8 @@ async def api_whatsapp_retry_all(
 async def api_whatsapp_clear_failed(
     request: Request,
     _=Depends(require_owner),
-    svc: WhatsAppService = Depends(get_whatsapp_service)
+    svc: WhatsAppService = Depends(get_whatsapp_service),
+    audit: AuditService = Depends(get_audit_service),
 ):
     """Alias for /api/whatsapp/clear_failures - clears failed messages."""
     try:
@@ -815,62 +1291,158 @@ async def api_whatsapp_clear_failed(
         payload = {}
     dias = int(payload.get("days") or 30)
     result = svc.limpiar_fallidos(None, dias)
-    cleared = result.get('deleted', 0) if isinstance(result, dict) else 0
-    return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", "cleared": cleared}
+    cleared = result.get("deleted", 0) if isinstance(result, dict) else 0
+    try:
+        audit.log_from_request(
+            request=request,
+            action=AuditService.ACTION_BULK_ACTION,
+            table_name="whatsapp_messages",
+            record_id=None,
+            old_values={},
+            new_values={"cleared": int(cleared or 0)},
+            extra_details={"op": "clear_failed", "dias": dias},
+        )
+    except Exception:
+        pass
+    return {
+        "ok": True,
+        "mensaje": "OK",
+        "success": True,
+        "message": "OK",
+        "cleared": cleared,
+    }
 
 
 @router.post("/api/whatsapp/mensajes/{mensaje_id}/retry")
 async def api_whatsapp_mensaje_retry(
     mensaje_id: int,
+    request: Request,
     _=Depends(require_owner),
     svc: WhatsAppService = Depends(get_whatsapp_service),
-    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service)
+    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service),
+    audit: AuditService = Depends(get_audit_service),
 ):
     """Retry a specific WhatsApp message by ID."""
     msg = svc.obtener_mensaje_por_id(mensaje_id)
     if not msg:
-        return JSONResponse({"ok": False, "mensaje": "Mensaje no encontrado", "success": False, "message": "Mensaje no encontrado"}, status_code=404)
-    uid = msg.get('user_id')
+        return JSONResponse(
+            {
+                "ok": False,
+                "mensaje": "Mensaje no encontrado",
+                "success": False,
+                "message": "Mensaje no encontrado",
+            },
+            status_code=404,
+        )
+    uid = msg.get("user_id")
     if not uid:
-        return JSONResponse({"ok": False, "mensaje": "Mensaje sin usuario asociado", "success": False, "message": "Mensaje sin usuario asociado"}, status_code=400)
-    mtype = (msg.get('message_type') or '').strip().lower()
+        return JSONResponse(
+            {
+                "ok": False,
+                "mensaje": "Mensaje sin usuario asociado",
+                "success": False,
+                "message": "Mensaje sin usuario asociado",
+            },
+            status_code=400,
+        )
+    mtype = (msg.get("message_type") or "").strip().lower()
     ok = False
     if mtype in ("welcome", "bienvenida"):
-        ok = wa.send_welcome(int(uid))
+        ok = wa.send_welcome(int(uid), request.session.get("sucursal_id"))
     elif mtype in ("payment", "pago", "payment_confirmation"):
-        ok = wa.send_payment_confirmation(int(uid))
+        ok = wa.send_payment_confirmation(
+            int(uid), sucursal_id=request.session.get("sucursal_id")
+        )
     elif mtype in ("deactivation", "desactivacion"):
         ok = wa.send_deactivation(int(uid), "Por decisión del administrador")
     elif mtype in ("overdue", "recordatorio_vencida", "payment_reminder"):
-        ok = wa.send_overdue_reminder(int(uid))
+        ok = wa.send_overdue_reminder(int(uid), request.session.get("sucursal_id"))
     elif mtype in ("membership_due_today", "due_today"):
         try:
             u = wa.db.get(Usuario, int(uid))
             fecha = getattr(u, "fecha_proximo_vencimiento", None) if u else None
             if not fecha:
-                return JSONResponse({"ok": False, "mensaje": "Sin fecha de vencimiento", "success": False, "message": "Sin fecha de vencimiento"}, status_code=400)
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "mensaje": "Sin fecha de vencimiento",
+                        "success": False,
+                        "message": "Sin fecha de vencimiento",
+                    },
+                    status_code=400,
+                )
             fecha_txt = fecha.isoformat() if hasattr(fecha, "isoformat") else str(fecha)
         except Exception:
-            return JSONResponse({"ok": False, "mensaje": "No se pudo resolver la fecha", "success": False, "message": "No se pudo resolver la fecha"}, status_code=400)
-        ok = wa.send_membership_due_today(int(uid), str(fecha_txt))
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "mensaje": "No se pudo resolver la fecha",
+                    "success": False,
+                    "message": "No se pudo resolver la fecha",
+                },
+                status_code=400,
+            )
+        ok = wa.send_membership_due_today(
+            int(uid), str(fecha_txt), request.session.get("sucursal_id")
+        )
     elif mtype in ("membership_due_soon", "due_soon"):
         try:
             u = wa.db.get(Usuario, int(uid))
             fecha = getattr(u, "fecha_proximo_vencimiento", None) if u else None
             if not fecha:
-                return JSONResponse({"ok": False, "mensaje": "Sin fecha de vencimiento", "success": False, "message": "Sin fecha de vencimiento"}, status_code=400)
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "mensaje": "Sin fecha de vencimiento",
+                        "success": False,
+                        "message": "Sin fecha de vencimiento",
+                    },
+                    status_code=400,
+                )
             fecha_txt = fecha.isoformat() if hasattr(fecha, "isoformat") else str(fecha)
         except Exception:
-            return JSONResponse({"ok": False, "mensaje": "No se pudo resolver la fecha", "success": False, "message": "No se pudo resolver la fecha"}, status_code=400)
-        ok = wa.send_membership_due_soon(int(uid), str(fecha_txt))
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "mensaje": "No se pudo resolver la fecha",
+                    "success": False,
+                    "message": "No se pudo resolver la fecha",
+                },
+                status_code=400,
+            )
+        ok = wa.send_membership_due_soon(
+            int(uid), str(fecha_txt), request.session.get("sucursal_id")
+        )
     elif mtype in ("membership_reactivated", "reactivated"):
-        ok = wa.send_membership_reactivated(int(uid))
+        ok = wa.send_membership_reactivated(int(uid), request.session.get("sucursal_id"))
     else:
         return JSONResponse(
-            {"ok": False, "mensaje": "Retry no soportado sin parámetros", "success": False, "message": "Retry no soportado sin parámetros"},
+            {
+                "ok": False,
+                "mensaje": "Retry no soportado sin parámetros",
+                "success": False,
+                "message": "Retry no soportado sin parámetros",
+            },
             status_code=400,
         )
-    return {"ok": bool(ok), "success": bool(ok), "mensaje": "OK" if ok else "Error", "message": "OK" if ok else "Error"}
+    try:
+        audit.log_from_request(
+            request=request,
+            action=AuditService.ACTION_UPDATE,
+            table_name="whatsapp_messages",
+            record_id=int(mensaje_id),
+            old_values={"status": msg.get("status"), "message_type": msg.get("message_type")},
+            new_values={"retried": bool(ok)},
+            extra_details={"op": "retry_one"},
+        )
+    except Exception:
+        pass
+    return {
+        "ok": bool(ok),
+        "success": bool(ok),
+        "mensaje": "OK" if ok else "Error",
+        "message": "OK" if ok else "Error",
+    }
 
 
 @router.post("/api/whatsapp/retry")
@@ -878,82 +1450,226 @@ async def api_whatsapp_retry(
     request: Request,
     _=Depends(require_owner),
     svc: WhatsAppService = Depends(get_whatsapp_service),
-    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service)
+    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service),
+    audit: AuditService = Depends(get_audit_service),
 ):
     try:
         payload = await request.json()
     except:
         payload = {}
-    
+
     telefono = str(payload.get("telefono") or payload.get("phone") or "").strip()
     usuario_id = payload.get("usuario_id")
-    
+
     uid = int(usuario_id) if usuario_id else None
     if not uid and telefono:
         uid = svc.obtener_usuario_id_por_telefono(telefono)
     if not uid:
         return JSONResponse(
-            {"ok": False, "mensaje": "usuario_id no encontrado", "success": False, "message": "usuario_id no encontrado"},
+            {
+                "ok": False,
+                "mensaje": "usuario_id no encontrado",
+                "success": False,
+                "message": "usuario_id no encontrado",
+            },
             status_code=400,
         )
-    
+
     last = svc.obtener_ultimo_fallido(telefono, uid)
     last_type = (last.get("message_type") or "").lower() if last else ""
-    
+
     if last_type in ("welcome", "bienvenida"):
-        ok = wa.send_welcome(uid)
+        ok = wa.send_welcome(uid, request.session.get("sucursal_id"))
         msg = "OK" if bool(ok) else "Error"
-        return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg, "tipo": last_type or "welcome"}
+        try:
+            audit.log_from_request(
+                request=request,
+                action=AuditService.ACTION_UPDATE,
+                table_name="whatsapp_messages",
+                record_id=None,
+                old_values={"message_type": last_type, "usuario_id": uid},
+                new_values={"retried": bool(ok)},
+                extra_details={"op": "retry_last_failed"},
+            )
+        except Exception:
+            pass
+        return {
+            "ok": bool(ok),
+            "mensaje": msg,
+            "success": bool(ok),
+            "message": msg,
+            "tipo": last_type or "welcome",
+        }
     elif last_type in ("overdue", "recordatorio_vencida", "payment_reminder"):
-        ok = wa.send_overdue_reminder(uid)
+        ok = wa.send_overdue_reminder(uid, request.session.get("sucursal_id"))
         msg = "OK" if bool(ok) else "Error"
-        return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg, "tipo": last_type}
+        try:
+            audit.log_from_request(
+                request=request,
+                action=AuditService.ACTION_UPDATE,
+                table_name="whatsapp_messages",
+                record_id=None,
+                old_values={"message_type": last_type, "usuario_id": uid},
+                new_values={"retried": bool(ok)},
+                extra_details={"op": "retry_last_failed"},
+            )
+        except Exception:
+            pass
+        return {
+            "ok": bool(ok),
+            "mensaje": msg,
+            "success": bool(ok),
+            "message": msg,
+            "tipo": last_type,
+        }
     elif last_type in ("payment", "pago", "payment_confirmation"):
-        ok = wa.send_payment_confirmation(uid)
+        ok = wa.send_payment_confirmation(uid, sucursal_id=request.session.get("sucursal_id"))
         msg = "OK" if bool(ok) else "Error"
-        return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg, "tipo": last_type}
+        try:
+            audit.log_from_request(
+                request=request,
+                action=AuditService.ACTION_UPDATE,
+                table_name="whatsapp_messages",
+                record_id=None,
+                old_values={"message_type": last_type, "usuario_id": uid},
+                new_values={"retried": bool(ok)},
+                extra_details={"op": "retry_last_failed"},
+            )
+        except Exception:
+            pass
+        return {
+            "ok": bool(ok),
+            "mensaje": msg,
+            "success": bool(ok),
+            "message": msg,
+            "tipo": last_type,
+        }
     elif last_type in ("deactivation", "desactivacion"):
         ok = wa.send_deactivation(uid, "Por decisión del administrador")
         msg = "OK" if bool(ok) else "Error"
-        return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg, "tipo": last_type}
+        try:
+            audit.log_from_request(
+                request=request,
+                action=AuditService.ACTION_UPDATE,
+                table_name="whatsapp_messages",
+                record_id=None,
+                old_values={"message_type": last_type, "usuario_id": uid},
+                new_values={"retried": bool(ok)},
+                extra_details={"op": "retry_last_failed"},
+            )
+        except Exception:
+            pass
+        return {
+            "ok": bool(ok),
+            "mensaje": msg,
+            "success": bool(ok),
+            "message": msg,
+            "tipo": last_type,
+        }
     elif last_type in ("class_reminder", "recordatorio_clase"):
         ok = wa.send_class_reminder(uid, "", "", "")
         msg = "OK" if bool(ok) else "Error"
-        return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg, "tipo": last_type}
+        try:
+            audit.log_from_request(
+                request=request,
+                action=AuditService.ACTION_UPDATE,
+                table_name="whatsapp_messages",
+                record_id=None,
+                old_values={"message_type": last_type, "usuario_id": uid},
+                new_values={"retried": bool(ok)},
+                extra_details={"op": "retry_last_failed"},
+            )
+        except Exception:
+            pass
+        return {
+            "ok": bool(ok),
+            "mensaje": msg,
+            "success": bool(ok),
+            "message": msg,
+            "tipo": last_type,
+        }
     else:
-        ok = wa.send_welcome(uid)
+        ok = wa.send_welcome(uid, request.session.get("sucursal_id"))
         msg = "OK" if bool(ok) else "Error"
-        return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg, "tipo": last_type or "welcome"}
+        try:
+            audit.log_from_request(
+                request=request,
+                action=AuditService.ACTION_UPDATE,
+                table_name="whatsapp_messages",
+                record_id=None,
+                old_values={"message_type": last_type or "welcome", "usuario_id": uid},
+                new_values={"retried": bool(ok)},
+                extra_details={"op": "retry_last_failed"},
+            )
+        except Exception:
+            pass
+        return {
+            "ok": bool(ok),
+            "mensaje": msg,
+            "success": bool(ok),
+            "message": msg,
+            "tipo": last_type or "welcome",
+        }
 
 
 @router.post("/api/whatsapp/clear_failures")
 async def api_whatsapp_clear_failures(
     request: Request,
     _=Depends(require_owner),
-    svc: WhatsAppService = Depends(get_whatsapp_service)
+    svc: WhatsAppService = Depends(get_whatsapp_service),
+    audit: AuditService = Depends(get_audit_service),
 ):
     try:
         payload = await request.json()
     except:
         payload = {}
-    telefono = str(payload.get("telefono") or payload.get("phone") or "").strip() or None
+    telefono = (
+        str(payload.get("telefono") or payload.get("phone") or "").strip() or None
+    )
     dias = int(payload.get("desde_dias") or payload.get("days") or 30)
     result = svc.limpiar_fallidos(telefono, dias)
-    ok_val = bool(isinstance(result, dict) and ('error' not in result))
-    msg = "OK" if ok_val else str((result or {}).get('error') if isinstance(result, dict) else 'Error')
+    ok_val = bool(isinstance(result, dict) and ("error" not in result))
+    msg = (
+        "OK"
+        if ok_val
+        else str((result or {}).get("error") if isinstance(result, dict) else "Error")
+    )
     payload_out = {"ok": ok_val, "mensaje": msg, "success": ok_val, "message": msg}
     if isinstance(result, dict):
         payload_out.update(result)
+    try:
+        audit.log_from_request(
+            request=request,
+            action=AuditService.ACTION_BULK_ACTION,
+            table_name="whatsapp_messages",
+            record_id=None,
+            old_values={},
+            new_values={"ok": ok_val},
+            extra_details={"op": "clear_failures", "telefono": telefono, "dias": dias},
+        )
+    except Exception:
+        pass
     return payload_out
 
 
 @router.post("/api/whatsapp/server/start")
 async def api_whatsapp_server_start(_=Depends(require_owner)):
     try:
-        return {"ok": False, "mensaje": "No soportado", "success": False, "message": "No soportado"}
+        return {
+            "ok": False,
+            "mensaje": "No soportado",
+            "success": False,
+            "message": "No soportado",
+        }
     except Exception as e:
         return JSONResponse(
-            {"ok": False, "mensaje": str(e), "success": False, "message": str(e), "error": str(e)},
+            {
+                "ok": False,
+                "mensaje": str(e),
+                "success": False,
+                "message": str(e),
+                "error": str(e),
+            },
             status_code=500,
         )
 
@@ -961,48 +1677,102 @@ async def api_whatsapp_server_start(_=Depends(require_owner)):
 @router.post("/api/whatsapp/server/stop")
 async def api_whatsapp_server_stop(_=Depends(require_owner)):
     try:
-        return {"ok": False, "mensaje": "No soportado", "success": False, "message": "No soportado"}
+        return {
+            "ok": False,
+            "mensaje": "No soportado",
+            "success": False,
+            "message": "No soportado",
+        }
     except Exception as e:
         return JSONResponse(
-            {"ok": False, "mensaje": str(e), "success": False, "message": str(e), "error": str(e)},
+            {
+                "ok": False,
+                "mensaje": str(e),
+                "success": False,
+                "message": str(e),
+                "error": str(e),
+            },
             status_code=500,
         )
 
 
 @router.post("/api/whatsapp/config")
-async def api_whatsapp_config(request: Request, _=Depends(require_owner), st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service)):
+async def api_whatsapp_config(
+    request: Request,
+    _=Depends(require_owner),
+    st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service),
+):
     try:
-        data = await request.json() if request.headers.get("content-type", "").startswith("application/json") else await request.form()
+        data = (
+            await request.json()
+            if request.headers.get("content-type", "").startswith("application/json")
+            else await request.form()
+        )
     except:
         data = {}
-    allowed = {"phone_number_id", "whatsapp_business_account_id", "access_token", "allowlist_numbers", "allowlist_enabled", "enable_webhook", "webhook_enabled", "webhook_verify_token", "enabled", "wa_template_language"}
+    allowed = {
+        "phone_number_id",
+        "whatsapp_business_account_id",
+        "access_token",
+        "allowlist_numbers",
+        "allowlist_enabled",
+        "enable_webhook",
+        "webhook_enabled",
+        "webhook_verify_token",
+        "enabled",
+        "wa_template_language",
+    }
     cfg = {k: data.get(k) for k in allowed if k in data}
     if "enable_webhook" in cfg and "webhook_enabled" not in cfg:
         cfg["webhook_enabled"] = cfg.get("enable_webhook")
-    _ = st.upsert_manual_config(cfg)
-    return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", "applied_keys": list(cfg.keys())}
+    _ = st.upsert_manual_config(cfg, sucursal_id=request.session.get("sucursal_id"))
+    return {
+        "ok": True,
+        "mensaje": "OK",
+        "success": True,
+        "message": "OK",
+        "applied_keys": list(cfg.keys()),
+    }
 
 
 @router.post("/api/usuarios/{usuario_id}/whatsapp/bienvenida")
-async def api_usuario_whatsapp_bienvenida(usuario_id: int, _=Depends(require_gestion_access), wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service)):
+async def api_usuario_whatsapp_bienvenida(
+    usuario_id: int,
+    request: Request,
+    _scope=Depends(require_scope_gestion("whatsapp:send")),
+    _=Depends(require_gestion_access),
+    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service),
+):
     try:
-        ok = wa.send_welcome(usuario_id)
+        ok = wa.send_welcome(usuario_id, request.session.get("sucursal_id"))
         msg = "OK" if bool(ok) else "Error"
         return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg}
     except Exception as e:
         return JSONResponse(
-            {"ok": False, "mensaje": str(e), "success": False, "message": str(e), "error": str(e)},
+            {
+                "ok": False,
+                "mensaje": str(e),
+                "success": False,
+                "message": str(e),
+                "error": str(e),
+            },
             status_code=500,
         )
 
 
 @router.post("/api/usuarios/{usuario_id}/whatsapp/confirmacion_pago")
-async def api_usuario_whatsapp_confirmacion_pago(usuario_id: int, request: Request, _=Depends(require_gestion_access), wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service)):
+async def api_usuario_whatsapp_confirmacion_pago(
+    usuario_id: int,
+    request: Request,
+    _scope=Depends(require_scope_gestion("whatsapp:send")),
+    _=Depends(require_gestion_access),
+    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service),
+):
     try:
         payload = await request.json()
     except:
         payload = {}
-    
+
     monto = payload.get("monto")
     mes = payload.get("mes") or payload.get("month")
     anio = payload.get("año") or payload.get("anio") or payload.get("year")
@@ -1018,13 +1788,21 @@ async def api_usuario_whatsapp_confirmacion_pago(usuario_id: int, request: Reque
         anio_i = int(anio) if anio is not None else None
     except Exception:
         anio_i = None
-    ok = wa.send_payment_confirmation(usuario_id, monto_f, mes_i, anio_i)
+    ok = wa.send_payment_confirmation(
+        usuario_id, monto_f, mes_i, anio_i, request.session.get("sucursal_id")
+    )
     msg = "OK" if bool(ok) else "Error"
     return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg}
 
 
 @router.post("/api/usuarios/{usuario_id}/whatsapp/desactivacion")
-async def api_usuario_whatsapp_desactivacion(usuario_id: int, request: Request, _=Depends(require_gestion_access), wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service)):
+async def api_usuario_whatsapp_desactivacion(
+    usuario_id: int,
+    request: Request,
+    _scope=Depends(require_scope_gestion("whatsapp:send")),
+    _=Depends(require_gestion_access),
+    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service),
+):
     try:
         payload = await request.json()
     except:
@@ -1036,8 +1814,14 @@ async def api_usuario_whatsapp_desactivacion(usuario_id: int, request: Request, 
 
 
 @router.post("/api/usuarios/{usuario_id}/whatsapp/recordatorio_vencida")
-async def api_usuario_whatsapp_recordatorio_vencida(usuario_id: int, _=Depends(require_gestion_access), wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service)):
-    ok = wa.send_overdue_reminder(usuario_id)
+async def api_usuario_whatsapp_recordatorio_vencida(
+    usuario_id: int,
+    request: Request,
+    _scope=Depends(require_scope_gestion("whatsapp:send")),
+    _=Depends(require_gestion_access),
+    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service),
+):
+    ok = wa.send_overdue_reminder(usuario_id, request.session.get("sucursal_id"))
     msg = "OK" if bool(ok) else "Error"
     return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg}
 
@@ -1047,53 +1831,67 @@ async def api_usuario_whatsapp_force(
     usuario_id: int,
     request: Request,
     _=Depends(require_owner),
-    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service)
+    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service),
 ):
     """Force send a WhatsApp message of a specific type to a user."""
     try:
         payload = await request.json()
     except:
         payload = {}
-    
+
     tipo = (payload.get("tipo") or "").lower()
-    
+
     ok = False
     if tipo in ("welcome", "bienvenida"):
-        ok = wa.send_welcome(usuario_id)
+        ok = wa.send_welcome(usuario_id, request.session.get("sucursal_id"))
     elif tipo in ("overdue", "vencida", "recordatorio"):
-        ok = wa.send_overdue_reminder(usuario_id)
+        ok = wa.send_overdue_reminder(usuario_id, request.session.get("sucursal_id"))
     elif tipo in ("deactivation", "desactivacion"):
-        ok = wa.send_deactivation(usuario_id=usuario_id, motivo="Por decisión del administrador")
+        ok = wa.send_deactivation(
+            usuario_id=usuario_id, motivo="Por decisión del administrador"
+        )
     elif tipo in ("payment", "pago"):
-        ok = wa.send_payment_confirmation(usuario_id)
+        ok = wa.send_payment_confirmation(
+            usuario_id, sucursal_id=request.session.get("sucursal_id")
+        )
     elif tipo in ("class_reminder", "clase", "recordatorio_clase"):
         ok = wa.send_class_reminder(usuario_id, "", "", "")
     else:
-        # Default to welcome
-        ok = wa.send_welcome(usuario_id)
+        ok = wa.send_welcome(usuario_id, request.session.get("sucursal_id"))
 
     msg = "OK" if bool(ok) else "Error"
     return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg}
 
 
 @router.post("/api/usuarios/{usuario_id}/whatsapp/recordatorio_clase")
-async def api_usuario_whatsapp_recordatorio_clase(usuario_id: int, request: Request, _=Depends(require_gestion_access), wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service)):
+async def api_usuario_whatsapp_recordatorio_clase(
+    usuario_id: int,
+    request: Request,
+    _scope=Depends(require_scope_gestion("whatsapp:send")),
+    _=Depends(require_gestion_access),
+    wa: WhatsAppDispatchService = Depends(get_whatsapp_dispatch_service),
+):
     try:
         payload = await request.json()
     except:
         payload = {}
     ok = wa.send_class_reminder(
         usuario_id,
-        payload.get('tipo_clase') or payload.get('clase_nombre') or '',
-        payload.get('fecha') or '',
-        payload.get('hora') or ''
+        payload.get("tipo_clase") or payload.get("clase_nombre") or "",
+        payload.get("fecha") or "",
+        payload.get("hora") or "",
     )
     msg = "OK" if bool(ok) else "Error"
     return {"ok": bool(ok), "mensaje": msg, "success": bool(ok), "message": msg}
 
 
 @router.get("/api/usuarios/{usuario_id}/whatsapp/ultimo")
-async def api_usuario_whatsapp_ultimo(usuario_id: int, request: Request, _=Depends(require_owner), svc: WhatsAppService = Depends(get_whatsapp_service)):
+async def api_usuario_whatsapp_ultimo(
+    usuario_id: int,
+    request: Request,
+    _=Depends(require_owner),
+    svc: WhatsAppService = Depends(get_whatsapp_service),
+):
     direccion = request.query_params.get("direccion")
     tipo = request.query_params.get("tipo")
     return {
@@ -1101,12 +1899,21 @@ async def api_usuario_whatsapp_ultimo(usuario_id: int, request: Request, _=Depen
         "mensaje": "OK",
         "success": True,
         "message": "OK",
-        "item": svc.obtener_ultimo_mensaje(usuario_id, tipo, direccion if direccion in (None, "enviado", "recibido") else None),
+        "item": svc.obtener_ultimo_mensaje(
+            usuario_id,
+            tipo,
+            direccion if direccion in (None, "enviado", "recibido") else None,
+        ),
     }
 
 
 @router.get("/api/usuarios/{usuario_id}/whatsapp/historial")
-async def api_usuario_whatsapp_historial(usuario_id: int, request: Request, _=Depends(require_gestion_access), svc: WhatsAppService = Depends(get_whatsapp_service)):
+async def api_usuario_whatsapp_historial(
+    usuario_id: int,
+    request: Request,
+    _=Depends(require_gestion_access),
+    svc: WhatsAppService = Depends(get_whatsapp_service),
+):
     tipo = request.query_params.get("tipo")
     limite = int(request.query_params.get("limit") or 50)
     items = svc.obtener_historial_usuario(usuario_id, tipo, limite)
@@ -1114,29 +1921,61 @@ async def api_usuario_whatsapp_historial(usuario_id: int, request: Request, _=De
 
 
 @router.delete("/api/usuarios/{usuario_id}/whatsapp/{message_pk}")
-async def api_usuario_whatsapp_delete(usuario_id: int, message_pk: int, _=Depends(require_owner), svc: WhatsAppService = Depends(get_whatsapp_service)):
-    old_item = svc.obtener_mensaje_por_pk(usuario_id, message_pk)
+async def api_usuario_whatsapp_delete(
+    usuario_id: int,
+    message_pk: int,
+    _=Depends(require_owner),
+    svc: WhatsAppService = Depends(get_whatsapp_service),
+):
     ok = svc.eliminar_mensaje_por_pk(usuario_id, message_pk)
     if not ok:
         return JSONResponse(
-            {"ok": False, "mensaje": "Mensaje no encontrado", "success": False, "message": "Mensaje no encontrado"},
+            {
+                "ok": False,
+                "mensaje": "Mensaje no encontrado",
+                "success": False,
+                "message": "Mensaje no encontrado",
+            },
             status_code=404,
         )
-    return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", "deleted": message_pk}
+    return {
+        "ok": True,
+        "mensaje": "OK",
+        "success": True,
+        "message": "OK",
+        "deleted": message_pk,
+    }
 
 
 @router.delete("/api/usuarios/{usuario_id}/whatsapp/by-mid/{message_id}")
-async def api_usuario_whatsapp_delete_by_mid(usuario_id: int, message_id: str, _=Depends(require_owner), svc: WhatsAppService = Depends(get_whatsapp_service)):
+async def api_usuario_whatsapp_delete_by_mid(
+    usuario_id: int,
+    message_id: str,
+    _=Depends(require_owner),
+    svc: WhatsAppService = Depends(get_whatsapp_service),
+):
     ok = svc.eliminar_mensaje_por_mid(usuario_id, message_id)
     if not ok:
         return JSONResponse(
-            {"ok": False, "mensaje": "Mensaje no encontrado", "success": False, "message": "Mensaje no encontrado"},
+            {
+                "ok": False,
+                "mensaje": "Mensaje no encontrado",
+                "success": False,
+                "message": "Mensaje no encontrado",
+            },
             status_code=404,
         )
-    return {"ok": True, "mensaje": "OK", "success": True, "message": "OK", "deleted_mid": message_id}
+    return {
+        "ok": True,
+        "mensaje": "OK",
+        "success": True,
+        "message": "OK",
+        "deleted_mid": message_id,
+    }
 
 
 # --- Webhooks ---
+
 
 @router.get("/webhooks/whatsapp")
 async def whatsapp_verify(request: Request):
@@ -1162,22 +2001,30 @@ async def whatsapp_verify_tenant(tenant: str, request: Request):
         mode = request.query_params.get("hub.mode")
         token = request.query_params.get("hub.verify_token")
         challenge = request.query_params.get("hub.challenge")
-        expected = os.getenv("WHATSAPP_VERIFY_TOKEN", "") or st.get_webhook_verify_token()
+        expected = (
+            os.getenv("WHATSAPP_VERIFY_TOKEN", "") or st.get_webhook_verify_token()
+        )
         if mode == "subscribe" and expected and token == expected and challenge:
             return Response(content=str(challenge), media_type="text/plain")
     raise HTTPException(status_code=403, detail="Invalid verify token")
 
 
 @router.post("/webhooks/whatsapp")
-async def whatsapp_webhook(request: Request, svc: WhatsAppService = Depends(get_whatsapp_service), db: Session = Depends(get_db_session)):
+async def whatsapp_webhook(
+    request: Request,
+):
     def _admin_db_params() -> Dict[str, Any]:
         return {
             "host": os.getenv("ADMIN_DB_HOST", os.getenv("DB_HOST", "localhost")),
             "port": int(os.getenv("ADMIN_DB_PORT", os.getenv("DB_PORT", 5432))),
-            "database": os.getenv("ADMIN_DB_NAME", os.getenv("DB_NAME", "ironhub_admin")),
+            "database": os.getenv(
+                "ADMIN_DB_NAME", os.getenv("DB_NAME", "ironhub_admin")
+            ),
             "user": os.getenv("ADMIN_DB_USER", os.getenv("DB_USER", "postgres")),
             "password": os.getenv("ADMIN_DB_PASSWORD", os.getenv("DB_PASSWORD", "")),
-            "sslmode": os.getenv("ADMIN_DB_SSLMODE", os.getenv("DB_SSLMODE", "require")),
+            "sslmode": os.getenv(
+                "ADMIN_DB_SSLMODE", os.getenv("DB_SSLMODE", "require")
+            ),
             "connect_timeout": 10,
             "application_name": "webapp_api_whatsapp_webhook",
         }
@@ -1192,7 +2039,10 @@ async def whatsapp_webhook(request: Request, svc: WhatsAppService = Depends(get_
             adm = RawPostgresManager(connection_params=_admin_db_params())
             with adm.get_connection_context() as conn:
                 cur = conn.cursor()
-                cur.execute("SELECT subdominio FROM gyms WHERE whatsapp_phone_id = %s LIMIT 1", (pid,))
+                cur.execute(
+                    "SELECT subdominio FROM gyms WHERE whatsapp_phone_id = %s LIMIT 1",
+                    (pid,),
+                )
                 row = cur.fetchone()
             return str(row[0]).strip().lower() if row and row[0] else None
         except Exception:
@@ -1208,15 +2058,27 @@ async def whatsapp_webhook(request: Request, svc: WhatsAppService = Depends(get_
                     if pid:
                         return str(pid)
                     for st0 in value.get("statuses") or []:
-                        c = (st0 or {}).get("recipient_id") or (st0 or {}).get("conversation") or None
+                        c = (
+                            (st0 or {}).get("recipient_id")
+                            or (st0 or {}).get("conversation")
+                            or None
+                        )
                         _ = c
             return None
         except Exception:
             return None
 
-    def _verify_signature(raw: bytes, request: Request, app_secret: str, dev_mode: bool, allow_unsigned: bool) -> None:
+    def _verify_signature(
+        raw: bytes,
+        request: Request,
+        app_secret: str,
+        dev_mode: bool,
+        allow_unsigned: bool,
+    ) -> None:
         if not app_secret and not (dev_mode or allow_unsigned):
-            raise HTTPException(status_code=503, detail="Webhook signature not configured")
+            raise HTTPException(
+                status_code=503, detail="Webhook signature not configured"
+            )
         if not app_secret:
             return
         import hmac, hashlib
@@ -1229,7 +2091,9 @@ async def whatsapp_webhook(request: Request, svc: WhatsAppService = Depends(get_
         if not hmac.compare_digest(expected_hash, incoming_hash):
             raise HTTPException(status_code=403, detail="Invalid signature")
 
-    def _process_payload(svc0: WhatsAppService, payload0: Dict[str, Any]) -> None:
+    def _process_payload(
+        svc0: WhatsAppService, payload0: Dict[str, Any], sucursal_id: Optional[int]
+    ) -> None:
         for entry in payload0.get("entry") or []:
             for change in entry.get("changes") or []:
                 value = change.get("value") or {}
@@ -1248,16 +2112,32 @@ async def whatsapp_webhook(request: Request, svc: WhatsAppService = Depends(get_
                         text = (msg.get("button") or {}).get("text")
                     elif mtype == "interactive":
                         ir = msg.get("interactive") or {}
-                        text = (ir.get("button_reply") or {}).get("title") or (ir.get("list_reply") or {}).get("title")
+                        text = (ir.get("button_reply") or {}).get("title") or (
+                            ir.get("list_reply") or {}
+                        ).get("title")
                     elif mtype in ("image", "audio", "video", "document"):
                         text = f"[{mtype}]"
-                    uid = svc0.obtener_usuario_id_por_telefono(wa_from) if wa_from else None
-                    svc0.registrar_mensaje_entrante(uid, wa_from, text or "", mid)
+                    uid = (
+                        svc0.obtener_usuario_id_por_telefono(wa_from)
+                        if wa_from
+                        else None
+                    )
+                    svc0.registrar_mensaje_entrante(
+                        uid, sucursal_id, wa_from, text or "", mid
+                    )
 
     try:
         raw = await request.body()
-        dev_mode = os.getenv("DEVELOPMENT_MODE", "").lower() in ("1", "true", "yes") or os.getenv("ENV", "").lower() in ("dev", "development")
-        allow_unsigned = os.getenv("ALLOW_UNSIGNED_WHATSAPP_WEBHOOK", "").lower() in ("1", "true", "yes")
+        dev_mode = os.getenv("DEVELOPMENT_MODE", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        ) or os.getenv("ENV", "").lower() in ("dev", "development")
+        allow_unsigned = os.getenv("ALLOW_UNSIGNED_WHATSAPP_WEBHOOK", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
         app_secret = (os.getenv("WHATSAPP_APP_SECRET", "") or "").strip()
         _verify_signature(raw, request, app_secret, dev_mode, allow_unsigned)
         payload = json.loads(raw.decode())
@@ -1277,11 +2157,30 @@ async def whatsapp_webhook(request: Request, svc: WhatsAppService = Depends(get_
         set_current_tenant(str(tenant))
         with tenant_session_scope(str(tenant)) as tdb:
             tsvc = WhatsAppService(tdb)
-            _process_payload(tsvc, payload)
+            sid = None
+            try:
+                if phone_number_id:
+                    sid = (
+                        tdb.execute(
+                            text(
+                                "SELECT sucursal_id FROM whatsapp_config WHERE phone_id = :pid ORDER BY created_at DESC LIMIT 1"
+                            ),
+                            {"pid": str(phone_number_id).strip()},
+                        ).scalar()
+                        or None
+                    )
+            except Exception:
+                sid = None
+            _process_payload(tsvc, payload, sid)
         return {"status": "ok"}
 
-    _process_payload(svc, payload)
-    return {"status": "ok", "routed": False}
+    try:
+        logger.warning(
+            f"WhatsApp webhook unrouted: phone_number_id={str(phone_number_id or '').strip() or 'none'}"
+        )
+    except Exception:
+        pass
+    return {"status": "ignored", "reason": "unrouted"}
 
 
 @router.post("/webhooks/whatsapp/{tenant}")
@@ -1295,23 +2194,38 @@ async def whatsapp_webhook_tenant(tenant: str, request: Request):
         svc = WhatsAppService(db)
         try:
             raw = await request.body()
-            dev_mode = os.getenv("DEVELOPMENT_MODE", "").lower() in ("1", "true", "yes") or os.getenv("ENV", "").lower() in ("dev", "development")
-            allow_unsigned = os.getenv("ALLOW_UNSIGNED_WHATSAPP_WEBHOOK", "").lower() in ("1", "true", "yes")
+            dev_mode = os.getenv("DEVELOPMENT_MODE", "").lower() in (
+                "1",
+                "true",
+                "yes",
+            ) or os.getenv("ENV", "").lower() in ("dev", "development")
+            allow_unsigned = os.getenv(
+                "ALLOW_UNSIGNED_WHATSAPP_WEBHOOK", ""
+            ).lower() in ("1", "true", "yes")
 
             app_secret = os.getenv("WHATSAPP_APP_SECRET", "")
             if not app_secret:
                 try:
-                    row = db.execute(select(Configuracion.valor).where(Configuracion.clave == "WHATSAPP_APP_SECRET").limit(1)).first()
+                    row = db.execute(
+                        select(Configuracion.valor)
+                        .where(Configuracion.clave == "WHATSAPP_APP_SECRET")
+                        .limit(1)
+                    ).first()
                     app_secret = (row[0] if row else "") or ""
                 except Exception:
                     app_secret = ""
             if not app_secret and not (dev_mode or allow_unsigned):
-                raise HTTPException(status_code=503, detail="Webhook signature not configured")
+                raise HTTPException(
+                    status_code=503, detail="Webhook signature not configured"
+                )
 
             if app_secret:
                 import hmac, hashlib
+
                 sig = request.headers.get("X-Hub-Signature-256") or ""
-                expected_hash = hmac.new(app_secret.encode(), raw, hashlib.sha256).hexdigest()
+                expected_hash = hmac.new(
+                    app_secret.encode(), raw, hashlib.sha256
+                ).hexdigest()
                 incoming_hash = str(sig).strip()
                 if incoming_hash.lower().startswith("sha256="):
                     incoming_hash = incoming_hash.split("=", 1)[1]
@@ -1323,6 +2237,33 @@ async def whatsapp_webhook_tenant(tenant: str, request: Request):
             raise
         except Exception:
             raise HTTPException(status_code=400, detail="Bad Request")
+
+        phone_number_id = None
+        try:
+            for entry in payload.get("entry") or []:
+                for change in entry.get("changes") or []:
+                    value = (change or {}).get("value") or {}
+                    md = value.get("metadata") or {}
+                    pid = (md or {}).get("phone_number_id")
+                    if pid:
+                        phone_number_id = str(pid)
+                        break
+        except Exception:
+            phone_number_id = None
+        sid = None
+        try:
+            if phone_number_id:
+                sid = (
+                    db.execute(
+                        text(
+                            "SELECT sucursal_id FROM whatsapp_config WHERE phone_id = :pid ORDER BY created_at DESC LIMIT 1"
+                        ),
+                        {"pid": str(phone_number_id).strip()},
+                    ).scalar()
+                    or None
+                )
+        except Exception:
+            sid = None
 
         for entry in payload.get("entry") or []:
             for change in entry.get("changes") or []:
@@ -1345,11 +2286,17 @@ async def whatsapp_webhook_tenant(tenant: str, request: Request):
                         text = (msg.get("button") or {}).get("text")
                     elif mtype == "interactive":
                         ir = msg.get("interactive") or {}
-                        text = (ir.get("button_reply") or {}).get("title") or (ir.get("list_reply") or {}).get("title")
+                        text = (ir.get("button_reply") or {}).get("title") or (
+                            ir.get("list_reply") or {}
+                        ).get("title")
                     elif mtype in ("image", "audio", "video", "document"):
                         text = f"[{mtype}]"
 
-                    uid = svc.obtener_usuario_id_por_telefono(wa_from) if wa_from else None
-                    svc.registrar_mensaje_entrante(uid, wa_from, text or "", mid)
+                    uid = (
+                        svc.obtener_usuario_id_por_telefono(wa_from)
+                        if wa_from
+                        else None
+                    )
+                    svc.registrar_mensaje_entrante(uid, sid, wa_from, text or "", mid)
 
         return {"status": "ok"}

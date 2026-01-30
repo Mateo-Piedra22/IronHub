@@ -7,9 +7,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Dumbbell, LogIn, Eye, EyeOff, User, KeyRound, ChevronDown, ChevronUp, AlertCircle, CheckCircle } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/lib/auth';
 
 export default function UsuarioLoginPage() {
     const router = useRouter();
+    const { checkSession } = useAuth();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [showPin, setShowPin] = useState(false);
@@ -69,6 +71,7 @@ export default function UsuarioLoginPage() {
                     setError('Tu cuenta está inactiva. Consultá en recepción.');
                     return;
                 }
+                await checkSession();
                 router.push('/usuario');
             } else {
                 setError(res.error || res.data?.message || 'Credenciales incorrectas');

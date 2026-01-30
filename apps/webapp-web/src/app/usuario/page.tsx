@@ -15,9 +15,10 @@ import {
     Clock,
     CheckCircle2,
     AlertCircle,
+    X,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
-import { api, type Usuario, type Pago, type Rutina } from '@/lib/api';
+import { api, type Usuario, type Pago, type Rutina, type UsuarioEntitlements } from '@/lib/api';
 import { formatDate, formatDateRelative, formatCurrency, cn } from '@/lib/utils';
 
 function UserDashboardContent() {
@@ -29,6 +30,9 @@ function UserDashboardContent() {
     const [rutina, setRutina] = useState<Rutina | null>(null);
     const [loading, setLoading] = useState(true);
     const [showScanner, setShowScanner] = useState(false);
+    const [entitlementsOpen, setEntitlementsOpen] = useState(false);
+    const [entitlementsLoading, setEntitlementsLoading] = useState(false);
+    const [entitlements, setEntitlements] = useState<UsuarioEntitlements | null>(null);
 
     useEffect(() => {
         if (user?.id) {
@@ -108,6 +112,24 @@ function UserDashboardContent() {
         setShowScanner(false);
     };
 
+    const openEntitlements = async () => {
+        setEntitlementsOpen(true);
+        if (entitlements) return;
+        setEntitlementsLoading(true);
+        try {
+            const res = await api.getUsuarioEntitlements();
+            if (res.ok && res.data) {
+                setEntitlements(res.data);
+            } else {
+                setEntitlements(null);
+            }
+        } catch {
+            setEntitlements(null);
+        } finally {
+            setEntitlementsLoading(false);
+        }
+    };
+
     if (authLoading || loading) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-slate-950">
@@ -115,6 +137,112 @@ function UserDashboardContent() {
                     <div className="w-12 h-12 border-4 border-primary-500/30 border-t-primary-500 rounded-full animate-spin" />
                     <p className="text-slate-400">Cargando...</p>
                 </div>
+
+            {entitlementsOpen ? (
+                <div className="fixed inset-0 z-50">
+                    <div
+                        className="absolute inset-0 bg-black/70"
+                        onClick={() => setEntitlementsOpen(false)}
+                    />
+                    <div className="absolute inset-x-0 bottom-0 max-w-md mx-auto p-4">
+                        <div className="rounded-2xl border border-slate-800/60 bg-slate-900/95 backdrop-blur-lg p-4">
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <div className="text-sm font-semibold text-white">Accesos de tu cuota</div>
+                                        <div className="text-xs text-slate-400">{userData?.tipo_cuota_nombre || 'Sin cuota'}</div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setEntitlementsOpen(false)}
+                                    className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 transition-colors"
+                                >
+                                    <X className="w-4 h-4" />
+                                </button>
+                            </div>
+
+                            <div className="mt-4 space-y-3">
+                                {entitlementsLoading ? (
+                                    <div className="text-sm text-slate-400">Cargando…</div>
+                                ) : !entitlements ? (
+                                    <div className="text-sm text-slate-400">No se pudo cargar la información.</div>
+                                ) : (
+                                    <>
+                                        <div className="rounded-xl border border-slate-800/60 bg-slate-950/40 p-3">
+                                            <div className="text-xs font-medium text-slate-300 mb-2">Sucursales habilitadas</div>
+                                            {Array.isArray(entitlements.allowed_sucursales) && entitlements.allowed_sucursales.length > 0 ? (
+                                                <div className="flex flex-wrap gap-2">
+                                                    {entitlements.allowed_sucursales.map((s) => (
+                                                        <span
+                                                            key={s.id}
+                                                            className="px-2 py-1 rounded-lg bg-slate-800/60 text-xs text-slate-200"
+                                                        >
+                                                            {s.nombre}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            ) : (
+                                                <div className="text-sm text-slate-400">Sin sucursales disponibles.</div>
+                                            )}
+                                        </div>
+
+                                        <div className="rounded-xl border border-slate-800/60 bg-slate-950/40 p-3">
+                                            <div className="text-xs font-medium text-slate-300 mb-2">Clases</div>
+                                            {entitlements.class_allowlist_enabled ? (
+                                                <>
+                                                    {entitlements.allowed_tipo_clases?.length ? (
+                                                        <div className="mb-2">
+                                                            <div className="text-xs text-slate-400 mb-1">Tipos de clase</div>
+                                                            <div className="flex flex-wrap gap-2">
+                                                                {entitlements.allowed_tipo_clases.map((t) => (
+                                                                    <span
+                                                                        key={t.id}
+                                                                        className="px-2 py-1 rounded-lg bg-slate-800/60 text-xs text-slate-200"
+                                                                    >
+                                                                        {t.nombre}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    ) : null}
+                                                    {entitlements.allowed_clases?.length ? (
+                                                        <div>
+                                                            <div className="text-xs text-slate-400 mb-1">Clases específicas</div>
+                                                            <div className="flex flex-wrap gap-2">
+                                                                {entitlements.allowed_clases.map((c) => (
+                                                                    <span
+                                                                        key={c.id}
+                                                                        className="px-2 py-1 rounded-lg bg-slate-800/60 text-xs text-slate-200"
+                                                                    >
+                                                                        {c.nombre}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="text-sm text-slate-400">No hay clases habilitadas explícitamente.</div>
+                                                    )}
+                                                </>
+                                            ) : (
+                                                <div className="text-sm text-slate-400">Todas las clases habilitadas.</div>
+                                            )}
+                                        </div>
+
+                                        {entitlements.enabled ? (
+                                            <div className="text-xs text-slate-500">
+                                                Accesos calculados por plan y permisos por sucursal.
+                                            </div>
+                                        ) : (
+                                            <div className="text-xs text-slate-500">
+                                                Accesos calculados por el sistema actual (sin restricciones por cuota).
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
             </div>
         );
     }
@@ -143,7 +271,14 @@ function UserDashboardContent() {
                         </div>
                         <div>
                             <h1 className="font-semibold text-white">{userData.nombre}</h1>
-                            <p className="text-xs text-slate-500">{userData.tipo_cuota_nombre || 'Sin cuota'}</p>
+                            <button
+                                type="button"
+                                onClick={openEntitlements}
+                                className="text-xs text-slate-500 hover:text-slate-300 transition-colors inline-flex items-center gap-1"
+                            >
+                                <span>{userData.tipo_cuota_nombre || 'Sin cuota'}</span>
+                                <ChevronRight className="w-3 h-3" />
+                            </button>
                         </div>
                     </div>
                     <button

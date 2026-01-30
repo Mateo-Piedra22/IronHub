@@ -4,42 +4,8 @@
  * Supports multi-tenant with dynamic API URL based on subdomain
  */
 
-// Environment configuration
+import { getCurrentTenant, getCsrfTokenFromCookie } from '@/lib/tenant';
 const TENANT_DOMAIN = process.env.NEXT_PUBLIC_TENANT_DOMAIN || 'ironhub.motiona.xyz';
-
-/**
- * Get the current gym subdomain from the browser URL
- * Example: mygym.ironhub.motiona.xyz -> mygym
- */
-function getCurrentSubdomain(): string {
-    if (typeof window === 'undefined') return '';
-
-    const hostname = window.location.hostname;
-
-    // Handle localhost/development
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-        return process.env.NEXT_PUBLIC_DEV_SUBDOMAIN || 'demo';
-    }
-
-    // Avoid treating the API host itself as a tenant
-    if (hostname.startsWith('api.')) return '';
-
-    // Extract subdomain from {gym}.ironhub.motiona.xyz
-    const domainParts = hostname.split('.');
-    const tenantParts = TENANT_DOMAIN.split('.');
-
-    if (domainParts.length > tenantParts.length) {
-        return domainParts[0];
-    }
-
-    // If the frontend is served on a non-tenant domain (e.g. Vercel domain),
-    // require an explicit default tenant via env.
-    const envTenant =
-        (process.env.NEXT_PUBLIC_DEFAULT_TENANT || process.env.NEXT_PUBLIC_DEV_SUBDOMAIN || '').trim();
-    if (envTenant) return envTenant;
-
-    return '';
-}
 
 /**
  * Build the API base URL for the current tenant
@@ -97,6 +63,17 @@ function _setCache<T>(key: string, entry: CacheEntry<T>) {
     }
 }
 
+function _clearCacheByPrefix(prefix: string) {
+    try {
+        const p = String(prefix || '');
+        if (!p) return;
+        Object.keys(_inMemoryCache).forEach((k) => {
+            if (k.startsWith(p)) delete _inMemoryCache[k];
+        });
+    } catch {
+    }
+}
+
 export interface PaginatedResponse<T> {
     items: T[];
     total: number;
@@ -123,6 +100,47 @@ export interface Usuario {
     cuotas_vencidas?: number;
     exento?: boolean;
     notas?: string;
+    sucursal_registro_id?: number | null;
+    sucursal_registro_nombre?: string | null;
+}
+
+export interface UsuarioEntitlements {
+    ok?: boolean;
+    enabled: boolean;
+    sucursal_actual_id?: number | null;
+    branch_access?: {
+        all_sucursales: boolean;
+        allowed_sucursal_ids: number[];
+        denied_sucursal_ids: number[];
+    } | null;
+    allowed_sucursales: Sucursal[];
+    class_allowlist_enabled: boolean;
+    allowed_tipo_clases: { id: number; nombre: string; activo: boolean }[];
+    allowed_clases: { id: number; nombre: string; sucursal_id?: number | null; activa: boolean }[];
+}
+
+export interface TipoCuotaEntitlements {
+    ok: boolean;
+    tipo_cuota: { id: number; nombre: string; all_sucursales: boolean };
+    sucursal_ids: number[];
+    class_rules: { id: number; sucursal_id?: number | null; target_type: string; target_id: number; allow: boolean }[];
+}
+
+export interface TipoCuotaEntitlementsUpdate {
+    all_sucursales: boolean;
+    sucursal_ids: number[];
+    class_rules: { sucursal_id?: number | null; target_type: 'tipo_clase' | 'clase'; target_id: number; allow: boolean }[];
+}
+
+export interface UsuarioEntitlementsGestion {
+    ok: boolean;
+    branch_overrides: { id: number; sucursal_id: number; allow: boolean; motivo?: string; starts_at?: string | null; ends_at?: string | null }[];
+    class_overrides: { id: number; sucursal_id?: number | null; target_type: string; target_id: number; allow: boolean; motivo?: string; starts_at?: string | null; ends_at?: string | null }[];
+}
+
+export interface UsuarioEntitlementsGestionUpdate {
+    branch_overrides: { sucursal_id: number; allow: boolean; motivo?: string; starts_at?: string | null; ends_at?: string | null }[];
+    class_overrides: { sucursal_id?: number | null; target_type: 'tipo_clase' | 'clase'; target_id: number; allow: boolean; motivo?: string; starts_at?: string | null; ends_at?: string | null }[];
 }
 
 export interface UsuarioCreateInput {
@@ -146,6 +164,8 @@ export interface Pago {
     fecha_pago?: string;
     mes?: number;
     anio?: number;
+    sucursal_id?: number | null;
+    sucursal_nombre?: string | null;
     metodo_pago_id?: number;
     metodo_pago_nombre?: string;
     metodo_pago?: string;
@@ -217,6 +237,9 @@ export interface Profesor {
     telefono?: string;
     activo: boolean;
     horarios?: Horario[];
+    usuario_id?: number;
+    tipo?: string | null;
+    scopes?: string[];
 }
 
 export interface Horario {
@@ -253,6 +276,10 @@ export interface Rutina {
     uuid_rutina?: string;
     dias: DiasRutina[];
     fecha_creacion?: string;
+    sucursal_id?: number | null;
+    sucursal_nombre?: string | null;
+    creada_por_usuario_id?: number | null;
+    creada_por_nombre?: string | null;
 }
 
 export interface DiasRutina {
@@ -336,6 +363,8 @@ export interface Asistencia {
     hora_salida?: string;
     duracion_minutos?: number;
     tipo?: string;
+    sucursal_id?: number | null;
+    sucursal_nombre?: string | null;
 }
 
 // === Config Types ===
@@ -391,15 +420,55 @@ export interface BootstrapPayload {
     tenant?: string | null;
     gym: PublicGymData;
     session: { authenticated: boolean; user?: SessionUser | null };
+    sucursales?: Sucursal[];
+    sucursal_actual_id?: number | null;
+    branch_required?: boolean;
     flags?: Record<string, any>;
+}
+
+export interface FeatureFlags {
+    modules?: Record<string, boolean>;
 }
 
 export interface SessionUser {
     id: number;
     nombre: string;
-    rol: 'owner' | 'admin' | 'profesor' | 'user';
+    rol: 'owner' | 'admin' | 'profesor' | 'empleado' | 'recepcionista' | 'staff' | 'user';
     dni?: string;
     gestion_profesor_id?: number | null;
+    sucursal_id?: number | null;
+    scopes?: string[];
+}
+
+export interface Sucursal {
+    id: number;
+    nombre: string;
+    codigo: string;
+    activa: boolean;
+    direccion?: string | null;
+    timezone?: string | null;
+}
+
+export interface StaffItem {
+    id: number;
+    nombre: string;
+    dni: string;
+    email: string;
+    rol: string;
+    activo: boolean;
+    staff?: { tipo?: string | null; estado?: string | null } | null;
+    sucursales: number[];
+    scopes: string[];
+}
+
+export interface Membership {
+    id: number;
+    usuario_id: number;
+    plan_name?: string | null;
+    status: string;
+    start_date: string;
+    end_date?: string | null;
+    all_sucursales: boolean;
 }
 
 // === User Tags & States ===
@@ -670,8 +739,17 @@ class ApiClient {
 
             const doFetch = async (): Promise<ApiResponse<T>> => {
                 const headers: Record<string, string> = {
-                    'X-Tenant': typeof window !== 'undefined' ? getCurrentSubdomain() : '',
+                    'X-Tenant': typeof window !== 'undefined' ? getCurrentTenant() : '',
                 };
+                try {
+                    const m = method.toUpperCase();
+                    const isWrite = m !== 'GET';
+                    const isAuthRoute = endpoint.startsWith('/api/auth/');
+                    if (isWrite && !isAuthRoute && typeof document !== 'undefined') {
+                        const csrf = getCsrfTokenFromCookie();
+                        if (csrf) headers['X-CSRF-Token'] = csrf;
+                    }
+                } catch {}
                 if (!((options.body instanceof FormData) || (options.body instanceof URLSearchParams))) {
                     headers['Content-Type'] = 'application/json';
                 }
@@ -733,13 +811,18 @@ class ApiClient {
         formData.append('file', file);
         try {
             const url = `${this.baseUrl}/api/gym/logo`;
+            const headers: Record<string, string> = { 'X-Tenant': typeof window !== 'undefined' ? getCurrentTenant() : '' };
+            try {
+                if (typeof document !== 'undefined') {
+                    const csrf = getCsrfTokenFromCookie();
+                    if (csrf) headers['X-CSRF-Token'] = csrf;
+                }
+            } catch {}
             const response = await fetch(url, {
                 method: 'POST',
                 body: formData,
                 credentials: 'include',
-                headers: {
-                    'X-Tenant': typeof window !== 'undefined' ? getCurrentSubdomain() : '',
-                },
+                headers,
             });
 
             const data = await response.json().catch(() => ({}));
@@ -850,6 +933,12 @@ class ApiClient {
         }>>('/api/profesores_basico');
     }
 
+    async getGestionLoginProfiles() {
+        return this.request<{ ok: boolean; items: Array<{ kind: 'owner' | 'user'; id: string | number; nombre: string; rol: string }> }>(
+            '/api/gestion/login-profiles'
+        );
+    }
+
     // Change user PIN (for usuario-login)
     async changePin(credentials: { dni: string; old_pin: string; new_pin: string }) {
         return this.request<{ ok: boolean; error?: string }>('/api/usuario/change_pin', {
@@ -867,6 +956,13 @@ class ApiClient {
     async logoutGestion() {
         return this.request<{ ok: boolean }>('/api/auth/logout_gestion', {
             method: 'POST',
+        });
+    }
+
+    async resetUsuarioPin(usuarioId: number, pin?: string) {
+        return this.request<{ ok: boolean; usuario_id: number; pin: string; error?: string }>(`/api/usuarios/${usuarioId}/pin/reset`, {
+            method: 'POST',
+            body: JSON.stringify(pin ? { pin } : {}),
         });
     }
 
@@ -903,7 +999,7 @@ class ApiClient {
 
         try {
             if (res.ok && res.data?.gym) {
-                _setCache(`GET:/gym/data:${getCurrentSubdomain() || ''}`, { ts: now, data: { ok: true, data: res.data.gym } });
+                _setCache(`GET:/gym/data:${getCurrentTenant() || ''}`, { ts: now, data: { ok: true, data: res.data.gym } });
             }
             if (res.ok && res.data?.session) {
                 _setCache(`GET:/api/auth/session:${ctx}`, {
@@ -914,6 +1010,48 @@ class ApiClient {
         } catch {
         }
         return res;
+    }
+
+    async getSucursales() {
+        return this.request<{ ok: boolean; items: Sucursal[]; sucursal_actual_id?: number | null }>('/api/sucursales');
+    }
+
+    async seleccionarSucursal(sucursal_id: number) {
+        const res = await this.request<{ ok: boolean; sucursal_actual_id?: number | null; error?: string }>(
+            '/api/sucursales/seleccionar',
+            {
+                method: 'POST',
+                body: JSON.stringify({ sucursal_id }),
+            }
+        );
+        try {
+            _clearCacheByPrefix('GET:/api/bootstrap');
+            _clearCacheByPrefix('GET:/api/auth/session');
+        } catch {
+        }
+        return res;
+    }
+
+    async updateSucursal(sucursalId: number, payload: Partial<{ nombre: string; codigo: string; direccion: string | null; timezone: string | null; activa: boolean }>) {
+        return this.request<{ ok: boolean; error?: string }>(`/api/sucursales/${sucursalId}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+        });
+    }
+
+    async getStaff(search: string = '', opts?: { all?: boolean }) {
+        const qp = new URLSearchParams();
+        if (search) qp.set('search', search);
+        if (opts?.all) qp.set('all', '1');
+        const q = qp.toString() ? `?${qp.toString()}` : '';
+        return this.request<{ items: StaffItem[] }>(`/api/staff${q}`);
+    }
+
+    async updateStaff(usuario_id: number, payload: Partial<StaffItem> & { tipo?: string; estado?: string }) {
+        return this.request<{ ok: boolean }>(`/api/staff/${usuario_id}`, {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+        });
     }
 
     // === Gym Data ===
@@ -935,8 +1073,27 @@ class ApiClient {
         return res;
     }
 
+    async getFeatureFlags() {
+        return this.request<{ ok: boolean; flags: FeatureFlags }>('/api/gym/feature-flags');
+    }
+
+    async setFeatureFlags(flags: FeatureFlags) {
+        const res = await this.request<{ ok: boolean; flags: FeatureFlags }>(
+            '/api/gym/feature-flags',
+            {
+                method: 'POST',
+                body: JSON.stringify({ flags }),
+            }
+        );
+        try {
+            _clearCacheByPrefix('GET:/api/bootstrap');
+        } catch {
+        }
+        return res;
+    }
+
     async getPublicGymData() {
-        const cacheKey = `GET:/gym/data:${getCurrentSubdomain() || ''}`;
+        const cacheKey = `GET:/gym/data:${getCurrentTenant() || ''}`;
         const now = Date.now();
         const cached = _inMemoryCache[cacheKey];
         if (cached && now - cached.ts < 5 * 60 * 1000) {
@@ -977,6 +1134,10 @@ class ApiClient {
 
     async getUsuario(id: number) {
         return this.request<Usuario>(`/api/usuarios/${id}`);
+    }
+
+    async getUsuarioEntitlements() {
+        return this.request<UsuarioEntitlements>(`/api/usuario/entitlements`);
     }
 
     async checkDniAvailable(dni: string, excludeId?: number) {
@@ -1021,10 +1182,20 @@ class ApiClient {
             const p = new URLSearchParams();
             if (name) p.set('name', String(name));
             const url = `${this.baseUrl}/api/exercises/video${p.toString() ? `?${p.toString()}` : ''}`;
+            const headers: Record<string, string> = {
+                'X-Tenant': typeof window !== 'undefined' ? getCurrentTenant() : '',
+            };
+            try {
+                if (typeof document !== 'undefined') {
+                    const csrf = getCsrfTokenFromCookie();
+                    if (csrf) headers['X-CSRF-Token'] = csrf;
+                }
+            } catch {}
             const response = await fetch(url, {
                 method: 'POST',
                 body: formData,
                 credentials: 'include', // Ensure cookies are sent
+                headers,
                 // Do NOT set 'Content-Type' header for FormData, browser handles it
             });
 
@@ -1086,10 +1257,20 @@ class ApiClient {
     async previewReceipt(data: any): Promise<ApiResponse<{ blob: Blob }>> {
         const url = `${this.baseUrl}/api/pagos/preview`;
         try {
+            const headers: Record<string, string> = {
+                'Content-Type': 'application/json',
+                'X-Tenant': typeof window !== 'undefined' ? getCurrentTenant() : '',
+            };
+            try {
+                if (typeof document !== 'undefined') {
+                    const csrf = getCsrfTokenFromCookie();
+                    if (csrf) headers['X-CSRF-Token'] = csrf;
+                }
+            } catch {}
             const response = await fetch(url, {
                 method: 'POST',
                 body: JSON.stringify(data),
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 credentials: 'include'
             });
 
@@ -1110,7 +1291,7 @@ class ApiClient {
     }
 
     async downloadReceipt(id: number): Promise<ApiResponse<{ blob: Blob }>> {
-        const url = `${this.baseUrl}/api/pagos/${id}/recibo/preview`;
+        const url = `${this.baseUrl}/api/pagos/${id}/recibo.pdf`;
         try {
             const response = await fetch(url, {
                 method: 'GET',
@@ -1239,7 +1420,7 @@ class ApiClient {
     getRutinaPdfUrl(id: number, weeks: number = 1): string {
         const p = new URLSearchParams();
         p.set('weeks', String(weeks));
-        const t = typeof window !== 'undefined' ? getCurrentSubdomain() : '';
+        const t = typeof window !== 'undefined' ? getCurrentTenant() : '';
         if (t) p.set('tenant', t);
         return `${this.baseUrl}/api/rutinas/${id}/export/pdf?${p.toString()}`;
     }
@@ -1258,7 +1439,7 @@ class ApiClient {
         if (params?.user_override) p.set('user_override', params.user_override);
         if (params?.filename) p.set('filename', params.filename);
 
-        const t = typeof window !== 'undefined' ? getCurrentSubdomain() : '';
+        const t = typeof window !== 'undefined' ? getCurrentTenant() : '';
         if (t) p.set('tenant', t);
 
         const query = p.toString();
@@ -1279,7 +1460,7 @@ class ApiClient {
         if (params?.qr_mode) p.set('qr_mode', params.qr_mode);
         if (params?.sheet_name) p.set('sheet', params.sheet_name);
 
-        const t = typeof window !== 'undefined' ? getCurrentSubdomain() : '';
+        const t = typeof window !== 'undefined' ? getCurrentTenant() : '';
         if (t) p.set('tenant', t);
 
         const query = p.toString();
@@ -1300,7 +1481,7 @@ class ApiClient {
         if (params?.qr_mode) p.set('qr_mode', params.qr_mode);
         if (params?.sheet_name) p.set('sheet', params.sheet_name);
 
-        const t = typeof window !== 'undefined' ? getCurrentSubdomain() : '';
+        const t = typeof window !== 'undefined' ? getCurrentTenant() : '';
         if (t) p.set('tenant', t);
 
         const query = p.toString();
@@ -1411,6 +1592,28 @@ class ApiClient {
     // === Configuration ===
     async getTiposCuota() {
         return this.request<{ tipos: TipoCuota[] }>('/api/config/tipos-cuota');
+    }
+
+    async getTipoCuotaEntitlements(tipoCuotaId: number) {
+        return this.request<TipoCuotaEntitlements>(`/api/gestion/tipos-cuota/${tipoCuotaId}/entitlements`);
+    }
+
+    async updateTipoCuotaEntitlements(tipoCuotaId: number, data: TipoCuotaEntitlementsUpdate) {
+        return this.request<{ ok: boolean }>(`/api/gestion/tipos-cuota/${tipoCuotaId}/entitlements`, {
+            method: 'PUT',
+            body: JSON.stringify(data),
+        });
+    }
+
+    async getUsuarioEntitlementsGestion(usuarioId: number) {
+        return this.request<UsuarioEntitlementsGestion>(`/api/gestion/usuarios/${usuarioId}/entitlements`);
+    }
+
+    async updateUsuarioEntitlementsGestion(usuarioId: number, data: UsuarioEntitlementsGestionUpdate) {
+        return this.request<{ ok: boolean }>(`/api/gestion/usuarios/${usuarioId}/entitlements`, {
+            method: 'PUT',
+            body: JSON.stringify(data),
+        });
     }
 
     async getMetodosPago() {
@@ -1722,6 +1925,20 @@ class ApiClient {
         });
     }
 
+    async getUsuarioMembership(usuarioId: number) {
+        return this.request<{ ok: boolean; membership: Membership | null; sucursales?: number[] }>(`/api/gestion/usuarios/${usuarioId}/membership`);
+    }
+
+    async setUsuarioMembership(
+        usuarioId: number,
+        data: { plan_name?: string | null; start_date?: string | null; end_date?: string | null; all_sucursales: boolean; sucursal_ids: number[] }
+    ) {
+        return this.request<{ ok: boolean; membership?: Membership; sucursales?: number[]; error?: string }>(`/api/gestion/usuarios/${usuarioId}/membership`, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    }
+
     // === User Tags (Etiquetas) ===
     async getEtiquetas(usuarioId: number) {
         return this.request<{ etiquetas: Etiqueta[] }>(`/api/usuarios/${usuarioId}/etiquetas`);
@@ -1985,6 +2202,23 @@ class ApiClient {
         return this.request<WhatsAppMensajesResponse>('/api/whatsapp/pendientes');
     }
 
+    async getWhatsAppMensajes(params: {
+        dias?: number;
+        status?: string;
+        page?: number;
+        limit?: number;
+        scope?: 'gym' | 'branch';
+    } = {}) {
+        const q = new URLSearchParams();
+        if (params.dias != null) q.set('dias', String(params.dias));
+        if (params.status) q.set('status', String(params.status));
+        if (params.page != null) q.set('page', String(params.page));
+        if (params.limit != null) q.set('limit', String(params.limit));
+        if (params.scope) q.set('scope', String(params.scope));
+        const qs = q.toString();
+        return this.request<any>(`/api/whatsapp/mensajes${qs ? `?${qs}` : ''}`);
+    }
+
     async getWhatsAppEmbeddedSignupConfig() {
         return this.request<WhatsAppEmbeddedSignupConfig>('/api/whatsapp/embedded-signup/config');
     }
@@ -2034,6 +2268,22 @@ class ApiClient {
             method: 'PUT',
             body: JSON.stringify(data),
         });
+    }
+
+    async getMyWorkSession() {
+        return this.request<any>('/api/my/work-session');
+    }
+    async startMyWorkSession() {
+        return this.request<any>('/api/my/work-session/start', { method: 'POST', body: JSON.stringify({}) });
+    }
+    async pauseMyWorkSession() {
+        return this.request<any>('/api/my/work-session/pause', { method: 'POST', body: JSON.stringify({}) });
+    }
+    async resumeMyWorkSession() {
+        return this.request<any>('/api/my/work-session/resume', { method: 'POST', body: JSON.stringify({}) });
+    }
+    async endMyWorkSession() {
+        return this.request<any>('/api/my/work-session/end', { method: 'POST', body: JSON.stringify({}) });
     }
 
     async runWhatsAppAutomation(data: { trigger_keys?: string[]; dry_run?: boolean }) {
@@ -2152,7 +2402,7 @@ class ApiClient {
             const response = await fetch(url, {
                 credentials: 'include',
                 headers: {
-                    'X-Tenant': typeof window !== 'undefined' ? getCurrentSubdomain() : '',
+                    'X-Tenant': typeof window !== 'undefined' ? getCurrentTenant() : '',
                 },
             });
             if (!response.ok) {

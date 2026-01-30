@@ -3,7 +3,6 @@ import os
 import re
 import logging
 import threading
-import contextvars
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 import urllib.parse
@@ -12,7 +11,7 @@ import psycopg2.extras
 from psycopg2 import sql
 
 from fastapi import Request
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.responses import JSONResponse
 
 # Import dependencies - simplified for standalone API
 try:
@@ -21,18 +20,22 @@ except ImportError:
     CURRENT_TENANT = None
     get_db_session = None
 
+
 # Helper class to wrap database session with obtener_configuracion method
 class _DatabaseWrapper:
     def __init__(self, session):
         self._session = session
-    
-    def obtener_configuracion(self, clave: str, timeout_ms: int = 1000) -> Optional[str]:
+
+    def obtener_configuracion(
+        self, clave: str, timeout_ms: int = 1000
+    ) -> Optional[str]:
         """Get configuration value from configuracion table."""
         try:
             from sqlalchemy import text
+
             result = self._session.execute(
                 text("SELECT valor FROM configuracion WHERE clave = :clave LIMIT 1"),
-                {"clave": clave}
+                {"clave": clave},
             )
             row = result.fetchone()
             if row:
@@ -41,31 +44,37 @@ class _DatabaseWrapper:
             pass
         return None
 
+
 def get_db():
     """Get database wrapper with configuration access."""
     try:
         from src.database.connection import SessionLocal
+
         session = SessionLocal()
         return _DatabaseWrapper(session)
     except Exception:
         return None
+
 
 def get_admin_db():
     """Get admin database connection for cross-tenant operations."""
     try:
         # Try to import and return the admin service
         from src.dependencies import get_admin_db as deps_get_admin_db
+
         return deps_get_admin_db()
     except ImportError:
         pass
     # Fallback: try to create a direct admin connection
     try:
         import os
+
         admin_url = os.getenv("ADMIN_DATABASE_URL")
         if admin_url:
             # Create a simple wrapper for admin DB
             from sqlalchemy import create_engine
             from sqlalchemy.orm import sessionmaker
+
             engine = create_engine(admin_url)
             Session = sessionmaker(bind=engine)
             return _DatabaseWrapper(Session())
@@ -73,11 +82,13 @@ def get_admin_db():
         pass
     return None
 
+
 DatabaseManager = None
 
 
 def read_theme_vars(path: Path) -> Dict[str, str]:
     return {}
+
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +96,10 @@ logger = logging.getLogger(__name__)
 _tenant_dbs: Dict[str, DatabaseManager] = {}
 _tenant_lock = threading.RLock()
 
-def _circuit_guard_json(db: Optional[DatabaseManager], endpoint: str = "") -> Optional[JSONResponse]:
+
+def _circuit_guard_json(
+    db: Optional[DatabaseManager], endpoint: str = ""
+) -> Optional[JSONResponse]:
     if db is None:
         return JSONResponse({"error": "DB no disponible"}, status_code=503)
     try:
@@ -93,24 +107,34 @@ def _circuit_guard_json(db: Optional[DatabaseManager], endpoint: str = "") -> Op
             if db.is_circuit_open():  # type: ignore
                 state = {}
                 try:
-                    if hasattr(db, "get_circuit_state") and callable(getattr(db, "get_circuit_state")):
+                    if hasattr(db, "get_circuit_state") and callable(
+                        getattr(db, "get_circuit_state")
+                    ):
                         state = db.get_circuit_state()  # type: ignore
                 except Exception:
                     state = {"open": True}
                 try:
-                    logger.warning(f"{endpoint or '[endpoint]'}: circuito abierto -> 503; state={state}")
+                    logger.warning(
+                        f"{endpoint or '[endpoint]'}: circuito abierto -> 503; state={state}"
+                    )
                 except Exception:
                     pass
-                return JSONResponse({
-                    "error": "Servicio temporalmente no disponible",
-                    "circuit": state,
-                }, status_code=503)
+                return JSONResponse(
+                    {
+                        "error": "Servicio temporalmente no disponible",
+                        "circuit": state,
+                    },
+                    status_code=503,
+                )
     except Exception as e:
         try:
-            logger.exception(f"{endpoint or '[endpoint]'}: error comprobando circuito: {e}")
+            logger.exception(
+                f"{endpoint or '[endpoint]'}: error comprobando circuito: {e}"
+            )
         except Exception:
             pass
     return None
+
 
 def _compute_base_dir() -> Path:
     """Determina la carpeta base desde la cual resolver recursos."""
@@ -128,7 +152,8 @@ def _compute_base_dir() -> Path:
         # webapp/utils.py está en webapp/, subimos a apps/
         return Path(__file__).resolve().parent.parent
     except Exception:
-        return Path('.')
+        return Path(".")
+
 
 BASE_DIR = _compute_base_dir()
 
@@ -140,20 +165,20 @@ def resource_path(relative_path: str) -> str:
     """
     try:
         # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base = getattr(sys, '_MEIPASS', None)
+        base = getattr(sys, "_MEIPASS", None)
         if base:
             return str(Path(base) / relative_path)
     except Exception:
         pass
-    
+
     try:
         # Frozen executable
-        if getattr(sys, 'frozen', False):
+        if getattr(sys, "frozen", False):
             base = Path(sys.executable).parent
             return str(base / relative_path)
     except Exception:
         pass
-    
+
     # Development: relative to the src/ directory
     try:
         # utils.py is in src/, so go up one level to get to webapp-api root
@@ -170,7 +195,7 @@ def resource_path(relative_path: str) -> str:
             return str(result2)
     except Exception:
         pass
-    
+
     # Fallback: current working directory
     return str(Path.cwd() / relative_path)
 
@@ -188,7 +213,7 @@ def get_webapp_base_url() -> str:
         os.getenv("VERCEL_BRANCH_URL"),
         os.getenv("VERCEL_PROJECT_PRODUCTION_URL"),
     ]
-    
+
     for url in candidates:
         if url and url.strip():
             url = url.strip()
@@ -196,9 +221,10 @@ def get_webapp_base_url() -> str:
             if not url.startswith("http://") and not url.startswith("https://"):
                 url = f"https://{url}"
             return url.rstrip("/")
-    
+
     # Default fallback
     return "http://127.0.0.1:8000"
+
 
 def _resolve_existing_dir(*parts: str) -> Path:
     candidates = []
@@ -239,8 +265,10 @@ def _resolve_existing_dir(*parts: str) -> Path:
             continue
     return candidates[0] if candidates else Path(*parts)
 
+
 # Define static_dir as it is used in theme resolution
 static_dir = _resolve_existing_dir("webapp", "static")
+
 
 def _get_theme_from_db() -> Dict[str, str]:
     out: Dict[str, str] = {}
@@ -269,31 +297,39 @@ def _get_theme_from_db() -> Dict[str, str]:
             out[css_var] = v
     return out
 
+
 def _resolve_theme_vars() -> Dict[str, str]:
     base = read_theme_vars(static_dir / "style.css")
     dbv = _get_theme_from_db()
     return {**base, **dbv}
 
+
 def _normalize_public_url(url: str) -> str:
     try:
         if not url:
             return url
-        
+
         # If it's a B2/CDN file key (e.g. "some-file.jpg" or "path/to/file.mp4")
         # and NOT a full URL (http/https), we might want to prepend the CDN domain
         # IF we know it's an asset.
         # However, some URLs might be local ("/assets/...") or external.
-        
+
         # Check if it's likely a B2 key (no protocol, no starting slash)
         # But wait, `logo.svg` is local. `assets/logo.svg` is local.
         # B2 keys usually don't start with slash.
         # Let's look for B2 bucket context.
         # If we have a CDN_CUSTOM_DOMAIN env var, we can construct the URL.
-        
-        bucket = os.getenv("B2_BUCKET_NAME", "").strip()
-        media_prefix = os.getenv("B2_MEDIA_PREFIX", "assets").strip().strip("/") or "assets"
 
-        base = os.getenv("B2_PUBLIC_BASE_URL", "https://f005.backblazeb2.com").strip().rstrip("/")
+        bucket = os.getenv("B2_BUCKET_NAME", "").strip()
+        media_prefix = (
+            os.getenv("B2_MEDIA_PREFIX", "assets").strip().strip("/") or "assets"
+        )
+
+        base = (
+            os.getenv("B2_PUBLIC_BASE_URL", "https://f005.backblazeb2.com")
+            .strip()
+            .rstrip("/")
+        )
         if base and not (base.startswith("http://") or base.startswith("https://")):
             base = f"https://{base.lstrip('/')}"
         if base.endswith("/file"):
@@ -338,32 +374,33 @@ def _normalize_public_url(url: str) -> str:
     except Exception:
         return url
 
+
 def _resolve_logo_url() -> str:
     # Primero intentar obtener URL desde gym_config; luego desde configuracion
     try:
         db = get_db()
         if db is not None:
             # Prioridad: gym_config
-            if hasattr(db, 'obtener_configuracion_gimnasio'):
+            if hasattr(db, "obtener_configuracion_gimnasio"):
                 try:
                     cfg = db.obtener_configuracion_gimnasio()  # type: ignore
                 except Exception:
                     cfg = {}
                 if isinstance(cfg, dict):
                     # En gym_config la clave se almacena como 'logo_url'
-                    u1 = str(cfg.get('logo_url') or '').strip()
+                    u1 = str(cfg.get("logo_url") or "").strip()
                     if u1:
                         return _normalize_public_url(u1)
             # Fallback: tabla configuracion
-            if hasattr(db, 'obtener_configuracion'):
+            if hasattr(db, "obtener_configuracion"):
                 try:
-                    url = db.obtener_configuracion('logo_url')  # type: ignore
+                    url = db.obtener_configuracion("logo_url")  # type: ignore
                 except Exception:
                     url = None
                 if isinstance(url, str) and url.strip():
                     return _normalize_public_url(url.strip())
                 try:
-                    url = db.obtener_configuracion('gym_logo_url')  # type: ignore
+                    url = db.obtener_configuracion("gym_logo_url")  # type: ignore
                 except Exception:
                     url = None
                 if isinstance(url, str) and url.strip():
@@ -384,16 +421,19 @@ def _resolve_logo_url() -> str:
             continue
     return "/assets/logo.svg"
 
+
 def get_gym_name(default: str = "Gimnasio") -> str:
     # Wrapper around DB config
     try:
         db = get_db()
-        if db and hasattr(db, 'obtener_configuracion'):
-             n = db.obtener_configuracion('gym_name')
-             if n: return str(n)
+        if db and hasattr(db, "obtener_configuracion"):
+            n = db.obtener_configuracion("gym_name")
+            if n:
+                return str(n)
     except Exception:
         pass
     return default
+
 
 def _get_password() -> str:
     # 1. Intentar obtener desde tabla usuarios (Donde AdminService actualiza la contraseña)
@@ -401,11 +441,14 @@ def _get_password() -> str:
     try:
         db = get_db()
         # Si get_db falla (ej: sin tenant context), esto lanzará excepción y pasamos al siguiente bloque.
-        if db and hasattr(db, '_session'):
+        if db and hasattr(db, "_session"):
             from sqlalchemy import text
+
             # Buscar usuario con rol dueño/admin/owner
             result = db._session.execute(
-                text("SELECT pin FROM usuarios WHERE rol IN ('dueno', 'owner', 'admin') AND activo = true ORDER BY id LIMIT 1")
+                text(
+                    "SELECT pin FROM usuarios WHERE rol IN ('dueno', 'owner', 'admin') AND activo = true ORDER BY id LIMIT 1"
+                )
             )
             row = result.fetchone()
             if row and row[0]:
@@ -420,8 +463,8 @@ def _get_password() -> str:
     # 2. Leer desde la base de datos (Legacy configuracion)
     try:
         db = get_db()
-        if db and hasattr(db, 'obtener_configuracion'):
-            pwd = db.obtener_configuracion('owner_password', timeout_ms=700)  # type: ignore
+        if db and hasattr(db, "obtener_configuracion"):
+            pwd = db.obtener_configuracion("owner_password", timeout_ms=700)  # type: ignore
             if isinstance(pwd, str) and pwd.strip():
                 return pwd.strip()
     except Exception:
@@ -434,10 +477,12 @@ def _get_password() -> str:
             tenant = CURRENT_TENANT.get()
         except Exception:
             pass
-            
+
         # Si no hay tenant en contexto, intentar adivinar por entorno (para dev local)
         if not tenant:
-            tenant = os.getenv("DEFAULT_TENANT", "testingiron") # Un default razonable para dev
+            tenant = os.getenv(
+                "DEFAULT_TENANT", "testingiron"
+            )  # Un default razonable para dev
 
         if tenant:
             adm = get_admin_db()
@@ -447,33 +492,43 @@ def _get_password() -> str:
                 session = next(session_gen)
                 try:
                     from sqlalchemy import text
+
                     result = session.execute(
-                        text("SELECT owner_password_hash FROM gyms WHERE subdominio = :sub"),
-                        {'sub': list([str(tenant).strip().lower()])} # Param as list to be safe or simple dict
+                        text(
+                            "SELECT owner_password_hash FROM gyms WHERE subdominio = :sub"
+                        ),
+                        {
+                            "sub": list([str(tenant).strip().lower()])
+                        },  # Param as list to be safe or simple dict
                     )
                     # Use simple params actually
                     result = session.execute(
-                        text("SELECT owner_password_hash FROM gyms WHERE subdominio = :sub"),
-                        {'sub': str(tenant).strip().lower()}
+                        text(
+                            "SELECT owner_password_hash FROM gyms WHERE subdominio = :sub"
+                        ),
+                        {"sub": str(tenant).strip().lower()},
                     )
                     row = result.fetchone()
                     if row and row[0]:
-                         val = str(row[0]).strip()
-                         if val:
-                             return val
+                        val = str(row[0]).strip()
+                        if val:
+                            return val
                 finally:
                     session.close()
     except Exception:
         pass
-        
+
     # 4. Fallback: variables de entorno
     try:
-        env_pwd = (os.getenv("WEBAPP_OWNER_PASSWORD", "") or os.getenv("OWNER_PASSWORD", "")).strip()
+        env_pwd = (
+            os.getenv("WEBAPP_OWNER_PASSWORD", "") or os.getenv("OWNER_PASSWORD", "")
+        ).strip()
     except Exception:
         env_pwd = ""
     if env_pwd:
         return env_pwd
-        
+
+
 def _verify_owner_password(password: str) -> bool:
     """
     Verify owner password against stored hash or environment variable.
@@ -481,21 +536,24 @@ def _verify_owner_password(password: str) -> bool:
     """
     import os
     import logging
+
     logger = logging.getLogger(__name__)
-    
+
     if not password:
         return False
-    
+
     # Get stored password from various sources
     stored = None
     try:
         stored = _get_password()
     except Exception:
         pass
-    
+
     # Fallback to env vars
-    env_pwd = (os.getenv("WEBAPP_OWNER_PASSWORD", "") or os.getenv("OWNER_PASSWORD", "")).strip()
-    
+    env_pwd = (
+        os.getenv("WEBAPP_OWNER_PASSWORD", "") or os.getenv("OWNER_PASSWORD", "")
+    ).strip()
+
     candidates = []
     if stored:
         candidates.append(stored)
@@ -503,14 +561,15 @@ def _verify_owner_password(password: str) -> bool:
         candidates.append(env_pwd)
     if not candidates:
         candidates.append("admin")  # Default fallback for dev
-    
+
     import bcrypt
+
     for secret in candidates:
         try:
             secret = str(secret).strip()
             # Bcrypt hash verification
-            if secret.startswith('$2'):
-                if bcrypt.checkpw(password.encode('utf-8'), secret.encode('utf-8')):
+            if secret.startswith("$2"):
+                if bcrypt.checkpw(password.encode("utf-8"), secret.encode("utf-8")):
                     return True
             # Plaintext comparison
             elif secret == password:
@@ -518,14 +577,18 @@ def _verify_owner_password(password: str) -> bool:
         except Exception as e:
             logger.debug(f"Password check failed: {e}")
             continue
-    
+
     return False
+
 
 def _get_password() -> str:
     """DEPRECATED: Unused."""
     return ""
 
-def _filter_existing_columns(conn, schema: str, table: str, data: Dict[str, Any]) -> Dict[str, Any]:
+
+def _filter_existing_columns(
+    conn, schema: str, table: str, data: Dict[str, Any]
+) -> Dict[str, Any]:
     """
     Filtra las claves del diccionario 'data' preservando solo aquellas que
     coinciden con columnas existentes en la tabla indicada.
@@ -539,7 +602,7 @@ def _filter_existing_columns(conn, schema: str, table: str, data: Dict[str, Any]
             FROM information_schema.columns 
             WHERE table_schema = %s AND table_name = %s
             """,
-            (schema, table)
+            (schema, table),
         )
         rows = cur.fetchall() or []
         valid_cols = {r[0] for r in rows}
@@ -547,57 +610,71 @@ def _filter_existing_columns(conn, schema: str, table: str, data: Dict[str, Any]
     except Exception:
         return {}
 
-def _apply_change_idempotent(conn, schema: str, table: str, operation: str, keys: Dict[str, Any], data: Dict[str, Any], where: List = None) -> bool:
+
+def _apply_change_idempotent(
+    conn,
+    schema: str,
+    table: str,
+    operation: str,
+    keys: Dict[str, Any],
+    data: Dict[str, Any],
+    where: List = None,
+) -> bool:
     try:
         cur = conn.cursor()
         if operation.upper() == "UPDATE":
             filtered_data = _filter_existing_columns(conn, schema, table, data)
             if not filtered_data:
                 return False
-            
-            set_clause = sql.SQL(", ").join([
-                sql.SQL("{} = {}").format(sql.Identifier(k), sql.Placeholder(k))
-                for k in filtered_data.keys()
-            ])
-            
-            where_clause = sql.SQL(" AND ").join([
-                sql.SQL("{} = {}").format(sql.Identifier(k), sql.Placeholder(f"w_{k}"))
-                for k in keys.keys()
-            ])
-            
-            query = sql.SQL("UPDATE {}.{} SET {} WHERE {}").format(
-                sql.Identifier(schema),
-                sql.Identifier(table),
-                set_clause,
-                where_clause
+
+            set_clause = sql.SQL(", ").join(
+                [
+                    sql.SQL("{} = {}").format(sql.Identifier(k), sql.Placeholder(k))
+                    for k in filtered_data.keys()
+                ]
             )
-            
+
+            where_clause = sql.SQL(" AND ").join(
+                [
+                    sql.SQL("{} = {}").format(
+                        sql.Identifier(k), sql.Placeholder(f"w_{k}")
+                    )
+                    for k in keys.keys()
+                ]
+            )
+
+            query = sql.SQL("UPDATE {}.{} SET {} WHERE {}").format(
+                sql.Identifier(schema), sql.Identifier(table), set_clause, where_clause
+            )
+
             params = filtered_data.copy()
             for k, v in keys.items():
                 params[f"w_{k}"] = v
-                
+
             cur.execute(query, params)
             return cur.rowcount > 0
 
         elif operation.upper() == "DELETE":
-            where_clause = sql.SQL(" AND ").join([
-                sql.SQL("{} = {}").format(sql.Identifier(k), sql.Placeholder(k))
-                for k in keys.keys()
-            ])
+            where_clause = sql.SQL(" AND ").join(
+                [
+                    sql.SQL("{} = {}").format(sql.Identifier(k), sql.Placeholder(k))
+                    for k in keys.keys()
+                ]
+            )
             query = sql.SQL("DELETE FROM {}.{} WHERE {}").format(
-                sql.Identifier(schema),
-                sql.Identifier(table),
-                where_clause
+                sql.Identifier(schema), sql.Identifier(table), where_clause
             )
             cur.execute(query, keys)
             return cur.rowcount > 0
-            
+
         return False
     except Exception as e:
         logger.error(f"_apply_change_idempotent error: {e}")
         return False
 
+
 # --- Multi-tenant Helpers ---
+
 
 def _get_multi_tenant_mode() -> bool:
     try:
@@ -605,6 +682,7 @@ def _get_multi_tenant_mode() -> bool:
         return v in ("1", "true", "yes", "on")
     except Exception:
         return False
+
 
 def _get_request_host(request: Request) -> str:
     try:
@@ -619,9 +697,15 @@ def _get_request_host(request: Request) -> str:
     except Exception:
         return ""
 
+
 def _extract_tenant_from_host(host: str) -> Optional[str]:
     try:
-        base = os.getenv("TENANT_BASE_DOMAIN", "gymms-motiona.xyz").strip().lower().lstrip(".")
+        base = (
+            os.getenv("TENANT_BASE_DOMAIN", "gymms-motiona.xyz")
+            .strip()
+            .lower()
+            .lstrip(".")
+        )
     except Exception:
         base = "gymms-motiona.xyz"
     h = (host or "").strip().lower()
@@ -629,6 +713,7 @@ def _extract_tenant_from_host(host: str) -> Optional[str]:
         return None
     if "localhost" in h or h.endswith(".localhost"):
         return None
+
     def _extract_with_base(hh: str, bb: str) -> Optional[str]:
         if not bb or not hh.endswith(bb):
             return None
@@ -650,15 +735,26 @@ def _extract_tenant_from_host(host: str) -> Optional[str]:
         except Exception:
             pass
         return s
+
     sub = _extract_with_base(h, base)
     if sub:
         return sub
     try:
-        v = (os.getenv("VERCEL_URL") or os.getenv("VERCEL_BRANCH_URL") or os.getenv("VERCEL_PROJECT_PRODUCTION_URL") or "").strip()
+        v = (
+            os.getenv("VERCEL_URL")
+            or os.getenv("VERCEL_BRANCH_URL")
+            or os.getenv("VERCEL_PROJECT_PRODUCTION_URL")
+            or ""
+        ).strip()
         if v:
             import urllib.parse as _up
+
             try:
-                u = _up.urlparse(v if (v.startswith("http://") or v.startswith("https://")) else ("https://" + v))
+                u = _up.urlparse(
+                    v
+                    if (v.startswith("http://") or v.startswith("https://"))
+                    else ("https://" + v)
+                )
                 vb = (u.hostname or "").strip().lower()
             except Exception:
                 vb = v.split("/")[0].strip().lower()
@@ -670,10 +766,12 @@ def _extract_tenant_from_host(host: str) -> Optional[str]:
         pass
     return None
 
+
 def _get_tenant_from_request(request: Request) -> Optional[str]:
     """Helper para extraer el tenant directamente del request."""
     host = _get_request_host(request)
     return _extract_tenant_from_host(host)
+
 
 def _resolve_base_db_params() -> Dict[str, Any]:
     host = os.getenv("DB_HOST", "localhost").strip()
@@ -709,6 +807,7 @@ def _resolve_base_db_params() -> Dict[str, Any]:
     }
     return params
 
+
 def _get_db_for_tenant(tenant: str) -> Optional[DatabaseManager]:
     """
     Get a database manager for the specified tenant.
@@ -718,20 +817,21 @@ def _get_db_for_tenant(tenant: str) -> Optional[DatabaseManager]:
     t = (tenant or "").strip().lower()
     if not t:
         return None
-    
+
     # First, try to get the tenant's db_name from admin
     with _tenant_lock:
         dm = _tenant_dbs.get(t)
         if dm is not None:
             return dm
-        
+
         # Use the new tenant connection module to get db_name
         try:
             from src.database.tenant_connection import _get_tenant_db_name
+
             db_name = _get_tenant_db_name(t)
         except ImportError:
             db_name = None
-        
+
         if not db_name:
             # Fallback to old method
             base = _resolve_base_db_params()
@@ -740,24 +840,26 @@ def _get_db_for_tenant(tenant: str) -> Optional[DatabaseManager]:
                 try:
                     with adm.db.get_connection_context() as conn:  # type: ignore
                         cur = conn.cursor()
-                        cur.execute("SELECT db_name FROM gyms WHERE subdominio = %s", (t,))
+                        cur.execute(
+                            "SELECT db_name FROM gyms WHERE subdominio = %s", (t,)
+                        )
                         row = cur.fetchone()
                         if row:
                             db_name = str(row[0] or "").strip()
                 except Exception:
                     db_name = None
-        
+
         if not db_name:
             return None
-        
+
         base = _resolve_base_db_params()
         base["database"] = db_name
-        
+
         try:
             dm = DatabaseManager(connection_params=base)  # type: ignore
         except Exception:
             return None
-        
+
         try:
             with dm.get_connection_context() as conn:  # type: ignore
                 cur = conn.cursor()
@@ -765,9 +867,10 @@ def _get_db_for_tenant(tenant: str) -> Optional[DatabaseManager]:
                 _ = cur.fetchone()
         except Exception:
             return None
-        
+
         _tenant_dbs[t] = dm
         return dm
+
 
 def _is_tenant_suspended(tenant: str) -> bool:
     adm = get_admin_db()
@@ -777,6 +880,7 @@ def _is_tenant_suspended(tenant: str) -> bool:
         return bool(adm.is_gym_suspended(tenant))  # type: ignore
     except Exception:
         return False
+
 
 def _get_tenant_suspension_info(tenant: str) -> Optional[Dict[str, Any]]:
     adm = get_admin_db()
@@ -794,12 +898,17 @@ def _get_tenant_suspension_info(tenant: str) -> Optional[Dict[str, Any]]:
                 return None
             hard, until, reason = row[0], row[1], row[2]
             try:
-                u = until.isoformat() if hasattr(until, "isoformat") and until else (str(until or ""))
+                u = (
+                    until.isoformat()
+                    if hasattr(until, "isoformat") and until
+                    else (str(until or ""))
+                )
             except Exception:
                 u = str(until or "")
             return {"hard": bool(hard), "until": u, "reason": str(reason or "")}
     except Exception:
         return None
+
 
 def _get_session_secret() -> str:
     # 1) Prefer an explicit, stable secret via environment
@@ -813,22 +922,28 @@ def _get_session_secret() -> str:
     # 2) In serverless environments (e.g., Vercel) the filesystem is ephemeral.
     try:
         if os.getenv("VERCEL") or os.getenv("VERCEL_ENV"):
-            base = (os.getenv("WHATSAPP_APP_SECRET", "") + "|" + os.getenv("WHATSAPP_VERIFY_TOKEN", "")).strip()
+            base = (
+                os.getenv("WHATSAPP_APP_SECRET", "")
+                + "|"
+                + os.getenv("WHATSAPP_VERIFY_TOKEN", "")
+            ).strip()
             if base:
                 import hashlib
+
                 return hashlib.sha256(base.encode("utf-8")).hexdigest()
     except Exception:
         pass
-    
+
     # 3) Non-serverless: try to read/persist in config/config.json for stability
     try:
         # Try to find config path
         base_dir = _resolve_existing_dir("config")
         cfg_path = base_dir / "config.json"
-        
+
         cfg = {}
         if cfg_path.exists():
             import json as _json
+
             try:
                 with open(cfg_path, "r", encoding="utf-8") as f:
                     cfg = _json.load(f) or {}
@@ -836,9 +951,12 @@ def _get_session_secret() -> str:
                     cfg = {}
             except Exception:
                 cfg = {}
-        secret = str(cfg.get("webapp_session_secret") or cfg.get("session_secret") or "").strip()
+        secret = str(
+            cfg.get("webapp_session_secret") or cfg.get("session_secret") or ""
+        ).strip()
         if not secret:
             import secrets as _secrets
+
             secret = _secrets.token_urlsafe(32)
             cfg["webapp_session_secret"] = secret
             try:
@@ -851,13 +969,15 @@ def _get_session_secret() -> str:
         return secret
     except Exception:
         pass
-    
+
     # 4) Absolute last resort: ephemeral secret
     import secrets as _secrets
+
     return _secrets.token_urlsafe(32)
 
 
 # --- JWT and Usuario Helpers (ported from legacy server.py lines 5613-5656) ---
+
 
 def _get_usuario_id_by_dni(dni: str) -> Optional[int]:
     """
@@ -904,7 +1024,7 @@ def _issue_usuario_jwt(usuario_id: int) -> Optional[str]:
         import time
         import hmac
         import hashlib
-        
+
         hdr = {"alg": "HS256", "typ": "JWT"}
         now = int(time.time())
         pl = {"sub": int(usuario_id), "role": "user", "iat": now, "exp": now + 86400}
@@ -932,9 +1052,12 @@ def _get_usuario_nombre(usuario_id: int) -> Optional[str]:
     try:
         u = db.obtener_usuario_por_id(int(usuario_id))  # type: ignore
         if u is not None:
-            nombre = getattr(u, 'nombre', None) or (u.get('nombre') if isinstance(u, dict) else None) or ""
+            nombre = (
+                getattr(u, "nombre", None)
+                or (u.get("nombre") if isinstance(u, dict) else None)
+                or ""
+            )
             return nombre if nombre else None
     except Exception:
         pass
     return None
-

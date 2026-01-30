@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { QrCode, Clock, Check, X, RefreshCw } from "lucide-react";
 import { Modal, Button, useToast } from "@/components/ui";
 import QRCodeLib from "qrcode";
+import { getCurrentTenant, getCsrfTokenFromCookie } from "@/lib/tenant";
 
 interface QRCheckInModalProps {
     isOpen: boolean;
@@ -29,9 +30,18 @@ export function QRCheckInModal({ isOpen, onClose, userId, userName }: QRCheckInM
         setLoading(true);
         setStatus("generating");
         try {
+            const headers: Record<string, string> = {};
+            try {
+                const csrf = getCsrfTokenFromCookie();
+                if (csrf) headers["X-CSRF-Token"] = csrf;
+            } catch {}
+            try {
+                headers["X-Tenant"] = getCurrentTenant() || "";
+            } catch {}
             const res = await fetch(`/api/usuarios/${userId}/qr`, {
                 method: "POST",
-                credentials: "include"
+                credentials: "include",
+                headers
             });
             if (res.ok) {
                 const data = await res.json();

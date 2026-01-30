@@ -1,4 +1,5 @@
 """Reports Service - SQLAlchemy ORM for KPIs, statistics, and exports."""
+
 from typing import Optional, Dict, Any, List
 from datetime import date, datetime, timedelta
 import logging
@@ -18,66 +19,132 @@ class ReportsService(BaseService):
     def __init__(self, db: Session):
         super().__init__(db)
 
+    def _effective_sucursal_id(self, sucursal_id: Optional[int] = None) -> Optional[int]:
+        sid = sucursal_id
+        if sid is None:
+            try:
+                sid = getattr(self, "sucursal_id", None)
+            except Exception:
+                sid = None
+        try:
+            sid = int(sid) if sid is not None else None
+        except Exception:
+            sid = None
+        if sid is not None and sid > 0:
+            return sid
+        return None
+
     # ========== KPIs ==========
-    
-    def obtener_kpis(self) -> Dict[str, Any]:
+
+    def obtener_kpis(self, sucursal_id: Optional[int] = None) -> Dict[str, Any]:
         """Get main dashboard KPIs."""
         try:
             today = date.today()
-            
-            activos = self.db.query(func.count(Usuario.id)).filter(Usuario.activo == True).scalar() or 0
-            inactivos = self.db.query(func.count(Usuario.id)).filter(Usuario.activo == False).scalar() or 0
-            
-            ingresos = self.db.query(func.sum(Pago.monto)).filter(
-                func.date_trunc('month', Pago.fecha_pago) == func.date_trunc('month', func.current_date())
-            ).scalar() or 0.0
-            
-            asistencias = self.db.query(func.count(Asistencia.id)).filter(
-                Asistencia.fecha == func.current_date()
-            ).scalar() or 0
-            
+            sid = self._effective_sucursal_id(sucursal_id)
+
+            activos = (
+                self.db.query(func.count(Usuario.id))
+                .filter(Usuario.activo == True)
+                .scalar()
+                or 0
+            )
+            inactivos = (
+                self.db.query(func.count(Usuario.id))
+                .filter(Usuario.activo == False)
+                .scalar()
+                or 0
+            )
+
+            ingresos = (
+                self.db.query(func.sum(Pago.monto))
+                .filter(
+                    func.date_trunc("month", Pago.fecha_pago)
+                    == func.date_trunc("month", func.current_date())
+                )
+                .scalar()
+                or 0.0
+            )
+
+            asistencias = (
+                self.db.query(func.count(Asistencia.id))
+                .filter(
+                    Asistencia.fecha == func.current_date(),
+                    *( [Asistencia.sucursal_id == sid] if sid is not None else [] ),
+                )
+                .scalar()
+                or 0
+            )
+
             limit_date = today - timedelta(days=30)
-            nuevos = self.db.query(func.count(Usuario.id)).filter(Usuario.fecha_registro >= limit_date).scalar() or 0
-            
+            nuevos = (
+                self.db.query(func.count(Usuario.id))
+                .filter(Usuario.fecha_registro >= limit_date)
+                .scalar()
+                or 0
+            )
+
             return {
-                "total_activos": activos, 
-                "total_inactivos": inactivos, 
-                "ingresos_mes": float(ingresos), 
-                "asistencias_hoy": asistencias, 
-                "nuevos_30_dias": nuevos
+                "total_activos": activos,
+                "total_inactivos": inactivos,
+                "ingresos_mes": float(ingresos),
+                "asistencias_hoy": asistencias,
+                "nuevos_30_dias": nuevos,
             }
         except Exception as e:
             logger.error(f"Error getting KPIs: {e}")
-            return {"total_activos": 0, "total_inactivos": 0, "ingresos_mes": 0, "asistencias_hoy": 0, "nuevos_30_dias": 0}
+            return {
+                "total_activos": 0,
+                "total_inactivos": 0,
+                "ingresos_mes": 0,
+                "asistencias_hoy": 0,
+                "nuevos_30_dias": 0,
+            }
 
-    def obtener_kpis_avanzados(self) -> Dict[str, Any]:
+    def obtener_kpis_avanzados(self, sucursal_id: Optional[int] = None) -> Dict[str, Any]:
         """Get advanced KPIs (churn rate, avg payment)."""
         try:
             limit_date = datetime.now() - timedelta(days=30)
-            
-            churned = self.db.query(func.count(Usuario.id)).filter(
-                Usuario.activo == False,
-                # Assuming 'updated_at' equivalent is needed. ORM doesn't show updated_at?
-                # orm_models.py doesn't show updated_at for Usuario. 
-                # Assuming we rely on status change history or just last 30 days registration?
-                # Use fallback: deactivated recently? We don't have 'fecha_baja'.
-                # We will approximate with modification date if available or just check inactives created > 30 days ago?
-                # Original SQL used updated_at. Let's use a workaround or 0 if field missing.
-                # Actually, skipping churn calculation accuracy improvement for now, just ORM parity with what exists or reasonable approximation.
-                # Use fecha_registro for now as there is no updated_at in model shown.
-                Usuario.fecha_registro >= limit_date # This is technically "New Inactives" not churned.
-            ).scalar() or 0
-            
-            total_active = self.db.query(func.count(Usuario.id)).filter(Usuario.activo == True).scalar() or 1
-            
-            avg_pago = self.db.query(func.avg(Pago.monto)).filter(
-                Pago.fecha_pago >= limit_date
-            ).scalar() or 0.0
-            
+            _ = self._effective_sucursal_id(sucursal_id)
+
+            churned = (
+                self.db.query(func.count(Usuario.id))
+                .filter(
+                    Usuario.activo == False,
+                    # Assuming 'updated_at' equivalent is needed. ORM doesn't show updated_at?
+                    # orm_models.py doesn't show updated_at for Usuario.
+                    # Assuming we rely on status change history or just last 30 days registration?
+                    # Use fallback: deactivated recently? We don't have 'fecha_baja'.
+                    # We will approximate with modification date if available or just check inactives created > 30 days ago?
+                    # Original SQL used updated_at. Let's use a workaround or 0 if field missing.
+                    # Actually, skipping churn calculation accuracy improvement for now, just ORM parity with what exists or reasonable approximation.
+                    # Use fecha_registro for now as there is no updated_at in model shown.
+                    Usuario.fecha_registro
+                    >= limit_date,  # This is technically "New Inactives" not churned.
+                )
+                .scalar()
+                or 0
+            )
+
+            total_active = (
+                self.db.query(func.count(Usuario.id))
+                .filter(Usuario.activo == True)
+                .scalar()
+                or 1
+            )
+
+            avg_pago = (
+                self.db.query(func.avg(Pago.monto))
+                .filter(Pago.fecha_pago >= limit_date)
+                .scalar()
+                or 0.0
+            )
+
             return {
-                "churn_rate": round(churned / total_active * 100, 1) if total_active else 0, 
-                "avg_pago": round(float(avg_pago), 2), 
-                "churned_30d": churned
+                "churn_rate": round(churned / total_active * 100, 1)
+                if total_active
+                else 0,
+                "avg_pago": round(float(avg_pago), 2),
+                "churned_30d": churned,
             }
         except Exception as e:
             logger.error(f"Error getting advanced KPIs: {e}")
@@ -86,11 +153,17 @@ class ReportsService(BaseService):
     def obtener_activos_inactivos(self) -> Dict[str, int]:
         """Get active/inactive user counts."""
         try:
-            result = self.db.query(Usuario.activo, func.count(Usuario.id)).group_by(Usuario.activo).all()
+            result = (
+                self.db.query(Usuario.activo, func.count(Usuario.id))
+                .group_by(Usuario.activo)
+                .all()
+            )
             counts = {"activos": 0, "inactivos": 0}
             for status, count in result:
-                if status: counts["activos"] = count
-                else: counts["inactivos"] = count
+                if status:
+                    counts["activos"] = count
+                else:
+                    counts["inactivos"] = count
             return counts
         except Exception as e:
             logger.error(f"Error getting active/inactive: {e}")
@@ -101,13 +174,22 @@ class ReportsService(BaseService):
     def obtener_ingresos_12m(self) -> List[Dict[str, Any]]:
         """Get income by month for last 12 months."""
         try:
-            result = self.db.query(
-                func.to_char(Pago.fecha_pago, 'YYYY-MM').label('mes'),
-                func.sum(Pago.monto).label('total')
-            ).filter(
-                Pago.fecha_pago >= func.date_trunc('month', func.current_date() - text("INTERVAL '11 months'"))
-            ).group_by('mes').order_by('mes').all()
-            
+            result = (
+                self.db.query(
+                    func.to_char(Pago.fecha_pago, "YYYY-MM").label("mes"),
+                    func.sum(Pago.monto).label("total"),
+                )
+                .filter(
+                    Pago.fecha_pago
+                    >= func.date_trunc(
+                        "month", func.current_date() - text("INTERVAL '11 months'")
+                    )
+                )
+                .group_by("mes")
+                .order_by("mes")
+                .all()
+            )
+
             return [{"mes": r.mes, "total": float(r.total or 0)} for r in result]
         except Exception as e:
             logger.error(f"Error getting ingresos 12m: {e}")
@@ -116,13 +198,22 @@ class ReportsService(BaseService):
     def obtener_nuevos_12m(self) -> List[Dict[str, Any]]:
         """Get new users by month for last 12 months."""
         try:
-            result = self.db.query(
-                func.to_char(Usuario.fecha_registro, 'YYYY-MM').label('mes'),
-                func.count(Usuario.id).label('total')
-            ).filter(
-                Usuario.fecha_registro >= func.date_trunc('month', func.current_date() - text("INTERVAL '11 months'"))
-            ).group_by('mes').order_by('mes').all()
-            
+            result = (
+                self.db.query(
+                    func.to_char(Usuario.fecha_registro, "YYYY-MM").label("mes"),
+                    func.count(Usuario.id).label("total"),
+                )
+                .filter(
+                    Usuario.fecha_registro
+                    >= func.date_trunc(
+                        "month", func.current_date() - text("INTERVAL '11 months'")
+                    )
+                )
+                .group_by("mes")
+                .order_by("mes")
+                .all()
+            )
+
             return [{"mes": r.mes, "total": int(r.total or 0)} for r in result]
         except Exception as e:
             logger.error(f"Error getting nuevos 12m: {e}")
@@ -132,13 +223,25 @@ class ReportsService(BaseService):
         """Get ARPU by month for last 12 months."""
         try:
             # ARPU = Revenue / Unique Users
-            result = self.db.query(
-                func.to_char(Pago.fecha_pago, 'YYYY-MM').label('mes'),
-                (func.sum(Pago.monto) / func.nullif(func.count(func.distinct(Pago.usuario_id)), 0)).label('arpu')
-            ).filter(
-                Pago.fecha_pago >= func.date_trunc('month', func.current_date() - text("INTERVAL '11 months'"))
-            ).group_by('mes').order_by('mes').all()
-            
+            result = (
+                self.db.query(
+                    func.to_char(Pago.fecha_pago, "YYYY-MM").label("mes"),
+                    (
+                        func.sum(Pago.monto)
+                        / func.nullif(func.count(func.distinct(Pago.usuario_id)), 0)
+                    ).label("arpu"),
+                )
+                .filter(
+                    Pago.fecha_pago
+                    >= func.date_trunc(
+                        "month", func.current_date() - text("INTERVAL '11 months'")
+                    )
+                )
+                .group_by("mes")
+                .order_by("mes")
+                .all()
+            )
+
             return [{"mes": r.mes, "arpu": float(r.arpu or 0)} for r in result]
         except Exception as e:
             logger.error(f"Error getting ARPU 12m: {e}")
@@ -156,7 +259,7 @@ class ReportsService(BaseService):
             # and verify table names.
             # Original used: cohorts CTE.
             # We'll adapt column names: created_at -> fecha_registro.
-            
+
             query = text("""
                 WITH cohorts AS (
                     SELECT id, DATE_TRUNC('month', fecha_registro) as cohort_month, activo
@@ -166,16 +269,20 @@ class ReportsService(BaseService):
                 FROM cohorts GROUP BY cohort_month ORDER BY cohort_month
             """)
             result = self.db.execute(query)
-            
+
             cohorts = []
             for r in result.fetchall():
                 total, retained = int(r[1] or 0), int(r[2] or 0)
-                cohorts.append({
-                    "cohort": r[0], 
-                    "total": total, 
-                    "retained": retained, 
-                    "retention_rate": round(retained / total * 100, 1) if total > 0 else 0
-                })
+                cohorts.append(
+                    {
+                        "cohort": r[0],
+                        "total": total,
+                        "retained": retained,
+                        "retention_rate": round(retained / total * 100, 1)
+                        if total > 0
+                        else 0,
+                    }
+                )
             return cohorts
         except Exception as e:
             logger.error(f"Error getting cohort: {e}")
@@ -194,16 +301,21 @@ class ReportsService(BaseService):
             # This suggests the SQL WAS BROKEN or the model in orm_models.py is outdated/mismatch.
             # 'audit_gestion.md' findings mentioned raw SQL.
             # If the model says String, we should group by that String.
-            
-            result = self.db.query(
-                func.coalesce(Usuario.tipo_cuota, 'Sin tipo').label('tipo'),
-                func.avg(Pago.monto).label('arpa')
-            ).join(
-                Usuario, Pago.usuario_id == Usuario.id
-            ).filter(
-                Pago.fecha_pago >= func.current_date() - text("INTERVAL '3 months'")
-            ).group_by(Usuario.tipo_cuota).order_by(desc('arpa')).all()
-            
+
+            result = (
+                self.db.query(
+                    func.coalesce(Usuario.tipo_cuota, "Sin tipo").label("tipo"),
+                    func.avg(Pago.monto).label("arpa"),
+                )
+                .join(Usuario, Pago.usuario_id == Usuario.id)
+                .filter(
+                    Pago.fecha_pago >= func.current_date() - text("INTERVAL '3 months'")
+                )
+                .group_by(Usuario.tipo_cuota)
+                .order_by(desc("arpa"))
+                .all()
+            )
+
             return [{"tipo": r.tipo, "arpa": float(r.arpa or 0)} for r in result]
         except Exception as e:
             logger.error(f"Error getting ARPA by type: {e}")
@@ -244,7 +356,11 @@ class ReportsService(BaseService):
                 or 0
             )
 
-            return {"al_dia": int(al_dia), "vencido": int(vencido), "sin_pagos": int(sin_pagos)}
+            return {
+                "al_dia": int(al_dia),
+                "vencido": int(vencido),
+                "sin_pagos": int(sin_pagos),
+            }
         except Exception as e:
             logger.error(f"Error getting payment status: {e}")
             return {"al_dia": 0, "vencido": 0, "sin_pagos": 0}
@@ -252,18 +368,29 @@ class ReportsService(BaseService):
     def obtener_eventos_espera(self) -> List[Dict[str, Any]]:
         """Get recent waitlist events."""
         try:
-            from src.models import ClaseListaEspera # Import here to avoid circular if any
-            
-            result = self.db.query(ClaseListaEspera, Usuario.nombre).join(
-                Usuario, ClaseListaEspera.usuario_id == Usuario.id
-            ).order_by(desc(ClaseListaEspera.fecha_creacion)).limit(20).all()
-            
-            return [{
-                "id": item.ClaseListaEspera.id, 
-                "usuario_nombre": item.nombre, 
-                "posicion": item.ClaseListaEspera.posicion, 
-                "fecha": item.ClaseListaEspera.fecha_creacion.isoformat() if item.ClaseListaEspera.fecha_creacion else None
-            } for item in result]
+            from src.models import (
+                ClaseListaEspera,
+            )  # Import here to avoid circular if any
+
+            result = (
+                self.db.query(ClaseListaEspera, Usuario.nombre)
+                .join(Usuario, ClaseListaEspera.usuario_id == Usuario.id)
+                .order_by(desc(ClaseListaEspera.fecha_creacion))
+                .limit(20)
+                .all()
+            )
+
+            return [
+                {
+                    "id": item.ClaseListaEspera.id,
+                    "usuario_nombre": item.nombre,
+                    "posicion": item.ClaseListaEspera.posicion,
+                    "fecha": item.ClaseListaEspera.fecha_creacion.isoformat()
+                    if item.ClaseListaEspera.fecha_creacion
+                    else None,
+                }
+                for item in result
+            ]
         except Exception as e:
             # Table might not exist yet if feature not fully used, handle gracefully
             logger.error(f"Error getting waitlist events: {e}")
@@ -275,7 +402,9 @@ class ReportsService(BaseService):
             today = date.today()
 
             subq = (
-                self.db.query(Pago.usuario_id, func.max(Pago.fecha_pago).label('last_payment'))
+                self.db.query(
+                    Pago.usuario_id, func.max(Pago.fecha_pago).label("last_payment")
+                )
                 .group_by(Pago.usuario_id)
                 .subquery()
             )
@@ -305,10 +434,14 @@ class ReportsService(BaseService):
                     {
                         "usuario_id": int(r.Usuario.id),
                         "usuario_nombre": r.Usuario.nombre,
-                        "ultimo_pago": r.last_payment.isoformat() if r.last_payment else None,
+                        "ultimo_pago": r.last_payment.isoformat()
+                        if r.last_payment
+                        else None,
                         "fecha_proximo_vencimiento": fpv.isoformat() if fpv else None,
                         "dias_restantes": dias_restantes,
-                        "cuotas_vencidas": int(getattr(r.Usuario, "cuotas_vencidas", 0) or 0),
+                        "cuotas_vencidas": int(
+                            getattr(r.Usuario, "cuotas_vencidas", 0) or 0
+                        ),
                     }
                 )
             return out
@@ -322,73 +455,103 @@ class ReportsService(BaseService):
         """Export all users for CSV."""
         try:
             items = self.db.query(Usuario).order_by(Usuario.nombre).all()
-            return [{
-                "id": u.id, 
-                "nombre": u.nombre, 
-                "dni": u.dni, 
-                "telefono": u.telefono, 
-                "email": "", # Not in model shown? assuming removed or safe to ignore
-                "activo": u.activo, 
-                "rol": u.rol, 
-                "tipo_cuota": u.tipo_cuota, # Using string field
-                "notas": u.notas, 
-                "created_at": u.fecha_registro.isoformat() if u.fecha_registro else None
-            } for u in items]
+            return [
+                {
+                    "id": u.id,
+                    "nombre": u.nombre,
+                    "dni": u.dni,
+                    "telefono": u.telefono,
+                    "email": "",  # Not in model shown? assuming removed or safe to ignore
+                    "activo": u.activo,
+                    "rol": u.rol,
+                    "tipo_cuota": u.tipo_cuota,  # Using string field
+                    "notas": u.notas,
+                    "created_at": u.fecha_registro.isoformat()
+                    if u.fecha_registro
+                    else None,
+                }
+                for u in items
+            ]
         except Exception as e:
             logger.error(f"Error exporting users: {e}")
             return []
 
-    def exportar_pagos(self, desde: Optional[str] = None, hasta: Optional[str] = None) -> List[Dict[str, Any]]:
+    def exportar_pagos(
+        self, desde: Optional[str] = None, hasta: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """Export payments for CSV."""
         try:
-            q = self.db.query(Pago, Usuario.nombre.label('usuario_nombre'), MetodoPago.nombre.label('metodo_nombre')).outerjoin(
-                Usuario, Pago.usuario_id == Usuario.id
-            ).outerjoin(
-                MetodoPago, Pago.metodo_pago_id == MetodoPago.id
+            q = (
+                self.db.query(
+                    Pago,
+                    Usuario.nombre.label("usuario_nombre"),
+                    MetodoPago.nombre.label("metodo_nombre"),
+                )
+                .outerjoin(Usuario, Pago.usuario_id == Usuario.id)
+                .outerjoin(MetodoPago, Pago.metodo_pago_id == MetodoPago.id)
             )
-            
+
             if desde:
                 q = q.filter(Pago.fecha_pago >= desde)
             if hasta:
                 q = q.filter(Pago.fecha_pago <= hasta)
-                
+
             items = q.order_by(desc(Pago.fecha_pago)).all()
-            
-            return [{
-                "id": r.Pago.id, 
-                "usuario_id": r.Pago.usuario_id, 
-                "usuario_nombre": r.usuario_nombre, 
-                "monto": float(r.Pago.monto), 
-                "fecha": r.Pago.fecha_pago.isoformat() if r.Pago.fecha_pago else None, 
-                "metodo_id": r.Pago.metodo_pago_id, 
-                "metodo_nombre": r.metodo_nombre or r.Pago.metodo_pago, # Fallback to string
-                "notas": "", # Notes not in Pago model shown?
-                "created_at": "" 
-            } for r in items]
+
+            return [
+                {
+                    "id": r.Pago.id,
+                    "usuario_id": r.Pago.usuario_id,
+                    "usuario_nombre": r.usuario_nombre,
+                    "monto": float(r.Pago.monto),
+                    "fecha": r.Pago.fecha_pago.isoformat()
+                    if r.Pago.fecha_pago
+                    else None,
+                    "metodo_id": r.Pago.metodo_pago_id,
+                    "metodo_nombre": r.metodo_nombre
+                    or r.Pago.metodo_pago,  # Fallback to string
+                    "notas": "",  # Notes not in Pago model shown?
+                    "created_at": "",
+                }
+                for r in items
+            ]
         except Exception as e:
             logger.error(f"Error exporting payments: {e}")
             return []
 
-    def exportar_asistencias(self, desde: Optional[str] = None, hasta: Optional[str] = None) -> List[Dict[str, Any]]:
+    def exportar_asistencias(
+        self,
+        desde: Optional[str] = None,
+        hasta: Optional[str] = None,
+        sucursal_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
         """Export attendance for CSV."""
         try:
-            q = self.db.query(Asistencia, Usuario.nombre.label('usuario_nombre')).outerjoin(
-                Usuario, Asistencia.usuario_id == Usuario.id
-            )
-            
+            sid = self._effective_sucursal_id(sucursal_id)
+            q = self.db.query(
+                Asistencia, Usuario.nombre.label("usuario_nombre")
+            ).outerjoin(Usuario, Asistencia.usuario_id == Usuario.id)
+            if sid is not None:
+                q = q.filter(Asistencia.sucursal_id == sid)
+
             if desde:
                 q = q.filter(func.date(Asistencia.hora_registro) >= desde)
             if hasta:
                 q = q.filter(func.date(Asistencia.hora_registro) <= hasta)
-                
+
             items = q.order_by(desc(Asistencia.hora_registro)).all()
-            
-            return [{
-                "id": r.Asistencia.id, 
-                "usuario_id": r.Asistencia.usuario_id, 
-                "usuario_nombre": r.usuario_nombre, 
-                "created_at": r.Asistencia.hora_registro.isoformat() if r.Asistencia.hora_registro else None
-            } for r in items]
+
+            return [
+                {
+                    "id": r.Asistencia.id,
+                    "usuario_id": r.Asistencia.usuario_id,
+                    "usuario_nombre": r.usuario_nombre,
+                    "created_at": r.Asistencia.hora_registro.isoformat()
+                    if r.Asistencia.hora_registro
+                    else None,
+                }
+                for r in items
+            ]
         except Exception as e:
             logger.error(f"Error exporting attendance: {e}")
             return []
@@ -401,9 +564,11 @@ class ReportsService(BaseService):
         dias: int = 35,
         umbral_multiples: int = 3,
         umbral_repeticion_minutos: int = 5,
+        sucursal_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         try:
             hoy = date.today()
+            sid = self._effective_sucursal_id(sucursal_id)
             if hasta is None:
                 hasta = hoy
             if desde is None:
@@ -413,16 +578,24 @@ class ReportsService(BaseService):
                 self.db.query(
                     Asistencia.fecha.label("fecha"),
                     func.count(Asistencia.id).label("total_checkins"),
-                    func.count(func.distinct(Asistencia.usuario_id)).label("unique_users"),
+                    func.count(func.distinct(Asistencia.usuario_id)).label(
+                        "unique_users"
+                    ),
                 )
-                .filter(Asistencia.fecha >= desde, Asistencia.fecha <= hasta)
+                .filter(
+                    Asistencia.fecha >= desde,
+                    Asistencia.fecha <= hasta,
+                    *( [Asistencia.sucursal_id == sid] if sid is not None else [] ),
+                )
                 .group_by(Asistencia.fecha)
                 .order_by(Asistencia.fecha.asc())
                 .all()
             )
             daily = [
                 {
-                    "fecha": (r.fecha.isoformat() if getattr(r, "fecha", None) else None),
+                    "fecha": (
+                        r.fecha.isoformat() if getattr(r, "fecha", None) else None
+                    ),
                     "total_checkins": int(getattr(r, "total_checkins", 0) or 0),
                     "unique_users": int(getattr(r, "unique_users", 0) or 0),
                 }
@@ -432,13 +605,23 @@ class ReportsService(BaseService):
             total_checkins = int(sum(d.get("total_checkins", 0) for d in daily))
             unique_users_total = int(
                 self.db.query(func.count(func.distinct(Asistencia.usuario_id)))
-                .filter(Asistencia.fecha >= desde, Asistencia.fecha <= hasta)
+                .filter(
+                    Asistencia.fecha >= desde,
+                    Asistencia.fecha <= hasta,
+                    *( [Asistencia.sucursal_id == sid] if sid is not None else [] ),
+                )
                 .scalar()
                 or 0
             )
-            avg_checkins_per_user = round(total_checkins / max(1, unique_users_total), 3)
-            max_day_total = max([0] + [int(d.get("total_checkins", 0) or 0) for d in daily])
-            max_day_unique = max([0] + [int(d.get("unique_users", 0) or 0) for d in daily])
+            avg_checkins_per_user = round(
+                total_checkins / max(1, unique_users_total), 3
+            )
+            max_day_total = max(
+                [0] + [int(d.get("total_checkins", 0) or 0) for d in daily]
+            )
+            max_day_unique = max(
+                [0] + [int(d.get("unique_users", 0) or 0) for d in daily]
+            )
 
             frecuentes_rows = (
                 self.db.query(
@@ -449,8 +632,14 @@ class ReportsService(BaseService):
                     Usuario.dni.label("usuario_dni"),
                 )
                 .outerjoin(Usuario, Usuario.id == Asistencia.usuario_id)
-                .filter(Asistencia.fecha >= desde, Asistencia.fecha <= hasta)
-                .group_by(Asistencia.fecha, Asistencia.usuario_id, Usuario.nombre, Usuario.dni)
+                .filter(
+                    Asistencia.fecha >= desde,
+                    Asistencia.fecha <= hasta,
+                    *( [Asistencia.sucursal_id == sid] if sid is not None else [] ),
+                )
+                .group_by(
+                    Asistencia.fecha, Asistencia.usuario_id, Usuario.nombre, Usuario.dni
+                )
                 .having(func.count(Asistencia.id) >= int(umbral_multiples))
                 .order_by(desc(func.count(Asistencia.id)))
                 .limit(100)
@@ -497,7 +686,20 @@ class ReportsService(BaseService):
                     LIMIT 100
                     """
                 )
-                rows = self.db.execute(rapid_sql, {"desde": desde, "hasta": hasta, "mins": int(umbral_repeticion_minutos)}).fetchall() or []
+                params = {
+                    "desde": desde,
+                    "hasta": hasta,
+                    "mins": int(umbral_repeticion_minutos),
+                }
+                if sid is not None:
+                    rapid_sql = text(
+                        str(rapid_sql.text).replace(
+                            "WHERE a.fecha BETWEEN :desde AND :hasta",
+                            "WHERE a.fecha BETWEEN :desde AND :hasta AND a.sucursal_id = :sid",
+                        )
+                    )
+                    params["sid"] = int(sid)
+                rows = (self.db.execute(rapid_sql, params).fetchall() or [])
                 for r in rows:
                     rapid.append(
                         {
@@ -505,8 +707,12 @@ class ReportsService(BaseService):
                             "usuario_id": int(r.usuario_id or 0),
                             "usuario_nombre": getattr(r, "usuario_nombre", None),
                             "usuario_dni": getattr(r, "usuario_dni", None),
-                            "hora": r.hora_registro.isoformat() if r.hora_registro else None,
-                            "prev_hora": r.prev_hora.isoformat() if r.prev_hora else None,
+                            "hora": r.hora_registro.isoformat()
+                            if r.hora_registro
+                            else None,
+                            "prev_hora": r.prev_hora.isoformat()
+                            if r.prev_hora
+                            else None,
                             "delta_seconds": int(getattr(r, "delta_seconds", 0) or 0),
                         }
                     )
@@ -515,15 +721,25 @@ class ReportsService(BaseService):
 
             spikes = []
             try:
-                values = [(d["fecha"], int(d["total_checkins"] or 0)) for d in daily if d.get("fecha")]
+                values = [
+                    (d["fecha"], int(d["total_checkins"] or 0))
+                    for d in daily
+                    if d.get("fecha")
+                ]
                 for idx in range(len(values)):
                     if idx < 7:
                         continue
-                    prev = [v for _, v in values[max(0, idx - 7): idx]]
+                    prev = [v for _, v in values[max(0, idx - 7) : idx]]
                     base = sum(prev) / max(1, len(prev))
                     cur = values[idx][1]
                     if base >= 1 and cur >= max(20, int(base * 1.8)):
-                        spikes.append({"fecha": values[idx][0], "total_checkins": cur, "avg_prev_7d": round(base, 2)})
+                        spikes.append(
+                            {
+                                "fecha": values[idx][0],
+                                "total_checkins": cur,
+                                "avg_prev_7d": round(base, 2),
+                            }
+                        )
             except Exception:
                 spikes = []
 
@@ -553,11 +769,19 @@ class ReportsService(BaseService):
             logger.error(f"Error attendance audit: {e}")
             return {"ok": False, "error": str(e)}
 
-    def exportar_asistencias_audit(self, desde: Optional[str] = None, hasta: Optional[str] = None) -> List[Dict[str, Any]]:
+    def exportar_asistencias_audit(
+        self, desde: Optional[str] = None, hasta: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         try:
-            d = date.fromisoformat(desde) if desde else (date.today() - timedelta(days=34))
+            d = (
+                date.fromisoformat(desde)
+                if desde
+                else (date.today() - timedelta(days=34))
+            )
             h = date.fromisoformat(hasta) if hasta else date.today()
-            audit = self.obtener_auditoria_asistencias(desde=d, hasta=h, dias=(h - d).days + 1)
+            audit = self.obtener_auditoria_asistencias(
+                desde=d, hasta=h, dias=(h - d).days + 1
+            )
             if not audit.get("ok"):
                 return []
             rows = []
@@ -576,4 +800,3 @@ class ReportsService(BaseService):
         except Exception as e:
             logger.error(f"Error exporting attendance audit: {e}")
             return []
-

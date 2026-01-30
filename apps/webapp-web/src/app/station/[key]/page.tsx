@@ -16,6 +16,9 @@ interface StationInfo {
     valid: boolean;
     gym_id?: number;
     gym_name?: string;
+    branch_id?: number;
+    branch_name?: string;
+    branch_code?: string | null;
     logo_url?: string;
 }
 
@@ -265,7 +268,10 @@ export default function StationPage() {
                     )}
                     <div>
                         <h1 className="text-2xl font-bold text-white">{stationInfo?.gym_name || 'Check-in'}</h1>
-                        <p className="text-slate-400 text-sm">Escanea el código con tu celular</p>
+                        <p className="text-slate-400 text-sm">
+                            {stationInfo?.branch_code ? `Sucursal ${stationInfo.branch_code} • ` : ''}
+                            Escanea el código con tu celular
+                        </p>
                     </div>
                 </div>
 

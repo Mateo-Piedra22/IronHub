@@ -18,24 +18,24 @@ import {
     ChevronRight,
     Home,
     MessageSquare,
-    Clock
+    Clock,
+    Briefcase
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ToastContainer, Modal, Button } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
+import { MiJornadaWidget } from '@/components/MiJornadaWidget';
 
 // Navigation items
 const navigation = [
-    { name: 'Usuarios', href: '/gestion/usuarios', icon: Users, description: 'Gestionar socios' },
-    { name: 'Pagos', href: '/gestion/pagos', icon: CreditCard, description: 'Registro de pagos' },
-    { name: 'Profesores', href: '/gestion/profesores', icon: GraduationCap, description: 'Staff y sesiones' },
-    { name: 'Rutinas', href: '/gestion/rutinas', icon: Clipboard, description: 'Plantillas y asignación' },
-    { name: 'Ejercicios', href: '/gestion/ejercicios', icon: Dumbbell, description: 'Biblioteca de ejercicios' },
-    { name: 'Clases', href: '/gestion/clases', icon: CalendarDays, description: 'Horarios grupales' },
-    { name: 'Asistencias', href: '/gestion/asistencias', icon: ScanLine, description: 'Check-in y registro' },
-    { name: 'WhatsApp', href: '/gestion/whatsapp', icon: MessageSquare, description: 'Mensajes y API' },
-    { name: 'Configuración', href: '/gestion/configuracion', icon: Settings, description: 'Cuotas, métodos, tema' },
+    { key: 'usuarios', name: 'Usuarios', href: '/gestion/usuarios', icon: Users, description: 'Gestionar socios' },
+    { key: 'pagos', name: 'Pagos', href: '/gestion/pagos', icon: CreditCard, description: 'Registro de pagos' },
+    { key: 'rutinas', name: 'Rutinas', href: '/gestion/rutinas', icon: Clipboard, description: 'Plantillas y asignación' },
+    { key: 'ejercicios', name: 'Ejercicios', href: '/gestion/ejercicios', icon: Dumbbell, description: 'Biblioteca de ejercicios' },
+    { key: 'clases', name: 'Clases', href: '/gestion/clases', icon: CalendarDays, description: 'Horarios grupales' },
+    { key: 'asistencias', name: 'Asistencias', href: '/gestion/asistencias', icon: ScanLine, description: 'Check-in y registro' },
+    { key: 'whatsapp', name: 'WhatsApp', href: '/gestion/whatsapp', icon: MessageSquare, description: 'Mensajes y API' },
 ];
 
 export default function AdminLayout({
@@ -48,6 +48,15 @@ export default function AdminLayout({
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [loggingOut, setLoggingOut] = useState(false);
     const [gymLogoUrl, setGymLogoUrl] = useState<string>('');
+    const [sucursales, setSucursales] = useState<Array<{ id: number; nombre: string; codigo: string; activa: boolean }>>([]);
+    const [sucursalActualId, setSucursalActualId] = useState<number | null>(null);
+    const [switchingSucursal, setSwitchingSucursal] = useState(false);
+    const [moduleFlags, setModuleFlags] = useState<Record<string, boolean> | null>(null);
+    const [userScopes, setUserScopes] = useState<string[]>([]);
+    const [userName, setUserName] = useState('');
+    const [userRole, setUserRole] = useState('');
+    const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
+    const [sessionTimer, setSessionTimer] = useState<string | null>(null);
 
     useEffect(() => {
         const loadBranding = async () => {
@@ -55,6 +64,15 @@ export default function AdminLayout({
                 const res = await api.getBootstrap('gestion');
                 const logo = res.ok ? (res.data?.gym?.logo_url || '') : '';
                 if (logo) setGymLogoUrl(logo);
+                if (res.ok && res.data?.sucursales) {
+                    setSucursales(res.data.sucursales.filter((s) => s.activa));
+                    setSucursalActualId((res.data.sucursal_actual_id ?? null) as any);
+                }
+                if (res.ok && (res.data as any)?.flags?.modules) {
+                    setModuleFlags(((res.data as any).flags.modules || null) as any);
+                } else {
+                    setModuleFlags(null);
+                }
             } catch {
                 // ignore
             }
@@ -62,15 +80,40 @@ export default function AdminLayout({
         loadBranding();
     }, []);
 
-    // Logout handler
+    const hasScopeFor = (key: string, scopes: string[]) => {
+        const k = String(key || '').trim().toLowerCase();
+        if (!k) return true;
+        if (k === 'whatsapp') {
+            return scopes.includes('whatsapp:read') || scopes.includes('whatsapp:send') || scopes.includes('whatsapp:config');
+        }
+        return scopes.includes(`${k}:read`) || scopes.includes(`${k}:write`);
+    };
+
+    const navItems = navigation.filter((item) => {
+        if (moduleFlags && Object.prototype.hasOwnProperty.call(moduleFlags, item.key) && moduleFlags[item.key] === false) {
+            return false;
+        }
+        if (!userRole) return true;
+        const roleNorm = String(userRole || '').toLowerCase();
+        if (roleNorm === 'owner' || roleNorm === 'admin') return true;
+        return hasScopeFor(item.key, userScopes || []);
+    });
+
+    useEffect(() => {
+        const current = navigation.find((n) => pathname.startsWith(n.href));
+        if (!current) return;
+        const enabledByModule = !moduleFlags || moduleFlags[current.key] !== false;
+        const roleNorm = String(userRole || '').toLowerCase();
+        const enabledByScope =
+            !userRole || roleNorm === 'owner' || roleNorm === 'admin' || hasScopeFor(current.key, userScopes || []);
+        const enabled = enabledByModule && enabledByScope;
+        if (enabled) return;
+        const first = navItems[0] || navigation[0];
+        if (first) router.push(first.href);
+    }, [moduleFlags, pathname, router, userRole, userScopes, navItems]);
+
     const [logoutWarningOpen, setLogoutWarningOpen] = useState(false);
     const [activeSession, setActiveSession] = useState<any>(null);
-
-    // Header State
-    const [userName, setUserName] = useState('');
-    const [userRole, setUserRole] = useState('');
-    const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
-    const [sessionTimer, setSessionTimer] = useState<string | null>(null);
 
     // Load User & Session Data
     useEffect(() => {
@@ -80,6 +123,7 @@ export default function AdminLayout({
                 if (res.ok && res.data?.user) {
                     setUserName(res.data.user.nombre);
                     setUserRole(res.data.user.rol);
+                    setUserScopes((res.data.user.scopes || []) as any);
 
                     // If profesor, check active session
                     if (res.data.user.rol === 'profesor' && res.data.user.gestion_profesor_id) {
@@ -242,13 +286,9 @@ export default function AdminLayout({
                                 {userRole === 'owner' && <span className="text-[10px] bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Admin</span>}
                                 {userRole === 'profesor' && <span className="text-[10px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Profe</span>}
                             </div>
-                            {sessionTimer && (
-                                <div className="text-xs text-success-400 font-mono flex items-center gap-1.5 bg-success-500/10 px-2 py-0.5 rounded-full mt-0.5">
-                                    <Clock className="w-3 h-3 animate-pulse" />
-                                    {sessionTimer}
-                                </div>
-                            )}
                         </div>
+
+                        <MiJornadaWidget className="hidden md:flex" />
 
                         <div className="flex items-center gap-2">
                             <Link
@@ -317,7 +357,7 @@ export default function AdminLayout({
 
                                 {/* Nav */}
                                 <nav className="flex-1 min-h-0 p-4 space-y-1 overflow-y-auto overflow-x-auto">
-                                    {navigation.map((item) => {
+                                    {navItems.map((item) => {
                                         const isActive = pathname === item.href || pathname?.startsWith(item.href + '/');
                                         return (
                                             <Link
@@ -349,7 +389,7 @@ export default function AdminLayout({
             {/* Desktop sidebar */}
             <aside className="hidden lg:block fixed top-16 left-0 bottom-0 w-64 border-r border-slate-800/50 bg-slate-900/50 backdrop-blur-lg">
                 <nav className="p-4 space-y-1 overflow-y-auto overflow-x-auto h-full">
-                    {navigation.map((item) => {
+                    {navItems.map((item) => {
                         const isActive = pathname === item.href || pathname?.startsWith(item.href + '/');
                         return (
                             <Link

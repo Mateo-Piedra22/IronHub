@@ -22,6 +22,7 @@ import {
     type ProfesorResumen,
     type Usuario,
 } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { formatTime, formatCurrency, cn } from '@/lib/utils';
 
 interface ProfesorDetailModalProps {
@@ -37,6 +38,18 @@ const diasSemana = [
     'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'
 ];
 
+const permissionModules = [
+    { key: 'usuarios', label: 'Usuarios', read: 'usuarios:read', write: 'usuarios:write' },
+    { key: 'pagos', label: 'Pagos', read: 'pagos:read', write: 'pagos:write' },
+    { key: 'asistencias', label: 'Asistencias', read: 'asistencias:read', write: 'asistencias:write' },
+    { key: 'clases', label: 'Clases', read: 'clases:read', write: 'clases:write' },
+    { key: 'rutinas', label: 'Rutinas', read: 'rutinas:read', write: 'rutinas:write' },
+    { key: 'ejercicios', label: 'Ejercicios', read: 'ejercicios:read', write: 'ejercicios:write' },
+    { key: 'whatsapp', label: 'WhatsApp', read: 'whatsapp:read', write: 'whatsapp:send', extra: ['whatsapp:config'] },
+    { key: 'configuracion', label: 'Configuración', read: 'configuracion:read', write: 'configuracion:write' },
+    { key: 'reportes', label: 'Reportes', read: 'reportes:read', write: null },
+] as const;
+
 export default function ProfesorDetailModal({
     isOpen,
     onClose,
@@ -44,6 +57,7 @@ export default function ProfesorDetailModal({
     onRefresh,
 }: ProfesorDetailModalProps) {
     const { success, error } = useToast();
+    const { user } = useAuth();
     const [activeTab, setActiveTab] = useState<TabType>('horarios');
 
     // Horarios
@@ -78,6 +92,10 @@ export default function ProfesorDetailModal({
     const [newPassword, setNewPassword] = useState('');
     const [passwordLoading, setPasswordLoading] = useState(false);
 
+    const [moduleFlags, setModuleFlags] = useState<Record<string, boolean> | null>(null);
+    const [editScopes, setEditScopes] = useState<string[]>([]);
+    const [permsLoading, setPermsLoading] = useState(false);
+
     const handlePasswordChange = async () => {
         if (!profesor || !newPassword) return;
         setPasswordLoading(true);
@@ -94,10 +112,23 @@ export default function ProfesorDetailModal({
     // Load data
     useEffect(() => {
         if (profesor && isOpen) {
+            setEditScopes((profesor.scopes || []) as any);
             loadHorarios();
             loadResumen();
             loadConfig();
             loadUsuarios();
+            (async () => {
+                try {
+                    const boot = await api.getBootstrap('auto');
+                    if (boot.ok && (boot.data as any)?.flags?.modules) {
+                        setModuleFlags(((boot.data as any).flags.modules || null) as any);
+                    } else {
+                        setModuleFlags(null);
+                    }
+                } catch {
+                    setModuleFlags(null);
+                }
+            })();
         }
     }, [profesor?.id, isOpen]);
 
@@ -149,6 +180,69 @@ export default function ProfesorDetailModal({
         const res = await api.getUsuarios({ activo: true, limit: 500 });
         if (res.ok && res.data) {
             setUsuarios(res.data.usuarios);
+        }
+    };
+
+    const isModuleEnabled = (key: string) => {
+        if (!moduleFlags) return true;
+        if (Object.prototype.hasOwnProperty.call(moduleFlags, key)) return moduleFlags[key] !== false;
+        return true;
+    };
+
+    const toggleScope = (scope: string, enabled: boolean) => {
+        const s = String(scope || '').trim();
+        if (!s) return;
+        setEditScopes((prev) => {
+            const has = prev.includes(s);
+            if (enabled && !has) return [...prev, s];
+            if (!enabled && has) return prev.filter((x) => x !== s);
+            return prev;
+        });
+    };
+
+    const setModuleRead = (key: string, readScope: string, writeScope: string | null, extra: readonly string[] | undefined, enabled: boolean) => {
+        if (!isModuleEnabled(key)) return;
+        if (enabled) {
+            toggleScope(readScope, true);
+            return;
+        }
+        toggleScope(readScope, false);
+        if (writeScope) toggleScope(writeScope, false);
+        for (const ex of extra || []) toggleScope(ex, false);
+    };
+
+    const setModuleWrite = (key: string, readScope: string, writeScope: string | null, enabled: boolean) => {
+        if (!isModuleEnabled(key)) return;
+        if (!writeScope) return;
+        if (enabled) {
+            toggleScope(readScope, true);
+            toggleScope(writeScope, true);
+        } else {
+            toggleScope(writeScope, false);
+        }
+    };
+
+    const savePerms = async () => {
+        if (!profesor?.usuario_id) return;
+        setPermsLoading(true);
+        try {
+            const disabled = new Set<string>();
+            for (const m of permissionModules) {
+                if (!isModuleEnabled(m.key)) {
+                    disabled.add(m.read);
+                    if (m.write) disabled.add(m.write);
+                    for (const ex of (m as any).extra || []) disabled.add(String(ex));
+                }
+            }
+            const scopesSanitized = Array.from(new Set(editScopes)).filter((s) => !disabled.has(String(s)));
+            const res = await api.updateStaff(profesor.usuario_id, { scopes: scopesSanitized } as any);
+            if (!res.ok) throw new Error(res.error || 'No se pudo guardar permisos');
+            success('Permisos actualizados');
+            onRefresh();
+        } catch (e) {
+            error(e instanceof Error ? e.message : 'No se pudo guardar permisos');
+        } finally {
+            setPermsLoading(false);
         }
     };
 
@@ -488,6 +582,85 @@ export default function ProfesorDetailModal({
                                     rows={3}
                                 />
                             </div>
+
+                            {(() => {
+                                const rol = String(user?.rol || '').toLowerCase();
+                                if (!(rol === 'owner' || rol === 'admin')) return null;
+                                return (
+                                    <div className="space-y-3 pt-4 border-t border-slate-800">
+                                        <h4 className="text-sm font-medium text-white flex items-center gap-1">
+                                            <Settings className="w-4 h-4" />
+                                            Permisos (por módulo)
+                                        </h4>
+                                        <div className="space-y-2">
+                                            {permissionModules.filter((m) => isModuleEnabled(m.key)).map((m) => {
+                                                const readOn = editScopes.includes(m.read) || (m.write ? editScopes.includes(m.write) : false);
+                                                const writeOn = m.write ? editScopes.includes(m.write) : false;
+                                                const extra = (m as any).extra as readonly string[] | undefined;
+                                                const configOn = extra ? extra.every((s) => editScopes.includes(s)) : false;
+                                                return (
+                                                    <div key={m.key} className="flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-800/60 bg-slate-950/20">
+                                                        <div className="min-w-0">
+                                                            <div className="text-sm font-medium text-white truncate">{m.label}</div>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setModuleRead(m.key, m.read, m.write, extra, !readOn)}
+                                                                className={cn(
+                                                                    'h-9 px-3 rounded-xl border text-xs font-semibold transition-colors',
+                                                                    readOn
+                                                                        ? 'bg-primary-500/20 border-primary-500/40 text-primary-200'
+                                                                        : 'bg-slate-950/30 border-slate-800/60 text-slate-200 hover:bg-slate-900/40'
+                                                                )}
+                                                            >
+                                                                Ver
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                disabled={!m.write}
+                                                                onClick={() => setModuleWrite(m.key, m.read, m.write, !writeOn)}
+                                                                className={cn(
+                                                                    'h-9 px-3 rounded-xl border text-xs font-semibold transition-colors',
+                                                                    writeOn
+                                                                        ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-200'
+                                                                        : 'bg-slate-950/30 border-slate-800/60 text-slate-200 hover:bg-slate-900/40',
+                                                                    !m.write ? 'opacity-50 cursor-not-allowed hover:bg-slate-950/30' : ''
+                                                                )}
+                                                            >
+                                                                Usar
+                                                            </button>
+                                                            {extra ? (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        const next = !configOn;
+                                                                        for (const s of extra) toggleScope(s, next);
+                                                                        if (next) toggleScope(m.read, true);
+                                                                    }}
+                                                                    className={cn(
+                                                                        'h-9 px-3 rounded-xl border text-xs font-semibold transition-colors',
+                                                                        configOn
+                                                                            ? 'bg-violet-500/15 border-violet-500/30 text-violet-200'
+                                                                            : 'bg-slate-950/30 border-slate-800/60 text-slate-200 hover:bg-slate-900/40'
+                                                                    )}
+                                                                >
+                                                                    Config
+                                                                </button>
+                                                            ) : null}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                        <div className="flex justify-end">
+                                            <Button onClick={savePerms} isLoading={permsLoading} variant="secondary" disabled={!profesor?.usuario_id}>
+                                                Guardar permisos
+                                            </Button>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
 
                             {/* Security / Password */}
                             <div className="space-y-3 pt-4 border-t border-slate-800">

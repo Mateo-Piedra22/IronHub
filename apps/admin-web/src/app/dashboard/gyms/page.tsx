@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { api, type Gym } from '@/lib/api';
+import { CreateGymWizardModal } from './CreateGymWizardModal';
 
 type ViewMode = 'cards' | 'table';
 
@@ -16,6 +17,7 @@ export default function GymsPage() {
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState('');
+    const [onlyProdReady, setOnlyProdReady] = useState(false);
     const [viewMode, setViewMode] = useState<ViewMode>('table');
 
     // Pagination
@@ -38,19 +40,6 @@ export default function GymsPage() {
     const [maintenanceMessage, setMaintenanceMessage] = useState('');
     const [batchLoading, setBatchLoading] = useState(false);
 
-    // Create form
-    const [formData, setFormData] = useState({
-        nombre: '',
-        subdominio: '',
-        owner_phone: '',
-        whatsapp_phone_id: '',
-        whatsapp_access_token: '',
-        whatsapp_business_account_id: '',
-        whatsapp_verify_token: '',
-        whatsapp_app_secret: '',
-        whatsapp_nonblocking: false,
-        whatsapp_send_timeout_seconds: '25',
-    });
     const [formLoading, setFormLoading] = useState(false);
     const [formError, setFormError] = useState('');
 
@@ -63,6 +52,7 @@ export default function GymsPage() {
             const res = await api.getGyms({
                 q: search || undefined,
                 status: statusFilter || undefined,
+                production_ready: onlyProdReady ? true : undefined,
                 page,
                 page_size: pageSize,
             });
@@ -75,7 +65,7 @@ export default function GymsPage() {
         } finally {
             setLoading(false);
         }
-    }, [search, statusFilter, page, pageSize]);
+    }, [search, statusFilter, onlyProdReady, page, pageSize]);
 
     useEffect(() => {
         loadGyms();
@@ -101,47 +91,6 @@ export default function GymsPage() {
 
     const clearSelection = () => {
         setSelectedIds(new Set());
-    };
-
-    // Create gym
-    const handleCreate = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!formData.nombre.trim()) {
-            setFormError('Nombre requerido');
-            return;
-        }
-        setFormLoading(true);
-        setFormError('');
-        try {
-            const res = await api.createGym({
-                nombre: formData.nombre,
-                subdominio: formData.subdominio || undefined,
-                owner_phone: formData.owner_phone || undefined,
-                whatsapp_phone_id: formData.whatsapp_phone_id || undefined,
-                whatsapp_access_token: formData.whatsapp_access_token || undefined,
-                whatsapp_business_account_id: formData.whatsapp_business_account_id || undefined,
-                whatsapp_verify_token: formData.whatsapp_verify_token || undefined,
-                whatsapp_app_secret: formData.whatsapp_app_secret || undefined,
-                whatsapp_nonblocking: formData.whatsapp_nonblocking,
-                whatsapp_send_timeout_seconds: formData.whatsapp_send_timeout_seconds || undefined,
-            });
-            if (res.ok) {
-                setCreateOpen(false);
-                setFormData({
-                    nombre: '', subdominio: '', owner_phone: '',
-                    whatsapp_phone_id: '', whatsapp_access_token: '', whatsapp_business_account_id: '',
-                    whatsapp_verify_token: '', whatsapp_app_secret: '', whatsapp_nonblocking: false,
-                    whatsapp_send_timeout_seconds: '25',
-                });
-                loadGyms();
-            } else {
-                setFormError(res.error || 'Error al crear');
-            }
-        } catch {
-            setFormError('Error de conexión');
-        } finally {
-            setFormLoading(false);
-        }
     };
 
     // Delete gym
@@ -302,6 +251,13 @@ export default function GymsPage() {
                 )}
             </td>
             <td>
+                {gym.production_ready ? (
+                    <span className="badge badge-success">Prod</span>
+                ) : (
+                    <span className="badge bg-slate-800 text-slate-400 border border-slate-700">—</span>
+                )}
+            </td>
+            <td>
                 <div className="flex items-center gap-1">
                     <Link
                         href={`/dashboard/gyms/${gym.id}`}
@@ -360,6 +316,11 @@ export default function GymsPage() {
                         gym.status === 'maintenance' ? 'Mant.' : 'Susp.'}
                 </span>
             </div>
+            {gym.production_ready ? (
+                <div className="mb-2">
+                    <span className="badge badge-success">Listo prod</span>
+                </div>
+            ) : null}
             <div className="flex items-center justify-between text-sm">
                 <span className="text-slate-500">DB: {gym.db_name}</span>
                 <div className="flex items-center gap-1">
@@ -423,6 +384,14 @@ export default function GymsPage() {
                     <option value="suspended">Suspendidos</option>
                     <option value="maintenance">Mantenimiento</option>
                 </select>
+                <label className="flex items-center gap-2 text-sm text-slate-300 select-none">
+                    <input
+                        type="checkbox"
+                        checked={onlyProdReady}
+                        onChange={(e) => { setOnlyProdReady(e.target.checked); setPage(1); }}
+                    />
+                    Listos prod
+                </label>
                 <div className="flex items-center gap-1 border border-slate-700 rounded-lg p-1">
                     <button
                         onClick={() => setViewMode('table')}
@@ -536,13 +505,14 @@ export default function GymsPage() {
                                 <th>DB</th>
                                 <th>Estado</th>
                                 <th>WhatsApp</th>
+                                <th>Prod</th>
                                 <th className="w-20">Acciones</th>
                             </tr>
                         </thead>
                         <tbody>
                             {gyms.length === 0 ? (
                                 <tr>
-                                    <td colSpan={7} className="text-center text-slate-500 py-8">
+                                    <td colSpan={8} className="text-center text-slate-500 py-8">
                                         No hay gimnasios
                                     </td>
                                 </tr>
@@ -585,150 +555,14 @@ export default function GymsPage() {
                 </div>
             </div>
 
-            {/* Create Modal */}
-            <AnimatePresence>
-                {createOpen && (
-                    <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 overflow-y-auto"
-                        onClick={() => setCreateOpen(false)}
-                    >
-                        <motion.div
-                            initial={{ scale: 0.95, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            exit={{ scale: 0.95, opacity: 0 }}
-                            onClick={(e) => e.stopPropagation()}
-                            className="card w-full max-w-lg p-6 my-8"
-                        >
-                            <h2 className="text-xl font-bold text-white mb-4">Nuevo Gimnasio</h2>
-                            <form onSubmit={handleCreate} className="space-y-4">
-                                <div>
-                                    <label className="label">Nombre *</label>
-                                    <input
-                                        type="text"
-                                        value={formData.nombre}
-                                        onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-                                        className="input"
-                                        placeholder="Iron Fitness"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="label">Subdominio</label>
-                                    <div className="flex items-center gap-2">
-                                        <input
-                                            type="text"
-                                            value={formData.subdominio}
-                                            onChange={(e) => setFormData({ ...formData, subdominio: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })}
-                                            className="input"
-                                            placeholder="ironfitness"
-                                        />
-                                        <span className="text-slate-500 whitespace-nowrap">.{tenantDomain}</span>
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="label">Teléfono Owner</label>
-                                    <input
-                                        type="text"
-                                        value={formData.owner_phone}
-                                        onChange={(e) => setFormData({ ...formData, owner_phone: e.target.value })}
-                                        className="input"
-                                        placeholder="+5493411234567"
-                                    />
-                                </div>
-
-                                <details className="border border-slate-700 rounded-lg">
-                                    <summary className="cursor-pointer px-4 py-3 text-sm text-slate-300 bg-slate-800/50 rounded-lg">
-                                        Configuración de WhatsApp (avanzado)
-                                    </summary>
-                                    <div className="p-4 space-y-3">
-                                        <div>
-                                            <label className="label text-xs">WhatsApp Phone ID</label>
-                                            <input
-                                                type="text"
-                                                value={formData.whatsapp_phone_id}
-                                                onChange={(e) => setFormData({ ...formData, whatsapp_phone_id: e.target.value })}
-                                                className="input text-sm"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="label text-xs">Access Token</label>
-                                            <input
-                                                type="text"
-                                                value={formData.whatsapp_access_token}
-                                                onChange={(e) => setFormData({ ...formData, whatsapp_access_token: e.target.value })}
-                                                className="input text-sm"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="label text-xs">WABA ID</label>
-                                            <input
-                                                type="text"
-                                                value={formData.whatsapp_business_account_id}
-                                                onChange={(e) => setFormData({ ...formData, whatsapp_business_account_id: e.target.value })}
-                                                className="input text-sm"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="label text-xs">Verify Token</label>
-                                            <input
-                                                type="text"
-                                                value={formData.whatsapp_verify_token}
-                                                onChange={(e) => setFormData({ ...formData, whatsapp_verify_token: e.target.value })}
-                                                className="input text-sm"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="label text-xs">App Secret</label>
-                                            <input
-                                                type="text"
-                                                value={formData.whatsapp_app_secret}
-                                                onChange={(e) => setFormData({ ...formData, whatsapp_app_secret: e.target.value })}
-                                                className="input text-sm"
-                                            />
-                                        </div>
-                                        <label className="flex items-center gap-2">
-                                            <input
-                                                type="checkbox"
-                                                checked={formData.whatsapp_nonblocking}
-                                                onChange={(e) => setFormData({ ...formData, whatsapp_nonblocking: e.target.checked })}
-                                            />
-                                            <span className="text-sm text-slate-300">Envío no bloqueante</span>
-                                        </label>
-                                        <div>
-                                            <label className="label text-xs">Timeout (segundos)</label>
-                                            <input
-                                                type="number"
-                                                value={formData.whatsapp_send_timeout_seconds}
-                                                onChange={(e) => setFormData({ ...formData, whatsapp_send_timeout_seconds: e.target.value })}
-                                                className="input text-sm w-24"
-                                                min="1"
-                                                max="120"
-                                            />
-                                        </div>
-                                    </div>
-                                </details>
-
-                                {formError && (
-                                    <div className="flex items-center gap-2 text-danger-400 text-sm">
-                                        <AlertCircle className="w-4 h-4" />
-                                        {formError}
-                                    </div>
-                                )}
-                                <div className="flex items-center justify-end gap-3 pt-2">
-                                    <button type="button" onClick={() => setCreateOpen(false)} className="btn-secondary">
-                                        Cancelar
-                                    </button>
-                                    <button type="submit" disabled={formLoading} className="btn-primary">
-                                        {formLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Crear'}
-                                    </button>
-                                </div>
-                            </form>
-                        </motion.div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
+            <CreateGymWizardModal
+                open={createOpen}
+                onClose={() => setCreateOpen(false)}
+                tenantDomain={tenantDomain}
+                onCreated={(_gymId) => {
+                    loadGyms();
+                }}
+            />
 
             {/* Delete Confirm Modal */}
             <AnimatePresence>

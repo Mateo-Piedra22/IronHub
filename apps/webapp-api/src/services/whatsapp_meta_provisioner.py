@@ -7,14 +7,20 @@ import requests
 
 
 def _api_version() -> str:
-    return (os.getenv("META_GRAPH_API_VERSION") or os.getenv("WHATSAPP_API_VERSION") or "v19.0").strip()
+    return (
+        os.getenv("META_GRAPH_API_VERSION")
+        or os.getenv("WHATSAPP_API_VERSION")
+        or "v19.0"
+    ).strip()
 
 
 def _template_language() -> str:
     return (os.getenv("WHATSAPP_TEMPLATE_LANGUAGE") or "es_AR").strip()
 
 
-def standard_meta_templates(language_code: Optional[str] = None) -> List[Dict[str, Any]]:
+def standard_meta_templates(
+    language_code: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     lang = (language_code or _template_language()).strip()
 
     def body(text: str, examples: List[str]) -> Dict[str, Any]:
@@ -25,21 +31,96 @@ def standard_meta_templates(language_code: Optional[str] = None) -> List[Dict[st
         }
 
     templates: List[Tuple[str, str, str, List[str]]] = [
-        ("ih_welcome_v1", "UTILITY", "Hola {{1}}. Confirmamos tu registro. Este mensaje es un aviso automático de tu cuenta.", ["Mateo"]),
-        ("ih_payment_confirmed_v1", "UTILITY", "Hola {{1}}. Confirmamos tu pago de ${{2}} correspondiente a {{3}}. ¡Gracias!", ["Mateo", "25000", "enero 2026"]),
-        ("ih_membership_due_today_v1", "UTILITY", "Hola {{1}}. Aviso de cuenta: tu cuota vence hoy ({{2}}). Si ya abonaste, ignorá este mensaje.", ["Mateo", "16 de enero"]),
-        ("ih_membership_due_soon_v1", "UTILITY", "Hola {{1}}. Aviso de cuenta: tu cuota vence el {{2}}. Si ya abonaste, ignorá este mensaje.", ["Mateo", "20 de enero"]),
-        ("ih_membership_overdue_v1", "UTILITY", "Hola {{1}}. Aviso de cuenta: tu cuota figura vencida. Si ya abonaste, ignorá este mensaje.", ["Mateo"]),
-        ("ih_membership_deactivated_v1", "UTILITY", "Hola {{1}}. Aviso de cuenta: tu acceso está temporalmente suspendido. Motivo: {{2}}.", ["Mateo", "cuotas vencidas"]),
-        ("ih_membership_reactivated_v1", "UTILITY", "Hola {{1}}. Tu acceso fue reactivado. ¡Gracias!", ["Mateo"]),
-        ("ih_class_booking_confirmed_v1", "UTILITY", "Confirmación de reserva: clase {{1}} el {{2}} a las {{3}} hs.", ["Funcional", "16 de enero", "19:00"]),
-        ("ih_class_booking_cancelled_v1", "UTILITY", "Tu reserva fue cancelada para la clase {{1}}. Si necesitás ayuda, respondé a este mensaje.", ["Funcional"]),
-        ("ih_class_reminder_v1", "UTILITY", "Hola {{1}}. Te recordamos que tenés la clase de {{2}} programada para el día {{3}} a las {{4}} hs. Si no podés asistir, respondé a este mensaje para ayudarte.", ["Mateo", "Funcional", "viernes", "19:00"]),
-        ("ih_waitlist_spot_available_v1", "UTILITY", "Hola {{1}}. Aviso de lista de espera: se liberó un cupo para {{2}} el {{3}} a las {{4}} hs. Para confirmar, gestioná tu reserva desde la app o en recepción.", ["Mateo", "Funcional", "viernes", "19:00"]),
-        ("ih_waitlist_confirmed_v1", "UTILITY", "Listo {{1}}. Te confirmamos tu lugar en la clase de {{2}} para el día {{3}} a las {{4}} hs. Si necesitás cambiarlo, respondé a este mensaje.", ["Mateo", "Funcional", "viernes", "19:00"]),
-        ("ih_schedule_change_v1", "UTILITY", "Aviso: hubo un cambio en {{1}}. Nuevo horario: {{2}} a las {{3}} hs. Gracias.", ["Funcional", "viernes", "20:00"]),
-        ("ih_marketing_promo_v1", "MARKETING", "Hola {{1}}. Esta semana tenemos {{2}}. Si querés más info, respondé a este mensaje.", ["Mateo", "descuento del 10% en el plan trimestral"]),
-        ("ih_marketing_new_class_v1", "MARKETING", "Nueva clase disponible: {{1}}. Primer horario: {{2}} {{3}}. ¿Querés que te reservemos un lugar?", ["Movilidad", "miércoles", "18:00"]),
+        (
+            "ih_welcome_v1",
+            "UTILITY",
+            "Hola {{1}}. Confirmamos tu registro. Este mensaje es un aviso automático de tu cuenta.",
+            ["Mateo"],
+        ),
+        (
+            "ih_payment_confirmed_v1",
+            "UTILITY",
+            "Hola {{1}}. Confirmamos tu pago de ${{2}} correspondiente a {{3}}. ¡Gracias!",
+            ["Mateo", "25000", "enero 2026"],
+        ),
+        (
+            "ih_membership_due_today_v1",
+            "UTILITY",
+            "Hola {{1}}. Aviso de cuenta: tu cuota vence hoy ({{2}}). Si ya abonaste, ignorá este mensaje.",
+            ["Mateo", "16 de enero"],
+        ),
+        (
+            "ih_membership_due_soon_v1",
+            "UTILITY",
+            "Hola {{1}}. Aviso de cuenta: tu cuota vence el {{2}}. Si ya abonaste, ignorá este mensaje.",
+            ["Mateo", "20 de enero"],
+        ),
+        (
+            "ih_membership_overdue_v1",
+            "UTILITY",
+            "Hola {{1}}. Aviso de cuenta: tu cuota figura vencida. Si ya abonaste, ignorá este mensaje.",
+            ["Mateo"],
+        ),
+        (
+            "ih_membership_deactivated_v1",
+            "UTILITY",
+            "Hola {{1}}. Aviso de cuenta: tu acceso está temporalmente suspendido. Motivo: {{2}}.",
+            ["Mateo", "cuotas vencidas"],
+        ),
+        (
+            "ih_membership_reactivated_v1",
+            "UTILITY",
+            "Hola {{1}}. Tu acceso fue reactivado. ¡Gracias!",
+            ["Mateo"],
+        ),
+        (
+            "ih_class_booking_confirmed_v1",
+            "UTILITY",
+            "Confirmación de reserva: clase {{1}} el {{2}} a las {{3}} hs.",
+            ["Funcional", "16 de enero", "19:00"],
+        ),
+        (
+            "ih_class_booking_cancelled_v1",
+            "UTILITY",
+            "Tu reserva fue cancelada para la clase {{1}}. Si necesitás ayuda, respondé a este mensaje.",
+            ["Funcional"],
+        ),
+        (
+            "ih_class_reminder_v1",
+            "UTILITY",
+            "Hola {{1}}. Te recordamos que tenés la clase de {{2}} programada para el día {{3}} a las {{4}} hs. Si no podés asistir, respondé a este mensaje para ayudarte.",
+            ["Mateo", "Funcional", "viernes", "19:00"],
+        ),
+        (
+            "ih_waitlist_spot_available_v1",
+            "UTILITY",
+            "Hola {{1}}. Aviso de lista de espera: se liberó un cupo para {{2}} el {{3}} a las {{4}} hs. Para confirmar, gestioná tu reserva desde la app o en recepción.",
+            ["Mateo", "Funcional", "viernes", "19:00"],
+        ),
+        (
+            "ih_waitlist_confirmed_v1",
+            "UTILITY",
+            "Listo {{1}}. Te confirmamos tu lugar en la clase de {{2}} para el día {{3}} a las {{4}} hs. Si necesitás cambiarlo, respondé a este mensaje.",
+            ["Mateo", "Funcional", "viernes", "19:00"],
+        ),
+        (
+            "ih_schedule_change_v1",
+            "UTILITY",
+            "Aviso: hubo un cambio en {{1}}. Nuevo horario: {{2}} a las {{3}} hs. Gracias.",
+            ["Funcional", "viernes", "20:00"],
+        ),
+        (
+            "ih_marketing_promo_v1",
+            "MARKETING",
+            "Hola {{1}}. Esta semana tenemos {{2}}. Si querés más info, respondé a este mensaje.",
+            ["Mateo", "descuento del 10% en el plan trimestral"],
+        ),
+        (
+            "ih_marketing_new_class_v1",
+            "MARKETING",
+            "Nueva clase disponible: {{1}}. Primer horario: {{2}} {{3}}. ¿Querés que te reservemos un lugar?",
+            ["Movilidad", "miércoles", "18:00"],
+        ),
     ]
 
     def split_version(n: str) -> tuple[str, Optional[int]]:
@@ -66,11 +147,17 @@ def standard_meta_templates(language_code: Optional[str] = None) -> List[Dict[st
             best_by_base[base] = (name, category, body_text, examples, int(v))
 
     final_templates: List[Tuple[str, str, str, List[str]]] = passthrough + [
-        (name, category, body_text, examples) for (name, category, body_text, examples, _v) in best_by_base.values()
+        (name, category, body_text, examples)
+        for (name, category, body_text, examples, _v) in best_by_base.values()
     ]
 
     return [
-        {"name": name, "language": lang, "category": category, "components": [body(body_text, examples)]}
+        {
+            "name": name,
+            "language": lang,
+            "category": category,
+            "components": [body(body_text, examples)],
+        }
         for name, category, body_text, examples in final_templates
     ]
 
@@ -83,11 +170,18 @@ def list_meta_templates(waba_id: str, access_token: str) -> Set[str]:
         params = {"fields": "name,status", "limit": "200"}
         if after:
             params["after"] = after
-        resp = requests.get(url, headers={"Authorization": f"Bearer {access_token}"}, params=params, timeout=15)
+        resp = requests.get(
+            url,
+            headers={"Authorization": f"Bearer {access_token}"},
+            params=params,
+            timeout=15,
+        )
         data = resp.json() if resp.content else {}
         if resp.status_code >= 400:
-            raise RuntimeError(str(data.get("error") or data or f"HTTP {resp.status_code}"))
-        for item in (data.get("data") or []):
+            raise RuntimeError(
+                str(data.get("error") or data or f"HTTP {resp.status_code}")
+            )
+        for item in data.get("data") or []:
             n = (item or {}).get("name")
             if n:
                 names.add(str(n))
@@ -99,18 +193,31 @@ def list_meta_templates(waba_id: str, access_token: str) -> Set[str]:
     return names
 
 
-def create_meta_template(waba_id: str, access_token: str, template_payload: Dict[str, Any]) -> Dict[str, Any]:
+def create_meta_template(
+    waba_id: str, access_token: str, template_payload: Dict[str, Any]
+) -> Dict[str, Any]:
     url = f"https://graph.facebook.com/{_api_version()}/{waba_id}/message_templates"
-    resp = requests.post(url, headers={"Authorization": f"Bearer {access_token}"}, json=template_payload, timeout=25)
+    resp = requests.post(
+        url,
+        headers={"Authorization": f"Bearer {access_token}"},
+        json=template_payload,
+        timeout=25,
+    )
     data = resp.json() if resp.content else {}
     if resp.status_code >= 400:
         raise RuntimeError(str(data.get("error") or data or f"HTTP {resp.status_code}"))
     return data if isinstance(data, dict) else {}
 
 
-def provision_standard_meta_templates(waba_id: str, access_token: str, language_code: Optional[str] = None) -> Dict[str, Any]:
+def provision_standard_meta_templates(
+    waba_id: str, access_token: str, language_code: Optional[str] = None
+) -> Dict[str, Any]:
     existing = list_meta_templates(waba_id, access_token)
-    to_create = [t for t in standard_meta_templates(language_code) if (t.get("name") or "") not in existing]
+    to_create = [
+        t
+        for t in standard_meta_templates(language_code)
+        if (t.get("name") or "") not in existing
+    ]
     created: List[str] = []
     failed: List[Dict[str, str]] = []
     for t in to_create:

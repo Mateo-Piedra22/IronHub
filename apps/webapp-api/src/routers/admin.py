@@ -1,4 +1,5 @@
 """Admin Router - Owner management using AdminService."""
+
 import logging
 import os
 
@@ -14,22 +15,30 @@ logger = logging.getLogger(__name__)
 
 # === Password Management ===
 
+
 @router.post("/api/admin/cambiar_contrasena")
-async def api_admin_cambiar_contrasena(request: Request, _=Depends(require_owner), svc: AdminService = Depends(get_admin_service)):
+async def api_admin_cambiar_contrasena(
+    request: Request,
+    _=Depends(require_owner),
+    svc: AdminService = Depends(get_admin_service),
+):
     """Change owner password."""
     try:
         payload = await request.json()
         current = payload.get("current_password", "").strip()
         new = payload.get("new_password", "").strip()
-        
+
         if not current or not new:
             raise HTTPException(400, "Contraseña actual y nueva requeridas")
         if len(new) < 6:
             raise HTTPException(400, "Mínimo 6 caracteres")
-        
+
         result = svc.cambiar_contrasena_dueno(current, new)
-        if not result.get('ok'):
-            raise HTTPException(401 if 'incorrect' in result.get('error', '') else 500, result.get('error'))
+        if not result.get("ok"):
+            raise HTTPException(
+                401 if "incorrect" in result.get("error", "") else 500,
+                result.get("error"),
+            )
         return {"ok": True, "message": "Contraseña actualizada"}
     except HTTPException:
         raise
@@ -39,17 +48,26 @@ async def api_admin_cambiar_contrasena(request: Request, _=Depends(require_owner
 
 # === User ID Renumbering ===
 
+
 @router.post("/api/admin/renumerar_usuarios")
-async def api_admin_renumerar_usuarios(request: Request, _=Depends(require_owner), svc: AdminService = Depends(get_admin_service)):
+async def api_admin_renumerar_usuarios(
+    request: Request,
+    _=Depends(require_owner),
+    svc: AdminService = Depends(get_admin_service),
+):
     """Renumber user IDs starting from specified value."""
     try:
         payload = await request.json()
         start_id = int(payload.get("start_id", 1))
         if start_id < 1:
             raise HTTPException(400, "start_id debe ser >= 1")
-        
+
         result = svc.renumerar_usuarios(start_id)
-        return {"ok": result.get('ok', False), "message": result.get('message', ''), "changes": result.get('changes', 0)}
+        return {
+            "ok": result.get("ok", False),
+            "message": result.get("message", ""),
+            "changes": result.get("changes", 0),
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -58,14 +76,18 @@ async def api_admin_renumerar_usuarios(request: Request, _=Depends(require_owner
 
 # === Owner Security ===
 
+
 @router.post("/api/admin/secure_owner")
-async def api_admin_secure_owner(_=Depends(require_owner), svc: AdminService = Depends(get_admin_service)):
+async def api_admin_secure_owner(
+    _=Depends(require_owner), svc: AdminService = Depends(get_admin_service)
+):
     """Ensure owner exists and has bcrypt password."""
     result = svc.secure_owner()
     return result
 
 
 # === System Reminders ===
+
 
 @router.get("/api/admin/reminder")
 async def api_admin_reminder(svc: AdminService = Depends(get_admin_service)):
@@ -77,7 +99,11 @@ async def api_admin_reminder(svc: AdminService = Depends(get_admin_service)):
 
 
 @router.post("/api/admin/reminder")
-async def api_admin_reminder_set(request: Request, _=Depends(require_owner), svc: AdminService = Depends(get_admin_service)):
+async def api_admin_reminder_set(
+    request: Request,
+    _=Depends(require_owner),
+    svc: AdminService = Depends(get_admin_service),
+):
     """Set system reminder."""
     try:
         payload = await request.json()

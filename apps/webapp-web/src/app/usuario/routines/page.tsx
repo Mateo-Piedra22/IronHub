@@ -197,6 +197,15 @@ function RoutinesContent() {
                         <p className="text-sm text-slate-400 mt-1">
                             {days.length} días de entrenamiento
                         </p>
+                        {(routine.creada_por_nombre || routine.fecha_creacion || routine.sucursal_nombre) && (
+                            <div className="text-xs text-slate-500 mt-2 space-y-1">
+                                {routine.creada_por_nombre && <div>Creada por {routine.creada_por_nombre}</div>}
+                                {routine.fecha_creacion && (
+                                    <div>Creación: {new Date(routine.fecha_creacion).toLocaleDateString('es-AR')}</div>
+                                )}
+                                {routine.sucursal_nombre && <div>Sucursal: {routine.sucursal_nombre}</div>}
+                            </div>
+                        )}
                         {routine.descripcion && (
                             <p className="text-xs text-slate-500 mt-2">{routine.descripcion}</p>
                         )}

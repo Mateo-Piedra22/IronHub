@@ -155,6 +155,7 @@ export default function PaymentsPage() {
                                         </div>
                                         <div className="text-xs text-slate-500">
                                             {payment.fecha ? new Date(payment.fecha).toLocaleDateString('es-AR') : '-'}
+                                            {payment.sucursal_nombre && ` • ${payment.sucursal_nombre}`}
                                             {payment.metodo_pago_nombre && ` • ${payment.metodo_pago_nombre}`}
                                         </div>
                                     </div>

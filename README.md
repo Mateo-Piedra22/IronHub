@@ -1,117 +1,68 @@
-# IronHub - Gym Management Platform
+# IronHub
 
-A multi-tenant SaaS platform for gym management built with modern technologies.
+Plataforma multi-tenant para gestión de gimnasios (SaaS). Cada gimnasio opera con su propia base de datos (tenant DB) y un panel superadmin administra el ciclo de vida (alta, estado, suscripción, mantenimiento).
 
-## Architecture
+## Documentación
+
+La documentación completa vive en [docs/README.md](docs/README.md).
+
+## Estructura del repositorio
 
 ```
 IronHub/
 ├── apps/
-│   ├── admin-api/       # Super-admin backend (FastAPI)
-│   ├── admin-web/       # Super-admin dashboard (Next.js)
-│   ├── landing/         # Public landing page (Next.js)
-│   ├── webapp-api/      # Tenant backend API (FastAPI)
-│   └── webapp-web/      # Tenant management dashboard (Next.js)
-├── core/                # Shared Python modules
-└── deprecated/          # Legacy system (reference only)
+│   ├── admin-api/        API superadmin (FastAPI)
+│   ├── admin-web/        Panel superadmin (Next.js)
+│   ├── webapp-api/       API tenant (FastAPI)
+│   ├── webapp-web/       App tenant (Next.js)
+│   └── landing/          Landing pública (Next.js)
+├── docs/                 Documentación (enterprise)
+└── deprecated/           Referencia histórica (no se deployea)
 ```
 
-## Technology Stack
+## Inicio rápido (desarrollo)
 
-### Backend
-- Python 3.11+
-- FastAPI
-- SQLAlchemy + PostgreSQL
-- Backblaze B2 + Cloudflare CDN
-
-### Frontend
-- Next.js 14 (App Router)
-- TypeScript
-- Tailwind CSS
-- Framer Motion
-
-## Multi-Tenant Architecture
-
-Each gym (tenant) operates with:
-- Isolated database per tenant
-- Subdomain-based routing (e.g., `mygym.ironhub.xyz`)
-- Centralized admin database for subscription management
-
-### Tenant Resolution
-1. Request arrives at subdomain
-2. Middleware extracts tenant from Host header
-3. Tenant status verified against admin database
-4. Tenant-specific database connection established
-5. Request processed with isolated data
-
-## Environment Variables
-
-### Required for All Apps
-
-```env
-# Database
-DB_HOST=
-DB_PORT=5432
-DB_USER=
-DB_PASSWORD=
-DB_SSLMODE=require
-
-# Admin Database
-ADMIN_DB_HOST=
-ADMIN_DB_NAME=ironhub_admin
-ADMIN_DB_USER=
-ADMIN_DB_PASSWORD=
-
-# Storage
-B2_KEY_ID=
-B2_APP_KEY=
-B2_BUCKET_NAME=
-B2_BUCKET_ID=
-CLOUDFLARE_CDN_URL=
-
-# Security
-SESSION_SECRET=
-```
-
-## Development Setup
-
-### Prerequisites
-- Python 3.11+
-- Node.js 18+
-- PostgreSQL 15+
-- pnpm (recommended)
-
-### Backend Setup
+**Backend tenant (webapp-api)**
 
 ```bash
 cd apps/webapp-api
 python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
+venv\\Scripts\\activate
 pip install -r requirements.txt
 uvicorn src.main:app --reload --port 8000
 ```
 
-### Frontend Setup
+**Backend superadmin (admin-api)**
+
+```bash
+cd apps/admin-api
+python -m venv venv
+venv\\Scripts\\activate
+pip install -r requirements.txt
+uvicorn src.main:app --reload --port 8002
+```
+
+**Frontends**
+
+```bash
+cd apps/admin-web
+npm install
+npm run dev
+```
 
 ```bash
 cd apps/webapp-web
-pnpm install
-pnpm dev
+npm install
+npm run dev
 ```
 
-## Project Structure
+## Migraciones
 
-See individual app README files for detailed documentation:
-- [webapp-api/README.md](apps/webapp-api/README.md)
-- [webapp-web/README.md](apps/webapp-web/README.md)
-- [admin-api/README.md](apps/admin-api/README.md)
-- [admin-web/README.md](apps/admin-web/README.md)
-- [landing/README.md](apps/landing/README.md)
+- Tenant DBs (todas las DBs de gimnasios): ver [docs/database/migrations.md](docs/database/migrations.md).
+- Validación de schema e idempotencia: ver [docs/database/schema-audit.md](docs/database/schema-audit.md).
+- Deploy sin pasos manuales: ver [docs/operations/auto-migrations.md](docs/operations/auto-migrations.md).
+- Operación del panel superadmin: ver [docs/operations/admin-panel.md](docs/operations/admin-panel.md).
 
-## Deployment
+## Licencia
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
-
-## License
-
-Proprietary - MotionA - Mateo Piedrabuena 2026
+Proprietary - MotionA - Mateo Piedrabuena (2026)

@@ -1,17 +1,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import logging
 import os
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 import requests
-from sqlalchemy import select, text, insert
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from src.database.orm_models import Usuario, Pago, WhatsappConfig, WhatsappMessage, WhatsappTemplate, Configuracion
+from src.database.orm_models import (
+    Usuario,
+    Pago,
+    Sucursal,
+    WhatsappConfig,
+    WhatsappMessage,
+    WhatsappTemplate,
+    Configuracion,
+)
 from src.services.base import BaseService
 from src.secure_config import SecureConfig
 
@@ -28,63 +36,6 @@ class WhatsAppSendResult:
 class WhatsAppDispatchService(BaseService):
     def __init__(self, db: Session):
         super().__init__(db)
-        self._ensure_tables()
-
-    def _ensure_tables(self) -> None:
-        try:
-            self.db.execute(text("""
-                CREATE TABLE IF NOT EXISTS whatsapp_config (
-                    id SERIAL PRIMARY KEY,
-                    phone_id VARCHAR(50) NOT NULL,
-                    waba_id VARCHAR(50) NOT NULL,
-                    access_token TEXT,
-                    active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """))
-            self.db.execute(text("""
-                CREATE TABLE IF NOT EXISTS whatsapp_messages (
-                    id SERIAL PRIMARY KEY,
-                    user_id INTEGER,
-                    message_type VARCHAR(50) NOT NULL,
-                    template_name VARCHAR(255) NOT NULL,
-                    phone_number VARCHAR(50) NOT NULL,
-                    message_id VARCHAR(100) UNIQUE,
-                    sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    status VARCHAR(20) DEFAULT 'sent',
-                    message_content TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """))
-            self.db.execute(text("""
-                CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_user_id ON whatsapp_messages(user_id)
-            """))
-            self.db.execute(text("""
-                CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_phone ON whatsapp_messages(phone_number)
-            """))
-            self.db.execute(text("""
-                CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_status_sent_at ON whatsapp_messages(status, sent_at DESC)
-            """))
-            self.db.execute(text("""
-                CREATE INDEX IF NOT EXISTS idx_whatsapp_messages_user_type_sent_at ON whatsapp_messages(user_id, message_type, sent_at DESC)
-            """))
-            self.db.execute(text("""
-                CREATE TABLE IF NOT EXISTS whatsapp_templates (
-                    id SERIAL PRIMARY KEY,
-                    template_name VARCHAR(255) UNIQUE NOT NULL,
-                    header_text VARCHAR(60),
-                    body_text TEXT NOT NULL,
-                    variables JSONB,
-                    active BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """))
-            self.db.commit()
-        except Exception:
-            try:
-                self.db.rollback()
-            except Exception:
-                pass
 
     def _now_utc_naive(self) -> datetime:
         return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -94,7 +45,9 @@ class WhatsAppDispatchService(BaseService):
 
     def _get_cfg_value(self, clave: str) -> Optional[str]:
         try:
-            row = self.db.execute(select(Configuracion.valor).where(Configuracion.clave == clave).limit(1)).first()
+            row = self.db.execute(
+                select(Configuracion.valor).where(Configuracion.clave == clave).limit(1)
+            ).first()
             return row[0] if row else None
         except Exception:
             return None
@@ -108,7 +61,9 @@ class WhatsAppDispatchService(BaseService):
         except Exception:
             return False
 
-    def send_waitlist_confirmed(self, usuario_id: int, tipo_clase: str, dia: str, hora: str) -> bool:
+    def send_waitlist_confirmed(
+        self, usuario_id: int, tipo_clase: str, dia: str, hora: str
+    ) -> bool:
         if not self._is_action_enabled("waitlist_confirmed", True):
             return True
         u = self.db.get(Usuario, int(usuario_id))
@@ -120,53 +75,104 @@ class WhatsAppDispatchService(BaseService):
             "day": str(dia or ""),
             "time": str(hora or ""),
         }
-        tpl = self._get_meta_template_binding("waitlist_confirmed", "ih_waitlist_confirmed_v1")
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [vars["name"], vars["class"], vars["day"], vars["time"]], "waitlist_confirmed")
+        tpl = self._get_meta_template_binding(
+            "waitlist_confirmed", "ih_waitlist_confirmed_v1"
+        )
+        r = self.send_template_positional(
+            int(usuario_id),
+            str(u.telefono),
+            tpl,
+            [vars["name"], vars["class"], vars["day"], vars["time"]],
+            "waitlist_confirmed",
+        )
         if r.ok:
             return True
         return False
 
-    def send_membership_due_today(self, usuario_id: int, fecha: str) -> bool:
+    def send_membership_due_today(
+        self, usuario_id: int, fecha: str, sucursal_id: Optional[int] = None
+    ) -> bool:
         if not self._is_action_enabled("membership_due_today", True):
             return True
         u = self.db.get(Usuario, int(usuario_id))
         if not u or not getattr(u, "telefono", None):
             return False
         name = str(getattr(u, "nombre", "") or "")
-        tpl = self._get_meta_template_binding("membership_due_today", "ih_membership_due_today_v1")
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [name, str(fecha or "")], "membership_due_today")
+        tpl = self._get_meta_template_binding(
+            "membership_due_today", "ih_membership_due_today_v1"
+        )
+        r = self.send_template_positional(
+            int(usuario_id),
+            str(u.telefono),
+            tpl,
+            [name, str(fecha or "")],
+            "membership_due_today",
+            sucursal_id=sucursal_id,
+        )
         return bool(r.ok)
 
-    def send_membership_due_soon(self, usuario_id: int, fecha: str) -> bool:
+    def send_membership_due_soon(
+        self, usuario_id: int, fecha: str, sucursal_id: Optional[int] = None
+    ) -> bool:
         if not self._is_action_enabled("membership_due_soon", True):
             return True
         u = self.db.get(Usuario, int(usuario_id))
         if not u or not getattr(u, "telefono", None):
             return False
         name = str(getattr(u, "nombre", "") or "")
-        tpl = self._get_meta_template_binding("membership_due_soon", "ih_membership_due_soon_v1")
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [name, str(fecha or "")], "membership_due_soon")
+        tpl = self._get_meta_template_binding(
+            "membership_due_soon", "ih_membership_due_soon_v1"
+        )
+        r = self.send_template_positional(
+            int(usuario_id),
+            str(u.telefono),
+            tpl,
+            [name, str(fecha or "")],
+            "membership_due_soon",
+            sucursal_id=sucursal_id,
+        )
         return bool(r.ok)
 
-    def send_membership_reactivated(self, usuario_id: int) -> bool:
+    def send_membership_reactivated(
+        self, usuario_id: int, sucursal_id: Optional[int] = None
+    ) -> bool:
         if not self._is_action_enabled("membership_reactivated", True):
             return True
         u = self.db.get(Usuario, int(usuario_id))
         if not u or not getattr(u, "telefono", None):
             return False
         name = str(getattr(u, "nombre", "") or "")
-        tpl = self._get_meta_template_binding("membership_reactivated", "ih_membership_reactivated_v1")
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [name], "membership_reactivated")
+        tpl = self._get_meta_template_binding(
+            "membership_reactivated", "ih_membership_reactivated_v1"
+        )
+        r = self.send_template_positional(
+            int(usuario_id),
+            str(u.telefono),
+            tpl,
+            [name],
+            "membership_reactivated",
+            sucursal_id=sucursal_id,
+        )
         return bool(r.ok)
 
-    def send_class_booking_confirmed(self, usuario_id: int, tipo_clase: str, fecha: str, hora: str) -> bool:
+    def send_class_booking_confirmed(
+        self, usuario_id: int, tipo_clase: str, fecha: str, hora: str
+    ) -> bool:
         if not self._is_action_enabled("class_booking_confirmed", True):
             return True
         u = self.db.get(Usuario, int(usuario_id))
         if not u or not getattr(u, "telefono", None):
             return False
-        tpl = self._get_meta_template_binding("class_booking_confirmed", "ih_class_booking_confirmed_v1")
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [str(tipo_clase or "clase"), str(fecha or ""), str(hora or "")], "class_booking_confirmed")
+        tpl = self._get_meta_template_binding(
+            "class_booking_confirmed", "ih_class_booking_confirmed_v1"
+        )
+        r = self.send_template_positional(
+            int(usuario_id),
+            str(u.telefono),
+            tpl,
+            [str(tipo_clase or "clase"), str(fecha or ""), str(hora or "")],
+            "class_booking_confirmed",
+        )
         return bool(r.ok)
 
     def send_class_booking_cancelled(self, usuario_id: int, tipo_clase: str) -> bool:
@@ -175,18 +181,36 @@ class WhatsAppDispatchService(BaseService):
         u = self.db.get(Usuario, int(usuario_id))
         if not u or not getattr(u, "telefono", None):
             return False
-        tpl = self._get_meta_template_binding("class_booking_cancelled", "ih_class_booking_cancelled_v1")
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [str(tipo_clase or "clase")], "class_booking_cancelled")
+        tpl = self._get_meta_template_binding(
+            "class_booking_cancelled", "ih_class_booking_cancelled_v1"
+        )
+        r = self.send_template_positional(
+            int(usuario_id),
+            str(u.telefono),
+            tpl,
+            [str(tipo_clase or "clase")],
+            "class_booking_cancelled",
+        )
         return bool(r.ok)
 
-    def send_schedule_change(self, usuario_id: int, tipo_clase: str, dia: str, hora: str) -> bool:
+    def send_schedule_change(
+        self, usuario_id: int, tipo_clase: str, dia: str, hora: str
+    ) -> bool:
         if not self._is_action_enabled("schedule_change", True):
             return True
         u = self.db.get(Usuario, int(usuario_id))
         if not u or not getattr(u, "telefono", None):
             return False
-        tpl = self._get_meta_template_binding("schedule_change", "ih_schedule_change_v1")
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [str(tipo_clase or "clase"), str(dia or ""), str(hora or "")], "schedule_change")
+        tpl = self._get_meta_template_binding(
+            "schedule_change", "ih_schedule_change_v1"
+        )
+        r = self.send_template_positional(
+            int(usuario_id),
+            str(u.telefono),
+            tpl,
+            [str(tipo_clase or "clase"), str(dia or ""), str(hora or "")],
+            "schedule_change",
+        )
         return bool(r.ok)
 
     def send_marketing_promo(self, usuario_id: int, promo: str) -> bool:
@@ -196,23 +220,43 @@ class WhatsAppDispatchService(BaseService):
         if not u or not getattr(u, "telefono", None):
             return False
         name = str(getattr(u, "nombre", "") or "")
-        tpl = self._get_meta_template_binding("marketing_promo", "ih_marketing_promo_v1")
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [name, str(promo or "")], "marketing_promo")
+        tpl = self._get_meta_template_binding(
+            "marketing_promo", "ih_marketing_promo_v1"
+        )
+        r = self.send_template_positional(
+            int(usuario_id),
+            str(u.telefono),
+            tpl,
+            [name, str(promo or "")],
+            "marketing_promo",
+        )
         return bool(r.ok)
 
-    def send_marketing_new_class(self, usuario_id: int, clase: str, dia: str, hora: str) -> bool:
+    def send_marketing_new_class(
+        self, usuario_id: int, clase: str, dia: str, hora: str
+    ) -> bool:
         if not self._is_action_enabled("marketing_new_class", False):
             return True
         u = self.db.get(Usuario, int(usuario_id))
         if not u or not getattr(u, "telefono", None):
             return False
-        tpl = self._get_meta_template_binding("marketing_new_class", "ih_marketing_new_class_v1")
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [str(clase or "clase"), str(dia or ""), str(hora or "")], "marketing_new_class")
+        tpl = self._get_meta_template_binding(
+            "marketing_new_class", "ih_marketing_new_class_v1"
+        )
+        r = self.send_template_positional(
+            int(usuario_id),
+            str(u.telefono),
+            tpl,
+            [str(clase or "clase"), str(dia or ""), str(hora or "")],
+            "marketing_new_class",
+        )
         return bool(r.ok)
 
     def _allowlist_ok(self, phone: str) -> bool:
         try:
-            enabled = str(self._get_cfg_value("allowlist_enabled") or "").strip().lower() in ("1", "true", "yes", "on")
+            enabled = str(
+                self._get_cfg_value("allowlist_enabled") or ""
+            ).strip().lower() in ("1", "true", "yes", "on")
         except Exception:
             enabled = False
         if not enabled:
@@ -233,12 +277,37 @@ class WhatsAppDispatchService(BaseService):
         except Exception:
             return bool(default_enabled)
 
-    def _get_active_whatsapp_config(self) -> Optional[WhatsappConfig]:
+    def _get_active_whatsapp_config(
+        self, sucursal_id: Optional[int] = None
+    ) -> Optional[WhatsappConfig]:
         try:
+            sid: Optional[int] = None
+            try:
+                sid = int(sucursal_id) if sucursal_id is not None else None
+            except Exception:
+                sid = None
+            if sid is not None and sid > 0:
+                row = (
+                    self.db.execute(
+                        select(WhatsappConfig)
+                        .join(Sucursal, Sucursal.id == WhatsappConfig.sucursal_id)
+                        .where(
+                            WhatsappConfig.active == True,
+                            WhatsappConfig.sucursal_id == int(sid),
+                            Sucursal.activa == True,
+                        )
+                        .order_by(WhatsappConfig.created_at.desc())
+                        .limit(1)
+                    )
+                    .scalars()
+                    .first()
+                )
+                if row is not None:
+                    return row
             return (
                 self.db.execute(
                     select(WhatsappConfig)
-                    .where(WhatsappConfig.active == True)
+                    .where(WhatsappConfig.active == True, WhatsappConfig.sucursal_id.is_(None))
                     .order_by(WhatsappConfig.created_at.desc())
                     .limit(1)
                 )
@@ -260,13 +329,19 @@ class WhatsAppDispatchService(BaseService):
         return ""
 
     def _get_language_code(self) -> str:
-        v = self._get_cfg_value("wa_template_language") or os.getenv("WHATSAPP_TEMPLATE_LANGUAGE") or "es_AR"
+        v = (
+            self._get_cfg_value("wa_template_language")
+            or os.getenv("WHATSAPP_TEMPLATE_LANGUAGE")
+            or "es_AR"
+        )
         try:
             return str(v).strip() or "es_AR"
         except Exception:
             return "es_AR"
 
-    def _get_meta_template_binding(self, binding_key: str, default_template: str) -> str:
+    def _get_meta_template_binding(
+        self, binding_key: str, default_template: str
+    ) -> str:
         key = f"wa_meta_template_{str(binding_key or '').strip()}"
         v = self._get_cfg_value(key)
         try:
@@ -275,11 +350,15 @@ class WhatsAppDispatchService(BaseService):
             vv = ""
         return vv or str(default_template or "")
 
-    def _graph_post(self, phone_id: str, access_token: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _graph_post(
+        self, phone_id: str, access_token: str, payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
         api_version = (os.getenv("WHATSAPP_API_VERSION") or "v19.0").strip()
         url = f"https://graph.facebook.com/{api_version}/{phone_id}/messages"
         try:
-            timeout_seconds = float(os.getenv("WHATSAPP_SEND_TIMEOUT_SECONDS", "8.0") or 8.0)
+            timeout_seconds = float(
+                os.getenv("WHATSAPP_SEND_TIMEOUT_SECONDS", "8.0") or 8.0
+            )
         except Exception:
             timeout_seconds = 8.0
         resp = requests.post(
@@ -296,14 +375,29 @@ class WhatsAppDispatchService(BaseService):
         except Exception:
             data = {}
         if resp.status_code >= 400:
-            raise RuntimeError(str(data.get("error") or data or f"HTTP {resp.status_code}"))
+            raise RuntimeError(
+                str(data.get("error") or data or f"HTTP {resp.status_code}")
+            )
         return data if isinstance(data, dict) else {}
 
-    def _log_outgoing(self, user_id: Optional[int], phone: str, message_type: str, template_name: str, body: str, status: str, message_id: Optional[str]) -> None:
+    def _log_outgoing(
+        self,
+        user_id: Optional[int],
+        sucursal_id: Optional[int],
+        phone: str,
+        message_type: str,
+        template_name: str,
+        body: str,
+        status: str,
+        message_id: Optional[str],
+        event_key: Optional[str] = None,
+    ) -> None:
         try:
             sent_at = self._now_utc_naive()
             row = WhatsappMessage(
                 user_id=int(user_id) if user_id is not None else None,
+                sucursal_id=int(sucursal_id) if sucursal_id is not None else None,
+                event_key=str(event_key).strip() if event_key is not None else None,
                 message_type=str(message_type or "custom"),
                 template_name=str(template_name or message_type or "custom"),
                 phone_number=self._normalize_phone(phone),
@@ -320,21 +414,263 @@ class WhatsAppDispatchService(BaseService):
             except Exception:
                 pass
 
+    def _event_key_exists(self, event_key: Optional[str]) -> bool:
+        try:
+            ek = str(event_key or "").strip()
+            if not ek:
+                return False
+            row = (
+                self.db.execute(
+                    select(WhatsappMessage.id)
+                    .where(WhatsappMessage.event_key == ek)
+                    .limit(1)
+                )
+                .first()
+            )
+            return bool(row)
+        except Exception:
+            return False
+
+    def _reserve_event_key(
+        self,
+        *,
+        event_key: str,
+        user_id: Optional[int],
+        sucursal_id: Optional[int],
+        phone: str,
+        message_type: str,
+        template_name: str,
+        body: str,
+    ) -> bool:
+        ek = str(event_key or "").strip()
+        if not ek:
+            return False
+        try:
+            sent_at = self._now_utc_naive()
+            row = WhatsappMessage(
+                user_id=int(user_id) if user_id is not None else None,
+                sucursal_id=int(sucursal_id) if sucursal_id is not None else None,
+                event_key=ek,
+                message_type=str(message_type or "custom"),
+                template_name=str(template_name or message_type or "custom"),
+                phone_number=self._normalize_phone(phone),
+                message_id=None,
+                sent_at=sent_at,
+                status="queued",
+                message_content=str(body or ""),
+            )
+            self.db.add(row)
+            self.db.commit()
+            return True
+        except Exception:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+            return False
+
+    def _finalize_reserved_event(
+        self,
+        *,
+        event_key: str,
+        status: str,
+        message_id: Optional[str],
+        body: str,
+        template_name: str,
+        message_type: str,
+        phone: str,
+    ) -> None:
+        ek = str(event_key or "").strip()
+        if not ek:
+            return
+        try:
+            self.db.execute(
+                text(
+                    """
+                    UPDATE whatsapp_messages
+                    SET status = :st,
+                        message_id = :mid,
+                        message_content = :body,
+                        template_name = :tpl,
+                        message_type = :mt,
+                        phone_number = :ph,
+                        sent_at = :sent_at
+                    WHERE event_key = :ek
+                    """
+                ),
+                {
+                    "st": str(status or ""),
+                    "mid": message_id,
+                    "body": str(body or ""),
+                    "tpl": str(template_name or message_type or "custom"),
+                    "mt": str(message_type or "custom"),
+                    "ph": self._normalize_phone(phone),
+                    "sent_at": self._now_utc_naive(),
+                    "ek": ek,
+                },
+            )
+            self.db.commit()
+        except Exception:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+
+    def _resolve_event_sucursal_id(
+        self, sucursal_id: Optional[int], user_id: Optional[int]
+    ) -> Optional[int]:
+        sid: Optional[int] = None
+        try:
+            sid = int(sucursal_id) if sucursal_id is not None else None
+        except Exception:
+            sid = None
+
+        try:
+            if sid is not None and sid > 0:
+                row = (
+                    self.db.execute(
+                        text(
+                            "SELECT id FROM sucursales WHERE id = :id AND activa = TRUE LIMIT 1"
+                        ),
+                        {"id": int(sid)},
+                    )
+                    .mappings()
+                    .first()
+                )
+                if row:
+                    return int(sid)
+        except Exception:
+            pass
+
+        try:
+            default_raw = (
+                self.db.execute(
+                    text(
+                        "SELECT valor FROM configuracion WHERE clave = 'default_sucursal_id' AND activo = TRUE LIMIT 1"
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if default_raw is not None:
+                default_sid = int(str(default_raw).strip())
+                if default_sid > 0:
+                    row = (
+                        self.db.execute(
+                            text(
+                                "SELECT id FROM sucursales WHERE id = :id AND activa = TRUE LIMIT 1"
+                            ),
+                            {"id": int(default_sid)},
+                        )
+                        .mappings()
+                        .first()
+                    )
+                    if row:
+                        return int(default_sid)
+        except Exception:
+            pass
+
+        uid: Optional[int] = None
+        try:
+            uid = int(user_id) if user_id is not None else None
+        except Exception:
+            uid = None
+
+        if uid is not None and uid > 0:
+            try:
+                ids = [
+                    int(r[0])
+                    for r in (
+                        self.db.execute(
+                            text(
+                                """
+                                SELECT s.id
+                                FROM usuario_sucursales us
+                                JOIN sucursales s ON s.id = us.sucursal_id
+                                WHERE us.usuario_id = :uid AND s.activa = TRUE
+                                ORDER BY s.id ASC
+                                """
+                            ),
+                            {"uid": int(uid)},
+                        )
+                        .fetchall()
+                        or []
+                    )
+                    if r and r[0] is not None
+                ]
+                if len(ids) == 1:
+                    return int(ids[0])
+            except Exception:
+                pass
+
+            try:
+                ids = [
+                    int(r[0])
+                    for r in (
+                        self.db.execute(
+                            text(
+                                """
+                                SELECT DISTINCT ms.sucursal_id
+                                FROM memberships m
+                                JOIN membership_sucursales ms ON ms.membership_id = m.id
+                                JOIN sucursales s ON s.id = ms.sucursal_id
+                                WHERE m.usuario_id = :uid
+                                  AND m.status = 'active'
+                                  AND m.all_sucursales = FALSE
+                                  AND s.activa = TRUE
+                                ORDER BY ms.sucursal_id ASC
+                                """
+                            ),
+                            {"uid": int(uid)},
+                        )
+                        .fetchall()
+                        or []
+                    )
+                    if r and r[0] is not None
+                ]
+                if len(ids) == 1:
+                    return int(ids[0])
+            except Exception:
+                pass
+
+        try:
+            row = (
+                self.db.execute(
+                    text("SELECT id FROM sucursales WHERE activa = TRUE ORDER BY id ASC LIMIT 1")
+                )
+                .mappings()
+                .first()
+            )
+            if row and row.get("id") is not None:
+                return int(row["id"])
+        except Exception:
+            pass
+
+        return None
+
     def _safe_format(self, s: str, vars: Dict[str, Any]) -> str:
         class _Default(dict):
             def __missing__(self, key):
                 return ""
+
         try:
-            return str(s or "").format_map(_Default({k: "" if v is None else v for k, v in (vars or {}).items()}))
+            return str(s or "").format_map(
+                _Default({k: "" if v is None else v for k, v in (vars or {}).items()})
+            )
         except Exception:
             return str(s or "")
 
-    def _render_template(self, template_name: str, vars: Dict[str, Any]) -> Optional[str]:
+    def _render_template(
+        self, template_name: str, vars: Dict[str, Any]
+    ) -> Optional[str]:
         try:
             tpl = (
                 self.db.execute(
                     select(WhatsappTemplate)
-                    .where(WhatsappTemplate.template_name == template_name, WhatsappTemplate.active == True)
+                    .where(
+                        WhatsappTemplate.template_name == template_name,
+                        WhatsappTemplate.active == True,
+                    )
                     .limit(1)
                 )
                 .scalars()
@@ -346,22 +682,93 @@ class WhatsAppDispatchService(BaseService):
         except Exception:
             return None
 
-    def send_text(self, user_id: Optional[int], phone: str, body: str, message_type: str) -> WhatsAppSendResult:
-        cfg = self._get_active_whatsapp_config()
+    def send_text(
+        self,
+        user_id: Optional[int],
+        phone: str,
+        body: str,
+        message_type: str,
+        sucursal_id: Optional[int] = None,
+        event_key: Optional[str] = None,
+    ) -> WhatsAppSendResult:
+        sucursal_id = self._resolve_event_sucursal_id(sucursal_id, user_id)
+        cfg = self._get_active_whatsapp_config(sucursal_id=sucursal_id)
         phone_id = str(getattr(cfg, "phone_id", "") or "").strip() if cfg else ""
-        access_token = self._decrypt_token_best_effort(str(getattr(cfg, "access_token", "") or "")) if cfg else ""
+        access_token = (
+            self._decrypt_token_best_effort(str(getattr(cfg, "access_token", "") or ""))
+            if cfg
+            else ""
+        )
 
         if not self._is_enabled():
-            self._log_outgoing(user_id, phone, message_type, "text", body, "failed", None)
+            self._log_outgoing(
+                user_id,
+                sucursal_id,
+                phone,
+                message_type,
+                "text",
+                body,
+                "failed",
+                None,
+                event_key=event_key,
+            )
             return WhatsAppSendResult(ok=False, error="disabled")
         if not phone_id or not access_token:
-            self._log_outgoing(user_id, phone, message_type, "text", body, "failed", None)
+            self._log_outgoing(
+                user_id,
+                sucursal_id,
+                phone,
+                message_type,
+                "text",
+                body,
+                "failed",
+                None,
+                event_key=event_key,
+            )
             return WhatsAppSendResult(ok=False, error="missing_config")
         if not self._allowlist_ok(phone):
-            self._log_outgoing(user_id, phone, message_type, "text", body, "failed", None)
+            self._log_outgoing(
+                user_id,
+                sucursal_id,
+                phone,
+                message_type,
+                "text",
+                body,
+                "failed",
+                None,
+                event_key=event_key,
+            )
             return WhatsAppSendResult(ok=False, error="allowlist_blocked")
 
         to = self._normalize_phone(phone)
+        ek = str(event_key or "").strip() or None
+        if ek and self._event_key_exists(ek):
+            return WhatsAppSendResult(ok=True)
+        if ek:
+            reserved = self._reserve_event_key(
+                event_key=ek,
+                user_id=user_id,
+                sucursal_id=sucursal_id,
+                phone=to,
+                message_type=message_type,
+                template_name="text",
+                body=str(body or ""),
+            )
+            if not reserved:
+                if self._event_key_exists(ek):
+                    return WhatsAppSendResult(ok=True)
+                self._log_outgoing(
+                    user_id,
+                    sucursal_id,
+                    phone,
+                    message_type,
+                    "text",
+                    body,
+                    "failed",
+                    None,
+                    event_key=event_key,
+                )
+                return WhatsAppSendResult(ok=False, error="dedupe_reserve_failed")
         payload = {
             "messaging_product": "whatsapp",
             "to": to,
@@ -377,29 +784,144 @@ class WhatsAppDispatchService(BaseService):
                     mid = (msgs[0] or {}).get("id")
             except Exception:
                 mid = None
-            self._log_outgoing(user_id, phone, message_type, "text", body, "sent", mid)
+            if ek:
+                self._finalize_reserved_event(
+                    event_key=ek,
+                    status="sent",
+                    message_id=mid,
+                    body=str(body or ""),
+                    template_name="text",
+                    message_type=message_type,
+                    phone=to,
+                )
+            else:
+                self._log_outgoing(
+                    user_id,
+                    sucursal_id,
+                    phone,
+                    message_type,
+                    "text",
+                    body,
+                    "sent",
+                    mid,
+                    event_key=event_key,
+                )
             return WhatsAppSendResult(ok=True, message_id=mid)
         except Exception as e:
-            self._log_outgoing(user_id, phone, message_type, "text", body, "failed", None)
+            if ek:
+                self._finalize_reserved_event(
+                    event_key=ek,
+                    status="failed",
+                    message_id=None,
+                    body=str(body or ""),
+                    template_name="text",
+                    message_type=message_type,
+                    phone=to,
+                )
+            else:
+                self._log_outgoing(
+                    user_id,
+                    sucursal_id,
+                    phone,
+                    message_type,
+                    "text",
+                    body,
+                    "failed",
+                    None,
+                    event_key=event_key,
+                )
             logger.error(f"WhatsApp send failed: {e}")
             return WhatsAppSendResult(ok=False, error=str(e))
 
-    def send_template_positional(self, user_id: Optional[int], phone: str, template_name: str, body_params: list[str], message_type: str) -> WhatsAppSendResult:
-        cfg = self._get_active_whatsapp_config()
+    def send_template_positional(
+        self,
+        user_id: Optional[int],
+        phone: str,
+        template_name: str,
+        body_params: List[str],
+        message_type: str,
+        sucursal_id: Optional[int] = None,
+        event_key: Optional[str] = None,
+    ) -> WhatsAppSendResult:
+        sucursal_id = self._resolve_event_sucursal_id(sucursal_id, user_id)
+        cfg = self._get_active_whatsapp_config(sucursal_id=sucursal_id)
         phone_id = str(getattr(cfg, "phone_id", "") or "").strip() if cfg else ""
-        access_token = self._decrypt_token_best_effort(str(getattr(cfg, "access_token", "") or "")) if cfg else ""
+        access_token = (
+            self._decrypt_token_best_effort(str(getattr(cfg, "access_token", "") or ""))
+            if cfg
+            else ""
+        )
 
         if not self._is_enabled():
-            self._log_outgoing(user_id, phone, message_type, template_name, f"[template:{template_name}] {body_params}", "failed", None)
+            self._log_outgoing(
+                user_id,
+                sucursal_id,
+                phone,
+                message_type,
+                template_name,
+                f"[template:{template_name}] {body_params}",
+                "failed",
+                None,
+                event_key=event_key,
+            )
             return WhatsAppSendResult(ok=False, error="disabled")
         if not phone_id or not access_token:
-            self._log_outgoing(user_id, phone, message_type, template_name, f"[template:{template_name}] {body_params}", "failed", None)
+            self._log_outgoing(
+                user_id,
+                sucursal_id,
+                phone,
+                message_type,
+                template_name,
+                f"[template:{template_name}] {body_params}",
+                "failed",
+                None,
+                event_key=event_key,
+            )
             return WhatsAppSendResult(ok=False, error="missing_config")
         if not self._allowlist_ok(phone):
-            self._log_outgoing(user_id, phone, message_type, template_name, f"[template:{template_name}] {body_params}", "failed", None)
+            self._log_outgoing(
+                user_id,
+                sucursal_id,
+                phone,
+                message_type,
+                template_name,
+                f"[template:{template_name}] {body_params}",
+                "failed",
+                None,
+                event_key=event_key,
+            )
             return WhatsAppSendResult(ok=False, error="allowlist_blocked")
 
         to = self._normalize_phone(phone)
+        ek = str(event_key or "").strip() or None
+        log_body = f"[template:{template_name}] {body_params}"
+        if ek and self._event_key_exists(ek):
+            return WhatsAppSendResult(ok=True)
+        if ek:
+            reserved = self._reserve_event_key(
+                event_key=ek,
+                user_id=user_id,
+                sucursal_id=sucursal_id,
+                phone=to,
+                message_type=message_type,
+                template_name=str(template_name),
+                body=log_body,
+            )
+            if not reserved:
+                if self._event_key_exists(ek):
+                    return WhatsAppSendResult(ok=True)
+                self._log_outgoing(
+                    user_id,
+                    sucursal_id,
+                    phone,
+                    message_type,
+                    template_name,
+                    log_body,
+                    "failed",
+                    None,
+                    event_key=event_key,
+                )
+                return WhatsAppSendResult(ok=False, error="dedupe_reserve_failed")
         lang = self._get_language_code()
         payload = {
             "messaging_product": "whatsapp",
@@ -411,7 +933,10 @@ class WhatsAppDispatchService(BaseService):
                 "components": [
                     {
                         "type": "body",
-                        "parameters": [{"type": "text", "text": str(p)} for p in (body_params or [])],
+                        "parameters": [
+                            {"type": "text", "text": str(p)}
+                            for p in (body_params or [])
+                        ],
                     }
                 ],
             },
@@ -425,27 +950,101 @@ class WhatsAppDispatchService(BaseService):
                     mid = (msgs[0] or {}).get("id")
             except Exception:
                 mid = None
-            self._log_outgoing(user_id, phone, message_type, template_name, f"[template:{template_name}] {body_params}", "sent", mid)
+            if ek:
+                self._finalize_reserved_event(
+                    event_key=ek,
+                    status="sent",
+                    message_id=mid,
+                    body=log_body,
+                    template_name=str(template_name),
+                    message_type=message_type,
+                    phone=to,
+                )
+            else:
+                self._log_outgoing(
+                    user_id,
+                    sucursal_id,
+                    phone,
+                    message_type,
+                    template_name,
+                    log_body,
+                    "sent",
+                    mid,
+                    event_key=event_key,
+                )
             return WhatsAppSendResult(ok=True, message_id=mid)
         except Exception as e:
-            self._log_outgoing(user_id, phone, message_type, template_name, f"[template:{template_name}] {body_params}", "failed", None)
+            if ek:
+                self._finalize_reserved_event(
+                    event_key=ek,
+                    status="failed",
+                    message_id=None,
+                    body=log_body,
+                    template_name=str(template_name),
+                    message_type=message_type,
+                    phone=to,
+                )
+            else:
+                self._log_outgoing(
+                    user_id,
+                    sucursal_id,
+                    phone,
+                    message_type,
+                    template_name,
+                    log_body,
+                    "failed",
+                    None,
+                    event_key=event_key,
+                )
             return WhatsAppSendResult(ok=False, error=str(e))
 
-    def send_welcome(self, usuario_id: int) -> bool:
+    def send_welcome(
+        self,
+        usuario_id: int,
+        sucursal_id: Optional[int] = None,
+        event_key: Optional[str] = None,
+    ) -> bool:
         u = self.db.get(Usuario, int(usuario_id))
         if not self._is_action_enabled("welcome", True):
             return True
         if not u or not getattr(u, "telefono", None):
             return False
         name = str(getattr(u, "nombre", "") or "")
+        ek = str(event_key or f"welcome:{int(usuario_id)}").strip() or None
         tpl = self._get_meta_template_binding("welcome", "ih_welcome_v1")
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [name], "welcome")
+        r = self.send_template_positional(
+            int(usuario_id),
+            str(u.telefono),
+            tpl,
+            [name],
+            "welcome",
+            sucursal_id=sucursal_id,
+            event_key=ek,
+        )
         if r.ok:
             return True
-        body = self._render_template("welcome", {"name": name}) or f"Hola {name}! Bienvenido/a."
-        return self.send_text(int(usuario_id), str(u.telefono), body, "welcome").ok
+        body = (
+            self._render_template("welcome", {"name": name})
+            or f"Hola {name}! Bienvenido/a."
+        )
+        return self.send_text(
+            int(usuario_id),
+            str(u.telefono),
+            body,
+            "welcome",
+            sucursal_id=sucursal_id,
+            event_key=ek,
+        ).ok
 
-    def send_payment_confirmation(self, usuario_id: int, monto: Optional[float] = None, mes: Optional[int] = None, anio: Optional[int] = None) -> bool:
+    def send_payment_confirmation(
+        self,
+        usuario_id: int,
+        monto: Optional[float] = None,
+        mes: Optional[int] = None,
+        anio: Optional[int] = None,
+        sucursal_id: Optional[int] = None,
+        event_key: Optional[str] = None,
+    ) -> bool:
         u = self.db.get(Usuario, int(usuario_id))
         if not self._is_action_enabled("payment", True):
             return True
@@ -464,7 +1063,9 @@ class WhatsAppDispatchService(BaseService):
             )
             if p:
                 try:
-                    monto = float(monto if monto is not None else (getattr(p, "monto", 0) or 0))
+                    monto = float(
+                        monto if monto is not None else (getattr(p, "monto", 0) or 0)
+                    )
                 except Exception:
                     monto = 0.0
                 try:
@@ -472,24 +1073,48 @@ class WhatsAppDispatchService(BaseService):
                 except Exception:
                     mes = 0
                 try:
-                    anio = int(anio if anio is not None else (getattr(p, "año", 0) or 0))
+                    anio = int(
+                        anio if anio is not None else (getattr(p, "año", 0) or 0)
+                    )
                 except Exception:
                     anio = 0
         if monto is None or mes is None or anio is None:
             return False
+        ek = str(
+            event_key
+            or f"payment:{int(usuario_id)}:{int(mes)}:{int(anio)}:{int(float(monto) * 100)}"
+        ).strip()
         vars = {
             "name": str(getattr(u, "nombre", "") or ""),
             "amount": f"{float(monto):.2f}",
             "period": f"{int(mes):02d}/{int(anio)}",
         }
         tpl = self._get_meta_template_binding("payment", "ih_payment_confirmed_v1")
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [vars["name"], vars["amount"], vars["period"]], "payment")
+        r = self.send_template_positional(
+            int(usuario_id),
+            str(u.telefono),
+            tpl,
+            [vars["name"], vars["amount"], vars["period"]],
+            "payment",
+            sucursal_id=sucursal_id,
+            event_key=ek,
+        )
         if r.ok:
             return True
-        body = self._render_template("payment", vars) or f"Hola {vars['name']}! Confirmamos tu pago de ${vars['amount']} correspondiente a {vars['period']}. Gracias."
-        return self.send_text(int(usuario_id), str(u.telefono), body, "payment").ok
+        body = (
+            self._render_template("payment", vars)
+            or f"Hola {vars['name']}! Confirmamos tu pago de ${vars['amount']} correspondiente a {vars['period']}. Gracias."
+        )
+        return self.send_text(
+            int(usuario_id),
+            str(u.telefono),
+            body,
+            "payment",
+            sucursal_id=sucursal_id,
+            event_key=ek,
+        ).ok
 
-    def send_overdue_reminder(self, usuario_id: int) -> bool:
+    def send_overdue_reminder(self, usuario_id: int, sucursal_id: Optional[int] = None) -> bool:
         u = self.db.get(Usuario, int(usuario_id))
         if not self._is_action_enabled("overdue", True):
             return True
@@ -497,11 +1122,18 @@ class WhatsAppDispatchService(BaseService):
             return False
         vars = {"name": str(getattr(u, "nombre", "") or "")}
         tpl = self._get_meta_template_binding("overdue", "ih_membership_overdue_v1")
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [vars["name"]], "overdue")
+        r = self.send_template_positional(
+            int(usuario_id), str(u.telefono), tpl, [vars["name"]], "overdue", sucursal_id=sucursal_id
+        )
         if r.ok:
             return True
-        body = self._render_template("overdue", vars) or f"Hola {vars['name']}. Te recordamos que tu cuota se encuentra vencida. Si ya abonaste, por favor ignora este mensaje."
-        return self.send_text(int(usuario_id), str(u.telefono), body, "overdue").ok
+        body = (
+            self._render_template("overdue", vars)
+            or f"Hola {vars['name']}. Te recordamos que tu cuota se encuentra vencida. Si ya abonaste, por favor ignora este mensaje."
+        )
+        return self.send_text(
+            int(usuario_id), str(u.telefono), body, "overdue", sucursal_id=sucursal_id
+        ).ok
 
     def send_deactivation(self, usuario_id: int, motivo: str) -> bool:
         u = self.db.get(Usuario, int(usuario_id))
@@ -509,15 +1141,31 @@ class WhatsAppDispatchService(BaseService):
             return True
         if not u or not getattr(u, "telefono", None):
             return False
-        vars = {"name": str(getattr(u, "nombre", "") or ""), "reason": str(motivo or "cuotas vencidas")}
-        tpl = self._get_meta_template_binding("deactivation", "ih_membership_deactivated_v1")
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [vars["name"], vars["reason"]], "deactivation")
+        vars = {
+            "name": str(getattr(u, "nombre", "") or ""),
+            "reason": str(motivo or "cuotas vencidas"),
+        }
+        tpl = self._get_meta_template_binding(
+            "deactivation", "ih_membership_deactivated_v1"
+        )
+        r = self.send_template_positional(
+            int(usuario_id),
+            str(u.telefono),
+            tpl,
+            [vars["name"], vars["reason"]],
+            "deactivation",
+        )
         if r.ok:
             return True
-        body = self._render_template("deactivation", vars) or f"Hola {vars['name']}. Tu acceso fue desactivado. Motivo: {vars['reason']}."
+        body = (
+            self._render_template("deactivation", vars)
+            or f"Hola {vars['name']}. Tu acceso fue desactivado. Motivo: {vars['reason']}."
+        )
         return self.send_text(int(usuario_id), str(u.telefono), body, "deactivation").ok
 
-    def send_class_reminder(self, usuario_id: int, tipo_clase: str, fecha: str, hora: str) -> bool:
+    def send_class_reminder(
+        self, usuario_id: int, tipo_clase: str, fecha: str, hora: str
+    ) -> bool:
         u = self.db.get(Usuario, int(usuario_id))
         if not self._is_action_enabled("class_reminder", True):
             return True
@@ -530,13 +1178,26 @@ class WhatsAppDispatchService(BaseService):
             "time": str(hora or ""),
         }
         tpl = self._get_meta_template_binding("class_reminder", "ih_class_reminder_v1")
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [vars["name"], vars["class"], vars["date"], vars["time"]], "class_reminder")
+        r = self.send_template_positional(
+            int(usuario_id),
+            str(u.telefono),
+            tpl,
+            [vars["name"], vars["class"], vars["date"], vars["time"]],
+            "class_reminder",
+        )
         if r.ok:
             return True
-        body = self._render_template("class_reminder", vars) or f"Hola {vars['name']}! Recordatorio: {vars['class']} el {vars['date']} a las {vars['time']}."
-        return self.send_text(int(usuario_id), str(u.telefono), body, "class_reminder").ok
+        body = (
+            self._render_template("class_reminder", vars)
+            or f"Hola {vars['name']}! Recordatorio: {vars['class']} el {vars['date']} a las {vars['time']}."
+        )
+        return self.send_text(
+            int(usuario_id), str(u.telefono), body, "class_reminder"
+        ).ok
 
-    def send_waitlist_promotion(self, usuario_id: int, tipo_clase: str, dia: str, hora: str) -> bool:
+    def send_waitlist_promotion(
+        self, usuario_id: int, tipo_clase: str, dia: str, hora: str
+    ) -> bool:
         u = self.db.get(Usuario, int(usuario_id))
         if not self._is_action_enabled("waitlist", True):
             return True
@@ -548,9 +1209,20 @@ class WhatsAppDispatchService(BaseService):
             "day": str(dia or ""),
             "time": str(hora or ""),
         }
-        tpl = self._get_meta_template_binding("waitlist", "ih_waitlist_spot_available_v1")
-        r = self.send_template_positional(int(usuario_id), str(u.telefono), tpl, [vars["name"], vars["class"], vars["day"], vars["time"]], "waitlist")
+        tpl = self._get_meta_template_binding(
+            "waitlist", "ih_waitlist_spot_available_v1"
+        )
+        r = self.send_template_positional(
+            int(usuario_id),
+            str(u.telefono),
+            tpl,
+            [vars["name"], vars["class"], vars["day"], vars["time"]],
+            "waitlist",
+        )
         if r.ok:
             return True
-        body = self._render_template("waitlist", vars) or f"Hola {vars['name']}! Se liberó un cupo para {vars['class']}. Día: {vars['day']} {vars['time']}."
+        body = (
+            self._render_template("waitlist", vars)
+            or f"Hola {vars['name']}! Se liberó un cupo para {vars['class']}. Día: {vars['day']} {vars['time']}."
+        )
         return self.send_text(int(usuario_id), str(u.telefono), body, "waitlist").ok

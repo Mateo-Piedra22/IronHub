@@ -34,12 +34,24 @@ const API_BASE = getApiBaseUrl();
 async function apiRequest<T>(url: string, opts: RequestInit = {}): Promise<ApiResult<T>> {
     try {
         const currentTenant = typeof window !== 'undefined' ? getCurrentSubdomain() : '';
+        const method = String(opts.method || 'GET').toUpperCase();
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            ...(currentTenant ? { 'X-Tenant': currentTenant } : {}),
+        };
+        try {
+            const isWrite = method !== 'GET';
+            if (isWrite && typeof document !== 'undefined') {
+                const match = document.cookie.match(/(?:^|;\s*)ironhub_csrf=([^;]+)/);
+                const csrf = match ? decodeURIComponent(match[1]) : '';
+                if (csrf) headers['X-CSRF-Token'] = csrf;
+            }
+        } catch {}
         const res = await fetch(`${API_BASE}${url}`, {
             ...opts,
             credentials: 'include',
             headers: {
-                'Content-Type': 'application/json',
-                ...(currentTenant ? { 'X-Tenant': currentTenant } : {}),
+                ...headers,
                 ...(opts.headers || {}),
             },
         });
@@ -280,4 +292,3 @@ export default function MetaReviewOwnerPage() {
         </div>
     );
 }
-

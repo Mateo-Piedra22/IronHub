@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { User, Mail, Phone, Calendar, Shield, Loader2 } from 'lucide-react';
+import { User, Mail, Phone, Calendar, Shield, Loader2, MapPin } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { api, type Usuario } from '@/lib/api';
 
@@ -148,6 +148,17 @@ export default function ProfilePage() {
                                             </span>
                                         )}
                                     </div>
+                                </div>
+                            </div>
+                        )}
+                        {profile.sucursal_registro_nombre && (
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-lg bg-slate-800 flex items-center justify-center">
+                                    <MapPin className="w-5 h-5 text-slate-400" />
+                                </div>
+                                <div>
+                                    <div className="text-xs text-slate-500">Sucursal de Registro</div>
+                                    <div className="text-white">{profile.sucursal_registro_nombre}</div>
                                 </div>
                             </div>
                         )}

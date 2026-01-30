@@ -3,20 +3,20 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { BarChart3, CreditCard, Home, LogOut, Menu, Settings, Users, X, ChevronRight, Layers, MessageSquare, ShieldCheck } from 'lucide-react';
+import { BarChart3, Building2, Home, LogOut, Menu, Settings, Users, X, ChevronRight, MessageSquare, ShieldCheck, UsersRound } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ToastContainer } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { api } from '@/lib/api';
 
 const navigation = [
-    { name: 'Dashboard', href: '/dashboard', icon: BarChart3, description: 'KPIs y reportes' },
-    { name: 'Usuarios', href: '/dashboard#usuarios', icon: Users, description: 'Tabla y acciones' },
-    { name: 'Pagos', href: '/dashboard#pagos', icon: CreditCard, description: 'Ingresos y cobranzas' },
-    { name: 'Reportes', href: '/dashboard#reportes', icon: Layers, description: 'Gráficos y cohortes' },
-    { name: 'WhatsApp', href: '/dashboard#whatsapp', icon: MessageSquare, description: 'Cola, salud y stats' },
-    { name: 'Meta Review', href: '/dashboard/meta-review', icon: ShieldCheck, description: 'Acceso puntual' },
-    { name: 'Gestión', href: '/gestion/usuarios', icon: Settings, description: 'Panel operativo' },
+    { key: 'overview', name: 'Overview', href: '/dashboard', icon: BarChart3, description: 'KPIs y reportes' },
+    { key: 'sucursales', name: 'Sucursales', href: '/dashboard/sucursales', icon: Building2, description: 'Datos, WhatsApp, estado' },
+    { key: 'equipo', name: 'Equipo', href: '/dashboard/equipo', icon: UsersRound, description: 'Profesores y staff' },
+    { key: 'whatsapp', name: 'WhatsApp', href: '/dashboard/whatsapp', icon: MessageSquare, description: 'Admin, salud, cola' },
+    { key: 'configuracion', name: 'Configuración', href: '/dashboard/configuracion', icon: Settings, description: 'Flags, ajustes, control' },
+    { key: 'meta_review', name: 'Meta Review', href: '/dashboard/meta-review', icon: ShieldCheck, description: 'Acceso puntual' },
+    { key: 'gestion', name: 'Gestión', href: '/gestion/usuarios', icon: Users, description: 'Panel operativo' },
 ];
 
 export default function OwnerLayout({ children }: { children: React.ReactNode }) {
@@ -25,6 +25,10 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const [loggingOut, setLoggingOut] = useState(false);
     const [gymLogoUrl, setGymLogoUrl] = useState<string>('');
+    const [sucursales, setSucursales] = useState<Array<{ id: number; nombre: string }>>([]);
+    const [sucursalActualId, setSucursalActualId] = useState<number | null>(null);
+    const [switchingSucursal, setSwitchingSucursal] = useState(false);
+    const [moduleFlags, setModuleFlags] = useState<Record<string, boolean> | null>(null);
 
     useEffect(() => {
         const loadBranding = async () => {
@@ -32,12 +36,40 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
                 const res = await api.getBootstrap('auto');
                 const logo = res.ok ? (res.data?.gym?.logo_url || '') : '';
                 if (logo) setGymLogoUrl(logo);
+                const items = (res.ok ? (res.data?.sucursales || []) : []) as Array<{ id: number; nombre: string }>;
+                setSucursales(items);
+                const currentId = res.ok ? (res.data?.sucursal_actual_id ?? null) : null;
+                setSucursalActualId(typeof currentId === 'number' ? currentId : null);
+                if (res.ok && (res.data as any)?.flags?.modules) {
+                    setModuleFlags(((res.data as any).flags.modules || null) as any);
+                } else {
+                    setModuleFlags(null);
+                }
             } catch {
                 setGymLogoUrl('');
+                setSucursales([]);
+                setSucursalActualId(null);
+                setModuleFlags(null);
             }
         };
         loadBranding();
     }, []);
+
+    const navItems = navigation.filter((item) => {
+        if (item.key === 'overview' || item.key === 'gestion' || item.key === 'meta_review') return true;
+        if (item.key === 'configuracion') return true;
+        if (item.key === 'equipo') {
+            if (!moduleFlags) return true;
+            const emp = moduleFlags['empleados'];
+            const prof = moduleFlags['profesores'];
+            return emp !== false || prof !== false;
+        }
+        if (!moduleFlags) return true;
+        if (Object.prototype.hasOwnProperty.call(moduleFlags, item.key)) {
+            return moduleFlags[item.key] !== false;
+        }
+        return true;
+    });
 
     const handleLogout = async () => {
         setLoggingOut(true);
@@ -94,6 +126,36 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
                     </div>
 
                     <div className="flex items-center gap-2">
+                        {sucursales.length > 1 ? (
+                            <select
+                                className="h-9 rounded-lg bg-slate-800/60 border border-slate-700/60 text-slate-200 text-sm px-3 outline-none focus:ring-2 focus:ring-primary-500/40 disabled:opacity-60"
+                                value={sucursalActualId ?? ''}
+                                disabled={switchingSucursal}
+                                onChange={async (e) => {
+                                    const nextId = Number(e.target.value);
+                                    if (!nextId || nextId === sucursalActualId) return;
+                                    setSwitchingSucursal(true);
+                                    try {
+                                        const r = await api.seleccionarSucursal(nextId);
+                                        if (r.ok) {
+                                            setSucursalActualId(nextId);
+                                            router.refresh();
+                                        }
+                                    } finally {
+                                        setSwitchingSucursal(false);
+                                    }
+                                }}
+                            >
+                                <option value="" disabled>
+                                    Seleccionar sucursal
+                                </option>
+                                {sucursales.map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                        {s.nombre}
+                                    </option>
+                                ))}
+                            </select>
+                        ) : null}
                         <Link
                             href="/"
                             className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/50 transition-colors"
@@ -150,7 +212,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
                                     </button>
                                 </div>
                                 <nav className="flex-1 min-h-0 p-4 space-y-1 overflow-y-auto overflow-x-auto">
-                                    {navigation.map((item) => {
+                                    {navItems.map((item) => {
                                         const isActive = pathname === item.href || pathname?.startsWith(item.href + '/');
                                         const isHash = item.href.startsWith('/dashboard#');
                                         return (
@@ -182,7 +244,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
 
             <aside className="hidden lg:block fixed top-16 left-0 bottom-0 w-64 border-r border-slate-800/50 bg-slate-900/50 backdrop-blur-lg">
                 <nav className="p-4 space-y-1 overflow-y-auto overflow-x-auto h-full">
-                    {navigation.map((item) => {
+                    {navItems.map((item) => {
                         const isActive = pathname === item.href || pathname?.startsWith(item.href + '/');
                         const isHash = item.href.startsWith('/dashboard#');
                         return (

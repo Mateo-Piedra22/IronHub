@@ -237,9 +237,10 @@ export default function CheckinPage() {
             const resCheckin = await api.checkIn(raw, idemKey);
 
             if (resCheckin.ok && resCheckin.data?.ok) {
+                const branch = (resCheckin.data as any)?.sucursal_nombre;
                 setLastResult({
                     success: true,
-                    message: resCheckin.data?.mensaje || 'OK',
+                    message: `${resCheckin.data?.mensaje || 'OK'}${branch ? ` • ${branch}` : ''}`,
                 });
                 playSuccessSound();
             } else {
@@ -247,9 +248,10 @@ export default function CheckinPage() {
 
                 if (res.ok && res.data?.ok) {
                     const timestamp = new Date().toLocaleTimeString('es-AR');
+                    const branch = (res.data as any)?.usuario?.branch_name || (res.data as any)?.usuario?.sucursal_nombre;
                     const result: CheckinResult = {
                         success: true,
-                        message: res.data.mensaje || '¡Check-in exitoso!',
+                        message: `${res.data.mensaje || '¡Check-in exitoso!'}${branch ? ` • ${branch}` : ''}`,
                         userName: res.data.usuario?.nombre || 'Usuario',
                         userDni: res.data.usuario?.dni || '',
                         timestamp,

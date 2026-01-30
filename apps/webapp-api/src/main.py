@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -67,7 +68,9 @@ logger.info(f"DB_USER: {_db_user}")
 logger.info(f"DB_PASSWORD: {'***configured***' if _has_password else '(NOT SET)'}")
 logger.info(f"ADMIN_DB_HOST: {_admin_db_host}")
 logger.info(f"ADMIN_DB_NAME: {_admin_db_name or '(not set)'}")
-logger.info(f"TENANT_BASE_DOMAIN: {os.getenv('TENANT_BASE_DOMAIN', 'ironhub.motiona.xyz')}")
+logger.info(
+    f"TENANT_BASE_DOMAIN: {os.getenv('TENANT_BASE_DOMAIN', 'ironhub.motiona.xyz')}"
+)
 
 if _db_host == "localhost" and not os.getenv("DEVELOPMENT_MODE"):
     logger.warning("⚠️  DB_HOST is 'localhost' but DEVELOPMENT_MODE not set!")
@@ -77,7 +80,6 @@ logger.info("=" * 60)
 
 # Import core services
 import sys
-from pathlib import Path
 
 # Add core to path
 core_path = Path(__file__).parent.parent.parent.parent / "core"
@@ -88,7 +90,7 @@ try:
         get_tenant_session_factory,
         set_current_tenant,
         get_current_tenant,
-        validate_tenant_name
+        validate_tenant_name,
     )
     from src.database import DatabaseManager
     from src.models import Usuario, Pago, Rutina
@@ -147,7 +149,7 @@ if vercel_url:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_origin_regex=rf"https://.*\.{escaped_domain}|https://.*\.vercel\.app",
+    allow_origin_regex=rf"^https://([a-z0-9-]+\.)*{escaped_domain}$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -157,24 +159,70 @@ app.add_middleware(
 # Configure cookie domain for cross-subdomain session sharing
 base_domain = os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz")
 is_dev = os.getenv("DEVELOPMENT_MODE", "False").lower() == "true"
+env = (os.getenv("ENV") or os.getenv("APP_ENV") or "").strip().lower()
+is_prod = (not is_dev) and (env not in ("dev", "development", "local", "test", "testing"))
 
-# In production/testing, we MUST share the cookie across subdomains (api <-> testingiron/www)
-# We use SameSite="None" to ensure it works across all contexts, and force the domain.
-if not is_dev:
-    cookie_domain = f".{base_domain}"
-    same_site = "none"
+session_secret = str(os.getenv("SESSION_SECRET") or "").strip()
+if is_prod:
+    if (not session_secret) or session_secret in ("webapp-session-secret", "changeme", "password"):
+        raise RuntimeError("SESSION_SECRET requerido y debe ser fuerte en producción")
 else:
-    cookie_domain = None
-    same_site = "lax"
+    if not session_secret:
+        session_secret = "webapp-session-secret"
+
+cookie_domain = f".{base_domain}" if not is_dev else None
+same_site_env = str(os.getenv("SESSION_SAMESITE") or "").strip().lower()
+same_site = same_site_env if same_site_env in ("lax", "none", "strict") else "lax"
 
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.getenv("SESSION_SECRET", "webapp-session-secret"),
+    secret_key=session_secret,
     https_only=not is_dev,
     same_site=same_site,
     domain=cookie_domain,
     session_cookie=os.getenv("SESSION_COOKIE", "ironhub_tenant_session"),
 )
+
+
+@app.on_event("startup")
+async def _startup_auto_migrate() -> None:
+    should = str(os.getenv("AUTO_MIGRATE_ADMIN_DB", "true")).strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    required = str(os.getenv("AUTO_MIGRATE_ADMIN_DB_REQUIRED", "true")).strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if not should:
+        return
+    try:
+        from src.database.connection import get_admin_database_url
+        from src.database.migration_runner import upgrade_head
+
+        root = Path(__file__).resolve().parents[1]
+        cfg_path = str((root / "alembic_admin.ini").resolve())
+        script_location = str((root / "alembic_admin").resolve())
+        url = str(get_admin_database_url() or "").strip()
+        if not url:
+            raise RuntimeError("ADMIN_DATABASE_URL no configurado")
+        upgrade_head(
+            sqlalchemy_url=url,
+            cfg_path=cfg_path,
+            script_location=script_location,
+            lock_name="admin-db",
+            lock_timeout_seconds=300,
+            verify_revision=False,
+            verify_idempotent=False,
+        )
+    except Exception as e:
+        logger.error(f"Auto-migrate admin DB failed: {e}")
+        if required:
+            raise
 
 
 # =====================================================
@@ -183,6 +231,7 @@ app.add_middleware(
 # This middleware extracts the tenant from the subdomain or X-Tenant header
 # and sets it in the context for all database operations.
 
+
 @app.middleware("http")
 async def tenant_context_middleware(request: Request, call_next):
     """
@@ -190,40 +239,77 @@ async def tenant_context_middleware(request: Request, call_next):
     This is CRITICAL for multi-tenant database routing.
     """
     tenant = None
-    
+
     # === GLOBAL RATE LIMITING ===
     if request.url.path.startswith("/api/"):
         try:
             from src.rate_limit import (
-                is_global_rate_limited, is_write_rate_limited,
-                register_api_request, register_write_request, get_rate_limit_status
+                is_global_rate_limited,
+                is_write_rate_limited,
+                register_api_request,
+                register_write_request,
+                get_rate_limit_status,
             )
+
             if is_global_rate_limited(request):
                 status = get_rate_limit_status(request)
                 return JSONResponse(
                     status_code=429,
-                    content={"ok": False, "error": "Too many requests", "mensaje": "Demasiadas solicitudes.", "retry_after": status.get("api_window", 60)},
-                    headers={"Retry-After": str(status.get("api_window", 60)), "X-RateLimit-Limit": str(status.get("api_limit", 100)), "X-RateLimit-Remaining": "0"}
+                    content={
+                        "ok": False,
+                        "error": "Too many requests",
+                        "mensaje": "Demasiadas solicitudes.",
+                        "retry_after": status.get("api_window", 60),
+                    },
+                    headers={
+                        "Retry-After": str(status.get("api_window", 60)),
+                        "X-RateLimit-Limit": str(status.get("api_limit", 100)),
+                        "X-RateLimit-Remaining": "0",
+                    },
                 )
             if request.method in ("POST", "PUT", "DELETE", "PATCH"):
                 if is_write_rate_limited(request):
                     status = get_rate_limit_status(request)
                     return JSONResponse(
                         status_code=429,
-                        content={"ok": False, "error": "Too many write requests", "mensaje": "Demasiadas operaciones.", "retry_after": status.get("write_window", 60)},
-                        headers={"Retry-After": str(status.get("write_window", 60)), "X-RateLimit-Limit": str(status.get("write_limit", 30)), "X-RateLimit-Remaining": "0"}
+                        content={
+                            "ok": False,
+                            "error": "Too many write requests",
+                            "mensaje": "Demasiadas operaciones.",
+                            "retry_after": status.get("write_window", 60),
+                        },
+                        headers={
+                            "Retry-After": str(status.get("write_window", 60)),
+                            "X-RateLimit-Limit": str(status.get("write_limit", 30)),
+                            "X-RateLimit-Remaining": "0",
+                        },
                     )
                 register_write_request(request)
             register_api_request(request)
         except Exception as e:
             logger.warning(f"Rate limiting check failed: {e}")
+
+    if request.url.path.startswith("/api/") and request.method in ("POST", "PUT", "DELETE", "PATCH"):
+        pth = str(request.url.path)
+        if not pth.startswith("/api/auth/"):
+            csrf_cookie = str(request.cookies.get("ironhub_csrf") or "").strip()
+            csrf_header = str(request.headers.get("x-csrf-token") or "").strip()
+            if (not csrf_cookie) or (not csrf_header) or (csrf_cookie != csrf_header):
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "ok": False,
+                        "error": "CSRF",
+                        "mensaje": "CSRF token inválido o ausente",
+                    },
+                )
     host = request.headers.get("host", "")
     base = os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz")
     debug_tenant = os.getenv("DEBUG_TENANT", "false").lower() in ("1", "true", "yes")
-    
+
     # Remove port if present
     host_clean = host.split(":")[0]
-    
+
     try:
         set_current_tenant(None)
     except Exception:
@@ -235,10 +321,42 @@ async def tenant_context_middleware(request: Request, call_next):
 
     if debug_tenant and request.url.path.startswith("/api/"):
         logger.info(f"TENANT DEBUG - Path: {request.url.path}")
-        logger.info(f"TENANT DEBUG - Host: {host_clean}, has_x_tenant: {bool(x_tenant)}, has_origin: {bool(origin)}")
+        logger.info(
+            f"TENANT DEBUG - Host: {host_clean}, has_x_tenant: {bool(x_tenant)}, has_origin: {bool(origin)}"
+        )
 
     reserved = ("www", "api", "admin", "admin-api")
-    host_is_reserved = (host_clean in reserved) or host_clean.endswith(f".{base}") and host_clean.replace(f".{base}", "") in reserved
+    host_is_reserved = (
+        (host_clean in reserved)
+        or host_clean.endswith(f".{base}")
+        and host_clean.replace(f".{base}", "") in reserved
+    )
+
+    session_tenant = None
+    try:
+        session_tenant = str(request.session.get("tenant") or "").strip().lower() or None
+    except Exception:
+        session_tenant = None
+
+    origin_tenant = None
+    if origin:
+        try:
+            match = re.search(rf"^https?://([a-z0-9-]+)\.{re.escape(base)}", origin.lower().strip())
+            if match:
+                cand = match.group(1)
+                if cand and cand not in reserved:
+                    origin_tenant = cand
+        except Exception:
+            origin_tenant = None
+
+    header_tenant = str(x_tenant or "").strip().lower() or None
+    if request.url.path.startswith("/api/"):
+        if session_tenant and header_tenant and header_tenant != session_tenant:
+            return JSONResponse(status_code=403, content={"ok": False, "error": "Tenant mismatch"})
+        if session_tenant and origin_tenant and origin_tenant != session_tenant:
+            return JSONResponse(status_code=403, content={"ok": False, "error": "Tenant mismatch"})
+        if header_tenant and origin_tenant and origin_tenant != header_tenant:
+            return JSONResponse(status_code=403, content={"ok": False, "error": "Tenant mismatch"})
 
     # 1. Prefer tenant from host subdomain when host is not reserved
     if host_clean.endswith(f".{base}"):
@@ -248,24 +366,19 @@ async def tenant_context_middleware(request: Request, call_next):
 
     # 2. If host is reserved (e.g. api.<base>), use session tenant if present
     if not tenant and host_is_reserved:
-        try:
-            session_tenant = request.session.get("tenant")
-            if session_tenant:
-                tenant = str(session_tenant).strip().lower()
-        except Exception:
-            pass
+        if session_tenant:
+            tenant = session_tenant
 
     # 3. Fallback to X-Tenant header
-    if not tenant and x_tenant:
-        tenant = x_tenant.strip().lower()
+    if not tenant and header_tenant:
+        if origin_tenant and header_tenant != origin_tenant:
+            tenant = None
+        else:
+            tenant = header_tenant
 
     # 4. Last resort: extract from Origin/Referer
-    if not tenant and origin:
-        match = re.search(rf"https?://([a-z0-9-]+)\.{re.escape(base)}", origin.lower())
-        if match:
-            candidate = match.group(1)
-            if candidate not in reserved:
-                tenant = candidate
+    if not tenant and origin_tenant:
+        tenant = origin_tenant
 
     # Validate tenant name before setting context
     if tenant:
@@ -310,7 +423,9 @@ async def tenant_context_middleware(request: Request, call_next):
                     now_ms = int(time.time() * 1000)
                     with _API_GET_CACHE_LOCK:
                         ent = _API_GET_CACHE.get(ck)
-                    if ent and (now_ms - int(ent.get("ts") or 0) < _API_GET_CACHE_TTL_MS):
+                    if ent and (
+                        now_ms - int(ent.get("ts") or 0) < _API_GET_CACHE_TTL_MS
+                    ):
                         hdrs = dict(ent.get("headers") or {})
                         return Response(
                             content=ent.get("body") or b"",
@@ -326,7 +441,11 @@ async def tenant_context_middleware(request: Request, call_next):
         try:
             content_type = (response.headers.get("content-type") or "").lower()
             body = getattr(response, "body", None)
-            if body and isinstance(body, (bytes, bytearray)) and "application/json" in content_type:
+            if (
+                body
+                and isinstance(body, (bytes, bytearray))
+                and "application/json" in content_type
+            ):
                 try:
                     payload = json.loads(body.decode("utf-8"))
                 except Exception:
@@ -337,7 +456,11 @@ async def tenant_context_middleware(request: Request, call_next):
                         ok_val = response.status_code < 400
 
                         if "ok" not in payload:
-                            payload["ok"] = bool(payload.get("success")) if "success" in payload else ok_val
+                            payload["ok"] = (
+                                bool(payload.get("success"))
+                                if "success" in payload
+                                else ok_val
+                            )
                         if "success" not in payload:
                             payload["success"] = bool(payload.get("ok"))
 
@@ -349,12 +472,16 @@ async def tenant_context_middleware(request: Request, call_next):
                             elif "error" in payload:
                                 payload["mensaje"] = payload.get("error")
                             else:
-                                payload["mensaje"] = "OK" if bool(payload.get("ok")) else "Error"
+                                payload["mensaje"] = (
+                                    "OK" if bool(payload.get("ok")) else "Error"
+                                )
 
                         if "message" not in payload:
                             payload["message"] = payload.get("mensaje")
 
-                        new_body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                        new_body = json.dumps(payload, ensure_ascii=False).encode(
+                            "utf-8"
+                        )
                         try:
                             response.body = new_body
                             response.headers["content-length"] = str(len(new_body))
@@ -364,14 +491,18 @@ async def tenant_context_middleware(request: Request, call_next):
                         try:
                             if request.method == "GET" and response.status_code == 200:
                                 etag = hashlib.sha256(new_body).hexdigest()
-                                response.headers["ETag"] = f"\"{etag}\""
+                                response.headers["ETag"] = f'"{etag}"'
                                 vary = response.headers.get("Vary") or ""
-                                vary_parts = [v.strip() for v in vary.split(",") if v.strip()]
+                                vary_parts = [
+                                    v.strip() for v in vary.split(",") if v.strip()
+                                ]
                                 for v in ("Cookie", "X-Tenant", "Origin"):
                                     if v not in vary_parts:
                                         vary_parts.append(v)
                                 response.headers["Vary"] = ", ".join(vary_parts)
-                                inm = (request.headers.get("if-none-match") or "").strip()
+                                inm = (
+                                    request.headers.get("if-none-match") or ""
+                                ).strip()
                                 if inm and inm == response.headers["ETag"]:
                                     response.status_code = 304
                                     response.body = b""
@@ -382,7 +513,10 @@ async def tenant_context_middleware(request: Request, call_next):
                         try:
                             if request.method == "GET" and response.status_code == 200:
                                 pth = str(request.url.path)
-                                if any(pth.startswith(x) for x in _API_GET_CACHE_PATH_PREFIXES):
+                                if any(
+                                    pth.startswith(x)
+                                    for x in _API_GET_CACHE_PATH_PREFIXES
+                                ):
                                     try:
                                         t = str(get_current_tenant() or "")
                                     except Exception:
@@ -420,6 +554,28 @@ async def tenant_context_middleware(request: Request, call_next):
         except Exception:
             pass
 
+        try:
+            if request.url.path.startswith("/api/") and request.method == "GET":
+                if not str(request.cookies.get("ironhub_csrf") or "").strip():
+                    import secrets
+
+                    tok = secrets.token_urlsafe(32)
+                    response.set_cookie(
+                        key="ironhub_csrf",
+                        value=tok,
+                        httponly=False,
+                        secure=not is_dev,
+                        samesite=same_site,
+                        domain=cookie_domain,
+                        path="/",
+                    )
+        except Exception:
+            pass
+
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+        response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
         return response
     finally:
         try:
@@ -432,15 +588,15 @@ def extract_tenant_from_request(request: Request) -> str:
     """Extract tenant subdomain from request host"""
     host = request.headers.get("host", "")
     base = os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz")
-    
+
     # Remove port if present
     host = host.split(":")[0]
-    
+
     # Check if it's a subdomain
     if host.endswith(f".{base}"):
         subdomain = host.replace(f".{base}", "")
         return subdomain if subdomain else None
-    
+
     # Check X-Tenant header as fallback
     return request.headers.get("x-tenant")
 
@@ -505,42 +661,50 @@ async def login(
     request: Request,
     dni: str = Form(...),
     pin: str = Form(...),
-    tenant: str = Depends(require_tenant)
+    tenant: str = Depends(require_tenant),
 ):
     """Authenticate gym member with DNI and PIN"""
     try:
         # Get tenant database session
         SessionFactory = get_tenant_session_factory(tenant)
         if not SessionFactory:
-            return JSONResponse({"ok": False, "error": "Gym not found"}, status_code=404)
-        
+            return JSONResponse(
+                {"ok": False, "error": "Gym not found"}, status_code=404
+            )
+
         session = SessionFactory()
         try:
             # Find user by DNI
             user = session.query(Usuario).filter(Usuario.dni == dni).first()
-            
+
             if not user:
-                return JSONResponse({"ok": False, "error": "Usuario no encontrado"}, status_code=401)
-            
+                return JSONResponse(
+                    {"ok": False, "error": "Usuario no encontrado"}, status_code=401
+                )
+
             # Verify PIN
-            stored_pin = getattr(user, 'pin', None) or getattr(user, 'password', None)
+            stored_pin = getattr(user, "pin", None) or getattr(user, "password", None)
             if not stored_pin or stored_pin != pin:
-                return JSONResponse({"ok": False, "error": "PIN incorrecto"}, status_code=401)
-            
+                return JSONResponse(
+                    {"ok": False, "error": "PIN incorrecto"}, status_code=401
+                )
+
             # Set session
             request.session["user_id"] = user.id
             request.session["user_dni"] = user.dni
             request.session["user_name"] = user.nombre
             request.session["tenant"] = tenant
-            
+
             return {"ok": True, "user": {"id": user.id, "name": user.nombre}}
-            
+
         finally:
             session.close()
-            
+
     except Exception as e:
         logger.error(f"Login error: {e}")
-        return JSONResponse({"ok": False, "error": "Error de autenticación"}, status_code=500)
+        return JSONResponse(
+            {"ok": False, "error": "Error de autenticación"}, status_code=500
+        )
 
 
 @app.post("/auth/logout")
@@ -554,7 +718,7 @@ async def logout(request: Request):
 async def get_me(
     request: Request,
     tenant: str = Depends(require_tenant),
-    user: dict = Depends(require_auth)
+    user: dict = Depends(require_auth),
 ):
     """Get current user profile"""
     try:
@@ -564,16 +728,16 @@ async def get_me(
             db_user = session.query(Usuario).filter(Usuario.id == user["id"]).first()
             if not db_user:
                 raise HTTPException(status_code=404, detail="User not found")
-            
+
             return {
                 "id": db_user.id,
                 "name": db_user.nombre,
                 "dni": db_user.dni,
-                "email": getattr(db_user, 'email', None),
-                "phone": getattr(db_user, 'telefono', None),
-                "status": getattr(db_user, 'estado', 'active'),
-                "plan": getattr(db_user, 'plan', None),
-                "memberSince": str(getattr(db_user, 'fecha_alta', '')),
+                "email": getattr(db_user, "email", None),
+                "phone": getattr(db_user, "telefono", None),
+                "status": getattr(db_user, "estado", "active"),
+                "plan": getattr(db_user, "plan", None),
+                "memberSince": str(getattr(db_user, "fecha_alta", "")),
             }
         finally:
             session.close()
@@ -588,26 +752,30 @@ async def get_me(
 async def get_payments(
     request: Request,
     tenant: str = Depends(require_tenant),
-    user: dict = Depends(require_auth)
+    user: dict = Depends(require_auth),
 ):
     """Get user's payment history"""
     try:
         SessionFactory = get_tenant_session_factory(tenant)
         session = SessionFactory()
         try:
-            payments = session.query(Pago).filter(
-                Pago.usuario_id == user["id"]
-            ).order_by(Pago.fecha.desc()).limit(50).all()
-            
+            payments = (
+                session.query(Pago)
+                .filter(Pago.usuario_id == user["id"])
+                .order_by(Pago.fecha.desc())
+                .limit(50)
+                .all()
+            )
+
             return {
                 "payments": [
                     {
                         "id": p.id,
                         "date": str(p.fecha),
                         "amount": float(p.monto),
-                        "concept": getattr(p, 'concepto', 'Cuota'),
-                        "method": getattr(p, 'metodo', 'Efectivo'),
-                        "status": "paid"
+                        "concept": getattr(p, "concepto", "Cuota"),
+                        "method": getattr(p, "metodo", "Efectivo"),
+                        "status": "paid",
                     }
                     for p in payments
                 ]
@@ -623,52 +791,69 @@ async def get_payments(
 async def get_attendance(
     request: Request,
     tenant: str = Depends(require_tenant),
-    user: dict = Depends(require_auth)
+    user: dict = Depends(require_auth),
 ):
     """Get user's attendance history"""
     try:
         from src.models import Asistencia
         from sqlalchemy import func, extract
-        from datetime import datetime, timedelta
-        
+        from datetime import datetime
+
         SessionFactory = get_tenant_session_factory(tenant)
         if not SessionFactory:
-            return {"attendance": [], "stats": {"thisMonth": 0, "lastMonth": 0, "avgDuration": 0}}
-        
+            return {
+                "attendance": [],
+                "stats": {"thisMonth": 0, "lastMonth": 0, "avgDuration": 0},
+            }
+
         session = SessionFactory()
         try:
             # Get attendance records
-            records = session.query(Asistencia).filter(
-                Asistencia.usuario_id == user["id"]
-            ).order_by(Asistencia.fecha.desc()).limit(50).all()
-            
+            records = (
+                session.query(Asistencia)
+                .filter(Asistencia.usuario_id == user["id"])
+                .order_by(Asistencia.fecha.desc())
+                .limit(50)
+                .all()
+            )
+
             # Calculate stats
             now = datetime.now()
             this_month = now.month
             this_year = now.year
             last_month = now.month - 1 if now.month > 1 else 12
             last_year = now.year if now.month > 1 else now.year - 1
-            
-            this_month_count = session.query(func.count(Asistencia.id)).filter(
-                Asistencia.usuario_id == user["id"],
-                extract('month', Asistencia.fecha) == this_month,
-                extract('year', Asistencia.fecha) == this_year
-            ).scalar() or 0
-            
-            last_month_count = session.query(func.count(Asistencia.id)).filter(
-                Asistencia.usuario_id == user["id"],
-                extract('month', Asistencia.fecha) == last_month,
-                extract('year', Asistencia.fecha) == last_year
-            ).scalar() or 0
-            
+
+            this_month_count = (
+                session.query(func.count(Asistencia.id))
+                .filter(
+                    Asistencia.usuario_id == user["id"],
+                    extract("month", Asistencia.fecha) == this_month,
+                    extract("year", Asistencia.fecha) == this_year,
+                )
+                .scalar()
+                or 0
+            )
+
+            last_month_count = (
+                session.query(func.count(Asistencia.id))
+                .filter(
+                    Asistencia.usuario_id == user["id"],
+                    extract("month", Asistencia.fecha) == last_month,
+                    extract("year", Asistencia.fecha) == last_year,
+                )
+                .scalar()
+                or 0
+            )
+
             return {
                 "attendance": [
                     {
                         "id": a.id,
                         "date": str(a.fecha),
-                        "checkIn": str(getattr(a, 'hora_entrada', '') or ''),
-                        "checkOut": str(getattr(a, 'hora_salida', '') or ''),
-                        "duration": getattr(a, 'duracion_minutos', 60) or 60
+                        "checkIn": str(getattr(a, "hora_entrada", "") or ""),
+                        "checkOut": str(getattr(a, "hora_salida", "") or ""),
+                        "duration": getattr(a, "duracion_minutos", 60) or 60,
                     }
                     for a in records
                 ],
@@ -676,8 +861,8 @@ async def get_attendance(
                     "thisMonth": this_month_count,
                     "lastMonth": last_month_count,
                     "avgDuration": 60,
-                    "streak": 0
-                }
+                    "streak": 0,
+                },
             }
         finally:
             session.close()
@@ -690,76 +875,87 @@ async def get_attendance(
 async def get_routines(
     request: Request,
     tenant: str = Depends(require_tenant),
-    user: dict = Depends(require_auth)
+    user: dict = Depends(require_auth),
 ):
     """Get user's assigned routines"""
     try:
         from src.models import RutinaEjercicio, Ejercicio
-        from sqlalchemy.orm import joinedload
-        
+
         SessionFactory = get_tenant_session_factory(tenant)
         if not SessionFactory:
             return {"routine": None}
-        
+
         session = SessionFactory()
         try:
             # Get user's assigned routine
             db_user = session.query(Usuario).filter(Usuario.id == user["id"]).first()
-            rutina_id = getattr(db_user, 'rutina_id', None)
-            
+            rutina_id = getattr(db_user, "rutina_id", None)
+
             if not rutina_id:
                 return {"routine": None}
-            
+
             rutina = session.query(Rutina).filter(Rutina.id == rutina_id).first()
             if not rutina:
                 return {"routine": None}
-            
+
             # Get exercises grouped by day
-            ejercicios_raw = session.query(RutinaEjercicio).filter(
-                RutinaEjercicio.rutina_id == rutina_id
-            ).order_by(RutinaEjercicio.dia, RutinaEjercicio.orden).all()
-            
+            ejercicios_raw = (
+                session.query(RutinaEjercicio)
+                .filter(RutinaEjercicio.rutina_id == rutina_id)
+                .order_by(RutinaEjercicio.dia, RutinaEjercicio.orden)
+                .all()
+            )
+
             # Group exercises by day
             days_map = {}
             for ej in ejercicios_raw:
-                dia = getattr(ej, 'dia', 1) or 1
+                dia = getattr(ej, "dia", 1) or 1
                 if dia not in days_map:
                     days_map[dia] = []
-                
+
                 # Get exercise details
-                ejercicio_id = getattr(ej, 'ejercicio_id', None)
+                ejercicio_id = getattr(ej, "ejercicio_id", None)
                 ejercicio_nombre = None
                 if ejercicio_id:
-                    ejercicio = session.query(Ejercicio).filter(Ejercicio.id == ejercicio_id).first()
+                    ejercicio = (
+                        session.query(Ejercicio)
+                        .filter(Ejercicio.id == ejercicio_id)
+                        .first()
+                    )
                     if ejercicio:
                         ejercicio_nombre = ejercicio.nombre
-                
-                days_map[dia].append({
-                    "id": ej.id,
-                    "ejercicio_id": ejercicio_id,
-                    "ejercicio_nombre": ejercicio_nombre or getattr(ej, 'nombre', 'Ejercicio'),
-                    "series": getattr(ej, 'series', 3),
-                    "repeticiones": str(getattr(ej, 'repeticiones', '10')),
-                    "descanso": getattr(ej, 'descanso', 60),
-                    "notas": getattr(ej, 'notas', None),
-                    "orden": getattr(ej, 'orden', 0)
-                })
-            
+
+                days_map[dia].append(
+                    {
+                        "id": ej.id,
+                        "ejercicio_id": ejercicio_id,
+                        "ejercicio_nombre": ejercicio_nombre
+                        or getattr(ej, "nombre", "Ejercicio"),
+                        "series": getattr(ej, "series", 3),
+                        "repeticiones": str(getattr(ej, "repeticiones", "10")),
+                        "descanso": getattr(ej, "descanso", 60),
+                        "notas": getattr(ej, "notas", None),
+                        "orden": getattr(ej, "orden", 0),
+                    }
+                )
+
             # Build days array
             days = []
             for dia_num in sorted(days_map.keys()):
-                days.append({
-                    "numero": dia_num,
-                    "nombre": f"Día {dia_num}",
-                    "ejercicios": days_map[dia_num]
-                })
-            
+                days.append(
+                    {
+                        "numero": dia_num,
+                        "nombre": f"Día {dia_num}",
+                        "ejercicios": days_map[dia_num],
+                    }
+                )
+
             return {
                 "routine": {
                     "id": rutina.id,
-                    "name": getattr(rutina, 'nombre', 'Rutina'),
-                    "description": getattr(rutina, 'descripcion', None),
-                    "days": days
+                    "name": getattr(rutina, "nombre", "Rutina"),
+                    "description": getattr(rutina, "descripcion", None),
+                    "days": days,
                 }
             }
         finally:
@@ -770,10 +966,7 @@ async def get_routines(
 
 
 @app.get("/gym/info")
-async def get_gym_info(
-    request: Request,
-    tenant: str = Depends(require_tenant)
-):
+async def get_gym_info(request: Request, tenant: str = Depends(require_tenant)):
     """Get gym public information"""
     try:
         # TODO: Fetch gym info from admin database
@@ -781,7 +974,7 @@ async def get_gym_info(
             "name": tenant.replace("_", " ").title(),
             "subdomain": tenant,
             "logo": None,
-            "theme": {}
+            "theme": {},
         }
     except Exception as e:
         logger.error(f"Error fetching gym info: {e}")
@@ -796,8 +989,12 @@ async def get_gym_info(
 from src.routers import users, gym, payments, whatsapp, attendance, exercises, auth
 from src.routers import public
 from src.routers import profesores, inscripciones
-from src.routers import reports, admin
+from src.routers import reports, admin, staff
 from src.routers import meta_review
+from src.routers import branches
+from src.routers import memberships
+from src.routers import entitlements
+from src.routers import work_sessions
 
 # Include routers
 app.include_router(auth.router, tags=["Auth"])
@@ -809,9 +1006,12 @@ app.include_router(whatsapp.router, tags=["WhatsApp"])
 app.include_router(attendance.router, tags=["Attendance"])
 app.include_router(exercises.router, tags=["Exercises"])
 app.include_router(public.router, tags=["Public"])
+app.include_router(branches.router, tags=["Branches"])
+app.include_router(memberships.router, tags=["Memberships"])
+app.include_router(entitlements.router, tags=["Entitlements"])
 app.include_router(profesores.router, tags=["Profesores"])
 app.include_router(reports.router, tags=["Reports"])
 app.include_router(admin.router, tags=["Admin"])
 app.include_router(meta_review.router, tags=["Meta Review"])
-
-
+app.include_router(staff.router, tags=["Staff"])
+app.include_router(work_sessions.router, tags=["Work Sessions"])

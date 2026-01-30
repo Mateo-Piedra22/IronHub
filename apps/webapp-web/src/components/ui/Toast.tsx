@@ -61,12 +61,35 @@ export function useToast() {
     const { addToast, removeToast, clearAll } = useToastStore();
 
     const toast = useCallback(
-        (message: string, type: ToastType = 'info', options?: { duration?: number; action?: Toast['action'] }) => {
+        (
+            input:
+                | string
+                | {
+                      title?: string;
+                      description?: string;
+                      variant?: ToastType;
+                      duration?: number;
+                      action?: Toast['action'];
+                  },
+            type: ToastType = 'info',
+            options?: { duration?: number; action?: Toast['action'] }
+        ) => {
+            if (typeof input === 'string') {
+                return addToast({
+                    message: input,
+                    type,
+                    duration: options?.duration,
+                    action: options?.action,
+                });
+            }
+
+            const resolvedType = input.variant || type;
+            const message = [input.title, input.description].filter(Boolean).join(' · ') || 'OK';
             return addToast({
                 message,
-                type,
-                duration: options?.duration,
-                action: options?.action,
+                type: resolvedType,
+                duration: input.duration ?? options?.duration,
+                action: input.action ?? options?.action,
             });
         },
         [addToast]

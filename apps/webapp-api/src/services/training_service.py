@@ -4,6 +4,7 @@ Training Service - SQLAlchemy ORM Implementation
 Handles exercises (Ejercicio) and routines (Rutina).
 Replaces legacy GymService training management methods.
 """
+
 import logging
 from typing import List, Dict, Any, Optional
 
@@ -12,11 +13,10 @@ from sqlalchemy.orm import Session, joinedload
 
 from src.services.base import BaseService
 from src.services.b2_storage import delete_file, extract_file_key, get_file_url
-from src.database.orm_models import (
-    Ejercicio, Rutina, RutinaEjercicio, Usuario
-)
+from src.database.orm_models import Ejercicio, Rutina, RutinaEjercicio, Usuario, Sucursal
 
 logger = logging.getLogger(__name__)
+
 
 class TrainingService(BaseService):
     """Service for exercises, routines, and training plans."""
@@ -24,20 +24,45 @@ class TrainingService(BaseService):
     def __init__(self, db: Session):
         super().__init__(db)
 
+    def _scope_by_sucursal(self, stmt, model, sucursal_id: Optional[int]):
+        if sucursal_id is None:
+            return stmt
+        try:
+            sid = int(sucursal_id)
+        except Exception:
+            return stmt
+        if sid <= 0:
+            return stmt
+        try:
+            col = getattr(model, "sucursal_id", None)
+        except Exception:
+            col = None
+        if col is None:
+            return stmt
+        return stmt.where(or_(col.is_(None), col == sid))
+
     # =========================================================================
     # EJERCICIOS (Exercises)
     # =========================================================================
 
-    def obtener_ejercicios_catalog(self) -> List[Dict[str, Any]]:
+    def obtener_ejercicios_catalog(self, sucursal_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """Get minimal exercises catalog for routine building."""
         try:
-            ejercicios = self.db.scalars(select(Ejercicio).order_by(Ejercicio.nombre)).all()
+            stmt = select(Ejercicio).order_by(Ejercicio.nombre)
+            stmt = self._scope_by_sucursal(stmt, Ejercicio, sucursal_id)
+            ejercicios = self.db.scalars(stmt).all()
             return [
                 {
-                    'id': e.id,
-                    'nombre': e.nombre,
-                    'video_url': (get_file_url(e.video_url) if (hasattr(e, 'video_url') and getattr(e, 'video_url', None)) else None),
-                    'grupo_muscular': e.grupo_muscular if hasattr(e, 'grupo_muscular') else None
+                    "id": e.id,
+                    "nombre": e.nombre,
+                    "video_url": (
+                        get_file_url(e.video_url)
+                        if (hasattr(e, "video_url") and getattr(e, "video_url", None))
+                        else None
+                    ),
+                    "grupo_muscular": e.grupo_muscular
+                    if hasattr(e, "grupo_muscular")
+                    else None,
                 }
                 for e in ejercicios
             ]
@@ -45,33 +70,40 @@ class TrainingService(BaseService):
             logger.error(f"Error getting ejercicios catalog: {e}")
             return []
 
-    def obtener_ejercicios(self, search: str = None, grupo: str = None, objetivo: str = None) -> List[Dict[str, Any]]:
+    def obtener_ejercicios(
+        self, search: str = None, grupo: str = None, objetivo: str = None, sucursal_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """Get all exercises with optional filters."""
         try:
             stmt = select(Ejercicio)
-            
+            stmt = self._scope_by_sucursal(stmt, Ejercicio, sucursal_id)
+
             if search and search.strip():
                 term = f"%{search.strip().lower()}%"
                 filters = [func.lower(Ejercicio.nombre).like(term)]
-                if hasattr(Ejercicio, 'descripcion'):
+                if hasattr(Ejercicio, "descripcion"):
                     filters.append(func.lower(Ejercicio.descripcion).like(term))
                 stmt = stmt.where(or_(*filters))
-            
+
             if grupo and grupo.strip():
-                if hasattr(Ejercicio, 'grupo_muscular'):
-                    stmt = stmt.where(func.lower(Ejercicio.grupo_muscular) == grupo.strip().lower())
-            
+                if hasattr(Ejercicio, "grupo_muscular"):
+                    stmt = stmt.where(
+                        func.lower(Ejercicio.grupo_muscular) == grupo.strip().lower()
+                    )
+
             if objetivo and objetivo.strip():
-                if hasattr(Ejercicio, 'objetivo'):
-                    stmt = stmt.where(func.lower(Ejercicio.objetivo) == objetivo.strip().lower())
+                if hasattr(Ejercicio, "objetivo"):
+                    stmt = stmt.where(
+                        func.lower(Ejercicio.objetivo) == objetivo.strip().lower()
+                    )
 
             stmt = stmt.order_by(Ejercicio.nombre)
-            
+
             ejercicios = self.db.scalars(stmt).all()
-            
+
             out = []
             for e in ejercicios:
-                v = getattr(e, 'video_url', None)
+                v = getattr(e, "video_url", None)
                 try:
                     if v:
                         v = get_file_url(v)
@@ -79,14 +111,14 @@ class TrainingService(BaseService):
                     pass
                 out.append(
                     {
-                        'id': e.id,
-                        'nombre': e.nombre,
-                        'descripcion': getattr(e, 'descripcion', None),
-                        'grupo_muscular': getattr(e, 'grupo_muscular', None),
-                        'objetivo': getattr(e, 'objetivo', None),
-                        'equipamiento': getattr(e, 'equipamiento', None),
-                        'variantes': getattr(e, 'variantes', None),
-                        'video_url': v,
+                        "id": e.id,
+                        "nombre": e.nombre,
+                        "descripcion": getattr(e, "descripcion", None),
+                        "grupo_muscular": getattr(e, "grupo_muscular", None),
+                        "objetivo": getattr(e, "objetivo", None),
+                        "equipamiento": getattr(e, "equipamiento", None),
+                        "variantes": getattr(e, "variantes", None),
+                        "video_url": v,
                     }
                 )
             return out
@@ -100,6 +132,7 @@ class TrainingService(BaseService):
         search: str = "",
         grupo: str = None,
         objetivo: str = None,
+        sucursal_id: Optional[int] = None,
         limit: int = 20,
         offset: int = 0,
     ) -> Dict[str, Any]:
@@ -109,35 +142,51 @@ class TrainingService(BaseService):
 
             stmt = select(Ejercicio)
             count_stmt = select(func.count()).select_from(Ejercicio)
+            stmt = self._scope_by_sucursal(stmt, Ejercicio, sucursal_id)
+            count_stmt = self._scope_by_sucursal(count_stmt, Ejercicio, sucursal_id)
 
             search_filters = []
             if term:
                 like = f"%{term}%"
                 search_filters.append(func.lower(Ejercicio.nombre).like(like))
-                if hasattr(Ejercicio, 'grupo_muscular'):
-                    search_filters.append(func.lower(Ejercicio.grupo_muscular).like(like))
-                if hasattr(Ejercicio, 'descripcion'):
+                if hasattr(Ejercicio, "grupo_muscular"):
+                    search_filters.append(
+                        func.lower(Ejercicio.grupo_muscular).like(like)
+                    )
+                if hasattr(Ejercicio, "descripcion"):
                     search_filters.append(func.lower(Ejercicio.descripcion).like(like))
 
             if search_filters:
                 stmt = stmt.where(or_(*search_filters))
                 count_stmt = count_stmt.where(or_(*search_filters))
 
-            if grupo and str(grupo).strip() and hasattr(Ejercicio, 'grupo_muscular'):
-                stmt = stmt.where(func.lower(Ejercicio.grupo_muscular) == str(grupo).strip().lower())
-                count_stmt = count_stmt.where(func.lower(Ejercicio.grupo_muscular) == str(grupo).strip().lower())
-            if objetivo and str(objetivo).strip() and hasattr(Ejercicio, 'objetivo'):
-                stmt = stmt.where(func.lower(Ejercicio.objetivo) == str(objetivo).strip().lower())
-                count_stmt = count_stmt.where(func.lower(Ejercicio.objetivo) == str(objetivo).strip().lower())
+            if grupo and str(grupo).strip() and hasattr(Ejercicio, "grupo_muscular"):
+                stmt = stmt.where(
+                    func.lower(Ejercicio.grupo_muscular) == str(grupo).strip().lower()
+                )
+                count_stmt = count_stmt.where(
+                    func.lower(Ejercicio.grupo_muscular) == str(grupo).strip().lower()
+                )
+            if objetivo and str(objetivo).strip() and hasattr(Ejercicio, "objetivo"):
+                stmt = stmt.where(
+                    func.lower(Ejercicio.objetivo) == str(objetivo).strip().lower()
+                )
+                count_stmt = count_stmt.where(
+                    func.lower(Ejercicio.objetivo) == str(objetivo).strip().lower()
+                )
 
             total = int(self.db.scalar(count_stmt) or 0)
 
-            stmt = stmt.order_by(Ejercicio.nombre).limit(int(limit or 20)).offset(int(offset or 0))
+            stmt = (
+                stmt.order_by(Ejercicio.nombre)
+                .limit(int(limit or 20))
+                .offset(int(offset or 0))
+            )
             ejercicios = self.db.scalars(stmt).all()
 
             items = []
             for e in ejercicios:
-                v = getattr(e, 'video_url', None)
+                v = getattr(e, "video_url", None)
                 try:
                     if v:
                         v = get_file_url(v)
@@ -145,74 +194,104 @@ class TrainingService(BaseService):
                     pass
                 items.append(
                     {
-                        'id': e.id,
-                        'nombre': e.nombre,
-                        'descripcion': getattr(e, 'descripcion', None),
-                        'grupo_muscular': getattr(e, 'grupo_muscular', None),
-                        'objetivo': getattr(e, 'objetivo', None),
-                        'equipamiento': getattr(e, 'equipamiento', None),
-                        'variantes': getattr(e, 'variantes', None),
-                        'video_url': v,
-                        'video_mime': getattr(e, 'video_mime', None),
+                        "id": e.id,
+                        "nombre": e.nombre,
+                        "descripcion": getattr(e, "descripcion", None),
+                        "grupo_muscular": getattr(e, "grupo_muscular", None),
+                        "objetivo": getattr(e, "objetivo", None),
+                        "equipamiento": getattr(e, "equipamiento", None),
+                        "variantes": getattr(e, "variantes", None),
+                        "video_url": v,
+                        "video_mime": getattr(e, "video_mime", None),
                     }
                 )
 
-            return {'items': items, 'total': total}
+            return {"items": items, "total": total}
         except Exception as e:
             logger.error(f"Error paginating ejercicios: {e}")
-            return {'items': [], 'total': 0}
-            
+            return {"items": [], "total": 0}
+
     def crear_ejercicio(self, data: Dict[str, Any]) -> Optional[int]:
         """Create a new exercise."""
         try:
             ejercicio = Ejercicio(
-                nombre=data.get('nombre', ''),
-                grupo_muscular=data.get('grupo_muscular'),
-                objetivo=data.get('objetivo') or 'general',
-                equipamiento=data.get('equipamiento'),
-                variantes=data.get('variantes'),
-                video_url=data.get('video_url'),
-                video_mime=data.get('video_mime')
+                nombre=data.get("nombre", ""),
+                grupo_muscular=data.get("grupo_muscular"),
+                objetivo=data.get("objetivo") or "general",
+                equipamiento=data.get("equipamiento"),
+                variantes=data.get("variantes"),
+                video_url=data.get("video_url"),
+                video_mime=data.get("video_mime"),
             )
+            if hasattr(Ejercicio, "sucursal_id") and "sucursal_id" in data:
+                ejercicio.sucursal_id = data.get("sucursal_id")
             # Add description if model has it
-            if hasattr(Ejercicio, 'descripcion'):
-                ejercicio.descripcion = data.get('descripcion')
-                
+            if hasattr(Ejercicio, "descripcion"):
+                ejercicio.descripcion = data.get("descripcion")
+
             self.db.add(ejercicio)
             self.db.commit()
             if ejercicio.id:
-                 return ejercicio.id
+                return ejercicio.id
             return None
         except Exception as e:
             logger.error(f"Error creating ejercicio: {e}")
             self.db.rollback()
             return None
 
-    def actualizar_ejercicio(self, ejercicio_id: int, data: Dict[str, Any]) -> bool:
+    def actualizar_ejercicio(self, ejercicio_id: int, data: Dict[str, Any], sucursal_id: Optional[int] = None) -> bool:
         """Update an exercise."""
         try:
             ejercicio = self.db.get(Ejercicio, ejercicio_id)
             if not ejercicio:
                 return False
-                
-            old_video_url = getattr(ejercicio, 'video_url', None)
+            if sucursal_id is not None and hasattr(ejercicio, "sucursal_id"):
+                try:
+                    sid = int(sucursal_id)
+                except Exception:
+                    sid = None
+                if sid is not None and sid > 0:
+                    try:
+                        own_sid = getattr(ejercicio, "sucursal_id", None)
+                        if own_sid is not None and int(own_sid) != sid:
+                            return False
+                    except Exception:
+                        pass
 
-            if 'nombre' in data: ejercicio.nombre = data['nombre']
-            if 'grupo_muscular' in data: ejercicio.grupo_muscular = data['grupo_muscular']
-            if 'objetivo' in data and hasattr(ejercicio, 'objetivo'): ejercicio.objetivo = data['objetivo']
-            if 'equipamiento' in data and hasattr(ejercicio, 'equipamiento'): ejercicio.equipamiento = data['equipamiento']
-            if 'variantes' in data and hasattr(ejercicio, 'variantes'): ejercicio.variantes = data['variantes']
-            if 'video_url' in data: ejercicio.video_url = data['video_url']
-            if 'video_mime' in data: ejercicio.video_mime = data['video_mime']
-            if 'descripcion' in data and hasattr(ejercicio, 'descripcion'): 
-                ejercicio.descripcion = data['descripcion']
-                
+            old_video_url = getattr(ejercicio, "video_url", None)
+
+            if "nombre" in data:
+                ejercicio.nombre = data["nombre"]
+            if "grupo_muscular" in data:
+                ejercicio.grupo_muscular = data["grupo_muscular"]
+            if "objetivo" in data and hasattr(ejercicio, "objetivo"):
+                ejercicio.objetivo = data["objetivo"]
+            if "equipamiento" in data and hasattr(ejercicio, "equipamiento"):
+                ejercicio.equipamiento = data["equipamiento"]
+            if "variantes" in data and hasattr(ejercicio, "variantes"):
+                ejercicio.variantes = data["variantes"]
+            if "video_url" in data:
+                ejercicio.video_url = data["video_url"]
+            if "video_mime" in data:
+                ejercicio.video_mime = data["video_mime"]
+            if "descripcion" in data and hasattr(ejercicio, "descripcion"):
+                ejercicio.descripcion = data["descripcion"]
+            if hasattr(ejercicio, "sucursal_id"):
+                if "shared" in data:
+                    try:
+                        if bool(data.get("shared")):
+                            ejercicio.sucursal_id = None
+                    except Exception:
+                        pass
+                if "sucursal_id" in data:
+                    ejercicio.sucursal_id = data.get("sucursal_id")
+
             self.db.commit()
 
             # Best-effort cleanup of old video if it was replaced/removed
             try:
-                if 'video_url' in data:
-                    new_video_url = getattr(ejercicio, 'video_url', None)
+                if "video_url" in data:
+                    new_video_url = getattr(ejercicio, "video_url", None)
                     if old_video_url and old_video_url != new_video_url:
                         old_key = extract_file_key(old_video_url)
                         if old_key:
@@ -226,32 +305,51 @@ class TrainingService(BaseService):
             self.db.rollback()
             return False
 
-    def eliminar_ejercicio(self, ejercicio_id: int) -> bool:
+    def eliminar_ejercicio(self, ejercicio_id: int, sucursal_id: Optional[int] = None) -> bool:
         """Delete an exercise."""
         try:
             ejercicio = self.db.get(Ejercicio, ejercicio_id)
             if not ejercicio:
                 return False
+            if sucursal_id is not None and hasattr(ejercicio, "sucursal_id"):
+                try:
+                    sid = int(sucursal_id)
+                except Exception:
+                    sid = None
+                if sid is not None and sid > 0:
+                    try:
+                        own_sid = getattr(ejercicio, "sucursal_id", None)
+                        if own_sid is not None and int(own_sid) != sid:
+                            return False
+                    except Exception:
+                        pass
 
             # Defensive cleanup of references (in case DB FKs are not configured with ON DELETE CASCADE)
             try:
-                self.db.query(RutinaEjercicio).filter(RutinaEjercicio.ejercicio_id == int(ejercicio_id)).delete()
+                self.db.query(RutinaEjercicio).filter(
+                    RutinaEjercicio.ejercicio_id == int(ejercicio_id)
+                ).delete()
             except Exception:
                 pass
             try:
                 from src.database.orm_models import ClaseEjercicio, ClaseBloqueItem
+
                 try:
-                    self.db.query(ClaseEjercicio).filter(ClaseEjercicio.ejercicio_id == int(ejercicio_id)).delete()
+                    self.db.query(ClaseEjercicio).filter(
+                        ClaseEjercicio.ejercicio_id == int(ejercicio_id)
+                    ).delete()
                 except Exception:
                     pass
                 try:
-                    self.db.query(ClaseBloqueItem).filter(ClaseBloqueItem.ejercicio_id == int(ejercicio_id)).delete()
+                    self.db.query(ClaseBloqueItem).filter(
+                        ClaseBloqueItem.ejercicio_id == int(ejercicio_id)
+                    ).delete()
                 except Exception:
                     pass
             except Exception:
                 pass
 
-            old_video_url = getattr(ejercicio, 'video_url', None)
+            old_video_url = getattr(ejercicio, "video_url", None)
             self.db.delete(ejercicio)
             self.db.commit()
 
@@ -280,12 +378,14 @@ class TrainingService(BaseService):
         include_exercises: bool = False,
         search: str = None,
         solo_plantillas: Optional[bool] = None,
+        sucursal_id: Optional[int] = None,
         limit: Optional[int] = None,
         offset: int = 0,
     ) -> List[Dict[str, Any]]:
         """Get routines, optionally filtered by user."""
         try:
             stmt = select(Rutina).options(joinedload(Rutina.usuario))
+            stmt = self._scope_by_sucursal(stmt, Rutina, sucursal_id)
             if usuario_id is not None:
                 stmt = stmt.where(Rutina.usuario_id == usuario_id)
 
@@ -298,7 +398,7 @@ class TrainingService(BaseService):
             if search and str(search).strip():
                 like = f"%{str(search).strip().lower()}%"
                 stmt = stmt.where(func.lower(Rutina.nombre_rutina).like(like))
-            
+
             stmt = stmt.order_by(Rutina.nombre_rutina)
 
             if limit is not None:
@@ -307,19 +407,77 @@ class TrainingService(BaseService):
                 stmt = stmt.offset(int(offset or 0))
 
             rutinas = self.db.scalars(stmt).all()
-            
+
             results = []
+
+            sucursal_nombre_by_id: Dict[int, str] = {}
+            creada_por_nombre_by_id: Dict[int, str] = {}
+            if rutinas:
+                try:
+                    suc_ids = sorted(
+                        {
+                            int(getattr(r, "sucursal_id"))
+                            for r in rutinas
+                            if getattr(r, "sucursal_id", None) is not None
+                        }
+                    )
+                except Exception:
+                    suc_ids = []
+                if suc_ids:
+                    try:
+                        rows = self.db.execute(
+                            select(Sucursal.id, Sucursal.nombre).where(
+                                Sucursal.id.in_(suc_ids)
+                            )
+                        ).all()
+                        for sid, nombre in rows or []:
+                            try:
+                                sucursal_nombre_by_id[int(sid)] = str(nombre or "")
+                            except Exception:
+                                pass
+                    except Exception:
+                        sucursal_nombre_by_id = {}
+
+                try:
+                    creador_ids = sorted(
+                        {
+                            int(getattr(r, "creada_por_usuario_id"))
+                            for r in rutinas
+                            if getattr(r, "creada_por_usuario_id", None) is not None
+                        }
+                    )
+                except Exception:
+                    creador_ids = []
+                if creador_ids:
+                    try:
+                        rows = self.db.execute(
+                            select(Usuario.id, Usuario.nombre).where(
+                                Usuario.id.in_(creador_ids)
+                            )
+                        ).all()
+                        for uid, nombre in rows or []:
+                            try:
+                                creada_por_nombre_by_id[int(uid)] = str(nombre or "")
+                            except Exception:
+                                pass
+                    except Exception:
+                        creada_por_nombre_by_id = {}
 
             ejercicios_count_by_rutina: Dict[int, int] = {}
             if rutinas:
                 try:
-                    rutina_ids = [int(r.id) for r in rutinas if getattr(r, 'id', None) is not None]
+                    rutina_ids = [
+                        int(r.id) for r in rutinas if getattr(r, "id", None) is not None
+                    ]
                 except Exception:
                     rutina_ids = []
                 if rutina_ids:
                     try:
                         rows = self.db.execute(
-                            select(RutinaEjercicio.rutina_id, func.count(RutinaEjercicio.id))
+                            select(
+                                RutinaEjercicio.rutina_id,
+                                func.count(RutinaEjercicio.id),
+                            )
                             .where(RutinaEjercicio.rutina_id.in_(rutina_ids))
                             .group_by(RutinaEjercicio.rutina_id)
                         ).all()
@@ -333,64 +491,85 @@ class TrainingService(BaseService):
 
             ejercicios_by_rutina: Dict[int, List[Dict[str, Any]]] = {}
             if include_exercises and rutinas:
-                rutina_ids = [int(r.id) for r in rutinas if getattr(r, 'id', None) is not None]
+                rutina_ids = [
+                    int(r.id) for r in rutinas if getattr(r, "id", None) is not None
+                ]
                 if rutina_ids:
                     exs_all = self.db.scalars(
                         select(RutinaEjercicio)
                         .options(joinedload(RutinaEjercicio.ejercicio))
                         .where(RutinaEjercicio.rutina_id.in_(rutina_ids))
-                        .order_by(RutinaEjercicio.rutina_id, RutinaEjercicio.dia_semana, RutinaEjercicio.orden)
+                        .order_by(
+                            RutinaEjercicio.rutina_id,
+                            RutinaEjercicio.dia_semana,
+                            RutinaEjercicio.orden,
+                        )
                     ).all()
                     for re in exs_all:
                         rid = int(re.rutina_id)
                         ejercicios_by_rutina.setdefault(rid, []).append(
                             {
-                                'id': re.id,
-                                'ejercicio_id': re.ejercicio_id,
-                                'nombre_ejercicio': re.ejercicio.nombre if re.ejercicio else None,
-                                'ejercicio_nombre': re.ejercicio.nombre if re.ejercicio else None,
-                                'dia_semana': re.dia_semana,
-                                'series': re.series,
-                                'repeticiones': re.repeticiones,
-                                'orden': re.orden,
-                                'video_url': (get_file_url(re.ejercicio.video_url) if (re.ejercicio and getattr(re.ejercicio, 'video_url', None)) else None),
+                                "id": re.id,
+                                "ejercicio_id": re.ejercicio_id,
+                                "nombre_ejercicio": re.ejercicio.nombre
+                                if re.ejercicio
+                                else None,
+                                "ejercicio_nombre": re.ejercicio.nombre
+                                if re.ejercicio
+                                else None,
+                                "dia_semana": re.dia_semana,
+                                "series": re.series,
+                                "repeticiones": re.repeticiones,
+                                "orden": re.orden,
+                                "video_url": (
+                                    get_file_url(re.ejercicio.video_url)
+                                    if (
+                                        re.ejercicio
+                                        and getattr(re.ejercicio, "video_url", None)
+                                    )
+                                    else None
+                                ),
                             }
                         )
 
-            def _build_days(dias_semana_val: Any, ejercicios_flat: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            def _build_days(
+                dias_semana_val: Any, ejercicios_flat: List[Dict[str, Any]]
+            ) -> List[Dict[str, Any]]:
                 try:
                     dcount = int(dias_semana_val or 1)
                 except Exception:
                     dcount = 1
                 dcount = max(1, min(dcount, 5))
                 dias_list: List[Dict[str, Any]] = [
-                    {'numero': d, 'nombre': f"Día {d}", 'ejercicios': []}
+                    {"numero": d, "nombre": f"Día {d}", "ejercicios": []}
                     for d in range(1, dcount + 1)
                 ]
                 if not ejercicios_flat:
                     return dias_list
-                by_num = {int(d['numero']): d for d in dias_list}
-                for ex in (ejercicios_flat or []):
+                by_num = {int(d["numero"]): d for d in dias_list}
+                for ex in ejercicios_flat or []:
                     try:
-                        dnum = int(ex.get('dia_semana') or ex.get('dia') or 1)
+                        dnum = int(ex.get("dia_semana") or ex.get("dia") or 1)
                     except Exception:
                         dnum = 1
                     dnum = max(1, min(dnum, dcount))
                     day_obj = by_num.get(dnum)
                     if not day_obj:
                         continue
-                    day_obj['ejercicios'].append(
+                    day_obj["ejercicios"].append(
                         {
-                            'id': ex.get('id'),
-                            'ejercicio_id': ex.get('ejercicio_id'),
-                            'ejercicio_nombre': ex.get('ejercicio_nombre') or ex.get('nombre_ejercicio') or ex.get('nombre'),
-                            'series': ex.get('series'),
-                            'repeticiones': ex.get('repeticiones'),
-                            'descanso': ex.get('descanso'),
-                            'notas': ex.get('notas'),
-                            'orden': ex.get('orden'),
-                            'dia': dnum,
-                            'video_url': ex.get('video_url'),
+                            "id": ex.get("id"),
+                            "ejercicio_id": ex.get("ejercicio_id"),
+                            "ejercicio_nombre": ex.get("ejercicio_nombre")
+                            or ex.get("nombre_ejercicio")
+                            or ex.get("nombre"),
+                            "series": ex.get("series"),
+                            "repeticiones": ex.get("repeticiones"),
+                            "descanso": ex.get("descanso"),
+                            "notas": ex.get("notas"),
+                            "orden": ex.get("orden"),
+                            "dia": dnum,
+                            "video_url": ex.get("video_url"),
                         }
                     )
                 return dias_list
@@ -398,47 +577,69 @@ class TrainingService(BaseService):
             for r in rutinas:
                 usuario_nombre = None
                 try:
-                    if getattr(r, 'usuario', None) is not None:
-                        usuario_nombre = getattr(r.usuario, 'nombre', None)
+                    if getattr(r, "usuario", None) is not None:
+                        usuario_nombre = getattr(r.usuario, "nombre", None)
                 except Exception:
                     usuario_nombre = None
 
                 try:
-                    fc = getattr(r, 'fecha_creacion', None)
+                    fc = getattr(r, "fecha_creacion", None)
                     fecha_creacion = fc.isoformat() if fc is not None else None
                 except Exception:
                     fecha_creacion = None
 
                 rout_dict = {
-                    'id': r.id,
-                    'nombre_rutina': r.nombre_rutina,
-                    'nombre': r.nombre_rutina,
-                    'descripcion': r.descripcion,
-                    'usuario_id': r.usuario_id,
-                    'usuario_nombre': usuario_nombre,
-                    'dias_semana': r.dias_semana,
-                    'categoria': r.categoria,
-                    'activa': r.activa,
-                    'uuid_rutina': getattr(r, 'uuid_rutina', None),
-                    'es_plantilla': (r.usuario_id is None),
-                    'fecha_creacion': fecha_creacion,
+                    "id": r.id,
+                    "nombre_rutina": r.nombre_rutina,
+                    "nombre": r.nombre_rutina,
+                    "descripcion": r.descripcion,
+                    "usuario_id": r.usuario_id,
+                    "usuario_nombre": usuario_nombre,
+                    "dias_semana": r.dias_semana,
+                    "categoria": r.categoria,
+                    "activa": r.activa,
+                    "uuid_rutina": getattr(r, "uuid_rutina", None),
+                    "es_plantilla": (r.usuario_id is None),
+                    "fecha_creacion": fecha_creacion,
+                    "sucursal_id": int(getattr(r, "sucursal_id"))
+                    if getattr(r, "sucursal_id", None) is not None
+                    else None,
+                    "sucursal_nombre": sucursal_nombre_by_id.get(
+                        int(getattr(r, "sucursal_id"))
+                    )
+                    if getattr(r, "sucursal_id", None) is not None
+                    else None,
+                    "creada_por_usuario_id": int(getattr(r, "creada_por_usuario_id"))
+                    if getattr(r, "creada_por_usuario_id", None) is not None
+                    else None,
+                    "creada_por_nombre": creada_por_nombre_by_id.get(
+                        int(getattr(r, "creada_por_usuario_id"))
+                    )
+                    if getattr(r, "creada_por_usuario_id", None) is not None
+                    else None,
                 }
-                
+
                 if include_exercises:
                     exs_flat = ejercicios_by_rutina.get(int(r.id), [])
-                    rout_dict['ejercicios'] = exs_flat
-                    rout_dict['dias'] = _build_days(getattr(r, 'dias_semana', None), exs_flat)
+                    rout_dict["ejercicios"] = exs_flat
+                    rout_dict["dias"] = _build_days(
+                        getattr(r, "dias_semana", None), exs_flat
+                    )
                     try:
-                        rout_dict['ejercicios_count'] = int(len(exs_flat or []))
+                        rout_dict["ejercicios_count"] = int(len(exs_flat or []))
                     except Exception:
-                        rout_dict['ejercicios_count'] = int(ejercicios_count_by_rutina.get(int(r.id), 0) or 0)
+                        rout_dict["ejercicios_count"] = int(
+                            ejercicios_count_by_rutina.get(int(r.id), 0) or 0
+                        )
                 else:
-                    rout_dict['dias'] = _build_days(getattr(r, 'dias_semana', None), [])
+                    rout_dict["dias"] = _build_days(getattr(r, "dias_semana", None), [])
                     try:
-                        rout_dict['ejercicios_count'] = int(ejercicios_count_by_rutina.get(int(r.id), 0) or 0)
+                        rout_dict["ejercicios_count"] = int(
+                            ejercicios_count_by_rutina.get(int(r.id), 0) or 0
+                        )
                     except Exception:
-                        rout_dict['ejercicios_count'] = 0
-                
+                        rout_dict["ejercicios_count"] = 0
+
                 results.append(rout_dict)
             return results
         except Exception as e:
@@ -451,6 +652,7 @@ class TrainingService(BaseService):
         include_exercises: bool = False,
         search: str = None,
         solo_plantillas: Optional[bool] = None,
+        sucursal_id: Optional[int] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> Dict[str, Any]:
@@ -465,6 +667,7 @@ class TrainingService(BaseService):
 
         try:
             stmt_total = select(func.count(Rutina.id))
+            stmt_total = self._scope_by_sucursal(stmt_total, Rutina, sucursal_id)
             if usuario_id is not None:
                 stmt_total = stmt_total.where(Rutina.usuario_id == usuario_id)
             if solo_plantillas is not None:
@@ -474,7 +677,9 @@ class TrainingService(BaseService):
                     stmt_total = stmt_total.where(Rutina.usuario_id.is_not(None))
             if search and str(search).strip():
                 like = f"%{str(search).strip().lower()}%"
-                stmt_total = stmt_total.where(func.lower(Rutina.nombre_rutina).like(like))
+                stmt_total = stmt_total.where(
+                    func.lower(Rutina.nombre_rutina).like(like)
+                )
             total = int(self.db.execute(stmt_total).scalar() or 0)
         except Exception:
             total = 0
@@ -484,6 +689,7 @@ class TrainingService(BaseService):
             include_exercises=include_exercises,
             search=search,
             solo_plantillas=solo_plantillas,
+            sucursal_id=sucursal_id,
             limit=lim,
             offset=off,
         )
@@ -492,35 +698,42 @@ class TrainingService(BaseService):
     def crear_rutina(self, data: Dict[str, Any]) -> Optional[int]:
         """Create a new routine."""
         try:
-            usuario_id = data.get('usuario_id')
+            usuario_id = data.get("usuario_id")
             if usuario_id is not None:
                 usuario = self.db.get(Usuario, int(usuario_id))
-                if not usuario or not bool(getattr(usuario, 'activo', False)):
-                    raise PermissionError("El usuario está inactivo: no se puede crear una rutina")
+                if not usuario or not bool(getattr(usuario, "activo", False)):
+                    raise PermissionError(
+                        "El usuario está inactivo: no se puede crear una rutina"
+                    )
 
             try:
-                dias_semana = int(data.get('dias_semana') or 1)
+                dias_semana = int(data.get("dias_semana") or 1)
             except Exception:
                 dias_semana = 1
             dias_semana = max(1, dias_semana)
 
-            nombre = str(data.get('nombre_rutina') or '').strip()
+            nombre = str(data.get("nombre_rutina") or "").strip()
             if not nombre:
                 return None
 
             rutina = Rutina(
                 nombre_rutina=nombre,
                 usuario_id=usuario_id,
-                descripcion=data.get('descripcion'),
+                descripcion=data.get("descripcion"),
                 dias_semana=dias_semana,
-                categoria=data.get('categoria', 'general'),
-                activa=data.get('activa', True)
+                categoria=data.get("categoria", "general"),
+                activa=data.get("activa", True),
             )
+            if hasattr(Rutina, "creada_por_usuario_id") and "creada_por_usuario_id" in data:
+                rutina.creada_por_usuario_id = data.get("creada_por_usuario_id")
+            if hasattr(Rutina, "sucursal_id") and "sucursal_id" in data:
+                rutina.sucursal_id = data.get("sucursal_id")
             # Add uuid if model supports it
-            if hasattr(Rutina, 'uuid_rutina'):
-                 import uuid
-                 rutina.uuid_rutina = str(uuid.uuid4())
-                 
+            if hasattr(Rutina, "uuid_rutina"):
+                import uuid
+
+                rutina.uuid_rutina = str(uuid.uuid4())
+
             self.db.add(rutina)
             self.db.commit()
             return rutina.id
@@ -533,21 +746,34 @@ class TrainingService(BaseService):
         """Get full details of a routine including exercises (Alias for obtener_rutina_detalle)."""
         return self.obtener_rutina_detalle(rutina_id)
 
-    def obtener_rutina_detalle(self, rutina_id: int) -> Optional[Dict[str, Any]]:
+    def obtener_rutina_detalle(self, rutina_id: int, sucursal_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """Get full details of a routine including exercises."""
         try:
             rutina = self.db.get(Rutina, rutina_id)
             if not rutina:
                 return None
+            if sucursal_id is not None and hasattr(rutina, "sucursal_id"):
+                try:
+                    sid = int(sucursal_id)
+                except Exception:
+                    sid = None
+                if sid is not None and sid > 0:
+                    try:
+                        own_sid = getattr(rutina, "sucursal_id", None)
+                        if own_sid is not None and int(own_sid) != sid:
+                            return None
+                    except Exception:
+                        pass
             return self._build_rutina_detail(rutina)
         except Exception as e:
             logger.error(f"Error getting rutina detail: {e}")
             return None
 
-    def obtener_rutina_por_uuid(self, uuid_str: str) -> Optional[Dict[str, Any]]:
+    def obtener_rutina_por_uuid(self, uuid_str: str, sucursal_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """Get full details of a routine by UUID."""
         try:
             stmt = select(Rutina).where(Rutina.uuid_rutina == uuid_str)
+            stmt = self._scope_by_sucursal(stmt, Rutina, sucursal_id)
             rutina = self.db.scalars(stmt).first()
             if not rutina:
                 return None
@@ -568,9 +794,9 @@ class TrainingService(BaseService):
         # Get user name if exists
         usuario_nombre = None
         if rutina.usuario_id:
-            if hasattr(rutina, 'usuario') and rutina.usuario: # type: ignore
-                 usuario_nombre = rutina.usuario.nombre
-            
+            if hasattr(rutina, "usuario") and rutina.usuario:  # type: ignore
+                usuario_nombre = rutina.usuario.nombre
+
         ejercicios_out = []
         for re in ejercicios:
             video_url = re.ejercicio.video_url if re.ejercicio else None
@@ -581,102 +807,174 @@ class TrainingService(BaseService):
                 pass
             ejercicios_out.append(
                 {
-                    'id': re.id,
-                    'ejercicio_id': re.ejercicio_id,
-                    'nombre': re.ejercicio.nombre if re.ejercicio else None,
-                    'nombre_ejercicio': getattr(re, 'nombre_ejercicio', None) or (re.ejercicio.nombre if re.ejercicio else None),
-                    'ejercicio_nombre': getattr(re, 'nombre_ejercicio', None) or (re.ejercicio.nombre if re.ejercicio else None),
-                    'grupo_muscular': re.ejercicio.grupo_muscular if re.ejercicio else None,
-                    'series': re.series,
-                    'repeticiones': re.repeticiones,
-                    'dia_semana': re.dia_semana,
-                    'orden': re.orden,
-                    'video_url': video_url,
+                    "id": re.id,
+                    "ejercicio_id": re.ejercicio_id,
+                    "nombre": re.ejercicio.nombre if re.ejercicio else None,
+                    "nombre_ejercicio": getattr(re, "nombre_ejercicio", None)
+                    or (re.ejercicio.nombre if re.ejercicio else None),
+                    "ejercicio_nombre": getattr(re, "nombre_ejercicio", None)
+                    or (re.ejercicio.nombre if re.ejercicio else None),
+                    "grupo_muscular": re.ejercicio.grupo_muscular
+                    if re.ejercicio
+                    else None,
+                    "series": re.series,
+                    "repeticiones": re.repeticiones,
+                    "dia_semana": re.dia_semana,
+                    "orden": re.orden,
+                    "video_url": video_url,
                 }
             )
 
-        def _build_days_detail(dias_semana_val: Any, ejercicios_flat: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        def _build_days_detail(
+            dias_semana_val: Any, ejercicios_flat: List[Dict[str, Any]]
+        ) -> List[Dict[str, Any]]:
             try:
                 dcount = int(dias_semana_val or 1)
             except Exception:
                 dcount = 1
             dcount = max(1, min(dcount, 5))
             dias_list: List[Dict[str, Any]] = [
-                {'numero': d, 'nombre': f"Día {d}", 'ejercicios': []}
+                {"numero": d, "nombre": f"Día {d}", "ejercicios": []}
                 for d in range(1, dcount + 1)
             ]
-            by_num = {int(d['numero']): d for d in dias_list}
-            for ex in (ejercicios_flat or []):
+            by_num = {int(d["numero"]): d for d in dias_list}
+            for ex in ejercicios_flat or []:
                 try:
-                    dnum = int(ex.get('dia_semana') or ex.get('dia') or 1)
+                    dnum = int(ex.get("dia_semana") or ex.get("dia") or 1)
                 except Exception:
                     dnum = 1
                 dnum = max(1, min(dnum, dcount))
                 day_obj = by_num.get(dnum)
                 if not day_obj:
                     continue
-                day_obj['ejercicios'].append(
+                day_obj["ejercicios"].append(
                     {
-                        'id': ex.get('id'),
-                        'ejercicio_id': ex.get('ejercicio_id'),
-                        'ejercicio_nombre': ex.get('ejercicio_nombre') or ex.get('nombre_ejercicio') or ex.get('nombre'),
-                        'series': ex.get('series'),
-                        'repeticiones': ex.get('repeticiones'),
-                        'descanso': ex.get('descanso'),
-                        'notas': ex.get('notas'),
-                        'orden': ex.get('orden'),
-                        'dia': dnum,
-                        'video_url': ex.get('video_url'),
+                        "id": ex.get("id"),
+                        "ejercicio_id": ex.get("ejercicio_id"),
+                        "ejercicio_nombre": ex.get("ejercicio_nombre")
+                        or ex.get("nombre_ejercicio")
+                        or ex.get("nombre"),
+                        "series": ex.get("series"),
+                        "repeticiones": ex.get("repeticiones"),
+                        "descanso": ex.get("descanso"),
+                        "notas": ex.get("notas"),
+                        "orden": ex.get("orden"),
+                        "dia": dnum,
+                        "video_url": ex.get("video_url"),
                     }
                 )
             return dias_list
 
         try:
-            fc = getattr(rutina, 'fecha_creacion', None)
+            fc = getattr(rutina, "fecha_creacion", None)
             fecha_creacion = fc.isoformat() if fc is not None else None
         except Exception:
             fecha_creacion = None
 
+        sucursal_id = getattr(rutina, "sucursal_id", None)
+        sucursal_nombre = None
+        try:
+            if sucursal_id is not None:
+                sucursal_nombre = (
+                    self.db.execute(
+                        select(Sucursal.nombre).where(Sucursal.id == int(sucursal_id))
+                    ).scalar()
+                    or None
+                )
+        except Exception:
+            sucursal_nombre = None
+
+        creada_por_usuario_id = getattr(rutina, "creada_por_usuario_id", None)
+        creada_por_nombre = None
+        try:
+            if creada_por_usuario_id is not None:
+                creada_por_nombre = (
+                    self.db.execute(
+                        select(Usuario.nombre).where(
+                            Usuario.id == int(creada_por_usuario_id)
+                        )
+                    ).scalar()
+                    or None
+                )
+        except Exception:
+            creada_por_nombre = None
+
         return {
-            'id': rutina.id,
-            'nombre_rutina': rutina.nombre_rutina,
-            'nombre': rutina.nombre_rutina,
-            'descripcion': rutina.descripcion,
-            'usuario_id': rutina.usuario_id,
-            'usuario_nombre': usuario_nombre,
-            'categoria': rutina.categoria,
-            'dias_semana': rutina.dias_semana,
-            'activa': rutina.activa,
-            'uuid_rutina': getattr(rutina, 'uuid_rutina', None),
-            'es_plantilla': (rutina.usuario_id is None),
-            'fecha_creacion': fecha_creacion,
-            'ejercicios': ejercicios_out,
-            'dias': _build_days_detail(getattr(rutina, 'dias_semana', None), ejercicios_out),
+            "id": rutina.id,
+            "nombre_rutina": rutina.nombre_rutina,
+            "nombre": rutina.nombre_rutina,
+            "descripcion": rutina.descripcion,
+            "usuario_id": rutina.usuario_id,
+            "usuario_nombre": usuario_nombre,
+            "categoria": rutina.categoria,
+            "dias_semana": rutina.dias_semana,
+            "activa": rutina.activa,
+            "uuid_rutina": getattr(rutina, "uuid_rutina", None),
+            "es_plantilla": (rutina.usuario_id is None),
+            "fecha_creacion": fecha_creacion,
+            "sucursal_id": int(sucursal_id) if sucursal_id is not None else None,
+            "sucursal_nombre": str(sucursal_nombre) if sucursal_nombre else None,
+            "creada_por_usuario_id": int(creada_por_usuario_id)
+            if creada_por_usuario_id is not None
+            else None,
+            "creada_por_nombre": str(creada_por_nombre) if creada_por_nombre else None,
+            "ejercicios": ejercicios_out,
+            "dias": _build_days_detail(
+                getattr(rutina, "dias_semana", None), ejercicios_out
+            ),
         }
 
-    def actualizar_rutina(self, rutina_id: int, data: Dict[str, Any]) -> bool:
+    def actualizar_rutina(self, rutina_id: int, data: Dict[str, Any], sucursal_id: Optional[int] = None) -> bool:
         """Update a routine."""
         try:
             rutina = self.db.get(Rutina, rutina_id)
             if not rutina:
                 return False
+            if sucursal_id is not None and hasattr(rutina, "sucursal_id"):
+                try:
+                    sid = int(sucursal_id)
+                except Exception:
+                    sid = None
+                if sid is not None and sid > 0:
+                    try:
+                        own_sid = getattr(rutina, "sucursal_id", None)
+                        if own_sid is not None and int(own_sid) != sid:
+                            return False
+                    except Exception:
+                        pass
 
-            if 'nombre_rutina' not in data and 'nombre' in data:
-                data['nombre_rutina'] = data.get('nombre')
+            if "nombre_rutina" not in data and "nombre" in data:
+                data["nombre_rutina"] = data.get("nombre")
 
-            if 'nombre_rutina' in data: rutina.nombre_rutina = data['nombre_rutina']
-            if 'descripcion' in data: rutina.descripcion = data['descripcion']
-            if 'categoria' in data: rutina.categoria = data['categoria']
-            if 'dias_semana' in data: rutina.dias_semana = data['dias_semana']
-            if 'activa' in data: rutina.activa = data['activa']
-            
+            if "nombre_rutina" in data:
+                rutina.nombre_rutina = data["nombre_rutina"]
+            if "descripcion" in data:
+                rutina.descripcion = data["descripcion"]
+            if "categoria" in data:
+                rutina.categoria = data["categoria"]
+            if "dias_semana" in data:
+                rutina.dias_semana = data["dias_semana"]
+            if "activa" in data:
+                rutina.activa = data["activa"]
+            if hasattr(rutina, "sucursal_id"):
+                if "shared" in data:
+                    try:
+                        if bool(data.get("shared")):
+                            rutina.sucursal_id = None
+                    except Exception:
+                        pass
+                if "sucursal_id" in data:
+                    rutina.sucursal_id = data.get("sucursal_id")
+
             # If exercises are included in update, handle them
-            if 'ejercicios' in data and isinstance(data['ejercicios'], list):
-                ok = self.asignar_ejercicios_rutina(rutina_id, data['ejercicios'], commit=False)
+            if "ejercicios" in data and isinstance(data["ejercicios"], list):
+                ok = self.asignar_ejercicios_rutina(
+                    rutina_id, data["ejercicios"], commit=False, sucursal_id=sucursal_id
+                )
                 if not ok:
                     self.db.rollback()
                     return False
-            
+
             self.db.commit()
             return True
         except Exception as e:
@@ -684,15 +982,29 @@ class TrainingService(BaseService):
             self.db.rollback()
             return False
 
-    def eliminar_rutina(self, rutina_id: int) -> bool:
+    def eliminar_rutina(self, rutina_id: int, sucursal_id: Optional[int] = None) -> bool:
         """Delete a routine."""
         try:
             rutina = self.db.get(Rutina, rutina_id)
             if not rutina:
                 return False
+            if sucursal_id is not None and hasattr(rutina, "sucursal_id"):
+                try:
+                    sid = int(sucursal_id)
+                except Exception:
+                    sid = None
+                if sid is not None and sid > 0:
+                    try:
+                        own_sid = getattr(rutina, "sucursal_id", None)
+                        if own_sid is not None and int(own_sid) != sid:
+                            return False
+                    except Exception:
+                        pass
 
             try:
-                self.db.query(RutinaEjercicio).filter(RutinaEjercicio.rutina_id == rutina_id).delete()
+                self.db.query(RutinaEjercicio).filter(
+                    RutinaEjercicio.rutina_id == rutina_id
+                ).delete()
             except Exception:
                 pass
             self.db.delete(rutina)
@@ -703,17 +1015,19 @@ class TrainingService(BaseService):
             self.db.rollback()
             return False
 
-    def desactivar_rutinas_usuario(self, usuario_id: int, except_rutina_id: int = None) -> bool:
+    def desactivar_rutinas_usuario(
+        self, usuario_id: int, except_rutina_id: int = None
+    ) -> bool:
         """Deactivate all routines for a user except one."""
         try:
             stmt = select(Rutina).where(Rutina.usuario_id == usuario_id)
             if except_rutina_id:
                 stmt = stmt.where(Rutina.id != except_rutina_id)
-            
+
             rutinas = self.db.scalars(stmt).all()
             for r in rutinas:
                 r.activa = False
-            
+
             self.db.commit()
             return True
         except Exception as e:
@@ -721,59 +1035,89 @@ class TrainingService(BaseService):
             self.db.rollback()
             return False
 
-    def asignar_ejercicios_rutina(self, rutina_id: int, ejercicios: List[Dict[str, Any]], commit: bool = True) -> bool:
+    def asignar_ejercicios_rutina(
+        self,
+        rutina_id: int,
+        ejercicios: List[Dict[str, Any]],
+        commit: bool = True,
+        sucursal_id: Optional[int] = None,
+    ) -> bool:
         """Assign exercises to a routine."""
         try:
             rutina = self.db.get(Rutina, rutina_id)
             if not rutina:
                 return False
+            if sucursal_id is not None and hasattr(rutina, "sucursal_id"):
+                try:
+                    sid = int(sucursal_id)
+                except Exception:
+                    sid = None
+                if sid is not None and sid > 0:
+                    try:
+                        own_sid = getattr(rutina, "sucursal_id", None)
+                        if own_sid is not None and int(own_sid) != sid:
+                            return False
+                    except Exception:
+                        pass
 
             try:
-                ejercicio_ids = [int(ex.get('ejercicio_id')) for ex in ejercicios if ex.get('ejercicio_id') is not None]
+                ejercicio_ids = [
+                    int(ex.get("ejercicio_id"))
+                    for ex in ejercicios
+                    if ex.get("ejercicio_id") is not None
+                ]
             except Exception:
                 ejercicio_ids = []
             if ejercicio_ids:
-                existing = set(self.db.scalars(select(Ejercicio.id).where(Ejercicio.id.in_(ejercicio_ids))).all())
+                existing = set(
+                    self.db.scalars(
+                        select(Ejercicio.id).where(Ejercicio.id.in_(ejercicio_ids))
+                    ).all()
+                )
                 missing = [eid for eid in ejercicio_ids if eid not in existing]
                 if missing:
                     return False
 
             # Clear existing exercises
-            self.db.query(RutinaEjercicio).filter(RutinaEjercicio.rutina_id == rutina_id).delete()
+            self.db.query(RutinaEjercicio).filter(
+                RutinaEjercicio.rutina_id == rutina_id
+            ).delete()
 
             for ex_data in ejercicios:
                 try:
-                    dia_semana = int(ex_data.get('dia_semana') or 1)
+                    dia_semana = int(ex_data.get("dia_semana") or 1)
                 except Exception:
                     dia_semana = 1
                 dia_semana = max(1, dia_semana)
                 try:
-                    if getattr(rutina, 'dias_semana', None):
-                        dia_semana = min(dia_semana, int(rutina.dias_semana or dia_semana))
+                    if getattr(rutina, "dias_semana", None):
+                        dia_semana = min(
+                            dia_semana, int(rutina.dias_semana or dia_semana)
+                        )
                 except Exception:
                     pass
 
                 try:
-                    series = int(ex_data.get('series') or 0)
+                    series = int(ex_data.get("series") or 0)
                 except Exception:
                     series = 0
                 series = max(0, series)
                 try:
-                    orden = int(ex_data.get('orden', 0) or 0)
+                    orden = int(ex_data.get("orden", 0) or 0)
                 except Exception:
                     orden = 0
                 orden = max(0, orden)
 
                 assignment = RutinaEjercicio(
                     rutina_id=rutina_id,
-                    ejercicio_id=int(ex_data['ejercicio_id']),
+                    ejercicio_id=int(ex_data["ejercicio_id"]),
                     dia_semana=dia_semana,
                     series=series,
-                    repeticiones=str(ex_data.get('repeticiones', '')),
+                    repeticiones=str(ex_data.get("repeticiones", "")),
                     orden=orden,
                 )
                 self.db.add(assignment)
-            
+
             if commit:
                 self.db.commit()
             else:

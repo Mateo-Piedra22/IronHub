@@ -1,0 +1,7 @@
+exclude_dirs:
+  - .venv
+  - venv
+  - build
+  - dist
+  - .mypy_cache
+  - .ruff_cache

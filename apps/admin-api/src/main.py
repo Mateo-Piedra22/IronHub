@@ -19,6 +19,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 import psycopg2
 import psycopg2.extras
+from pydantic import BaseModel
+from typing import Optional, List, Any, Dict
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +31,37 @@ from src.database.raw_manager import RawPostgresManager
 from src.services.admin_service import AdminService
 from src.routers.payments import router as payments_router
 from src.secure_config import SecureConfig
+from src.security_utils import SecurityUtils
+
+
+class GymBranchInput(BaseModel):
+    name: str
+    code: str
+    address: Optional[str] = None
+    timezone: Optional[str] = None
+
+
+class GymCreateV2Input(BaseModel):
+    nombre: str
+    subdominio: Optional[str] = None
+    owner_phone: Optional[str] = None
+    owner_password: Optional[str] = None
+    whatsapp_phone_id: Optional[str] = None
+    whatsapp_access_token: Optional[str] = None
+    whatsapp_business_account_id: Optional[str] = None
+    whatsapp_verify_token: Optional[str] = None
+    whatsapp_app_secret: Optional[str] = None
+    whatsapp_nonblocking: Optional[bool] = False
+    whatsapp_send_timeout_seconds: Optional[float] = None
+    branches: Optional[List[GymBranchInput]] = None
+
+
+class BulkBranchesInput(BaseModel):
+    items: List[GymBranchInput]
+
+
+class ProductionReadyInput(BaseModel):
+    ready: bool
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -45,16 +78,24 @@ app.include_router(payments_router)
 origins_str = os.getenv("ALLOWED_ORIGINS", "")
 origins = [o.strip() for o in origins_str.split(",") if o.strip()]
 _origin_regex = os.getenv("ALLOWED_ORIGIN_REGEX", "")
+vercel_url = str(os.getenv("VERCEL_URL") or "").strip()
+if vercel_url:
+    if not vercel_url.startswith("http://") and not vercel_url.startswith("https://"):
+        vercel_url = f"https://{vercel_url}"
+    origins.append(vercel_url)
 
 if not origins and not _origin_regex:
     # Default behavior: Use regex to allow subdomains + localhost
-    base_domain = str(os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz") or "").strip().lstrip(".")
+    base_domain = (
+        str(os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz") or "")
+        .strip()
+        .lstrip(".")
+    )
     base_domain_escaped = re.escape(base_domain)
     _origin_regex = (
         rf"^https?://([a-z0-9-]+\.)?{base_domain_escaped}$"  # Any subdomain of base
-        r"|^https?://.*\.vercel\.app$"                        # Any Vercel preview
-        r"|^http://localhost(:\d+)?$"                         # Localhost
-        r"|^http://127\.0\.0\.1(:\d+)?$"                      # IP Localhost
+        r"|^http://localhost(:\d+)?$"  # Localhost
+        r"|^http://127\.0\.0\.1(:\d+)?$"  # IP Localhost
     )
 
 app.add_middleware(
@@ -67,25 +108,34 @@ app.add_middleware(
 )
 
 # Session middleware
+_admin_secret = str(os.getenv("ADMIN_SESSION_SECRET") or "").strip()
+_env = str(os.getenv("ENV") or "").strip().lower()
+_is_prod = _env in ("prod", "production")
+if _is_prod and (not _admin_secret or _admin_secret in ("admin-session-secret-change-me", "changeme", "password")):
+    raise RuntimeError("ADMIN_SESSION_SECRET requerido y debe ser fuerte en producción")
+if not _admin_secret:
+    _admin_secret = "admin-session-secret-change-me"
+
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.getenv("ADMIN_SESSION_SECRET", "admin-session-secret-change-me"),
+    secret_key=_admin_secret,
     https_only=os.getenv("ENV", "production") == "production",
     same_site="lax",
     session_cookie=os.getenv("ADMIN_SESSION_COOKIE", "ironhub_admin_session"),
-    domain=f".{os.getenv('TENANT_BASE_DOMAIN', 'ironhub.motiona.xyz')}"  # Allow cookie sharing
+    domain=f".{os.getenv('TENANT_BASE_DOMAIN', 'ironhub.motiona.xyz')}",  # Allow cookie sharing
 )
 
 # Service instance (lazy loaded)
 _admin_service = None
 _public_metrics_cache = {"ts": 0.0, "value": None}
 
+
 def get_admin_service() -> AdminService:
     """Get or initialize the AdminService singleton."""
     global _admin_service
     if _admin_service is not None:
         return _admin_service
-    
+
     params = AdminService.resolve_admin_db_params()
     db = RawPostgresManager(connection_params=params)
     _admin_service = AdminService(db)
@@ -112,6 +162,7 @@ def require_admin(request: Request):
 
 # ========== ROUTES ==========
 
+
 @app.get("/")
 async def root():
     """API info endpoint."""
@@ -126,14 +177,15 @@ async def health():
 
 # ========== AUTH ROUTES ==========
 
+
 @app.post("/login")
 async def login(request: Request, password: str = Form(...)):
     """Admin login with password."""
     adm = get_admin_service()
-    
+
     # Verify password
     ok = adm.verificar_owner_password(password)
-    
+
     if not ok:
         # Check fallback passwords from env
         candidates = [
@@ -143,10 +195,12 @@ async def login(request: Request, password: str = Form(...)):
         ]
         if password in [c for c in candidates if c]:
             ok = True
-    
+
     if not ok:
-        return JSONResponse({"ok": False, "error": "Credenciales incorrectas"}, status_code=401)
-    
+        return JSONResponse(
+            {"ok": False, "error": "Credenciales incorrectas"}, status_code=401
+        )
+
     request.session["admin_logged_in"] = True
     adm.log_action("owner", "login", None, None)
     return {"ok": True}
@@ -167,32 +221,34 @@ async def check_session(request: Request):
 
 @app.post("/admin/password")
 async def change_admin_password(
-    request: Request,
-    current_password: str = Form(...),
-    new_password: str = Form(...)
+    request: Request, current_password: str = Form(...), new_password: str = Form(...)
 ):
     """Change the admin owner password."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     # Verify current password
     if not adm.verificar_owner_password(current_password):
         raise HTTPException(status_code=400, detail="Contraseña actual incorrecta")
-    
+
     # Validate new password
     if len(new_password.strip()) < 8:
-        raise HTTPException(status_code=400, detail="La nueva contraseña debe tener al menos 8 caracteres")
-    
+        raise HTTPException(
+            status_code=400,
+            detail="La nueva contraseña debe tener al menos 8 caracteres",
+        )
+
     # Set new password
     success = adm.set_admin_owner_password(new_password)
     if not success:
         raise HTTPException(status_code=500, detail="Error al actualizar la contraseña")
-    
+
     adm.log_action("owner", "change_password", None, "Admin password changed")
     return {"ok": True}
 
 
 # ========== GYM ROUTES ==========
+
 
 @app.get("/gyms")
 async def list_gyms(
@@ -200,18 +256,21 @@ async def list_gyms(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     q: str = Query(None),
-    status: str = Query(None)
+    status: str = Query(None),
+    production_ready: Optional[bool] = Query(None),
 ):
     """List all gyms with pagination and filtering."""
     require_admin(request)
     adm = get_admin_service()
-    result = adm.listar_gimnasios_avanzado(page, page_size, q or None, status or None, "id", "DESC")
+    result = adm.listar_gimnasios_avanzado(
+        page, page_size, q or None, status or None, production_ready, "id", "DESC"
+    )
     # Map 'items' to 'gyms' to match frontend expectations
     return {
         "gyms": result.get("items", []),
         "total": result.get("total", 0),
         "page": result.get("page", 1),
-        "page_size": result.get("page_size", 20)
+        "page_size": result.get("page_size", 20),
     }
 
 
@@ -222,9 +281,9 @@ async def list_public_gyms():
     adm = get_admin_service()
     try:
         # Only return active gyms with limited info
-        result = adm.listar_gimnasios_avanzado(1, 100, None, "active", "nombre", "ASC")
+        result = adm.listar_gimnasios_avanzado(1, 100, None, "active", None, "nombre", "ASC")
         items = result.get("items", []) or []
-        
+
         # 3. Resolve base DB params once
         admin_params = AdminService.resolve_admin_db_params()
         base_pg_params = {
@@ -235,7 +294,7 @@ async def list_public_gyms():
             "sslmode": admin_params.get("sslmode"),
             "connect_timeout": 3,
         }
-        
+
         def _fetch_gym_branding(gym):
             gid = int(gym.get("id"))
             db_name = str(gym.get("db_name") or "").strip()
@@ -245,20 +304,19 @@ async def list_public_gyms():
                 "nombre": gym.get("nombre"),
                 "subdominio": gym.get("subdominio"),
                 "status": gym.get("status", "active"),
-                "logo_url": None
+                "logo_url": None,
             }
             if not db_name:
                 return g_out
 
             # Retry logic for branding (Cold Starts)
-            last_err = None
             for attempt in range(3):
                 try:
                     pg_params = {
                         **base_pg_params,
                         "dbname": db_name,
                         "application_name": "landing_gyms_worker",
-                        "connect_timeout": 3 if attempt == 0 else 5
+                        "connect_timeout": 3 if attempt == 0 else 5,
                     }
                     with psycopg2.connect(**pg_params) as t_conn:
                         with t_conn.cursor() as t_cur:
@@ -271,8 +329,8 @@ async def list_public_gyms():
                                 rows = t_cur.fetchall()
                                 kv = {r[0]: r[1] for r in rows}
                             except Exception:
-                                pass # Table might not exist or be empty
-                            
+                                pass  # Table might not exist or be empty
+
                             # Fetch branding from Legacy Fixed-Column table (gym_config)
                             legacy_logo = None
                             try:
@@ -284,41 +342,48 @@ async def list_public_gyms():
                                 pass
 
                             # Strategy: gym_config > configuracion[logo_url] > configuracion[gym_logo_url]
-                            logo_url = legacy_logo or str(kv.get("logo_url") or kv.get("gym_logo_url") or "").strip()
+                            logo_url = (
+                                legacy_logo
+                                or str(
+                                    kv.get("logo_url") or kv.get("gym_logo_url") or ""
+                                ).strip()
+                            )
                             nombre_publico = str(kv.get("nombre_publico") or "").strip()
-                            
+
                             if nombre_publico:
                                 g_out["nombre"] = nombre_publico
-                            
+
                             # Simple B2/URL validation
                             if logo_url:
-                                if not logo_url.startswith("http") and not logo_url.startswith("/"):
+                                if not logo_url.startswith(
+                                    "http"
+                                ) and not logo_url.startswith("/"):
                                     # It's a B2 path, return as is
                                     pass
                                 g_out["logo_url"] = logo_url
-                            
+
                             return g_out
-                except Exception as e:
+                except Exception:
                     import time
-                    last_err = e
+
                     time.sleep(0.5 * (attempt + 1))
-            
+
             return g_out
 
         # Parallel Execution
         import concurrent.futures
         import asyncio
+
         loop = asyncio.get_event_loop()
-        
+
         public_gyms = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
             futures = [
-                loop.run_in_executor(executor, _fetch_gym_branding, g)
-                for g in items
+                loop.run_in_executor(executor, _fetch_gym_branding, g) for g in items
             ]
             results = await asyncio.gather(*futures)
             public_gyms = list(results)
-        
+
         return {"items": public_gyms, "total": len(public_gyms)}
     except Exception as e:
         logger.error(f"Error fetching public gyms: {e}")
@@ -331,14 +396,14 @@ async def get_public_metrics(ttl_seconds: int = Query(600, ge=60, le=3600)):
     now = time.time()
     cached = _public_metrics_cache.get("value")
     cached_ts = float(_public_metrics_cache.get("ts") or 0.0)
-    
+
     # Check cache validity
     if cached and (now - cached_ts) < float(ttl_seconds):
         return cached
 
     try:
         # 1. Fetch all active gyms
-        result = adm.listar_gimnasios_avanzado(1, 500, None, "active", "nombre", "ASC")
+        result = adm.listar_gimnasios_avanzado(1, 500, None, "active", None, "nombre", "ASC")
         gyms = result.get("items", []) or []
 
         # 2. Get paying gyms count (centralized query, fast)
@@ -361,7 +426,7 @@ async def get_public_metrics(ttl_seconds: int = Query(600, ge=60, le=3600)):
             "user": admin_params.get("user"),
             "password": admin_params.get("password"),
             "sslmode": admin_params.get("sslmode"),
-            "connect_timeout": 3, # Lower timeout for individual checks
+            "connect_timeout": 3,  # Lower timeout for individual checks
         }
 
         # 4. Define helper for parallel execution
@@ -369,9 +434,14 @@ async def get_public_metrics(ttl_seconds: int = Query(600, ge=60, le=3600)):
             gid = int(gym.get("id"))
             db_name = str(gym.get("db_name") or "").strip()
             sub = str(gym.get("subdominio") or "")
-            
+
             if not db_name:
-                return {"id": gid, "subdominio": sub, "users_total": None, "users_active": None}
+                return {
+                    "id": gid,
+                    "subdominio": sub,
+                    "users_total": None,
+                    "users_active": None,
+                }
 
             # Retry policy for Cold Starts (Neon DB wakes up)
             # Default connect_timeout is short (3s), so we retry 3 times.
@@ -383,9 +453,9 @@ async def get_public_metrics(ttl_seconds: int = Query(600, ge=60, le=3600)):
                         "dbname": db_name,
                         "application_name": "landing_metrics_worker",
                         # On attempt 0: 3s timeout. On attempt 1+: 5s timeout.
-                        "connect_timeout": 3 if attempt == 0 else 5
+                        "connect_timeout": 3 if attempt == 0 else 5,
                     }
-                    
+
                     with psycopg2.connect(**pg_params) as t_conn:
                         with t_conn.cursor() as t_cur:
                             # SINGLE OPTIMIZED QUERY: Reduces DB round-trips by 50%
@@ -398,36 +468,43 @@ async def get_public_metrics(ttl_seconds: int = Query(600, ge=60, le=3600)):
                             row = t_cur.fetchone() or (0, 0)
                             u_total = int(row[0] or 0)
                             u_active = int(row[1] or 0)
-                            
+
                             return {
-                                "id": gid, 
-                                "subdominio": sub, 
-                                "users_total": u_total, 
-                                "users_active": u_active
+                                "id": gid,
+                                "subdominio": sub,
+                                "users_total": u_total,
+                                "users_active": u_active,
                             }
                 except Exception as e:
-                    import time # Ensure locally available just in case, logic safe
+                    import time  # Ensure locally available just in case, logic safe
+
                     last_err = e
                     # Wait briefly before retrying if it's a connection issue
                     time.sleep(0.5 * (attempt + 1))
-            
+
             # If we get here, all retries failed
-            logger.warning(f"Failed to fetch metrics for gym {gid} ({sub}) after 3 attempts: {last_err}")
-            return {"id": gid, "subdominio": sub, "users_total": None, "users_active": None}
+            logger.warning(
+                f"Failed to fetch metrics for gym {gid} ({sub}) after 3 attempts: {last_err}"
+            )
+            return {
+                "id": gid,
+                "subdominio": sub,
+                "users_total": None,
+                "users_active": None,
+            }
 
         # 5. execute in parallel using ThreadPoolExecutor
         import concurrent.futures
         import asyncio
-        
+
         loop = asyncio.get_event_loop()
         gyms_metrics = []
-        
+
         # We can use a reasonable number of workers, e.g., 20, to parallelize DB IO
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
             # Wrap standard blocking calls in executor
             futures = [
-                loop.run_in_executor(executor, _fetch_gym_metrics, g)
-                for g in gyms
+                loop.run_in_executor(executor, _fetch_gym_metrics, g) for g in gyms
             ]
             # Gather results
             results = await asyncio.gather(*futures)
@@ -436,7 +513,7 @@ async def get_public_metrics(ttl_seconds: int = Query(600, ge=60, le=3600)):
         # 6. Aggregate results
         total_users = 0
         total_active_users = 0
-        
+
         for gm in gyms_metrics:
             ut = gm.get("users_total")
             ua = gm.get("users_active")
@@ -456,11 +533,11 @@ async def get_public_metrics(ttl_seconds: int = Query(600, ge=60, le=3600)):
             },
             "gyms": gyms_metrics,
         }
-        
+
         # Update cache
         _public_metrics_cache["ts"] = now
         _public_metrics_cache["value"] = value
-        
+
         return value
 
     except Exception as e:
@@ -475,12 +552,15 @@ async def list_gyms_with_summary(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     q: str = Query(None),
-    status: str = Query(None)
+    status: str = Query(None),
+    production_ready: Optional[bool] = Query(None),
 ):
     """List all gyms with subscription and payment summary."""
     require_admin(request)
     adm = get_admin_service()
-    result = adm.listar_gimnasios_con_resumen(page, page_size, q or None, status or None, "id", "DESC")
+    result = adm.listar_gimnasios_con_resumen(
+        page, page_size, q or None, status or None, production_ready, "id", "DESC"
+    )
     return result
 
 
@@ -523,13 +603,17 @@ async def create_gym(
     """Create a new gym with database provisioning."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     sub = (subdominio or "").strip().lower()
     if not sub:
         sub = adm.sugerir_subdominio_unico(nombre)
-    
+
     try:
-        wa_timeout = float(whatsapp_send_timeout_seconds) if whatsapp_send_timeout_seconds not in (None, "") else None
+        wa_timeout = (
+            float(whatsapp_send_timeout_seconds)
+            if whatsapp_send_timeout_seconds not in (None, "")
+            else None
+        )
     except Exception:
         wa_timeout = None
 
@@ -545,12 +629,85 @@ async def create_gym(
         whatsapp_nonblocking=bool(whatsapp_nonblocking),
         whatsapp_send_timeout_seconds=wa_timeout,
     )
-    
+
     if "error" in result:
         return JSONResponse(result, status_code=400)
-    
+
     adm.log_action("owner", "create_gym", result.get("id"), f"{nombre}|{sub}")
     return JSONResponse({**result, "ok": True}, status_code=201)
+
+
+@app.post("/gyms/v2")
+async def create_gym_v2(request: Request, payload: GymCreateV2Input):
+    require_admin(request)
+    adm = get_admin_service()
+
+    nombre = str(payload.nombre or "").strip()
+    if len(nombre) < 2:
+        return JSONResponse({"ok": False, "error": "invalid_name"}, status_code=400)
+
+    sub = str(payload.subdominio or "").strip().lower()
+    if not sub:
+        sub = adm.sugerir_subdominio_unico(nombre)
+
+    branches = payload.branches or []
+    create_default_branch = not bool(branches)
+
+    result = adm.crear_gimnasio(
+        nombre,
+        sub,
+        whatsapp_phone_id=payload.whatsapp_phone_id,
+        whatsapp_access_token=payload.whatsapp_access_token,
+        owner_phone=payload.owner_phone,
+        whatsapp_business_account_id=payload.whatsapp_business_account_id,
+        whatsapp_verify_token=payload.whatsapp_verify_token,
+        whatsapp_app_secret=payload.whatsapp_app_secret,
+        whatsapp_nonblocking=bool(payload.whatsapp_nonblocking or False),
+        whatsapp_send_timeout_seconds=payload.whatsapp_send_timeout_seconds,
+        create_default_branch=create_default_branch,
+    )
+    if "error" in result:
+        return JSONResponse({**result, "ok": False}, status_code=400)
+
+    gym_id = int(result.get("id") or 0)
+    owner_password = str(payload.owner_password or "").strip()
+    owner_password_generated = False
+    if not owner_password:
+        owner_password = SecurityUtils.generate_secure_password(16)
+        owner_password_generated = True
+
+    if not adm.set_gym_owner_password(gym_id, owner_password):
+        return JSONResponse({"ok": False, "error": "owner_password_set_failed", "gym_id": gym_id}, status_code=500)
+
+    created_branches: List[Dict[str, Any]] = []
+    if branches:
+        bulk_items = [b.model_dump() for b in branches]
+        bulk_res = adm.bulk_crear_sucursales(gym_id, bulk_items)
+        if bulk_res.get("ok") and isinstance(bulk_res.get("results"), list):
+            for r in bulk_res.get("results") or []:
+                if isinstance(r, dict) and r.get("ok") and r.get("branch"):
+                    created_branches.append(r.get("branch"))
+        result["bulk_branches"] = bulk_res
+
+    tenant_domain = str(os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz") or "").strip().lstrip(".")
+    tenant_url = f"https://{sub}.{tenant_domain}" if sub and tenant_domain else None
+
+    try:
+        adm.log_action("owner", "create_gym_v2", gym_id, f"{nombre}|{sub}")
+    except Exception:
+        pass
+
+    resp: Dict[str, Any] = {
+        "ok": True,
+        "gym": {**result, "owner_password_hash": None},
+        "tenant_url": tenant_url,
+        "branches": created_branches,
+        "owner_password_generated": bool(owner_password_generated),
+        "owner_password_set": True,
+    }
+    if owner_password_generated:
+        resp["owner_password"] = owner_password
+    return JSONResponse(resp, status_code=201)
 
 
 @app.get("/gyms/{gym_id}")
@@ -558,7 +715,7 @@ async def get_gym(request: Request, gym_id: int):
     """Get a single gym by ID."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     gym = adm.obtener_gimnasio(gym_id)
     if not gym:
         raise HTTPException(status_code=404, detail="Gym not found")
@@ -574,7 +731,9 @@ async def get_gym(request: Request, gym_id: int):
         if tenant_cfg.get("ok"):
             gym["tenant_whatsapp_phone_id"] = str(tenant_cfg.get("phone_id") or "")
             gym["tenant_whatsapp_waba_id"] = str(tenant_cfg.get("waba_id") or "")
-            gym["tenant_whatsapp_access_token_present"] = bool(tenant_cfg.get("access_token_present") is True)
+            gym["tenant_whatsapp_access_token_present"] = bool(
+                tenant_cfg.get("access_token_present") is True
+            )
             gym["tenant_wa_configured"] = bool(tenant_cfg.get("configured") is True)
             if not bool(gym.get("wa_configured")):
                 gym["wa_configured"] = bool(gym.get("tenant_wa_configured"))
@@ -603,21 +762,188 @@ async def get_gym_details(request: Request, gym_id: int):
     return await get_gym(request, gym_id)
 
 
+@app.get("/gyms/{gym_id}/onboarding")
+async def get_gym_onboarding(request: Request, gym_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+
+    gym = adm.obtener_gimnasio(int(gym_id))
+    if not gym:
+        raise HTTPException(status_code=404, detail="Gym not found")
+
+    try:
+        branches = adm.listar_sucursales(int(gym_id)) or []
+    except Exception:
+        branches = []
+    active = 0
+    for b in branches:
+        try:
+            st = str((b or {}).get("status") or "active").strip().lower()
+            if st != "inactive":
+                active += 1
+        except Exception:
+            active += 1
+
+    owner_password_set = bool(str(gym.get("owner_password_hash") or "").strip())
+
+    wa_configured = False
+    try:
+        wa_configured = bool(str(gym.get("whatsapp_phone_id") or "").strip())
+    except Exception:
+        wa_configured = False
+    if not wa_configured:
+        try:
+            tenant_cfg = adm.get_tenant_whatsapp_active_config_for_gym(int(gym_id))
+            wa_configured = bool(tenant_cfg.get("configured") is True)
+        except Exception:
+            pass
+
+    base_domain = str(os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz") or "").strip().lstrip(".")
+    sub = str(gym.get("subdominio") or "").strip().lower()
+    tenant_url = f"https://{sub}.{base_domain}" if sub and base_domain else None
+
+    return {
+        "ok": True,
+        "gym_id": int(gym_id),
+        "subdominio": sub,
+        "gym_status": str(gym.get("status") or ""),
+        "tenant_url": tenant_url,
+        "branches_total": int(len(branches)),
+        "branches_active": int(active),
+        "owner_password_set": bool(owner_password_set),
+        "whatsapp_configured": bool(wa_configured),
+        "production_ready": bool(gym.get("production_ready") is True),
+        "production_ready_at": gym.get("production_ready_at"),
+    }
+
+
+@app.post("/gyms/{gym_id}/production-ready")
+async def set_gym_production_ready(request: Request, gym_id: int, payload: ProductionReadyInput):
+    require_admin(request)
+    adm = get_admin_service()
+    result = adm.set_gym_production_ready(int(gym_id), bool(payload.ready), by="admin")
+    if not result.get("ok"):
+        code = 404 if result.get("error") == "gym_not_found" else 400
+        return JSONResponse(result, status_code=code)
+    try:
+        adm.log_action("owner", "set_production_ready", int(gym_id), f"ready={bool(payload.ready)}")
+    except Exception:
+        pass
+    return result
+
+
+@app.get("/gyms/{gym_id}/branches")
+async def list_gym_branches(request: Request, gym_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    items = adm.listar_sucursales(int(gym_id))
+    return {"ok": True, "items": items}
+
+
+@app.post("/gyms/{gym_id}/branches")
+async def create_gym_branch(request: Request, gym_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    name = data.get("name") or data.get("nombre")
+    code = data.get("code") or data.get("codigo")
+    address = data.get("address") or data.get("direccion")
+    timezone = data.get("timezone")
+    result = adm.crear_sucursal(
+        int(gym_id),
+        str(name or ""),
+        str(code or ""),
+        address=address,
+        timezone=timezone,
+    )
+    if not result.get("ok"):
+        return JSONResponse(result, status_code=400)
+    try:
+        adm.log_action("owner", "create_branch", int(gym_id), f"{code}")
+    except Exception:
+        pass
+    return result
+
+
+@app.post("/gyms/{gym_id}/branches/bulk")
+async def bulk_create_gym_branches(request: Request, gym_id: int, payload: BulkBranchesInput):
+    require_admin(request)
+    adm = get_admin_service()
+    items = [it.model_dump() for it in (payload.items or [])]
+    result = adm.bulk_crear_sucursales(int(gym_id), items)
+    if not result.get("ok"):
+        return JSONResponse(result, status_code=400)
+    try:
+        adm.log_action("owner", "bulk_create_branches", int(gym_id), f"count={len(items)}")
+    except Exception:
+        pass
+    return result
+
+
+@app.post("/gyms/{gym_id}/branches/sync")
+async def sync_gym_branches(request: Request, gym_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    result = adm.sync_sucursales(int(gym_id))
+    if not result.get("ok"):
+        return JSONResponse(result, status_code=400)
+    try:
+        adm.log_action("owner", "sync_branches", int(gym_id), None)
+    except Exception:
+        pass
+    return result
+
+
+@app.put("/gyms/{gym_id}/branches/{branch_id}")
+async def update_gym_branch(request: Request, gym_id: int, branch_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    result = adm.actualizar_sucursal(int(gym_id), int(branch_id), data or {})
+    if not result.get("ok"):
+        return JSONResponse(result, status_code=400)
+    try:
+        adm.log_action("owner", "update_branch", int(gym_id), f"{branch_id}")
+    except Exception:
+        pass
+    return result
+
+
+@app.delete("/gyms/{gym_id}/branches/{branch_id}")
+async def delete_gym_branch(request: Request, gym_id: int, branch_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    result = adm.eliminar_sucursal(int(gym_id), int(branch_id))
+    if not result.get("ok"):
+        return JSONResponse(result, status_code=400)
+    try:
+        adm.log_action("owner", "delete_branch", int(gym_id), f"{branch_id}")
+    except Exception:
+        pass
+    return result
+
+
 @app.put("/gyms/{gym_id}")
 async def update_gym(
     request: Request,
     gym_id: int,
     nombre: str = Form(None),
-    subdominio: str = Form(None)
+    subdominio: str = Form(None),
 ):
     """Update a gym's basic info."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     result = adm.actualizar_gimnasio(gym_id, nombre, subdominio)
     if not result.get("ok"):
         return JSONResponse(result, status_code=400)
-    
+
     adm.log_action("owner", "update_gym", gym_id, f"{nombre}|{subdominio}")
     return result
 
@@ -627,7 +953,7 @@ async def delete_gym(request: Request, gym_id: int):
     """Delete a gym and its resources."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     ok = adm.eliminar_gimnasio(gym_id)
     adm.log_action("owner", "delete_gym", gym_id, None)
     return {"ok": ok}
@@ -640,12 +966,12 @@ async def set_gym_status(
     status: str = Form(...),
     hard_suspend: bool = Form(False),
     suspended_until: str = Form(None),
-    reason: str = Form(None)
+    reason: str = Form(None),
 ):
     """Set a gym's status (active, suspended, maintenance)."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     ok = adm.set_estado_gimnasio(gym_id, status, hard_suspend, suspended_until, reason)
     adm.log_action("owner", "set_gym_status", gym_id, f"{status}|{reason}")
     return {"ok": ok}
@@ -653,33 +979,34 @@ async def set_gym_status(
 
 @app.post("/gyms/{gym_id}/owner-password")
 async def set_gym_owner_password(
-    request: Request,
-    gym_id: int,
-    new_password: str = Form(...)
+    request: Request, gym_id: int, new_password: str = Form(...)
 ):
     """Set the owner password for a specific gym."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     if len(new_password.strip()) < 6:
-        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 6 caracteres")
-    
+        raise HTTPException(
+            status_code=400, detail="La contraseña debe tener al menos 6 caracteres"
+        )
+
     success = adm.set_gym_owner_password(gym_id, new_password)
     if not success:
         raise HTTPException(status_code=500, detail="Error al actualizar la contraseña")
-    
+
     adm.log_action("owner", "set_gym_owner_password", gym_id, "Password changed")
     return {"ok": True}
 
 
 # ========== METRICS ROUTES ==========
 
+
 @app.get("/metrics")
 async def get_metrics(request: Request):
     """Get dashboard metrics."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     metrics = adm.obtener_metricas_agregadas()
     return metrics
 
@@ -689,7 +1016,7 @@ async def get_warnings(request: Request):
     """Get admin warnings (expirations, issues, etc.)."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     warnings = adm.obtener_warnings_admin()
     return {"warnings": warnings}
 
@@ -699,11 +1026,12 @@ async def get_expirations(request: Request, days: int = Query(30, ge=1, le=365))
     """Get upcoming subscription expirations."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     expirations = adm.listar_proximos_vencimientos(days)
     # Normalize response fields for admin-web
     try:
         from datetime import date
+
         today = date.today()
         normalized = []
         for e in expirations:
@@ -714,22 +1042,27 @@ async def get_expirations(request: Request, days: int = Query(30, ge=1, le=365))
                 days_remaining = None
             else:
                 try:
-                    due_date = next_due.date() if hasattr(next_due, "date") else next_due
+                    due_date = (
+                        next_due.date() if hasattr(next_due, "date") else next_due
+                    )
                     if isinstance(due_date, str):
                         from datetime import datetime
+
                         due_date = datetime.fromisoformat(due_date[:10]).date()
                     valid_until = str(due_date)
                     days_remaining = (due_date - today).days
                 except Exception:
                     valid_until = str(next_due)
                     days_remaining = None
-            normalized.append({
-                "gym_id": e.get("gym_id"),
-                "nombre": e.get("nombre"),
-                "subdominio": e.get("subdominio"),
-                "valid_until": valid_until,
-                "days_remaining": days_remaining,
-            })
+            normalized.append(
+                {
+                    "gym_id": e.get("gym_id"),
+                    "nombre": e.get("nombre"),
+                    "subdominio": e.get("subdominio"),
+                    "valid_until": valid_until,
+                    "days_remaining": days_remaining,
+                }
+            )
         expirations = normalized
     except Exception:
         pass
@@ -751,28 +1084,29 @@ async def assign_gym_subscription(
     gym_id: int,
     plan_id: int = Form(...),
     start_date: str = Form(None),
-    end_date: str = Form(None)
+    end_date: str = Form(None),
 ):
     """Manually assign a subscription to a gym (without payment)."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     ok = adm.asignar_suscripcion_manual(gym_id, plan_id, end_date, start_date)
     if not ok:
         raise HTTPException(status_code=400, detail="Error assigning subscription")
-    
+
     adm.log_action("owner", "assign_subscription", gym_id, f"plan={plan_id}")
     return {"ok": True}
 
 
 # ========== PAYMENTS ROUTES ==========
 
+
 @app.get("/gyms/{gym_id}/payments")
 async def list_gym_payments(request: Request, gym_id: int):
     """List all payments for a gym."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     payments = adm.listar_pagos(gym_id)
     return {"payments": payments}
 
@@ -797,16 +1131,24 @@ async def register_payment(
     """Register a payment for a gym."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     try:
-        pid = int(plan_id) if plan_id is not None and str(plan_id).strip() != "" else None
+        pid = (
+            int(plan_id) if plan_id is not None and str(plan_id).strip() != "" else None
+        )
     except Exception:
         pid = None
     try:
         per = int(periods) if periods is not None and str(periods).strip() != "" else 1
     except Exception:
         per = 1
-    apply_flag = str(apply_to_subscription or "true").strip().lower() in ("true", "1", "yes", "y", "on")
+    apply_flag = str(apply_to_subscription or "true").strip().lower() in (
+        "true",
+        "1",
+        "yes",
+        "y",
+        "on",
+    )
 
     ok = adm.registrar_pago(
         gym_id,
@@ -833,7 +1175,7 @@ async def get_recent_payments(request: Request, limit: int = Query(10, ge=1, le=
     """Get recent payments across all gyms."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     payments = adm.listar_pagos_recientes(limit)
     return {"payments": payments}
 
@@ -851,7 +1193,15 @@ async def list_payments_advanced(
 ):
     require_admin(request)
     adm = get_admin_service()
-    return adm.listar_pagos_avanzado(gym_id=gym_id, status=status, q=q, desde=desde, hasta=hasta, page=page, page_size=page_size)
+    return adm.listar_pagos_avanzado(
+        gym_id=gym_id,
+        status=status,
+        q=q,
+        desde=desde,
+        hasta=hasta,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @app.put("/gyms/{gym_id}/payments/{payment_id}")
@@ -866,7 +1216,9 @@ async def update_gym_payment(request: Request, gym_id: int, payment_id: int):
         raise HTTPException(status_code=400, detail="Invalid payload")
     result = adm.actualizar_pago_gym(int(gym_id), int(payment_id), payload)
     if result.get("ok"):
-        adm.log_action("owner", "update_payment", int(gym_id), f"payment_id={payment_id}")
+        adm.log_action(
+            "owner", "update_payment", int(gym_id), f"payment_id={payment_id}"
+        )
     return result
 
 
@@ -876,28 +1228,33 @@ async def delete_gym_payment(request: Request, gym_id: int, payment_id: int):
     adm = get_admin_service()
     result = adm.eliminar_pago_gym(int(gym_id), int(payment_id))
     if result.get("ok") and int(result.get("deleted") or 0) > 0:
-        adm.log_action("owner", "delete_payment", int(gym_id), f"payment_id={payment_id}")
+        adm.log_action(
+            "owner", "delete_payment", int(gym_id), f"payment_id={payment_id}"
+        )
     return result
 
 
 # ========== AUDIT ROUTES ==========
+
 
 @app.get("/audit")
 async def get_audit_summary(request: Request, days: int = Query(7, ge=1, le=90)):
     """Get audit summary for the last N days."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     summary = adm.resumen_auditoria(days)
     return summary
 
 
 @app.get("/gyms/{gym_id}/audit")
-async def get_gym_audit(request: Request, gym_id: int, limit: int = Query(50, ge=1, le=200)):
+async def get_gym_audit(
+    request: Request, gym_id: int, limit: int = Query(50, ge=1, le=200)
+):
     """Get audit log for a specific gym."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     audit = adm.obtener_auditoria_gym(gym_id, limit)
     return {"audit": audit}
 
@@ -1100,6 +1457,7 @@ async def set_gym_reminder_message(request: Request, gym_id: int):
 
 # ========== GYM ATTENDANCE POLICY (used by admin-web) ==========
 
+
 @app.get("/gyms/{gym_id}/attendance-policy")
 async def get_gym_attendance_policy(request: Request, gym_id: int):
     require_admin(request)
@@ -1126,21 +1484,66 @@ async def set_gym_attendance_policy(request: Request, gym_id: int):
     return adm.set_gym_attendance_policy(gym_id, allow)
 
 
-@app.get("/gyms/{gym_id}/audit")
-async def get_gym_audit(request: Request, gym_id: int, limit: int = 50):
+@app.get("/gyms/{gym_id}/feature-flags")
+async def get_gym_feature_flags(request: Request, gym_id: int, scope: str = "gym", branch_id: int = 0):
     require_admin(request)
     adm = get_admin_service()
-    return adm.list_audit(gym_id, limit=limit)
+    return adm.get_gym_feature_flags(int(gym_id), scope=scope, branch_id=int(branch_id) if branch_id else None)
+
+
+@app.put("/gyms/{gym_id}/feature-flags")
+async def set_gym_feature_flags(request: Request, gym_id: int, scope: str = "gym", branch_id: int = 0):
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    flags = data.get("flags") if isinstance(data, dict) else {}
+    return adm.set_gym_feature_flags(int(gym_id), flags, scope=scope, branch_id=int(branch_id) if branch_id else None)
+
+
+@app.get("/gyms/{gym_id}/tipos-cuota")
+async def list_gym_tipos_cuota(request: Request, gym_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    return adm.list_gym_tipos_cuota(int(gym_id))
+
+
+@app.get("/gyms/{gym_id}/tipos-clases")
+async def list_gym_tipos_clases(request: Request, gym_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    return adm.list_gym_tipos_clases(int(gym_id))
+
+
+@app.get("/gyms/{gym_id}/tipos-cuota/{tipo_cuota_id}/entitlements")
+async def get_gym_tipo_cuota_entitlements(request: Request, gym_id: int, tipo_cuota_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    return adm.get_gym_tipo_cuota_entitlements(int(gym_id), int(tipo_cuota_id))
+
+
+@app.put("/gyms/{gym_id}/tipos-cuota/{tipo_cuota_id}/entitlements")
+async def set_gym_tipo_cuota_entitlements(request: Request, gym_id: int, tipo_cuota_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    return adm.set_gym_tipo_cuota_entitlements(int(gym_id), int(tipo_cuota_id), data or {})
 
 
 # ========== BRANDING ROUTES ==========
+
 
 @app.get("/gyms/{gym_id}/branding")
 async def get_gym_branding(request: Request, gym_id: int):
     """Get branding configuration for a gym."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     branding = adm.get_gym_branding(gym_id)
     return {"branding": branding}
 
@@ -1155,66 +1558,81 @@ async def save_gym_branding(
     color_primario: str = Form(None),
     color_secundario: str = Form(None),
     color_fondo: str = Form(None),
-    color_texto: str = Form(None)
+    color_texto: str = Form(None),
 ):
     """Save branding configuration for a gym."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     branding = {}
-    if nombre_publico is not None: branding["nombre_publico"] = nombre_publico
-    if direccion is not None: branding["direccion"] = direccion
-    if logo_url is not None: branding["logo_url"] = logo_url
-    if color_primario is not None: branding["color_primario"] = color_primario
-    if color_secundario is not None: branding["color_secundario"] = color_secundario
-    if color_fondo is not None: branding["color_fondo"] = color_fondo
-    if color_texto is not None: branding["color_texto"] = color_texto
-    
+    if nombre_publico is not None:
+        branding["nombre_publico"] = nombre_publico
+    if direccion is not None:
+        branding["direccion"] = direccion
+    if logo_url is not None:
+        branding["logo_url"] = logo_url
+    if color_primario is not None:
+        branding["color_primario"] = color_primario
+    if color_secundario is not None:
+        branding["color_secundario"] = color_secundario
+    if color_fondo is not None:
+        branding["color_fondo"] = color_fondo
+    if color_texto is not None:
+        branding["color_texto"] = color_texto
+
     result = adm.save_gym_branding(gym_id, branding)
     return result
 
 
 @app.post("/gyms/{gym_id}/logo")
-async def upload_gym_logo(
-    request: Request,
-    gym_id: int,
-    file: UploadFile = File(...)
-):
+async def upload_gym_logo(request: Request, gym_id: int, file: UploadFile = File(...)):
     """Upload a logo image for a gym to B2 storage."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     # Validate file type
-    allowed_types = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"]
+    allowed_types = [
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "image/svg+xml",
+    ]
     if file.content_type not in allowed_types:
-        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: {', '.join(allowed_types)}")
-    
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type. Allowed: {', '.join(allowed_types)}",
+        )
+
     # Read file content
     content = await file.read()
-    
+
     # Limit file size (5MB)
     max_size = 5 * 1024 * 1024
     if len(content) > max_size:
         raise HTTPException(status_code=400, detail="File too large. Max 5MB.")
-    
+
     # Upload to B2
-    result = adm.upload_gym_asset(gym_id, content, file.filename or "logo.png", file.content_type)
-    
+    result = adm.upload_gym_asset(
+        gym_id, content, file.filename or "logo.png", file.content_type
+    )
+
     if result.get("ok"):
         # Automatically save as logo_url in branding
         adm.save_gym_branding(gym_id, {"logo_url": result["url"]})
-    
+
     return result
 
 
 # ========== SUBDOMAIN ROUTES ==========
+
 
 @app.get("/subdomain/check")
 async def check_subdomain(request: Request, subdomain: str = Query(...)):
     """Check if a subdomain is available."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     available = adm.subdominio_disponible(subdomain)
     return {"subdomain": subdomain, "available": available}
 
@@ -1224,12 +1642,13 @@ async def suggest_subdomain(request: Request, name: str = Query(...)):
     """Suggest a unique subdomain based on a name."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     suggested = adm.sugerir_subdominio_unico(name)
     return {"suggested": suggested}
 
 
 # ========== PLANS ROUTES ==========
+
 
 @app.get("/plans")
 async def list_plans(request: Request):
@@ -1246,15 +1665,17 @@ async def create_plan(
     name: str = Form(...),
     amount: float = Form(...),
     currency: str = Form("ARS"),
-    period_days: int = Form(30)
+    period_days: int = Form(30),
 ):
     """Create a new plan."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     result = adm.crear_plan(name, amount, currency, period_days)
     if result.get("ok"):
-        adm.log_action("owner", "create_plan", None, f"Plan: {name}, Amount: {amount} {currency}")
+        adm.log_action(
+            "owner", "create_plan", None, f"Plan: {name}, Amount: {amount} {currency}"
+        )
     return result
 
 
@@ -1265,18 +1686,22 @@ async def update_plan(
     name: str = Form(None),
     amount: str = Form(None),
     currency: str = Form(None),
-    period_days: str = Form(None)
+    period_days: str = Form(None),
 ):
     """Update an existing plan."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     updates = {}
-    if name: updates["name"] = name
-    if amount: updates["amount"] = float(amount)
-    if currency: updates["currency"] = currency
-    if period_days: updates["period_days"] = int(period_days)
-    
+    if name:
+        updates["name"] = name
+    if amount:
+        updates["amount"] = float(amount)
+    if currency:
+        updates["currency"] = currency
+    if period_days:
+        updates["period_days"] = int(period_days)
+
     result = adm.actualizar_plan(plan_id, updates)
     if result.get("ok"):
         adm.log_action("owner", "update_plan", None, f"Plan ID: {plan_id}")
@@ -1284,19 +1709,17 @@ async def update_plan(
 
 
 @app.post("/plans/{plan_id}/toggle")
-async def toggle_plan(
-    request: Request,
-    plan_id: int,
-    active: str = Form(...)
-):
+async def toggle_plan(request: Request, plan_id: int, active: str = Form(...)):
     """Toggle a plan's active status."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     is_active = active.lower() in ("true", "1", "yes")
     result = adm.toggle_plan(plan_id, is_active)
     if result.get("ok"):
-        adm.log_action("owner", "toggle_plan", None, f"Plan ID: {plan_id}, Active: {is_active}")
+        adm.log_action(
+            "owner", "toggle_plan", None, f"Plan ID: {plan_id}, Active: {is_active}"
+        )
     return result
 
 
@@ -1305,7 +1728,7 @@ async def delete_plan(request: Request, plan_id: int):
     """Delete a plan."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     result = adm.eliminar_plan(plan_id)
     if result.get("ok"):
         adm.log_action("owner", "delete_plan", None, f"Plan ID: {plan_id}")
@@ -1313,6 +1736,7 @@ async def delete_plan(request: Request, plan_id: int):
 
 
 # ========== SETTINGS ROUTES ==========
+
 
 @app.get("/settings")
 async def get_settings(request: Request):
@@ -1333,11 +1757,14 @@ async def put_settings(request: Request):
         raise HTTPException(status_code=400, detail="Invalid payload")
     result = adm.upsert_settings(payload, actor_username="owner")
     if result.get("ok"):
-        adm.log_action("owner", "update_settings", None, f"keys={','.join(payload.keys())}")
+        adm.log_action(
+            "owner", "update_settings", None, f"keys={','.join(payload.keys())}"
+        )
     return result
 
 
 # ========== SUBSCRIPTIONS ROUTES ==========
+
 
 @app.get("/gyms/{gym_id}/subscription")
 async def get_gym_subscription(request: Request, gym_id: int):
@@ -1365,7 +1792,9 @@ async def put_gym_subscription(request: Request, gym_id: int):
         status=payload.get("status") or "active",
     )
     if result.get("ok"):
-        adm.log_action("owner", "upsert_subscription", int(gym_id), f"plan_id={plan_id}")
+        adm.log_action(
+            "owner", "upsert_subscription", int(gym_id), f"plan_id={plan_id}"
+        )
     return result
 
 
@@ -1398,7 +1827,13 @@ async def list_subscriptions(
 ):
     require_admin(request)
     adm = get_admin_service()
-    return adm.listar_suscripciones_avanzado(q=q, status=status, due_before_days=due_before_days, page=page, page_size=page_size)
+    return adm.listar_suscripciones_avanzado(
+        q=q,
+        status=status,
+        due_before_days=due_before_days,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @app.post("/subscriptions/maintenance/run")
@@ -1429,21 +1864,31 @@ async def run_subscriptions_maintenance(
         eff_days = int((subs or {}).get("reminder_days_before", 7) or 7)
 
     try:
-        eff_grace = int(grace_days) if grace_days is not None and str(grace_days).strip() != "" else None
+        eff_grace = (
+            int(grace_days)
+            if grace_days is not None and str(grace_days).strip() != ""
+            else None
+        )
     except Exception:
         eff_grace = None
     if eff_grace is None:
         eff_grace = int((subs or {}).get("grace_days", 0) or 0)
 
     run_id = str(uuid.uuid4())
-    result = adm.ejecutar_mantenimiento_suscripciones(reminder_days=eff_days, grace_days=eff_grace, run_id=run_id)
+    result = adm.ejecutar_mantenimiento_suscripciones(
+        reminder_days=eff_days, grace_days=eff_grace, run_id=run_id
+    )
     if result.get("ok"):
-        adm.log_action("owner", "subscriptions_maintenance_run", None, f"run_id={run_id}")
+        adm.log_action(
+            "owner", "subscriptions_maintenance_run", None, f"run_id={run_id}"
+        )
     return result
 
 
 @app.get("/jobs/runs")
-async def list_job_runs(request: Request, job_key: str = Query(...), limit: int = Query(25, ge=1, le=200)):
+async def list_job_runs(
+    request: Request, job_key: str = Query(...), limit: int = Query(25, ge=1, le=200)
+):
     require_admin(request)
     adm = get_admin_service()
     return adm.listar_job_runs(job_key, limit=int(limit))
@@ -1458,6 +1903,7 @@ async def get_job_run(request: Request, run_id: str):
 
 # ========== CRON & AUTOMATION ROUTES ==========
 
+
 @app.post("/cron/subscriptions/maintenance")
 async def cron_subscriptions_maintenance(
     request: Request,
@@ -1467,9 +1913,12 @@ async def cron_subscriptions_maintenance(
     run_id: str = Query(None),
 ):
     import os
+
     expected_token = os.getenv("CRON_TOKEN", "").strip()
     header_token = request.headers.get("x-cron-token", "")
-    if not expected_token or (token != expected_token and header_token != expected_token):
+    if not expected_token or (
+        token != expected_token and header_token != expected_token
+    ):
         raise HTTPException(status_code=403, detail="Invalid cron token")
 
     adm = get_admin_service()
@@ -1493,31 +1942,46 @@ async def cron_subscriptions_maintenance(
         eff_days = int((subs or {}).get("reminder_days_before", 7) or 7)
 
     try:
-        eff_grace = int(grace_days) if grace_days is not None and str(grace_days).strip() != "" else None
+        eff_grace = (
+            int(grace_days)
+            if grace_days is not None and str(grace_days).strip() != ""
+            else None
+        )
     except Exception:
         eff_grace = None
     if eff_grace is None:
         eff_grace = int((subs or {}).get("grace_days", 0) or 0)
 
-    effective_run_id = (str(run_id).strip() if run_id is not None and str(run_id).strip() != "" else None)
+    effective_run_id = (
+        str(run_id).strip()
+        if run_id is not None and str(run_id).strip() != ""
+        else None
+    )
     if effective_run_id is None:
         effective_run_id = f"subscriptions_maintenance:{date.today().isoformat()}:{int(eff_days)}:{int(eff_grace)}"
 
-    result = adm.ejecutar_mantenimiento_suscripciones(reminder_days=eff_days, grace_days=eff_grace, run_id=effective_run_id)
+    result = adm.ejecutar_mantenimiento_suscripciones(
+        reminder_days=eff_days, grace_days=eff_grace, run_id=effective_run_id
+    )
     return result
 
 
 @app.post("/cron/reminders")
-async def cron_daily_reminders(request: Request, token: str = Query(None), days: str = Query(None)):
+async def cron_daily_reminders(
+    request: Request, token: str = Query(None), days: str = Query(None)
+):
     """Cron endpoint for daily subscription reminders. Requires CRON_TOKEN."""
     import os
+
     expected_token = os.getenv("CRON_TOKEN", "").strip()
-    
+
     # Check token from query or header
     header_token = request.headers.get("x-cron-token", "")
-    if not expected_token or (token != expected_token and header_token != expected_token):
+    if not expected_token or (
+        token != expected_token and header_token != expected_token
+    ):
         raise HTTPException(status_code=403, detail="Invalid cron token")
-    
+
     adm = get_admin_service()
     cfg = {}
     try:
@@ -1544,10 +2008,7 @@ async def cron_daily_reminders(request: Request, token: str = Query(None), days:
 
 
 @app.post("/gyms/batch/auto-suspend")
-async def auto_suspend_overdue(
-    request: Request,
-    grace_days: str = Form(None)
-):
+async def auto_suspend_overdue(request: Request, grace_days: str = Form(None)):
     """Automatically suspend gyms that are overdue by more than grace_days."""
     require_admin(request)
     adm = get_admin_service()
@@ -1565,7 +2026,11 @@ async def auto_suspend_overdue(
     subs = cfg.get("subscriptions") or {}
     enabled = bool((subs or {}).get("auto_suspend_enabled", True))
     try:
-        eff_grace = int(grace_days) if grace_days is not None and str(grace_days).strip() != "" else None
+        eff_grace = (
+            int(grace_days)
+            if grace_days is not None and str(grace_days).strip() != ""
+            else None
+        )
     except Exception:
         eff_grace = None
     if eff_grace is None:
@@ -1575,37 +2040,46 @@ async def auto_suspend_overdue(
 
     result = adm.auto_suspender_vencidos(eff_grace)
     if result.get("suspended"):
-        adm.log_action("owner", "auto_suspend_overdue", None, f"Suspended: {result.get('suspended')}, Grace: {eff_grace}")
+        adm.log_action(
+            "owner",
+            "auto_suspend_overdue",
+            None,
+            f"Suspended: {result.get('suspended')}, Grace: {eff_grace}",
+        )
     return result
 
 
 # ========== WHATSAPP ROUTES ==========
+
 
 @app.post("/gyms/{gym_id}/whatsapp/test")
 async def send_whatsapp_test(
     request: Request,
     gym_id: int,
     phone: str = Form(...),
-    message: str = Form("Mensaje de prueba desde IronHub Admin")
+    message: str = Form("Mensaje de prueba desde IronHub Admin"),
 ):
     """Send a test WhatsApp message using a gym's WhatsApp configuration."""
     require_admin(request)
     adm = get_admin_service()
-    
+
     # Get gym info
     gym = adm.obtener_gimnasio(gym_id)
     if not gym:
         raise HTTPException(status_code=404, detail="Gimnasio no encontrado")
-    
+
     phone_id = (gym.get("whatsapp_phone_id") or "").strip()
     access_token_enc = (gym.get("whatsapp_access_token") or "").strip()
-    access_token = SecureConfig.decrypt_waba_secret(access_token_enc) if access_token_enc else ""
-    
+    access_token = (
+        SecureConfig.decrypt_waba_secret(access_token_enc) if access_token_enc else ""
+    )
+
     if not phone_id or not access_token:
         return {"ok": False, "error": "WhatsApp no configurado para este gimnasio"}
-    
+
     # Normalize phone number
     import re
+
     phone_clean = re.sub(r"[^\d]", "", phone)
     if not phone_clean.startswith("549"):
         if phone_clean.startswith("0"):
@@ -1614,9 +2088,10 @@ async def send_whatsapp_test(
             phone_clean = "54" + phone_clean
         else:
             phone_clean = "549" + phone_clean
-    
+
     # Send via WhatsApp API
     import httpx
+
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             api_version = (os.getenv("WHATSAPP_API_VERSION") or "v19.0").strip()
@@ -1626,16 +2101,18 @@ async def send_whatsapp_test(
                 "recipient_type": "individual",
                 "to": phone_clean,
                 "type": "text",
-                "text": {"body": message}
+                "text": {"body": message},
             }
             headers = {
                 "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
             }
             response = await client.post(url, json=payload, headers=headers)
-            
+
             if response.status_code == 200:
-                adm.log_action("owner", "whatsapp_test", gym_id, f"Sent test to {phone_clean}")
+                adm.log_action(
+                    "owner", "whatsapp_test", gym_id, f"Sent test to {phone_clean}"
+                )
                 return {"ok": True, "message": f"Mensaje enviado a {phone_clean}"}
             else:
                 error_data = response.json() if response.content else {}
@@ -1663,7 +2140,12 @@ async def gym_whatsapp_onboarding_events(
 async def list_whatsapp_template_catalog(request: Request, active_only: bool = False):
     require_admin(request)
     adm = get_admin_service()
-    return {"ok": True, "templates": adm.listar_whatsapp_template_catalog(active_only=bool(active_only))}
+    return {
+        "ok": True,
+        "templates": adm.listar_whatsapp_template_catalog(
+            active_only=bool(active_only)
+        ),
+    }
 
 
 @app.put("/whatsapp/templates/{template_name}")
@@ -1674,7 +2156,9 @@ async def upsert_whatsapp_template_catalog(request: Request, template_name: str)
         payload = await request.json()
     except Exception:
         payload = {}
-    result = adm.upsert_whatsapp_template_catalog(template_name, payload if isinstance(payload, dict) else {})
+    result = adm.upsert_whatsapp_template_catalog(
+        template_name, payload if isinstance(payload, dict) else {}
+    )
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
     return {"ok": True}
@@ -1701,7 +2185,9 @@ async def sync_whatsapp_template_defaults(request: Request, overwrite: bool = Tr
 
 
 @app.post("/whatsapp/templates/bump-version")
-async def bump_whatsapp_template_version(request: Request, template_name: str = Form(None)):
+async def bump_whatsapp_template_version(
+    request: Request, template_name: str = Form(None)
+):
     require_admin(request)
     name = str(template_name or "").strip()
     if not name:
@@ -1776,7 +2262,9 @@ async def set_gym_whatsapp_action(request: Request, gym_id: int, action_key: str
     enabled = bool((payload or {}).get("enabled") is True)
     template_name = str((payload or {}).get("template_name") or "").strip()
     adm = get_admin_service()
-    result = adm.set_gym_whatsapp_action(int(gym_id), action_key, enabled, template_name)
+    result = adm.set_gym_whatsapp_action(
+        int(gym_id), action_key, enabled, template_name
+    )
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
     return {"ok": True}
@@ -1806,6 +2294,7 @@ async def gym_whatsapp_health(request: Request, gym_id: int):
                     err = str(errs[0])
             except Exception:
                 err = None
-        return JSONResponse({**result, "ok": False, "error": str(err or "Error")}, status_code=200)
+        return JSONResponse(
+            {**result, "ok": False, "error": str(err or "Error")}, status_code=200
+        )
     return JSONResponse(result, status_code=200)
-

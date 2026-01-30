@@ -16,6 +16,8 @@ export interface Gym {
     owner_phone?: string;
     wa_configured?: boolean;
     b2_bucket_name?: string;
+    production_ready?: boolean;
+    production_ready_at?: string | null;
     // Subscription fields
     subscription_status?: string;
     subscription_plan_name?: string;
@@ -36,6 +38,33 @@ export interface GymCreateInput {
     whatsapp_app_secret?: string;
     whatsapp_nonblocking?: boolean;
     whatsapp_send_timeout_seconds?: string;
+}
+
+export interface GymCreateV2Input {
+    nombre: string;
+    subdominio?: string;
+    owner_phone?: string;
+    owner_password?: string;
+    whatsapp_phone_id?: string;
+    whatsapp_access_token?: string;
+    whatsapp_business_account_id?: string;
+    whatsapp_verify_token?: string;
+    whatsapp_app_secret?: string;
+    whatsapp_nonblocking?: boolean;
+    whatsapp_send_timeout_seconds?: number | null;
+    branches?: GymBranchCreateInput[];
+}
+
+export interface GymCreateV2Response {
+    ok: boolean;
+    gym: any;
+    tenant_url?: string | null;
+    branches?: GymBranch[];
+    owner_password_generated?: boolean;
+    owner_password_set?: boolean;
+    owner_password?: string;
+    bulk_branches?: any;
+    error?: string;
 }
 
 export interface Metrics {
@@ -192,6 +221,77 @@ export interface GymDetails extends Gym {
     suspension_until?: string;
 }
 
+export interface GymOnboardingStatus {
+    ok: boolean;
+    gym_id: number;
+    subdominio: string;
+    gym_status: string;
+    tenant_url?: string | null;
+    branches_total: number;
+    branches_active: number;
+    owner_password_set: boolean;
+    whatsapp_configured: boolean;
+    production_ready?: boolean;
+    production_ready_at?: string | null;
+}
+
+export interface GymBranch {
+    id: number;
+    gym_id: number;
+    name: string;
+    code: string;
+    address?: string | null;
+    timezone?: string | null;
+    status?: string | null;
+    station_key?: string | null;
+    created_at?: string;
+}
+
+export interface GymBranchCreateInput {
+    name: string;
+    code: string;
+    address?: string | null;
+    timezone?: string | null;
+}
+
+export interface GymBranchUpdateInput {
+    name?: string;
+    code?: string;
+    address?: string | null;
+    timezone?: string | null;
+    status?: 'active' | 'inactive';
+}
+
+export interface FeatureFlags {
+    modules: Record<string, boolean>;
+}
+
+export interface GymTipoCuotaItem {
+    id: number;
+    nombre: string;
+    activo: boolean;
+    all_sucursales: boolean;
+}
+
+export interface GymTipoClaseItem {
+    id: number;
+    nombre: string;
+    activo: boolean;
+}
+
+export interface TipoCuotaEntitlements {
+    ok: boolean;
+    tipo_cuota: { id: number; nombre: string; all_sucursales: boolean };
+    sucursal_ids: number[];
+    class_rules: { id: number; sucursal_id?: number | null; target_type: string; target_id: number; allow: boolean }[];
+}
+
+export interface TipoCuotaEntitlementsUpdate {
+    all_sucursales: boolean;
+    sucursal_ids: number[];
+    class_rules: { sucursal_id?: number | null; target_type: 'tipo_clase'; target_id: number; allow: boolean }[];
+}
+
 // Helper for API requests
 async function request<T>(
     endpoint: string,
@@ -246,12 +346,13 @@ export const api = {
         }),
 
     // Gyms
-    getGyms: (params?: { page?: number; page_size?: number; q?: string; status?: string }) => {
+    getGyms: (params?: { page?: number; page_size?: number; q?: string; status?: string; production_ready?: boolean }) => {
         const searchParams = new URLSearchParams();
         if (params?.page) searchParams.set('page', String(params.page));
         if (params?.page_size) searchParams.set('page_size', String(params.page_size));
         if (params?.q) searchParams.set('q', params.q);
         if (params?.status) searchParams.set('status', params.status);
+        if (params?.production_ready !== undefined) searchParams.set('production_ready', String(params.production_ready));
         return request<{ gyms: Gym[]; total: number; page: number; page_size: number }>(
             `/gyms?${searchParams.toString()}`
         );
@@ -275,6 +376,13 @@ export const api = {
             body: params,
         });
     },
+
+    createGymV2: (payload: GymCreateV2Input) =>
+        request<GymCreateV2Response>('/gyms/v2', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        }),
 
     updateGym: (id: number, data: Partial<GymCreateInput>) =>
         request<Gym>(`/gyms/${id}`, {
@@ -620,6 +728,87 @@ export const api = {
     // Gym Details
     getGymDetails: (id: number) =>
         request<GymDetails>(`/gyms/${id}/details`),
+
+    getGymOnboardingStatus: (gymId: number) =>
+        request<GymOnboardingStatus>(`/gyms/${gymId}/onboarding`),
+
+    setGymProductionReady: (gymId: number, ready: boolean) =>
+        request<{ ok: boolean; production_ready?: boolean; production_ready_at?: string | null; error?: string }>(
+            `/gyms/${gymId}/production-ready`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ready }),
+            }
+        ),
+
+    listGymBranches: (gymId: number) =>
+        request<{ ok: boolean; items: GymBranch[] }>(`/gyms/${gymId}/branches`),
+
+    createGymBranch: (gymId: number, payload: GymBranchCreateInput) =>
+        request<{ ok: boolean; branch?: GymBranch; error?: string }>(`/gyms/${gymId}/branches`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        }),
+
+    updateGymBranch: (gymId: number, branchId: number, payload: GymBranchUpdateInput) =>
+        request<{ ok: boolean; branch?: GymBranch; error?: string }>(`/gyms/${gymId}/branches/${branchId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        }),
+
+    deleteGymBranch: (gymId: number, branchId: number) =>
+        request<{ ok: boolean; branch?: GymBranch; error?: string }>(`/gyms/${gymId}/branches/${branchId}`, {
+            method: 'DELETE',
+        }),
+
+    bulkCreateGymBranches: (gymId: number, items: GymBranchCreateInput[]) =>
+        request<{ ok: boolean; created: number; failed: number; results: any[]; error?: string }>(`/gyms/${gymId}/branches/bulk`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items }),
+        }),
+
+    syncGymBranches: (gymId: number) =>
+        request<{ ok: boolean; items?: GymBranch[]; error?: string }>(`/gyms/${gymId}/branches/sync`, { method: 'POST' }),
+
+    listGymTiposCuota: (gymId: number) =>
+        request<{ ok: boolean; items: GymTipoCuotaItem[] }>(`/gyms/${gymId}/tipos-cuota`),
+
+    listGymTiposClases: (gymId: number) =>
+        request<{ ok: boolean; items: GymTipoClaseItem[] }>(`/gyms/${gymId}/tipos-clases`),
+
+    getGymTipoCuotaEntitlements: (gymId: number, tipoCuotaId: number) =>
+        request<TipoCuotaEntitlements>(`/gyms/${gymId}/tipos-cuota/${tipoCuotaId}/entitlements`),
+
+    setGymTipoCuotaEntitlements: (gymId: number, tipoCuotaId: number, payload: TipoCuotaEntitlementsUpdate) =>
+        request<{ ok: boolean }>(`/gyms/${gymId}/tipos-cuota/${tipoCuotaId}/entitlements`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        }),
+
+    getGymFeatureFlags: (gymId: number, params?: { scope?: 'gym' | 'branch'; branch_id?: number }) => {
+        const searchParams = new URLSearchParams();
+        if (params?.scope) searchParams.set('scope', params.scope);
+        if (params?.branch_id) searchParams.set('branch_id', String(params.branch_id));
+        const qs = searchParams.toString();
+        return request<{ ok: boolean; flags: FeatureFlags }>(`/gyms/${gymId}/feature-flags${qs ? `?${qs}` : ''}`);
+    },
+
+    setGymFeatureFlags: (gymId: number, flags: FeatureFlags, params?: { scope?: 'gym' | 'branch'; branch_id?: number }) => {
+        const searchParams = new URLSearchParams();
+        if (params?.scope) searchParams.set('scope', params.scope);
+        if (params?.branch_id) searchParams.set('branch_id', String(params.branch_id));
+        const qs = searchParams.toString();
+        return request<{ ok: boolean; flags: FeatureFlags }>(`/gyms/${gymId}/feature-flags${qs ? `?${qs}` : ''}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ flags }),
+        });
+    },
 
     getGymReminderMessage: (id: number) =>
         request<{ message: string }>(`/gyms/${id}/reminder`),
