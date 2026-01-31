@@ -146,6 +146,40 @@ vercel_url = os.getenv("VERCEL_URL")
 if vercel_url:
     allowed_origins.append(f"https://{vercel_url}")
 
+_allowed_origin_re = re.compile(rf"^https://([a-z0-9-]+\.)*{escaped_domain}$")
+
+
+def _apply_cors_headers(request: Request, response: Response) -> None:
+    try:
+        origin = str(request.headers.get("origin") or "").strip()
+    except Exception:
+        origin = ""
+    if not origin:
+        return
+    try:
+        allowed = origin in allowed_origins or bool(_allowed_origin_re.match(origin))
+    except Exception:
+        allowed = False
+    if not allowed:
+        return
+
+    try:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        vary = response.headers.get("Vary") or ""
+        vary_parts = [v.strip() for v in vary.split(",") if v.strip()]
+        if "Origin" not in vary_parts:
+            vary_parts.append("Origin")
+        response.headers["Vary"] = ", ".join(vary_parts)
+        if request.method == "OPTIONS":
+            acrh = str(request.headers.get("access-control-request-headers") or "").strip()
+            response.headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = acrh or "*"
+            response.headers["Access-Control-Max-Age"] = "600"
+    except Exception:
+        return
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -253,7 +287,7 @@ async def tenant_context_middleware(request: Request, call_next):
 
             if is_global_rate_limited(request):
                 status = get_rate_limit_status(request)
-                return JSONResponse(
+                resp = JSONResponse(
                     status_code=429,
                     content={
                         "ok": False,
@@ -267,10 +301,12 @@ async def tenant_context_middleware(request: Request, call_next):
                         "X-RateLimit-Remaining": "0",
                     },
                 )
+                _apply_cors_headers(request, resp)
+                return resp
             if request.method in ("POST", "PUT", "DELETE", "PATCH"):
                 if is_write_rate_limited(request):
                     status = get_rate_limit_status(request)
-                    return JSONResponse(
+                    resp = JSONResponse(
                         status_code=429,
                         content={
                             "ok": False,
@@ -284,6 +320,8 @@ async def tenant_context_middleware(request: Request, call_next):
                             "X-RateLimit-Remaining": "0",
                         },
                     )
+                    _apply_cors_headers(request, resp)
+                    return resp
                 register_write_request(request)
             register_api_request(request)
         except Exception as e:
@@ -295,7 +333,7 @@ async def tenant_context_middleware(request: Request, call_next):
             csrf_cookie = str(request.cookies.get("ironhub_csrf") or "").strip()
             csrf_header = str(request.headers.get("x-csrf-token") or "").strip()
             if (not csrf_cookie) or (not csrf_header) or (csrf_cookie != csrf_header):
-                return JSONResponse(
+                resp = JSONResponse(
                     status_code=403,
                     content={
                         "ok": False,
@@ -303,6 +341,8 @@ async def tenant_context_middleware(request: Request, call_next):
                         "mensaje": "CSRF token inválido o ausente",
                     },
                 )
+                _apply_cors_headers(request, resp)
+                return resp
     host = request.headers.get("host", "")
     base = os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz")
     debug_tenant = os.getenv("DEBUG_TENANT", "false").lower() in ("1", "true", "yes")
@@ -352,11 +392,17 @@ async def tenant_context_middleware(request: Request, call_next):
     header_tenant = str(x_tenant or "").strip().lower() or None
     if request.url.path.startswith("/api/"):
         if session_tenant and header_tenant and header_tenant != session_tenant:
-            return JSONResponse(status_code=403, content={"ok": False, "error": "Tenant mismatch"})
+            resp = JSONResponse(status_code=403, content={"ok": False, "error": "Tenant mismatch"})
+            _apply_cors_headers(request, resp)
+            return resp
         if session_tenant and origin_tenant and origin_tenant != session_tenant:
-            return JSONResponse(status_code=403, content={"ok": False, "error": "Tenant mismatch"})
+            resp = JSONResponse(status_code=403, content={"ok": False, "error": "Tenant mismatch"})
+            _apply_cors_headers(request, resp)
+            return resp
         if header_tenant and origin_tenant and origin_tenant != header_tenant:
-            return JSONResponse(status_code=403, content={"ok": False, "error": "Tenant mismatch"})
+            resp = JSONResponse(status_code=403, content={"ok": False, "error": "Tenant mismatch"})
+            _apply_cors_headers(request, resp)
+            return resp
 
     # 1. Prefer tenant from host subdomain when host is not reserved
     if host_clean.endswith(f".{base}"):
@@ -427,12 +473,14 @@ async def tenant_context_middleware(request: Request, call_next):
                         now_ms - int(ent.get("ts") or 0) < _API_GET_CACHE_TTL_MS
                     ):
                         hdrs = dict(ent.get("headers") or {})
-                        return Response(
+                        resp = Response(
                             content=ent.get("body") or b"",
                             status_code=int(ent.get("status") or 200),
                             media_type="application/json",
                             headers=hdrs,
                         )
+                        _apply_cors_headers(request, resp)
+                        return resp
         except Exception:
             pass
 

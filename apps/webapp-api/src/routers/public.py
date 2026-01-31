@@ -15,6 +15,7 @@ from src.database.tenant_connection import get_tenant_session_factory
 from src.database.tenant_connection import validate_tenant_name
 from src.services.gym_config_service import GymConfigService
 from src.services.feature_flags_service import FeatureFlagsService
+from src.services.entitlements_payload_service import EntitlementsPayloadService
 from src.utils import (
     _resolve_theme_vars,
     _resolve_logo_url,
@@ -388,6 +389,21 @@ async def api_bootstrap(request: Request, context: str = "auto"):
         "branch_required": branch_required,
         "flags": flags,
     }
+    try:
+        if tenant and isinstance(session_payload.get("user"), dict):
+            uid = session_payload["user"].get("id")
+            if uid is not None and int(uid) > 0:
+                factory = get_tenant_session_factory(tenant)
+                if factory:
+                    ses = factory()
+                    try:
+                        payload["entitlements"] = EntitlementsPayloadService(ses).get_payload(
+                            int(uid), current_sucursal_id
+                        )
+                    finally:
+                        ses.close()
+    except Exception:
+        pass
     resp = JSONResponse(payload)
     resp.headers["Cache-Control"] = "private, max-age=5"
     resp.headers["Vary"] = "Cookie, X-Tenant, Origin"

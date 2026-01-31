@@ -103,12 +103,59 @@ class UserRepository(BaseRepository):
         return stmt
 
     def contar_usuarios(
-        self, q: Optional[str] = None, activo: Optional[bool] = None
+        self,
+        q: Optional[str] = None,
+        activo: Optional[bool] = None,
+        *,
+        sucursal_id: Optional[int] = None,
     ) -> int:
-        stmt = select(func.count()).select_from(Usuario)
-        stmt = self._apply_user_list_filters(stmt, q=q, activo=activo)
+        if sucursal_id is None:
+            stmt = select(func.count()).select_from(Usuario)
+            stmt = self._apply_user_list_filters(stmt, q=q, activo=activo)
+            try:
+                return int(self.db.scalar(stmt) or 0)
+            except Exception:
+                return 0
+
+        where_parts: List[str] = []
+        params: Dict[str, Any] = {"sucursal_id": int(sucursal_id)}
+        if q:
+            where_parts.append(
+                "(u.nombre ILIKE :q OR u.dni ILIKE :q OR u.telefono ILIKE :q)"
+            )
+            params["q"] = f"%{q}%"
+        if activo is not None:
+            where_parts.append("u.activo = :activo")
+            params["activo"] = bool(activo)
+
+        where_parts.append(
+            """
+            COALESCE((
+                SELECT uas.allow
+                FROM usuario_accesos_sucursales uas
+                WHERE uas.usuario_id = u.id
+                  AND uas.sucursal_id = :sucursal_id
+                  AND (uas.starts_at IS NULL OR uas.starts_at <= NOW())
+                  AND (uas.ends_at IS NULL OR uas.ends_at >= NOW())
+                ORDER BY uas.id DESC
+                LIMIT 1
+            ), (
+                COALESCE(tc.all_sucursales, FALSE)
+                OR EXISTS (
+                    SELECT 1
+                    FROM tipo_cuota_sucursales tcs
+                    WHERE tcs.tipo_cuota_id = tc.id
+                      AND tcs.sucursal_id = :sucursal_id
+                )
+            )) = TRUE
+            """
+        )
+
+        where_sql = " AND ".join([p.strip() for p in where_parts if p and p.strip()])
+        query = f"SELECT COUNT(*) AS total FROM usuarios u LEFT JOIN tipos_cuota tc ON LOWER(tc.nombre) = LOWER(u.tipo_cuota) WHERE {where_sql}"
         try:
-            return int(self.db.scalar(stmt) or 0)
+            row = self.db.execute(text(query), params).mappings().first()
+            return int((row or {}).get("total") or 0)
         except Exception:
             return 0
 
@@ -118,31 +165,115 @@ class UserRepository(BaseRepository):
         limit: int = 50,
         offset: int = 0,
         activo: Optional[bool] = None,
+        *,
+        sucursal_id: Optional[int] = None,
     ) -> List[Dict]:
-        stmt = select(Usuario)
-        stmt = self._apply_user_list_filters(stmt, q=q, activo=activo)
-        stmt = stmt.order_by(Usuario.nombre.asc()).limit(limit).offset(offset)
+        if sucursal_id is None:
+            stmt = select(Usuario)
+            stmt = self._apply_user_list_filters(stmt, q=q, activo=activo)
+            stmt = stmt.order_by(Usuario.nombre.asc()).limit(limit).offset(offset)
 
-        users = self.db.scalars(stmt).all()
+            users = self.db.scalars(stmt).all()
+            return [
+                {
+                    "id": u.id,
+                    "nombre": (u.nombre or "").strip(),
+                    "dni": u.dni,
+                    "telefono": u.telefono,
+                    "email": getattr(u, "email", None),
+                    "rol": (u.rol or "").strip().lower(),
+                    "tipo_cuota": u.tipo_cuota,
+                    "activo": u.activo,
+                    "fecha_registro": u.fecha_registro,
+                    "fecha_proximo_vencimiento": getattr(
+                        u, "fecha_proximo_vencimiento", None
+                    ),
+                    "cuotas_vencidas": getattr(u, "cuotas_vencidas", None),
+                    "ultimo_pago": getattr(u, "ultimo_pago", None),
+                    "notas": getattr(u, "notas", None),
+                }
+                for u in users
+            ]
+
+        where_parts: List[str] = []
+        params: Dict[str, Any] = {
+            "sucursal_id": int(sucursal_id),
+            "limit": int(limit),
+            "offset": int(offset),
+        }
+        if q:
+            where_parts.append(
+                "(u.nombre ILIKE :q OR u.dni ILIKE :q OR u.telefono ILIKE :q)"
+            )
+            params["q"] = f"%{q}%"
+        if activo is not None:
+            where_parts.append("u.activo = :activo")
+            params["activo"] = bool(activo)
+
+        where_parts.append(
+            """
+            COALESCE((
+                SELECT uas.allow
+                FROM usuario_accesos_sucursales uas
+                WHERE uas.usuario_id = u.id
+                  AND uas.sucursal_id = :sucursal_id
+                  AND (uas.starts_at IS NULL OR uas.starts_at <= NOW())
+                  AND (uas.ends_at IS NULL OR uas.ends_at >= NOW())
+                ORDER BY uas.id DESC
+                LIMIT 1
+            ), (
+                COALESCE(tc.all_sucursales, FALSE)
+                OR EXISTS (
+                    SELECT 1
+                    FROM tipo_cuota_sucursales tcs
+                    WHERE tcs.tipo_cuota_id = tc.id
+                      AND tcs.sucursal_id = :sucursal_id
+                )
+            )) = TRUE
+            """
+        )
+
+        where_sql = " AND ".join([p.strip() for p in where_parts if p and p.strip()])
+        query = f"""
+            SELECT
+              u.id,
+              u.nombre,
+              u.dni,
+              u.telefono,
+              u.email,
+              u.rol,
+              u.tipo_cuota,
+              u.activo,
+              u.fecha_registro,
+              u.fecha_proximo_vencimiento,
+              u.cuotas_vencidas,
+              u.ultimo_pago,
+              u.notas
+            FROM usuarios u
+            LEFT JOIN tipos_cuota tc ON LOWER(tc.nombre) = LOWER(u.tipo_cuota)
+            WHERE {where_sql}
+            ORDER BY u.nombre ASC
+            LIMIT :limit OFFSET :offset
+        """
+        rows = self.db.execute(text(query), params).mappings().all()
         return [
             {
-                "id": u.id,
-                "nombre": (u.nombre or "").strip(),
-                "dni": u.dni,
-                "telefono": u.telefono,
-                "email": getattr(u, "email", None),
-                "rol": (u.rol or "").strip().lower(),
-                "tipo_cuota": u.tipo_cuota,
-                "activo": u.activo,
-                "fecha_registro": u.fecha_registro,
-                "fecha_proximo_vencimiento": getattr(
-                    u, "fecha_proximo_vencimiento", None
-                ),
-                "cuotas_vencidas": getattr(u, "cuotas_vencidas", None),
-                "ultimo_pago": getattr(u, "ultimo_pago", None),
-                "notas": getattr(u, "notas", None),
+                "id": int(r.get("id")),
+                "nombre": str(r.get("nombre") or "").strip(),
+                "dni": r.get("dni"),
+                "telefono": r.get("telefono"),
+                "email": r.get("email"),
+                "rol": str(r.get("rol") or "").strip().lower(),
+                "tipo_cuota": r.get("tipo_cuota"),
+                "activo": bool(r.get("activo")) if r.get("activo") is not None else False,
+                "fecha_registro": r.get("fecha_registro"),
+                "fecha_proximo_vencimiento": r.get("fecha_proximo_vencimiento"),
+                "cuotas_vencidas": r.get("cuotas_vencidas"),
+                "ultimo_pago": r.get("ultimo_pago"),
+                "notas": r.get("notas"),
             }
-            for u in users
+            for r in (rows or [])
+            if r and r.get("id") is not None
         ]
 
     def cambiar_usuario_id(self, current_id: int, new_id: int):

@@ -106,11 +106,12 @@ class UserService(BaseService):
         activo: Optional[bool] = None,
         limit: int = 50,
         offset: int = 0,
+        sucursal_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         items = self.user_repo.listar_usuarios_paginados(
-            q, limit, offset, activo=activo
+            q, limit, offset, activo=activo, sucursal_id=sucursal_id
         )
-        total = self.user_repo.contar_usuarios(q, activo=activo)
+        total = self.user_repo.contar_usuarios(q, activo=activo, sucursal_id=sucursal_id)
 
         # Enriquecer con tipo_cuota_id / tipo_cuota_nombre (frontend contract)
         try:

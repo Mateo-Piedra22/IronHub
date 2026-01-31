@@ -114,6 +114,15 @@ export default function AsistenciasPage() {
         loadAsistencias();
     }, [loadAsistencias]);
 
+    useEffect(() => {
+        const handler = () => {
+            setPage(1);
+            loadAsistencias();
+        };
+        window.addEventListener('ironhub:sucursal-changed', handler as any);
+        return () => window.removeEventListener('ironhub:sucursal-changed', handler as any);
+    }, [loadAsistencias]);
+
     // Copy URL handler
     const handleCopyUrl = async () => {
         if (!stationUrl) return;

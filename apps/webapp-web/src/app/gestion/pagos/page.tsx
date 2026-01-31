@@ -637,6 +637,19 @@ export default function PagosPage() {
         loadPagos();
     }, [loadPagos]);
 
+    useEffect(() => {
+        const handler = async () => {
+            loadPagos();
+            try {
+                const usuariosRes = await api.getUsuarios({ limit: 1000 });
+                if (usuariosRes.ok && usuariosRes.data) setUsuarios(usuariosRes.data.usuarios);
+            } catch {
+            }
+        };
+        window.addEventListener('ironhub:sucursal-changed', handler as any);
+        return () => window.removeEventListener('ironhub:sucursal-changed', handler as any);
+    }, [loadPagos]);
+
     // Delete
     const handleDelete = async () => {
         if (!pagoToDelete) return;

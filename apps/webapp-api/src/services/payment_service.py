@@ -33,6 +33,8 @@ from src.database.orm_models import (
     Sucursal,
 )
 from src.services.whatsapp_dispatch_service import WhatsAppDispatchService
+from src.services.entitlements_service import EntitlementsService
+from src.services.membership_service import MembershipService
 
 logger = logging.getLogger(__name__)
 
@@ -485,6 +487,28 @@ class PaymentService(BaseService):
 
         if not conceptos:
             raise ValueError("Se requiere al menos un concepto de pago")
+
+        if sucursal_id is not None:
+            allowed = None
+            reason = ""
+            try:
+                es = EntitlementsService(self.db)
+                allowed, reason = es.check_branch_access(int(usuario_id), int(sucursal_id))
+            except Exception:
+                allowed = None
+                reason = ""
+            if allowed is False:
+                raise PermissionError(reason or "Sucursal no habilitada")
+            if allowed is None:
+                try:
+                    ms = MembershipService(self.db)
+                    allowed2, reason2 = ms.check_access(int(usuario_id), int(sucursal_id))
+                    if allowed2 is False:
+                        raise PermissionError(reason2 or "Sucursal no habilitada")
+                except PermissionError:
+                    raise
+                except Exception:
+                    pass
 
         try:
             now = fecha_pago or self._now_local_naive()

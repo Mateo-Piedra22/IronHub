@@ -689,6 +689,12 @@ class AttendanceService(BaseService):
                 if sucursal_id is not None
                 else self._get_default_sucursal_id()
             )
+            if sid is not None:
+                allowed, access_reason = self.verificar_acceso_usuario_sucursal(
+                    int(usuario_id), int(sid)
+                )
+                if allowed is False:
+                    raise PermissionError(access_reason or "Sucursal no habilitada")
             return self.repo.registrar_asistencia(
                 int(usuario_id),
                 fecha,

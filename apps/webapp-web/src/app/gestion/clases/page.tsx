@@ -292,6 +292,16 @@ export default function ClasesPage() {
         })();
     }, [loadClases]);
 
+    useEffect(() => {
+        const handler = () => {
+            setSelectedClase(null);
+            setDetailOpen(false);
+            loadClases();
+        };
+        window.addEventListener('ironhub:sucursal-changed', handler as any);
+        return () => window.removeEventListener('ironhub:sucursal-changed', handler as any);
+    }, [loadClases]);
+
     const horariosCount = useMemo(() => {
         const m = new Map<number, number>();
         for (const it of agenda || []) {

@@ -39,6 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<SessionUser | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const pathnameRef = useRef<string>('');
+    const autoSelectingSucursalRef = useRef(false);
     useEffect(() => {
         pathnameRef.current = pathname || '';
     }, [pathname]);
@@ -125,7 +126,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 if (matchedRoute === '/dashboard') {
                     router.replace('/dashboard/seleccionar-sucursal');
                 } else if (matchedRoute === '/usuario') {
-                    router.replace('/usuario/seleccionar-sucursal');
+                    if (autoSelectingSucursalRef.current) return;
+                    autoSelectingSucursalRef.current = true;
+                    (async () => {
+                        try {
+                            const br = await api.getSucursales();
+                            const nextId =
+                                (br.ok && (br.data?.sucursal_actual_id as any)) ||
+                                (br.ok && br.data?.items?.[0]?.id) ||
+                                null;
+                            if (typeof nextId === 'number' && nextId > 0) {
+                                const r = await api.seleccionarSucursal(nextId);
+                                if (r.ok) {
+                                    await checkSession();
+                                    router.refresh();
+                                    return;
+                                }
+                            }
+                            router.replace('/usuario/seleccionar-sucursal');
+                        } finally {
+                            autoSelectingSucursalRef.current = false;
+                        }
+                    })();
                 } else {
                     router.replace('/gestion/seleccionar-sucursal');
                 }
@@ -134,7 +156,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 router.replace('/');
             }
         }
-    }, [pathname, user, isLoading, router]);
+    }, [pathname, user, isLoading, router, checkSession]);
 
     return (
         <AuthContext.Provider

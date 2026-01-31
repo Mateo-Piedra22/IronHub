@@ -27,7 +27,7 @@ from src.services.auth_service import AuthService
 from src.services.whatsapp_dispatch_service import WhatsAppDispatchService
 from src.services.audit_service import AuditService
 from src.services.membership_service import MembershipService
-from src.services.entitlements_service import EntitlementsService
+from src.services.entitlements_payload_service import EntitlementsPayloadService
 
 # Fallback for UsuarioEstado if not imported correctly or available
 try:
@@ -61,129 +61,32 @@ async def api_usuario_entitlements(
     except Exception:
         sid_int = None
 
-    es = EntitlementsService(user_service.db)
-    summary = es.get_summary(uid, sid_int)
-    enabled = es.is_enabled() and summary is not None
-
-    allowed_sucursales: List[Dict[str, Any]] = []
-    try:
-        rows = (
-            user_service.db.execute(
-                text("SELECT id, nombre, activa FROM sucursales ORDER BY id ASC")
-            )
-            .mappings()
-            .all()
-        )
-        all_items = [
-            {"id": int(r["id"]), "nombre": str(r.get("nombre") or ""), "activa": bool(r.get("activa"))}
-            for r in (rows or [])
-            if r and r.get("id") is not None
-        ]
-        if summary is None:
-            role = None
-            try:
-                row = (
-                    user_service.db.execute(
-                        text(
-                            "SELECT LOWER(COALESCE(rol,'socio')) AS rol FROM usuarios WHERE id = :id LIMIT 1"
-                        ),
-                        {"id": int(uid)},
-                    )
-                    .mappings()
-                    .first()
-                )
-                role = str((row or {}).get("rol") or "socio").strip().lower()
-            except Exception:
-                role = None
-            if role in ("owner", "dueño", "dueno", "admin", "administrador", "profesor", "staff", "recepcionista", "empleado"):
-                allowed_sucursales = all_items
-            else:
-                ms = MembershipService(user_service.db)
-                m = ms.get_active_membership(int(uid))
-                if not m:
-                    allowed_sucursales = all_items
-                elif bool(m.get("all_sucursales")):
-                    allowed_sucursales = all_items
-                else:
-                    mid = m.get("id")
-                    allowed_ids = set(ms.get_membership_sucursales(int(mid)) if mid else [])
-                    allowed_sucursales = [s for s in all_items if int(s["id"]) in allowed_ids]
-        elif summary.branch_access.all_sucursales:
-            denied = set(summary.branch_access.denied_sucursal_ids)
-            allowed_sucursales = [s for s in all_items if int(s["id"]) not in denied]
-        else:
-            allow = set(summary.branch_access.allowed_sucursal_ids)
-            allowed_sucursales = [s for s in all_items if int(s["id"]) in allow]
-    except Exception:
-        allowed_sucursales = []
-
-    allowed_tipo_clases: List[Dict[str, Any]] = []
-    allowed_clases: List[Dict[str, Any]] = []
-    if summary is not None and summary.class_allowlist_enabled:
-        try:
-            tc_ids = list(summary.allowed_tipo_clase_ids or [])
-            if tc_ids:
-                rows = (
-                    user_service.db.execute(
-                        text("SELECT id, nombre, activo FROM tipos_clases ORDER BY id ASC")
-                    )
-                    .mappings()
-                    .all()
-                )
-                allowed_tc = set(int(x) for x in tc_ids)
-                for r in rows or []:
-                    if r and r.get("id") is not None and int(r["id"]) in allowed_tc:
-                        allowed_tipo_clases.append(
-                            {
-                                "id": int(r["id"]),
-                                "nombre": str(r.get("nombre") or ""),
-                                "activo": bool(r.get("activo")) if r.get("activo") is not None else True,
-                            }
-                        )
-        except Exception:
-            allowed_tipo_clases = []
-        try:
-            c_ids = list(summary.allowed_clase_ids or [])
-            if c_ids:
-                rows = (
-                    user_service.db.execute(
-                        text(
-                            "SELECT id, nombre, sucursal_id, activa FROM clases ORDER BY id ASC"
-                        )
-                    )
-                    .mappings()
-                    .all()
-                )
-                allowed_c = set(int(x) for x in c_ids)
-                for r in rows or []:
-                    if r and r.get("id") is not None and int(r["id"]) in allowed_c:
-                        allowed_clases.append(
-                            {
-                                "id": int(r["id"]),
-                                "nombre": str(r.get("nombre") or ""),
-                                "sucursal_id": int(r.get("sucursal_id")) if r.get("sucursal_id") is not None else None,
-                                "activa": bool(r.get("activa")) if r.get("activa") is not None else True,
-                            }
-                        )
-        except Exception:
-            allowed_clases = []
+    payload = EntitlementsPayloadService(user_service.db).get_payload(uid, sid_int)
 
     return {
         "ok": True,
-        "enabled": bool(enabled),
-        "sucursal_actual_id": sid_int,
-        "branch_access": None
-        if summary is None
-        else {
-            "all_sucursales": bool(summary.branch_access.all_sucursales),
-            "allowed_sucursal_ids": list(summary.branch_access.allowed_sucursal_ids),
-            "denied_sucursal_ids": list(summary.branch_access.denied_sucursal_ids),
-        },
-        "allowed_sucursales": allowed_sucursales,
-        "class_allowlist_enabled": bool(summary.class_allowlist_enabled) if summary is not None else False,
-        "allowed_tipo_clases": allowed_tipo_clases,
-        "allowed_clases": allowed_clases,
+        **payload,
     }
+
+
+@router.get(
+    "/api/gestion/usuarios/{usuario_id}/entitlements/summary",
+    dependencies=[Depends(require_feature("usuarios")), Depends(require_scope("usuarios:read"))],
+)
+async def api_usuario_entitlements_summary_gestion(
+    usuario_id: int,
+    request: Request,
+    user_service: UserService = Depends(get_user_service),
+    sucursal_id: int = Depends(require_sucursal_selected),
+    _=Depends(require_gestion_access),
+):
+    try:
+        uid = int(usuario_id)
+        sid = int(sucursal_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Parámetros inválidos")
+    payload = EntitlementsPayloadService(user_service.db).get_payload(uid, sid)
+    return {"ok": True, **payload}
 
 
 @router.post("/api/usuarios/{usuario_id}/pin/reset")
@@ -281,6 +184,7 @@ async def api_usuarios_list(
     limit: int = 50,
     offset: int = 0,
     user_service: UserService = Depends(get_user_service),
+    sucursal_id: int = Depends(require_sucursal_selected),
     _=Depends(require_gestion_access),
 ):
     try:
@@ -299,7 +203,11 @@ async def api_usuarios_list(
         offset_effective = max(0, offset_effective)
 
         out = user_service.list_users_paged(
-            q_effective, activo=activo, limit=limit_effective, offset=offset_effective
+            q_effective,
+            activo=activo,
+            limit=limit_effective,
+            offset=offset_effective,
+            sucursal_id=int(sucursal_id),
         )
         return {
             "usuarios": out.get("items", []),

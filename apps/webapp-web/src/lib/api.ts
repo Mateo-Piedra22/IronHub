@@ -1029,6 +1029,12 @@ class ApiClient {
             _clearCacheByPrefix('GET:/api/auth/session');
         } catch {
         }
+        try {
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('ironhub:sucursal-changed', { detail: { sucursal_id } }));
+            }
+        } catch {
+        }
         return res;
     }
 
@@ -1607,6 +1613,10 @@ class ApiClient {
 
     async getUsuarioEntitlementsGestion(usuarioId: number) {
         return this.request<UsuarioEntitlementsGestion>(`/api/gestion/usuarios/${usuarioId}/entitlements`);
+    }
+
+    async getUsuarioEntitlementsSummaryGestion(usuarioId: number) {
+        return this.request<UsuarioEntitlements>(`/api/gestion/usuarios/${usuarioId}/entitlements/summary`);
     }
 
     async updateUsuarioEntitlementsGestion(usuarioId: number, data: UsuarioEntitlementsGestionUpdate) {

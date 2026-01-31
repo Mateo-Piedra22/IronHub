@@ -32,7 +32,7 @@ import {
     CreditCard,
 } from 'lucide-react';
 import { Button, Modal, ConfirmModal, Input, useToast } from '@/components/ui';
-import { api, type Usuario, type Etiqueta, type Estado, type Pago, type EstadoTemplate, type Asistencia, type Membership, type Sucursal } from '@/lib/api';
+import { api, type Usuario, type Etiqueta, type Estado, type Pago, type EstadoTemplate, type Asistencia, type Membership, type Sucursal, type UsuarioEntitlements } from '@/lib/api';
 import { formatDate, formatCurrency, getWhatsAppLink, cn } from '@/lib/utils';
 
 interface UserSidebarProps {
@@ -62,12 +62,36 @@ export default function UserSidebar({
 }: UserSidebarProps) {
     const { success, error } = useToast();
     const [activeTab, setActiveTab] = useState<TabType>('notas');
+    const [entitlementsModalOpen, setEntitlementsModalOpen] = useState(false);
+    const [entitlementsSummaryLoading, setEntitlementsSummaryLoading] = useState(false);
+    const [entitlementsSummary, setEntitlementsSummary] = useState<UsuarioEntitlements | null>(null);
 
     // Notas
     const [notas, setNotas] = useState('');
     const [notasSaving, setNotasSaving] = useState(false);
     const notasTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const copyMenuRef = useRef<HTMLDetailsElement | null>(null);
+
+    useEffect(() => {
+        setEntitlementsSummary(null);
+        setEntitlementsModalOpen(false);
+        setEntitlementsSummaryLoading(false);
+    }, [usuario?.id]);
+
+    const loadEntitlementsSummary = useCallback(async () => {
+        if (!usuario?.id) return;
+        setEntitlementsSummaryLoading(true);
+        try {
+            const res = await api.getUsuarioEntitlementsSummaryGestion(usuario.id);
+            if (res.ok && res.data) {
+                setEntitlementsSummary(res.data);
+            } else {
+                setEntitlementsSummary(null);
+            }
+        } finally {
+            setEntitlementsSummaryLoading(false);
+        }
+    }, [usuario?.id]);
 
     // Etiquetas
     const [etiquetas, setEtiquetas] = useState<Etiqueta[]>([]);
@@ -712,9 +736,18 @@ export default function UserSidebar({
                     </div>
                     <div className="card p-3">
                         <div className="text-xs text-slate-500">Tipo cuota</div>
-                        <div className="font-semibold text-white truncate">
+                        <button
+                            type="button"
+                            className="font-semibold text-white truncate text-left hover:underline"
+                            onClick={() => {
+                                setEntitlementsModalOpen(true);
+                                if (!entitlementsSummary && !entitlementsSummaryLoading) {
+                                    loadEntitlementsSummary();
+                                }
+                            }}
+                        >
                             {usuario.tipo_cuota_nombre || '—'}
-                        </div>
+                        </button>
                     </div>
                 </div>
 
@@ -1547,6 +1580,102 @@ export default function UserSidebar({
                 </div>
                 </div>
             </motion.div>
+
+            <Modal
+                isOpen={entitlementsModalOpen}
+                onClose={() => setEntitlementsModalOpen(false)}
+                title={`Accesos - ${usuario?.nombre || ''}`}
+                size="lg"
+                footer={
+                    <div className="flex items-center justify-end w-full">
+                        <Button
+                            variant="secondary"
+                            onClick={() => loadEntitlementsSummary()}
+                            isLoading={entitlementsSummaryLoading}
+                        >
+                            <RefreshCw className="w-4 h-4 mr-1" />
+                            Refrescar
+                        </Button>
+                    </div>
+                }
+            >
+                <div className="space-y-4">
+                    {entitlementsSummaryLoading ? (
+                        <div className="flex items-center justify-center py-10">
+                            <Loader2 className="w-6 h-6 animate-spin text-primary-400" />
+                        </div>
+                    ) : entitlementsSummary ? (
+                        <>
+                            <div className="card p-4">
+                                <div className="text-xs text-slate-500 mb-1">Sucursales</div>
+                                <div className="flex flex-wrap gap-2">
+                                    {(entitlementsSummary.allowed_sucursales || [])
+                                        .filter((s) => s.activa)
+                                        .map((s) => (
+                                            <span
+                                                key={s.id}
+                                                className="px-2 py-1 rounded-md bg-slate-800 text-slate-200 text-xs"
+                                            >
+                                                {s.nombre}
+                                            </span>
+                                        ))}
+                                    {(entitlementsSummary.allowed_sucursales || []).filter((s) => s.activa).length === 0 ? (
+                                        <span className="text-sm text-slate-500">Sin sucursales permitidas</span>
+                                    ) : null}
+                                </div>
+                            </div>
+
+                            <div className="card p-4">
+                                <div className="text-xs text-slate-500 mb-1">Clases</div>
+                                {entitlementsSummary.class_allowlist_enabled ? (
+                                    <div className="space-y-3">
+                                        <div>
+                                            <div className="text-xs text-slate-500 mb-2">Tipos de clase</div>
+                                            <div className="flex flex-wrap gap-2">
+                                                {(entitlementsSummary.allowed_tipo_clases || []).map((tc) => (
+                                                    <span
+                                                        key={tc.id}
+                                                        className="px-2 py-1 rounded-md bg-slate-800 text-slate-200 text-xs"
+                                                    >
+                                                        {tc.nombre}
+                                                    </span>
+                                                ))}
+                                                {(entitlementsSummary.allowed_tipo_clases || []).length === 0 ? (
+                                                    <span className="text-sm text-slate-500">Sin tipos de clase permitidos</span>
+                                                ) : null}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div className="text-xs text-slate-500 mb-2">Clases específicas</div>
+                                            <div className="flex flex-wrap gap-2">
+                                                {(entitlementsSummary.allowed_clases || []).map((c) => (
+                                                    <span
+                                                        key={c.id}
+                                                        className="px-2 py-1 rounded-md bg-slate-800 text-slate-200 text-xs"
+                                                    >
+                                                        {c.nombre}
+                                                    </span>
+                                                ))}
+                                                {(entitlementsSummary.allowed_clases || []).length === 0 ? (
+                                                    <span className="text-sm text-slate-500">Sin clases específicas permitidas</span>
+                                                ) : null}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="text-sm text-slate-400">
+                                        Acceso por clase no restringido por cuota.
+                                    </div>
+                                )}
+                            </div>
+                        </>
+                    ) : (
+                        <div className="text-sm text-slate-400">
+                            No se pudo cargar el detalle de accesos.
+                        </div>
+                    )}
+                </div>
+            </Modal>
 
             {/* QR Modal */}
             <Modal

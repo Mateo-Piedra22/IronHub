@@ -64,14 +64,18 @@ export default function AdminLayout({
                 const res = await api.getBootstrap('gestion');
                 const logo = res.ok ? (res.data?.gym?.logo_url || '') : '';
                 if (logo) setGymLogoUrl(logo);
-                if (res.ok && res.data?.sucursales) {
-                    setSucursales(res.data.sucursales.filter((s) => s.activa));
-                    setSucursalActualId((res.data.sucursal_actual_id ?? null) as any);
-                }
                 if (res.ok && (res.data as any)?.flags?.modules) {
                     setModuleFlags(((res.data as any).flags.modules || null) as any);
                 } else {
                     setModuleFlags(null);
+                }
+                try {
+                    const br = await api.getSucursales();
+                    if (br.ok && br.data?.items) {
+                        setSucursales(br.data.items.filter((s) => s.activa));
+                        setSucursalActualId((br.data.sucursal_actual_id ?? null) as any);
+                    }
+                } catch {
                 }
             } catch {
                 // ignore
@@ -279,6 +283,36 @@ export default function AdminLayout({
 
                     {/* Right: Actions */}
                     <div className="flex items-center gap-4">
+                        {sucursales.length > 1 ? (
+                            <select
+                                className="h-9 rounded-lg bg-slate-800/60 border border-slate-700/60 text-slate-200 text-sm px-3 outline-none focus:ring-2 focus:ring-primary-500/40 disabled:opacity-60"
+                                value={sucursalActualId ?? ''}
+                                disabled={switchingSucursal}
+                                onChange={async (e) => {
+                                    const nextId = Number(e.target.value);
+                                    if (!nextId || nextId === sucursalActualId) return;
+                                    setSwitchingSucursal(true);
+                                    try {
+                                        const r = await api.seleccionarSucursal(nextId);
+                                        if (r.ok) {
+                                            setSucursalActualId(nextId);
+                                            router.refresh();
+                                        }
+                                    } finally {
+                                        setSwitchingSucursal(false);
+                                    }
+                                }}
+                            >
+                                <option value="" disabled>
+                                    Seleccionar sucursal
+                                </option>
+                                {sucursales.map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                        {s.nombre}
+                                    </option>
+                                ))}
+                            </select>
+                        ) : null}
                         {/* User Info & Timer */}
                         <div className="hidden md:flex flex-col items-end">
                             <div className="text-sm font-medium text-white flex items-center gap-2">

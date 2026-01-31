@@ -277,6 +277,15 @@ export default function UsuariosPage() {
         loadUsuarios();
     }, [loadUsuarios]);
 
+    useEffect(() => {
+        const handler = () => {
+            setPage(1);
+            loadUsuarios();
+        };
+        window.addEventListener('ironhub:sucursal-changed', handler as any);
+        return () => window.removeEventListener('ironhub:sucursal-changed', handler as any);
+    }, [loadUsuarios]);
+
     // Handle delete
     const handleDelete = async () => {
         if (!usuarioToDelete) return;

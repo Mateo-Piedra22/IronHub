@@ -1977,6 +1977,8 @@ async def api_pagos_create(
                     tipo_cuota_id=tipo_cuota_id_int,
                     idempotency_key=idempotency_key or None,
                 )
+            except PermissionError as pe:
+                raise HTTPException(status_code=403, detail=str(pe))
             except ValueError as ve:
                 raise HTTPException(status_code=400, detail=str(ve))
             except Exception as e:
@@ -2057,6 +2059,8 @@ async def api_pagos_create(
                 tipo_cuota_id=tipo_cuota_id_int,
                 idempotency_key=idempotency_key or None,
             )
+        except PermissionError as pe:
+            raise HTTPException(status_code=403, detail=str(pe))
         except ValueError as ve:
             raise HTTPException(status_code=400, detail=str(ve))
         except Exception as e:
