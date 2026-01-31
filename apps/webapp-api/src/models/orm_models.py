@@ -1,6 +1,7 @@
 from typing import List, Optional, Any
 from datetime import datetime, date, time
 from sqlalchemy import (
+    BigInteger,
     Integer,
     SmallInteger,
     String,
@@ -56,11 +57,26 @@ class Usuario(Base):
     pagos: Mapped[List["Pago"]] = relationship(
         "Pago", back_populates="usuario", cascade="all, delete-orphan"
     )
+    pagos_idempotency: Mapped[List["PagoIdempotency"]] = relationship(
+        "PagoIdempotency", back_populates="usuario", cascade="all, delete-orphan"
+    )
     asistencias: Mapped[List["Asistencia"]] = relationship(
         "Asistencia", back_populates="usuario", cascade="all, delete-orphan"
     )
+    clase_inscripciones: Mapped[List["ClaseUsuario"]] = relationship(
+        "ClaseUsuario", back_populates="usuario", cascade="all, delete-orphan"
+    )
+    clase_lista_espera: Mapped[List["ClaseListaEspera"]] = relationship(
+        "ClaseListaEspera", back_populates="usuario", cascade="all, delete-orphan"
+    )
+    notificaciones_cupo: Mapped[List["NotificacionCupo"]] = relationship(
+        "NotificacionCupo", back_populates="usuario", cascade="all, delete-orphan"
+    )
     rutinas: Mapped[List["Rutina"]] = relationship(
-        "Rutina", back_populates="usuario", cascade="all, delete-orphan"
+        "Rutina",
+        back_populates="usuario",
+        foreign_keys="[Rutina.usuario_id]",
+        cascade="all, delete-orphan",
     )
     usuario_notas: Mapped[List["UsuarioNota"]] = relationship(
         "UsuarioNota",
@@ -89,6 +105,18 @@ class Usuario(Base):
 
     profesor_perfil: Mapped[Optional["Profesor"]] = relationship(
         "Profesor",
+        back_populates="usuario",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    staff_profile: Mapped[Optional["StaffProfile"]] = relationship(
+        "StaffProfile",
+        back_populates="usuario",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    staff_permission: Mapped[Optional["StaffPermission"]] = relationship(
+        "StaffPermission",
         back_populates="usuario",
         uselist=False,
         cascade="all, delete-orphan",
@@ -136,6 +164,9 @@ class Pago(Base):
     usuario: Mapped["Usuario"] = relationship("Usuario", back_populates="pagos")
     detalles: Mapped[List["PagoDetalle"]] = relationship(
         "PagoDetalle", back_populates="pago", cascade="all, delete-orphan"
+    )
+    idempotency_records: Mapped[List["PagoIdempotency"]] = relationship(
+        "PagoIdempotency", back_populates="pago", cascade="all, delete-orphan"
     )
 
     __table_args__ = (
@@ -294,6 +325,26 @@ class TipoCuota(Base):
 
 
 # --- Sucursales (Multi-sucursal) ---
+
+
+class PagoIdempotency(Base):
+    __tablename__ = "pagos_idempotency"
+
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    pago_id: Mapped[int] = mapped_column(
+        ForeignKey("pagos.id", ondelete="CASCADE"), nullable=False
+    )
+    usuario_id: Mapped[int] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False
+    )
+    mes: Mapped[int] = mapped_column(Integer, nullable=False)
+    año: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.current_timestamp()
+    )
+
+    pago: Mapped["Pago"] = relationship("Pago", back_populates="idempotency_records")
+    usuario: Mapped["Usuario"] = relationship("Usuario", back_populates="pagos_idempotency")
 
 
 class Sucursal(Base):
@@ -649,6 +700,9 @@ class ClaseUsuario(Base):
     clase_horario: Mapped["ClaseHorario"] = relationship(
         "ClaseHorario", back_populates="clase_usuarios"
     )
+    usuario: Mapped["Usuario"] = relationship(
+        "Usuario", back_populates="clase_inscripciones"
+    )
 
     __table_args__ = (
         UniqueConstraint(
@@ -679,6 +733,9 @@ class ClaseListaEspera(Base):
 
     clase_horario: Mapped["ClaseHorario"] = relationship(
         "ClaseHorario", back_populates="lista_espera"
+    )
+    usuario: Mapped["Usuario"] = relationship(
+        "Usuario", back_populates="clase_lista_espera"
     )
 
     __table_args__ = (
@@ -714,6 +771,9 @@ class NotificacionCupo(Base):
 
     clase_horario: Mapped["ClaseHorario"] = relationship(
         "ClaseHorario", back_populates="notificaciones_cupo"
+    )
+    usuario: Mapped["Usuario"] = relationship(
+        "Usuario", back_populates="notificaciones_cupo"
     )
 
     __table_args__ = (
@@ -776,7 +836,7 @@ class Rutina(Base):
     uuid_rutina: Mapped[Optional[str]] = mapped_column(String(36), unique=True)
 
     usuario: Mapped[Optional["Usuario"]] = relationship(
-        "Usuario", back_populates="rutinas"
+        "Usuario", back_populates="rutinas", foreign_keys=[usuario_id]
     )
     creada_por_usuario: Mapped[Optional["Usuario"]] = relationship(
         "Usuario", foreign_keys=[creada_por_usuario_id]
@@ -1402,7 +1462,7 @@ class StaffProfile(Base):
         DateTime, server_default=func.current_timestamp()
     )
 
-    usuario: Mapped["Usuario"] = relationship("Usuario")
+    usuario: Mapped["Usuario"] = relationship("Usuario", back_populates="staff_profile")
     sesiones: Mapped[List["StaffSession"]] = relationship(
         "StaffSession", back_populates="staff", cascade="all, delete-orphan"
     )
@@ -1489,7 +1549,7 @@ class StaffPermission(Base):
         DateTime, server_default=func.current_timestamp()
     )
 
-    usuario: Mapped["Usuario"] = relationship("Usuario")
+    usuario: Mapped["Usuario"] = relationship("Usuario", back_populates="staff_permission")
 
 
 # --- Notas, Etiquetas, Estados ---
@@ -1813,7 +1873,7 @@ class CheckinPending(Base):
 class CheckinStationToken(Base):
     __tablename__ = "checkin_station_tokens"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     gym_id: Mapped[int] = mapped_column(Integer, server_default="0")
     sucursal_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("sucursales.id", ondelete="SET NULL")

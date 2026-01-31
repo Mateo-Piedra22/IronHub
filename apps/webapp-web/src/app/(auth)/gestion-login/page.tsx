@@ -110,8 +110,13 @@ export default function GestionLoginPage() {
             const items = (res.data.items || []).filter((s) => !!s.activa);
             setSucursales(items);
             const current = Number(res.data.sucursal_actual_id || 0);
-            const first = Number(items[0]?.id || 0);
-            setSelectedSucursalId(current || first);
+            const currentValid = current > 0 && items.some((s) => Number(s.id) === current);
+            setSelectedSucursalId(currentValid ? current : 0);
+            if (currentValid) {
+                await checkSession();
+                router.push('/gestion/usuarios');
+                return;
+            }
             if (items.length === 1 && Number(items[0]?.id)) {
                 const selRes = await api.seleccionarSucursal(Number(items[0].id));
                 if (selRes.ok && selRes.data?.ok) {

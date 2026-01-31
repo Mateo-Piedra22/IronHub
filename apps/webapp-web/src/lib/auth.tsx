@@ -54,7 +54,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     : 'auto';
             const res = await api.getBootstrap(context);
             if (res.ok && res.data?.session?.authenticated && res.data.session.user) {
-                setUser(res.data.session.user as SessionUser);
+                const u = { ...(res.data.session.user as any) } as SessionUser;
+                if (!u.sucursal_id) {
+                    const sid = (res.data as any)?.sucursal_actual_id;
+                    if (typeof sid === 'number' && sid > 0) {
+                        (u as any).sucursal_id = sid;
+                    }
+                }
+                setUser(u);
             } else {
                 setUser(null);
             }

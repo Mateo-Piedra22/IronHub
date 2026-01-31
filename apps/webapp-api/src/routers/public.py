@@ -143,6 +143,7 @@ def _get_sucursales_for_tenant(tenant: str) -> Dict[str, Any]:
                         """
                         SELECT id, nombre, codigo, activa
                         FROM sucursales
+                        WHERE activa = TRUE
                         ORDER BY id ASC
                         """
                     )
@@ -353,6 +354,28 @@ async def api_bootstrap(request: Request, context: str = "auto"):
 
     sucursales_info = _get_sucursales_for_tenant(tenant) if tenant else {"items": []}
     sucursales = sucursales_info.get("items") or []
+
+    try:
+        if current_sucursal_id is not None:
+            active_ids = set()
+            for s in sucursales or []:
+                try:
+                    sid = int((s or {}).get("id"))
+                except Exception:
+                    continue
+                if bool((s or {}).get("activa")):
+                    active_ids.add(sid)
+            if active_ids and int(current_sucursal_id) not in active_ids:
+                request.session.pop("sucursal_id", None)
+                current_sucursal_id = None
+    except Exception:
+        pass
+
+    try:
+        if isinstance(session_payload.get("user"), dict):
+            session_payload["user"]["sucursal_id"] = current_sucursal_id
+    except Exception:
+        pass
 
     branch_required = bool(session_payload.get("authenticated")) and (not current_sucursal_id) and bool(sucursales)
 

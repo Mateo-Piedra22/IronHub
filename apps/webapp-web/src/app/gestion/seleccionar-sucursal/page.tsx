@@ -25,7 +25,7 @@ export default function GestionSeleccionarSucursalPage() {
                 const sid = res.data?.sucursal_actual_id ?? null;
                 setCurrentId(typeof sid === 'number' ? sid : null);
                 if (typeof sid === 'number' && sid > 0) {
-                    router.replace('/gestion/usuarios');
+                    window.location.assign('/gestion/usuarios');
                 }
             } catch (e) {
                 toast({
@@ -48,7 +48,7 @@ export default function GestionSeleccionarSucursalPage() {
             const res = await api.seleccionarSucursal(sid);
             if (!res.ok) throw new Error(res.error || 'No se pudo seleccionar la sucursal');
             setCurrentId(sid);
-            router.replace('/gestion/usuarios');
+            window.location.assign('/gestion/usuarios');
         } catch (e) {
             toast({
                 title: 'No se pudo seleccionar sucursal',
@@ -97,4 +97,3 @@ export default function GestionSeleccionarSucursalPage() {
         </div>
     );
 }
-

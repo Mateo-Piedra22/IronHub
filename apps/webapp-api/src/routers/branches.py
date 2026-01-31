@@ -119,13 +119,14 @@ async def api_list_sucursales(request: Request, db: Session = Depends(get_db_ses
     if not _is_authenticated_any(request):
         return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
     try:
-        allowed = _get_allowed_sucursal_ids(request, db, include_inactive=True)
+        allowed = _get_allowed_sucursal_ids(request, db, include_inactive=False)
         rows = (
             db.execute(
                 text(
                     """
                     SELECT id, nombre, codigo, direccion, timezone, activa
                     FROM sucursales
+                    WHERE activa = TRUE
                     ORDER BY id ASC
                     """
                 )

@@ -55,4 +55,13 @@ def run() -> int:
     except Exception:
         ok = False
 
+    try:
+        from sqlalchemy.orm import configure_mappers
+        from src.models import orm_models as _orm
+
+        _ = _orm
+        configure_mappers()
+    except Exception:
+        ok = False
+
     return 0 if ok else 21
