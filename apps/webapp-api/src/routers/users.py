@@ -19,6 +19,7 @@ from src.dependencies import (
     get_audit_service,
     require_feature,
     require_sucursal_selected,
+    require_sucursal_selected_optional,
     get_membership_service,
     require_scope,
 )
@@ -328,7 +329,7 @@ async def api_usuario_get(
     usuario_id: int,
     request: Request,
     user_service: UserService = Depends(get_user_service),
-    sucursal_id: int = Depends(require_sucursal_selected),
+    sucursal_id: Optional[int] = Depends(require_sucursal_selected_optional),
     ms: MembershipService = Depends(get_membership_service),
 ):
     try:
@@ -355,6 +356,8 @@ async def api_usuario_get(
                 "staff",
             )
         )
+        if is_gestion and sucursal_id is None:
+            raise HTTPException(status_code=428, detail="Sucursal requerida")
         session_user_id = request.session.get("user_id")
         if (not is_gestion) and (session_user_id is None):
             raise HTTPException(status_code=401, detail="Unauthorized")
@@ -365,7 +368,10 @@ async def api_usuario_get(
         ):
             raise HTTPException(status_code=403, detail="Forbidden")
         if not is_gestion and session_user_id is not None:
-            allowed, reason = ms.check_access(int(session_user_id), int(sucursal_id))
+            if sucursal_id is not None:
+                allowed, reason = ms.check_access(int(session_user_id), int(sucursal_id))
+            else:
+                allowed, reason = ms.check_access_any(int(session_user_id))
             if allowed is False:
                 raise HTTPException(status_code=403, detail=reason or "Forbidden")
 
@@ -497,6 +503,29 @@ async def api_usuario_create(
             )
 
         new_id = user_service.create_user(data, is_owner=is_owner)
+        try:
+            role_norm = str(data.get("rol") or "").strip().lower()
+        except Exception:
+            role_norm = ""
+        if role_norm in ("profesor", "empleado", "recepcionista", "staff"):
+            try:
+                sid_int = int(sucursal_id) if sucursal_id else None
+            except Exception:
+                sid_int = None
+            if sid_int is not None and sid_int > 0:
+                try:
+                    user_service.db.execute(
+                        text(
+                            "INSERT INTO usuario_sucursales (usuario_id, sucursal_id, created_at) VALUES (:uid, :sid, NOW()) ON CONFLICT DO NOTHING"
+                        ),
+                        {"uid": int(new_id), "sid": int(sid_int)},
+                    )
+                    user_service.db.commit()
+                except Exception:
+                    try:
+                        user_service.db.rollback()
+                    except Exception:
+                        pass
         try:
             if background_tasks is not None:
                 background_tasks.add_task(

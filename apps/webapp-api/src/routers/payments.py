@@ -21,6 +21,7 @@ from src.dependencies import (
     get_audit_service,
     require_feature,
     require_sucursal_selected,
+    require_sucursal_selected_optional,
     get_membership_service,
     require_scope_gestion,
 )
@@ -766,7 +767,7 @@ async def api_tipos_cuota_delete(
 async def api_pagos_list(
     request: Request,
     _scope=Depends(require_scope_gestion("pagos:read")),
-    sucursal_id: int = Depends(require_sucursal_selected),
+    sucursal_id: Optional[int] = Depends(require_sucursal_selected_optional),
     svc: PaymentService = Depends(get_payment_service),
     ms: MembershipService = Depends(get_membership_service),
 ):
@@ -795,6 +796,8 @@ async def api_pagos_list(
                 "staff",
             )
         )
+        if is_gestion and sucursal_id is None:
+            raise HTTPException(status_code=428, detail="Sucursal requerida")
         if is_gestion and role in ("profesor", "empleado", "recepcionista", "staff"):
             staff_uid = request.session.get("gestion_profesor_user_id") or request.session.get("user_id")
             if not staff_uid:
@@ -836,7 +839,10 @@ async def api_pagos_list(
         uid_filter: Optional[int] = None
         if not is_gestion:
             uid_filter = int(session_user_id)
-            allowed, reason = ms.check_access(int(uid_filter), int(sucursal_id))
+            if sucursal_id is not None:
+                allowed, reason = ms.check_access(int(uid_filter), int(sucursal_id))
+            else:
+                allowed, reason = ms.check_access_any(int(uid_filter))
             if allowed is False:
                 raise HTTPException(status_code=403, detail=reason or "Forbidden")
         elif usuario_id and str(usuario_id).isdigit():
@@ -846,7 +852,7 @@ async def api_pagos_list(
             except Exception:
                 role = ""
             if role not in ("dueño", "dueno", "owner", "admin", "administrador"):
-                allowed, reason = ms.check_access(int(uid_filter), int(sucursal_id))
+                allowed, reason = ms.check_access(int(uid_filter), int(sucursal_id or 0))
                 if allowed is False:
                     raise HTTPException(status_code=403, detail=reason or "Forbidden")
 
@@ -857,7 +863,7 @@ async def api_pagos_list(
         suc_filter: Optional[int] = None
         if is_gestion:
             try:
-                suc_filter = int(sucursal_id) if sucursal_id else None
+                suc_filter = int(sucursal_id) if sucursal_id is not None else None
             except Exception:
                 suc_filter = None
 

@@ -239,7 +239,9 @@ export interface Profesor {
     horarios?: Horario[];
     usuario_id?: number;
     tipo?: string | null;
+    estado?: string | null;
     scopes?: string[];
+    sucursales?: Array<{ id: number; nombre: string }>;
 }
 
 export interface Horario {
@@ -261,6 +263,7 @@ export interface Sesion {
     inicio?: string | null;
     fin?: string | null;
     notas?: string | null;
+    sucursal_id?: number | null;
 }
 
 // === Rutina Types ===
@@ -1016,7 +1019,7 @@ class ApiClient {
         return this.request<{ ok: boolean; items: Sucursal[]; sucursal_actual_id?: number | null }>('/api/sucursales');
     }
 
-    async seleccionarSucursal(sucursal_id: number) {
+    async seleccionarSucursal(sucursal_id: number | null) {
         const res = await this.request<{ ok: boolean; sucursal_actual_id?: number | null; error?: string }>(
             '/api/sucursales/seleccionar',
             {
@@ -1043,6 +1046,19 @@ class ApiClient {
             method: 'PUT',
             body: JSON.stringify(payload),
         });
+    }
+
+    async getSucursalStationKey(sucursalId: number) {
+        return this.request<{ ok: boolean; sucursal_id: number; station_key: string; station_url: string; error?: string }>(
+            `/api/sucursales/${sucursalId}/station`
+        );
+    }
+
+    async regenerateSucursalStationKey(sucursalId: number) {
+        return this.request<{ ok: boolean; sucursal_id: number; station_key: string; station_url: string; error?: string }>(
+            `/api/sucursales/${sucursalId}/station/regenerate`,
+            { method: 'POST' }
+        );
     }
 
     async getStaff(search: string = '', opts?: { all?: boolean }) {
@@ -1351,6 +1367,17 @@ class ApiClient {
         return this.request<{ sesion: Sesion | null }>(`/api/profesores/${profesorId}/sesiones/activa`);
     }
 
+    async getProfesorClasesAsignadas(profesorId: number) {
+        return this.request<{ clase_ids: number[] }>(`/api/profesores/${profesorId}/clases-asignadas`);
+    }
+
+    async updateProfesorClasesAsignadas(profesorId: number, data: { clase_ids: number[] }) {
+        return this.request<{ ok: boolean; clase_ids?: number[]; error?: string }>(`/api/profesores/${profesorId}/clases-asignadas`, {
+            method: 'PUT',
+            body: JSON.stringify(data),
+        });
+    }
+
     // === Rutinas ===
     async getRutinas(params?: { plantillas?: boolean; usuario_id?: number; search?: string }) {
         const searchParams = new URLSearchParams();
@@ -1574,6 +1601,10 @@ class ApiClient {
         return this.request<{ clases: Clase[] }>('/api/clases');
     }
 
+    async getClaseProfesoresAsignados(claseId: number) {
+        return this.request<{ profesor_ids: number[] }>(`/api/clases/${claseId}/profesores-asignados`);
+    }
+
     async getClasesAgenda() {
         return this.request<{ agenda: ClaseAgendaItem[] }>('/api/clases/agenda');
     }
@@ -1637,6 +1668,51 @@ class ApiClient {
     // === KPIs / Statistics ===
     async getOwnerDashboardOverview() {
         return this.request<any>('/api/owner_dashboard/overview');
+    }
+
+    async getOwnerDashboardUsuarios(params?: { search?: string; activo?: boolean; page?: number; limit?: number }) {
+        const qp = new URLSearchParams();
+        if (params?.search) qp.set('search', params.search);
+        if (params?.activo !== undefined) qp.set('activo', String(params.activo));
+        if (params?.page !== undefined) qp.set('page', String(params.page));
+        if (params?.limit !== undefined) qp.set('limit', String(params.limit));
+        const q = qp.toString() ? `?${qp.toString()}` : '';
+        return this.request<{ ok: boolean; usuarios: Usuario[]; total: number; limit: number; offset: number }>(`/api/owner_dashboard/usuarios${q}`);
+    }
+
+    async getOwnerDashboardPagos(params?: { desde?: string; hasta?: string; metodo_id?: number; page?: number; limit?: number }) {
+        const qp = new URLSearchParams();
+        if (params?.desde) qp.set('desde', params.desde);
+        if (params?.hasta) qp.set('hasta', params.hasta);
+        if (params?.metodo_id !== undefined) qp.set('metodo_id', String(params.metodo_id));
+        if (params?.page !== undefined) qp.set('page', String(params.page));
+        if (params?.limit !== undefined) qp.set('limit', String(params.limit));
+        const q = qp.toString() ? `?${qp.toString()}` : '';
+        return this.request<{ ok: boolean; pagos: Pago[]; limit: number; offset: number }>(`/api/owner_dashboard/pagos${q}`);
+    }
+
+    async getOwnerDashboardAsistencias(params?: { desde?: string; hasta?: string; page?: number; limit?: number }) {
+        const qp = new URLSearchParams();
+        if (params?.desde) qp.set('desde', params.desde);
+        if (params?.hasta) qp.set('hasta', params.hasta);
+        if (params?.page !== undefined) qp.set('page', String(params.page));
+        if (params?.limit !== undefined) qp.set('limit', String(params.limit));
+        const q = qp.toString() ? `?${qp.toString()}` : '';
+        return this.request<{ ok: boolean; asistencias: Asistencia[]; limit: number; offset: number }>(`/api/owner_dashboard/asistencias${q}`);
+    }
+
+    async getOwnerDashboardStaff(params?: { search?: string }) {
+        const qp = new URLSearchParams();
+        if (params?.search) qp.set('search', params.search);
+        const q = qp.toString() ? `?${qp.toString()}` : '';
+        return this.request<any>(`/api/owner_dashboard/staff${q}`);
+    }
+
+    async getOwnerDashboardProfesores(params?: { search?: string }) {
+        const qp = new URLSearchParams();
+        if (params?.search) qp.set('search', params.search);
+        const q = qp.toString() ? `?${qp.toString()}` : '';
+        return this.request<any>(`/api/owner_dashboard/profesores${q}`);
     }
 
     async getOwnerAttendanceAudit(params?: { dias?: number; desde?: string; hasta?: string; umbral_multiples?: number; umbral_repeticion_minutos?: number }) {
@@ -2406,7 +2482,9 @@ class ApiClient {
         if (params?.desde) searchParams.set('desde', params.desde);
         if (params?.hasta) searchParams.set('hasta', params.hasta);
         const query = searchParams.toString();
-        const url = `${this.baseUrl}/api/export/${type}/csv${query ? `?${query}` : ''}`;
+        const isDashboard = typeof window !== 'undefined' && (window.location?.pathname || '').startsWith('/dashboard');
+        const basePath = isDashboard ? `/api/owner_dashboard/export/${type}/csv` : `/api/export/${type}/csv`;
+        const url = `${this.baseUrl}${basePath}${query ? `?${query}` : ''}`;
 
         try {
             const response = await fetch(url, {

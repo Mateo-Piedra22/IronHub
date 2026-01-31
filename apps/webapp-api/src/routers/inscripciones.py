@@ -89,6 +89,20 @@ async def api_clase_tipo_delete(
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@router.get("/api/clases/{clase_id}/profesores-asignados")
+async def api_clase_profesores_asignados(
+    clase_id: int,
+    sucursal_id: int = Depends(require_sucursal_selected),
+    _=Depends(require_gestion_access),
+    svc: InscripcionesService = Depends(get_inscripciones_service),
+):
+    return {
+        "profesor_ids": svc.obtener_profesores_asignados_a_clase(
+            int(clase_id), sucursal_id=int(sucursal_id)
+        )
+    }
+
+
 # === Clase Horarios ===
 
 

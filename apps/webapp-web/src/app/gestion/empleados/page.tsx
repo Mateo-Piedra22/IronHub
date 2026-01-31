@@ -36,7 +36,6 @@ export default function EmpleadosPage() {
     const [items, setItems] = useState<StaffItem[]>([]);
     const [sucursales, setSucursales] = useState<Sucursal[]>([]);
     const [moduleFlags, setModuleFlags] = useState<Record<string, boolean> | null>(null);
-    const [showAll, setShowAll] = useState(false);
     const [open, setOpen] = useState(false);
     const [selected, setSelected] = useState<StaffItem | null>(null);
     const [editRole, setEditRole] = useState('empleado');
@@ -59,12 +58,11 @@ export default function EmpleadosPage() {
         });
     }, [items, search]);
 
-    const load = async (nextAll?: boolean) => {
+    const load = async () => {
         setLoading(true);
         try {
-            const all = typeof nextAll === 'boolean' ? nextAll : showAll;
             const [staffRes, sucRes, bootRes] = await Promise.all([
-                api.getStaff('', { all }),
+                api.getStaff('', { all: false }),
                 api.getSucursales(),
                 api.getBootstrap('auto'),
             ]);
@@ -91,6 +89,12 @@ export default function EmpleadosPage() {
     useEffect(() => {
         load();
         // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    useEffect(() => {
+        const handler = () => void load();
+        window.addEventListener('ironhub:sucursal-changed', handler as any);
+        return () => window.removeEventListener('ironhub:sucursal-changed', handler as any);
     }, []);
 
     const openEdit = (item: StaffItem) => {
@@ -260,18 +264,6 @@ export default function EmpleadosPage() {
                         disabled={loading}
                     >
                         Refrescar
-                    </Button>
-                    <Button
-                        variant="secondary"
-                        onClick={async () => {
-                            const next = !showAll;
-                            setShowAll(next);
-                            await load(next);
-                        }}
-                        leftIcon={<Shield className="w-4 h-4" />}
-                        disabled={loading}
-                    >
-                        {showAll ? 'Ver solo sucursal' : 'Ver todas las sucursales'}
                     </Button>
                 </div>
             </div>

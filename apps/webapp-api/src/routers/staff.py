@@ -32,7 +32,7 @@ async def api_staff_list(
     try:
         return {
             "items": svc.list_staff(
-                search=search, sucursal_id=int(sucursal_id), show_all=bool(all)
+                search=search, sucursal_id=int(sucursal_id), show_all=False
             )
         }
     except Exception as e:

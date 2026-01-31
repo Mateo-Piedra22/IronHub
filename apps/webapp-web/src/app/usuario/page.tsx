@@ -414,7 +414,10 @@ function UserDashboardContent() {
                                 <div key={pago.id} className="p-4 flex items-center justify-between">
                                     <div>
                                         <div className="text-sm text-white">{formatDate(pago.fecha)}</div>
-                                        <div className="text-xs text-slate-500">{pago.tipo_cuota_nombre || 'Pago'}</div>
+                                        <div className="text-xs text-slate-500">
+                                            {pago.tipo_cuota_nombre || 'Pago'}
+                                            {pago.sucursal_nombre ? ` • ${pago.sucursal_nombre}` : ''}
+                                        </div>
                                     </div>
                                     <div className="text-success-400 font-semibold">
                                         {formatCurrency(pago.monto)}

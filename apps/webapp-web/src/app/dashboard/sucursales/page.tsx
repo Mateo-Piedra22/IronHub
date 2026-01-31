@@ -27,6 +27,9 @@ export default function DashboardSucursalesPage() {
 
     const [original, setOriginal] = useState<EditState | null>(null);
     const [edit, setEdit] = useState<EditState | null>(null);
+    const [stationLoading, setStationLoading] = useState(false);
+    const [stationKey, setStationKey] = useState('');
+    const [stationUrl, setStationUrl] = useState('');
 
     const active = useMemo(() => items.filter((s) => !!s.activa), [items]);
     const inactive = useMemo(() => items.filter((s) => !s.activa), [items]);
@@ -64,6 +67,20 @@ export default function DashboardSucursalesPage() {
         setOriginal(st);
         setEdit(st);
         setOpen(true);
+        setStationKey('');
+        setStationUrl('');
+        setStationLoading(true);
+        (async () => {
+            try {
+                const r = await api.getSucursalStationKey(s.id);
+                if (r.ok && r.data?.ok) {
+                    setStationKey(String(r.data.station_key || ''));
+                    setStationUrl(String(r.data.station_url || ''));
+                }
+            } finally {
+                setStationLoading(false);
+            }
+        })();
     };
 
     const saveNow = async () => {
@@ -227,6 +244,54 @@ export default function DashboardSucursalesPage() {
                                 >
                                     Inactiva
                                 </button>
+                            </div>
+                        </div>
+                        <div className="space-y-2 md:col-span-2">
+                            <div className="text-sm font-medium text-slate-200">Station URL (QR)</div>
+                            <div className="flex flex-col md:flex-row gap-2">
+                                <Input value={stationLoading ? 'Cargando…' : stationUrl} readOnly />
+                                <Button
+                                    variant="secondary"
+                                    onClick={async () => {
+                                        try {
+                                            await navigator.clipboard.writeText(stationUrl || '');
+                                            toast({ title: 'Copiado', description: 'URL copiada al portapapeles', variant: 'success' });
+                                        } catch {
+                                            toast({ title: 'No se pudo copiar', description: 'Copiá manualmente la URL', variant: 'error' });
+                                        }
+                                    }}
+                                    disabled={!stationUrl || stationLoading}
+                                >
+                                    Copiar
+                                </Button>
+                                <Button
+                                    variant="danger"
+                                    onClick={() => {
+                                        if (!edit) return;
+                                        setConfirmText('Regenerar la Station Key invalida el QR/URL anterior para check-in. ¿Confirmás?');
+                                        setPendingSave(() => async () => {
+                                            setStationLoading(true);
+                                            try {
+                                                const r = await api.regenerateSucursalStationKey(edit.id);
+                                                if (!r.ok || !r.data?.ok) throw new Error(r.error || r.data?.error || 'No se pudo regenerar');
+                                                setStationKey(String(r.data.station_key || ''));
+                                                setStationUrl(String(r.data.station_url || ''));
+                                                toast({ title: 'Regenerado', description: 'Station Key actualizada', variant: 'success' });
+                                            } finally {
+                                                setStationLoading(false);
+                                                setConfirmOpen(false);
+                                                setPendingSave(null);
+                                            }
+                                        });
+                                        setConfirmOpen(true);
+                                    }}
+                                    disabled={stationLoading || !edit}
+                                >
+                                    Regenerar
+                                </Button>
+                            </div>
+                            <div className="text-xs text-slate-500">
+                                Station Key: <span className="font-mono text-slate-300">{stationKey || (stationLoading ? '…' : '-')}</span>
                             </div>
                         </div>
                     </div>

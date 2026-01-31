@@ -55,8 +55,6 @@ export default function AdminLayout({
     const [userScopes, setUserScopes] = useState<string[]>([]);
     const [userName, setUserName] = useState('');
     const [userRole, setUserRole] = useState('');
-    const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
-    const [sessionTimer, setSessionTimer] = useState<string | null>(null);
 
     useEffect(() => {
         const loadBranding = async () => {
@@ -117,7 +115,7 @@ export default function AdminLayout({
     }, [moduleFlags, pathname, router, userRole, userScopes, navItems]);
 
     const [logoutWarningOpen, setLogoutWarningOpen] = useState(false);
-    const [activeSession, setActiveSession] = useState<any>(null);
+    const [activeWorkSession, setActiveWorkSession] = useState<any>(null);
 
     // Load User & Session Data
     useEffect(() => {
@@ -128,26 +126,6 @@ export default function AdminLayout({
                     setUserName(res.data.user.nombre);
                     setUserRole(res.data.user.rol);
                     setUserScopes((res.data.user.scopes || []) as any);
-
-                    // If profesor, check active session
-                    if (res.data.user.rol === 'profesor' && res.data.user.gestion_profesor_id) {
-                        const activeRes = await api.getSesionActiva(res.data.user.gestion_profesor_id);
-                        if (activeRes.ok && activeRes.data?.sesion) {
-                            const s = activeRes.data.sesion;
-                            // Calculate start time
-                            let start: Date | null = null;
-                            if (s.inicio) start = new Date(s.inicio);
-                            else if (s.fecha && s.hora_inicio) start = new Date(`${s.fecha}T${s.hora_inicio}`);
-
-                            if (start && !isNaN(start.getTime())) {
-                                setSessionStartTime(start);
-                            } else {
-                                setSessionStartTime(null);
-                            }
-                        } else {
-                            setSessionStartTime(null);
-                        }
-                    }
                 }
             } catch { }
         };
@@ -156,31 +134,6 @@ export default function AdminLayout({
         const poll = setInterval(loadHeaderData, 15000); // Poll every 15s to keep sync
         return () => clearInterval(poll);
     }, []);
-
-    // Timer Tick
-    useEffect(() => {
-        if (!sessionStartTime) {
-            setSessionTimer(null);
-            return;
-        }
-
-        const tick = () => {
-            const now = new Date();
-            const diff = Math.floor((now.getTime() - sessionStartTime.getTime()) / 1000);
-            if (diff < 0) {
-                setSessionTimer('00:00:00');
-                return;
-            }
-            const h = Math.floor(diff / 3600);
-            const m = Math.floor((diff % 3600) / 60);
-            const s = diff % 60;
-            setSessionTimer(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`);
-        };
-
-        tick();
-        const interval = setInterval(tick, 1000);
-        return () => clearInterval(interval);
-    }, [sessionStartTime]);
 
     const proceedLogout = async () => {
         setLoggingOut(true);
@@ -196,17 +149,13 @@ export default function AdminLayout({
     const handleLogout = async () => {
         setLoggingOut(true);
         try {
-            // Check current user
-            const sessionRes = await api.getSession('gestion');
-            if (sessionRes.ok && sessionRes.data?.user?.rol === 'profesor' && sessionRes.data.user.gestion_profesor_id) {
-                const pid = sessionRes.data.user.gestion_profesor_id;
-                const activeRes = await api.getSesionActiva(pid);
-                if (activeRes.ok && activeRes.data?.sesion) {
-                    setActiveSession({ ...activeRes.data.sesion, profesorId: pid });
-                    setLogoutWarningOpen(true);
-                    setLoggingOut(false);
-                    return;
-                }
+            const st = await api.getMyWorkSession();
+            const active = (st.ok ? (st.data as any)?.active : null) || null;
+            if (st.ok && (st.data as any)?.allowed && active?.session_id) {
+                setActiveWorkSession({ ...(active || {}), kind: (st.data as any)?.kind });
+                setLogoutWarningOpen(true);
+                setLoggingOut(false);
+                return;
             }
         } catch (e) {
             // Ignore errors and proceed
@@ -215,10 +164,9 @@ export default function AdminLayout({
     };
 
     const handleCloseSessionAndLogout = async () => {
-        if (activeSession) {
+        if (activeWorkSession) {
             try {
-                // api.endSesion requires sessionId. getSesionActiva returns sesion object with id
-                await api.endSesion(activeSession.profesorId, activeSession.id);
+                await api.endMyWorkSession();
             } catch { }
         }
         proceedLogout();

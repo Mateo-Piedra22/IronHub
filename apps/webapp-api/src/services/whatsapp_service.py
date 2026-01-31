@@ -22,24 +22,34 @@ class WhatsAppService(BaseService):
         return datetime.now(timezone.utc).replace(tzinfo=None)
 
     def obtener_resumen_mensajes(
-        self, dias: int = 30, limite: int = 300
+        self, dias: int = 30, limite: int = 300, sucursal_id: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         try:
             since = self._now_utc_naive() - timedelta(days=int(dias or 0))
+            sid = None
+            try:
+                sid = int(sucursal_id) if sucursal_id is not None else None
+            except Exception:
+                sid = None
+            if sid is not None and sid <= 0:
+                sid = None
             result = self.db.execute(
                 text("""
                     SELECT wm.id, wm.user_id,
                            COALESCE(u.nombre,'') AS usuario_nombre,
                            COALESCE(u.telefono,'') AS usuario_telefono,
+                           wm.sucursal_id, COALESCE(s.nombre,'') AS sucursal_nombre,
                            wm.phone_number, wm.message_type, wm.template_name, wm.message_content,
                            COALESCE(wm.status,'') AS status, wm.message_id, wm.sent_at, wm.created_at
                     FROM whatsapp_messages wm
                     LEFT JOIN usuarios u ON u.id = wm.user_id
+                    LEFT JOIN sucursales s ON s.id = wm.sucursal_id
                     WHERE wm.sent_at >= :since
+                      AND (:sid IS NULL OR wm.sucursal_id = :sid)
                     ORDER BY wm.sent_at DESC
                     LIMIT :limite
                 """),
-                {"since": since, "limite": int(limite or 0)},
+                {"since": since, "limite": int(limite or 0), "sid": sid},
             )
             return [
                 {
@@ -47,14 +57,16 @@ class WhatsAppService(BaseService):
                     "user_id": r[1],
                     "usuario_nombre": r[2],
                     "usuario_telefono": r[3],
-                    "phone_number": r[4],
-                    "message_type": r[5],
-                    "template_name": r[6],
-                    "message_content": r[7],
-                    "status": r[8],
-                    "message_id": r[9],
-                    "sent_at": str(r[10]) if r[10] else None,
-                    "created_at": str(r[11]) if r[11] else None,
+                    "sucursal_id": r[4],
+                    "sucursal_nombre": r[5],
+                    "phone_number": r[6],
+                    "message_type": r[7],
+                    "template_name": r[8],
+                    "message_content": r[9],
+                    "status": r[10],
+                    "message_id": r[11],
+                    "sent_at": str(r[12]) if r[12] else None,
+                    "created_at": str(r[13]) if r[13] else None,
                 }
                 for r in result.fetchall()
             ]

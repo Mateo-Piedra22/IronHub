@@ -1043,6 +1043,7 @@ from src.routers import branches
 from src.routers import memberships
 from src.routers import entitlements
 from src.routers import work_sessions
+from src.routers import owner_dashboard
 
 # Include routers
 app.include_router(auth.router, tags=["Auth"])
@@ -1059,6 +1060,7 @@ app.include_router(memberships.router, tags=["Memberships"])
 app.include_router(entitlements.router, tags=["Entitlements"])
 app.include_router(profesores.router, tags=["Profesores"])
 app.include_router(reports.router, tags=["Reports"])
+app.include_router(owner_dashboard.router, tags=["Owner Dashboard"])
 app.include_router(admin.router, tags=["Admin"])
 app.include_router(meta_review.router, tags=["Meta Review"])
 app.include_router(staff.router, tags=["Staff"])

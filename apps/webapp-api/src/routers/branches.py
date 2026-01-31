@@ -178,12 +178,24 @@ async def api_select_sucursal(request: Request, db: Session = Depends(get_db_ses
     except Exception:
         data = {}
     sucursal_id = data.get("sucursal_id")
+    if sucursal_id is None or str(sucursal_id).strip() in ("", "0", "null", "none"):
+        try:
+            request.session.pop("sucursal_id", None)
+        except Exception:
+            pass
+        return {"ok": True, "sucursal_actual_id": None}
     try:
         sid = int(sucursal_id)
     except Exception:
         return JSONResponse(
             {"ok": False, "error": "sucursal_id_invalid"}, status_code=400
         )
+    if sid <= 0:
+        try:
+            request.session.pop("sucursal_id", None)
+        except Exception:
+            pass
+        return {"ok": True, "sucursal_actual_id": None}
 
     try:
         allowed = _get_allowed_sucursal_ids(request, db, include_inactive=False)
@@ -412,6 +424,113 @@ async def api_update_sucursal(
         except Exception:
             pass
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.get("/api/sucursales/{sucursal_id}/station")
+async def api_get_sucursal_station_key(
+    sucursal_id: int,
+    request: Request,
+    _=Depends(require_owner),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        sid = int(sucursal_id)
+    except Exception:
+        return JSONResponse({"ok": False, "error": "sucursal_id_invalid"}, status_code=400)
+    row = (
+        db.execute(
+            text(
+                "SELECT id, station_key, activa FROM sucursales WHERE id = :id LIMIT 1"
+            ),
+            {"id": sid},
+        )
+        .mappings()
+        .first()
+    )
+    if not row:
+        return JSONResponse({"ok": False, "error": "sucursal_not_found"}, status_code=404)
+    if not bool(row.get("activa")):
+        return JSONResponse({"ok": False, "error": "sucursal_inactiva"}, status_code=400)
+    station_key = str(row.get("station_key") or "").strip()
+    if not station_key:
+        station_key = secrets.token_urlsafe(16)
+        try:
+            db.execute(
+                text("UPDATE sucursales SET station_key = :k WHERE id = :id"),
+                {"k": station_key, "id": sid},
+            )
+            db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            return JSONResponse(
+                {"ok": False, "error": "No se pudo generar la station key"},
+                status_code=500,
+            )
+    origin = request.headers.get("origin", "")
+    if origin:
+        station_url = f"{origin}/station/{station_key}"
+    else:
+        host = request.headers.get("host", "")
+        protocol = (
+            "https"
+            if request.headers.get("x-forwarded-proto") == "https"
+            else "http"
+        )
+        station_url = f"{protocol}://{host}/station/{station_key}"
+    return {"ok": True, "sucursal_id": sid, "station_key": station_key, "station_url": station_url}
+
+
+@router.post("/api/sucursales/{sucursal_id}/station/regenerate")
+async def api_regenerate_sucursal_station_key(
+    sucursal_id: int,
+    request: Request,
+    _=Depends(require_owner),
+    db: Session = Depends(get_db_session),
+):
+    try:
+        sid = int(sucursal_id)
+    except Exception:
+        return JSONResponse({"ok": False, "error": "sucursal_id_invalid"}, status_code=400)
+    row = (
+        db.execute(
+            text("SELECT id, activa FROM sucursales WHERE id = :id LIMIT 1"),
+            {"id": sid},
+        )
+        .mappings()
+        .first()
+    )
+    if not row:
+        return JSONResponse({"ok": False, "error": "sucursal_not_found"}, status_code=404)
+    if not bool(row.get("activa")):
+        return JSONResponse({"ok": False, "error": "sucursal_inactiva"}, status_code=400)
+    new_key = secrets.token_urlsafe(16)
+    try:
+        db.execute(
+            text("UPDATE sucursales SET station_key = :k WHERE id = :id"),
+            {"k": new_key, "id": sid},
+        )
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return JSONResponse({"ok": False, "error": "No se pudo regenerar la station key"}, status_code=500)
+    origin = request.headers.get("origin", "")
+    if origin:
+        station_url = f"{origin}/station/{new_key}"
+    else:
+        host = request.headers.get("host", "")
+        protocol = (
+            "https"
+            if request.headers.get("x-forwarded-proto") == "https"
+            else "http"
+        )
+        station_url = f"{protocol}://{host}/station/{new_key}"
+    return {"ok": True, "sucursal_id": sid, "station_key": new_key, "station_url": station_url}
 
 
 @router.delete("/api/sucursales/{sucursal_id}")

@@ -1383,6 +1383,39 @@ async def require_sucursal_selected(
     return RedirectResponse(url="/gestion/seleccionar-sucursal", status_code=303)
 
 
+async def require_sucursal_selected_optional(
+    request: Request, db: Session = Depends(get_db_session)
+) -> Optional[int]:
+    claims = get_claims(request)
+    sid = claims.get("sucursal_id")
+    if sid:
+        try:
+            sid_int = int(sid)
+        except Exception:
+            sid_int = 0
+        if sid_int > 0:
+            try:
+                row = (
+                    db.execute(
+                        text(
+                            "SELECT id FROM sucursales WHERE id = :id AND activa = TRUE LIMIT 1"
+                        ),
+                        {"id": int(sid_int)},
+                    )
+                    .mappings()
+                    .first()
+                )
+                if row:
+                    return int(sid_int)
+            except Exception:
+                pass
+        try:
+            request.session.pop("sucursal_id", None)
+        except Exception:
+            pass
+    return None
+
+
 async def get_current_active_user(
     request: Request, user_service: UserService = Depends(get_user_service)
 ):

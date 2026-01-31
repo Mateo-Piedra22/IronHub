@@ -67,7 +67,6 @@ class StaffService(BaseService):
             stmt = stmt.where(
                 func.lower(Usuario.nombre).like(like)
                 | func.lower(Usuario.dni).like(like)
-                | func.lower(Usuario.email).like(like)
             )
 
         users = list(self.db.scalars(stmt).all())
@@ -134,7 +133,7 @@ class StaffService(BaseService):
                     "id": uid,
                     "nombre": u.nombre or "",
                     "dni": u.dni or "",
-                    "email": u.email or "",
+                    "email": getattr(u, "email", None) or "",
                     "rol": (u.rol or "").strip().lower(),
                     "activo": bool(u.activo),
                     "staff": {
@@ -189,7 +188,7 @@ class StaffService(BaseService):
             "id": uid,
             "nombre": u.nombre or "",
             "dni": u.dni or "",
-            "email": u.email or "",
+            "email": getattr(u, "email", None) or "",
             "rol": (u.rol or "").strip().lower(),
             "activo": bool(u.activo),
             "staff": {

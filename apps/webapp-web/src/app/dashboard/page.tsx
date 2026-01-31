@@ -52,6 +52,7 @@ export default function DashboardPage() {
 function OwnerDashboard() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [scope, setScope] = useState<{ mode?: string; sucursal_id?: number | null; sucursal_nombre?: string | null } | null>(null);
     const [kpis, setKpis] = useState<{ total_activos: number; total_inactivos: number; ingresos_mes: number; asistencias_hoy: number; nuevos_30_dias: number } | null>(
         null
     );
@@ -63,8 +64,8 @@ function OwnerDashboard() {
     const [arpaTipos, setArpaTipos] = useState<Array<{ tipo: string; arpa: number }>>([]);
     const [paymentDist, setPaymentDist] = useState<{ al_dia: number; vencido: number; sin_pagos: number } | null>(null);
     const [cohorts, setCohorts] = useState<Array<{ cohort: string; retention_rate: number; total: number; retained: number }>>([]);
-    const [waitlistEvents, setWaitlistEvents] = useState<Array<{ id?: number; usuario_nombre?: string; posicion?: number; fecha?: string | null }>>([]);
-    const [delinquencyAlerts, setDelinquencyAlerts] = useState<Array<{ usuario_id?: number; usuario_nombre?: string; ultimo_pago?: string | null }>>([]);
+    const [waitlistEvents, setWaitlistEvents] = useState<Array<{ id?: number; usuario_nombre?: string; posicion?: number; fecha?: string | null; sucursal_id?: number | null; sucursal_nombre?: string | null }>>([]);
+    const [delinquencyAlerts, setDelinquencyAlerts] = useState<Array<{ usuario_id?: number; usuario_nombre?: string; ultimo_pago?: string | null; sucursal_id?: number | null; sucursal_nombre?: string | null }>>([]);
     const [waStats, setWaStats] = useState<{ total?: number; ultimo_mes?: number; por_tipo?: Record<string, number>; por_estado?: Record<string, number> } | null>(null);
     const [waPendientes, setWaPendientes] = useState<WaPendiente[]>([]);
     const [ownerGymSettings, setOwnerGymSettings] = useState<{ attendance_allow_multiple_per_day: boolean } | null>(null);
@@ -90,58 +91,62 @@ function OwnerDashboard() {
     const [auditUmbralMultiples, setAuditUmbralMultiples] = useState(3);
     const [auditUmbralRepeticion, setAuditUmbralRepeticion] = useState(5);
 
-    useEffect(() => {
-        const run = async () => {
-            setLoading(true);
-            setError('');
-            try {
-                const [rOverview, rMetodos, rSettings, rBilling, rAudit] = await Promise.all([
-                    api.getOwnerDashboardOverview(),
-                    api.getMetodosPago(),
-                    api.getOwnerGymSettings(),
-                    api.getOwnerGymBilling(),
-                    api.getOwnerAttendanceAudit({ desde: auditDesde, hasta: auditHasta, umbral_multiples: auditUmbralMultiples, umbral_repeticion_minutos: auditUmbralRepeticion }),
-                ]);
+    const reloadOverview = useCallback(async () => {
+        setLoading(true);
+        setError('');
+        try {
+            const [rOverview, rMetodos, rSettings, rBilling, rAudit] = await Promise.all([
+                api.getOwnerDashboardOverview(),
+                api.getMetodosPago(),
+                api.getOwnerGymSettings(),
+                api.getOwnerGymBilling(),
+                api.getOwnerAttendanceAudit({ desde: auditDesde, hasta: auditHasta, umbral_multiples: auditUmbralMultiples, umbral_repeticion_minutos: auditUmbralRepeticion }),
+            ]);
 
-                if (rOverview.ok && rOverview.data?.ok) {
-                    const d = rOverview.data as any;
-                    if (d.kpis) setKpis(d.kpis);
-                    if (d.kpis_avanzados) setKpisAdv(d.kpis_avanzados);
-                    if (d.activos_inactivos) setActivos(d.activos_inactivos);
-                    setIngresos12m((d.ingresos12m?.data || []) as any[]);
-                    setNuevos12m((d.nuevos12m?.data || []) as any[]);
-                    setArpu12m((d.arpu12m?.data || []) as any[]);
-                    setArpaTipos((d.arpa_por_tipo_cuota?.data || []) as any[]);
-                    if (d.payment_status_dist) setPaymentDist(d.payment_status_dist);
-                    const items = (d.cohort_retencion_6m?.cohorts || []) as Array<any>;
-                    setCohorts(
-                        items.map((it) => ({
-                            cohort: String((it as any)?.cohort || ''),
-                            retention_rate: Number((it as any)?.retention_rate || 0),
-                            total: Number((it as any)?.total || 0),
-                            retained: Number((it as any)?.retained || 0),
-                        }))
-                    );
-                    setWaitlistEvents((d.waitlist_events?.events || []) as any[]);
-                    setDelinquencyAlerts((d.delinquency_alerts_recent?.alerts || []) as any[]);
-                    setWaStats((d.whatsapp_stats || null) as any);
-                    setWaPendientes((d.whatsapp_pendientes?.mensajes || []) as any[]);
-                }
-                if (rMetodos.ok && rMetodos.data) setMetodosPago((rMetodos.data.metodos || []) as any[]);
-                if (rSettings.ok && rSettings.data?.ok) {
-                    const v = Boolean((rSettings.data.settings || {})['attendance_allow_multiple_per_day']);
-                    setOwnerGymSettings({ attendance_allow_multiple_per_day: v });
-                }
-                if (rBilling.ok && rBilling.data?.ok) setOwnerGymBilling(rBilling.data);
-                if (rAudit.ok && rAudit.data?.ok) setAudit(rAudit.data);
-            } catch (e) {
-                setError(String(e) || 'No se pudieron cargar los datos');
-            } finally {
-                setLoading(false);
+            if (rOverview.ok && rOverview.data?.ok) {
+                const d = rOverview.data as any;
+                setScope((d.scope || null) as any);
+                if (d.kpis) setKpis(d.kpis);
+                if (d.kpis_avanzados) setKpisAdv(d.kpis_avanzados);
+                if (d.activos_inactivos) setActivos(d.activos_inactivos);
+                setIngresos12m((d.ingresos12m?.data || []) as any[]);
+                setNuevos12m((d.nuevos12m?.data || []) as any[]);
+                setArpu12m((d.arpu12m?.data || []) as any[]);
+                setArpaTipos((d.arpa_por_tipo_cuota?.data || []) as any[]);
+                if (d.payment_status_dist) setPaymentDist(d.payment_status_dist);
+                const items = (d.cohort_retencion_6m?.cohorts || []) as Array<any>;
+                setCohorts(
+                    items.map((it) => ({
+                        cohort: String((it as any)?.cohort || ''),
+                        retention_rate: Number((it as any)?.retention_rate || 0),
+                        total: Number((it as any)?.total || 0),
+                        retained: Number((it as any)?.retained || 0),
+                    }))
+                );
+                setWaitlistEvents((d.waitlist_events?.events || []) as any[]);
+                setDelinquencyAlerts((d.delinquency_alerts_recent?.alerts || []) as any[]);
+                setWaStats((d.whatsapp_stats || null) as any);
+                setWaPendientes((d.whatsapp_pendientes?.mensajes || []) as any[]);
+            } else {
+                setError((rOverview as any)?.error || (rOverview as any)?.data?.mensaje || 'No se pudieron cargar los datos del overview');
             }
-        };
-        run();
-    }, []);
+            if (rMetodos.ok && rMetodos.data) setMetodosPago((rMetodos.data.metodos || []) as any[]);
+            if (rSettings.ok && rSettings.data?.ok) {
+                const v = Boolean((rSettings.data.settings || {})['attendance_allow_multiple_per_day']);
+                setOwnerGymSettings({ attendance_allow_multiple_per_day: v });
+            }
+            if (rBilling.ok && rBilling.data?.ok) setOwnerGymBilling(rBilling.data);
+            if (rAudit.ok && rAudit.data?.ok) setAudit(rAudit.data);
+        } catch (e) {
+            setError(String(e) || 'No se pudieron cargar los datos');
+        } finally {
+            setLoading(false);
+        }
+    }, [auditDesde, auditHasta, auditUmbralMultiples, auditUmbralRepeticion]);
+
+    useEffect(() => {
+        reloadOverview();
+    }, [reloadOverview]);
 
     const downloadCsv = useCallback(async (type: 'usuarios' | 'pagos' | 'asistencias' | 'asistencias_audit', params?: { desde?: string; hasta?: string }) => {
         try {
@@ -198,34 +203,40 @@ function OwnerDashboard() {
         setRefreshing(true);
         try {
             const [rUsuarios, rPagos, rAsist] = await Promise.all([
-                api.getUsuarios({
+                api.getOwnerDashboardUsuarios({
                     search: usuariosSearchDebounced || undefined,
                     activo: usuariosActivo === 'all' ? undefined : usuariosActivo === 'true',
                     page: 1,
                     limit: 20,
                 }),
-                api.getPagos({
+                api.getOwnerDashboardPagos({
                     desde: pagosDesde || undefined,
                     hasta: pagosHasta || undefined,
                     metodo_id: metodoId || undefined,
                     page: 1,
                     limit: 20,
                 }),
-                api.getAsistencias({
+                api.getOwnerDashboardAsistencias({
                     desde: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
                     hasta: new Date().toISOString().slice(0, 10),
                     limit: 20,
                 }),
             ]);
-            if (rUsuarios.ok && rUsuarios.data) {
-                setUsuarios(rUsuarios.data.usuarios || []);
-                setUsuariosTotal(rUsuarios.data.total || 0);
+            if (rUsuarios.ok && rUsuarios.data?.ok) {
+                setUsuarios((rUsuarios.data.usuarios || []) as any[]);
+                setUsuariosTotal(Number(rUsuarios.data.total || 0));
+            } else if (!rUsuarios.ok) {
+                setError(rUsuarios.error || 'No se pudieron cargar usuarios');
             }
-            if (rPagos.ok && rPagos.data) {
-                setPagos(rPagos.data.pagos || []);
+            if (rPagos.ok && rPagos.data?.ok) {
+                setPagos((rPagos.data.pagos || []) as any[]);
+            } else if (!rPagos.ok) {
+                setError(rPagos.error || 'No se pudieron cargar pagos');
             }
-            if (rAsist.ok && rAsist.data) {
-                setAsistencias(rAsist.data.asistencias || []);
+            if (rAsist.ok && rAsist.data?.ok) {
+                setAsistencias((rAsist.data.asistencias || []) as any[]);
+            } else if (!rAsist.ok) {
+                setError(rAsist.error || 'No se pudieron cargar asistencias');
             }
         } finally {
             setRefreshing(false);
@@ -237,6 +248,15 @@ function OwnerDashboard() {
     useEffect(() => {
         if (!loading) refreshTables();
     }, [loading, refreshTables, usuariosSearchDebounced, usuariosActivo, pagosDesde, pagosHasta, metodoId]);
+
+    useEffect(() => {
+        const handler = async () => {
+            await reloadOverview();
+            refreshTables();
+        };
+        window.addEventListener('ironhub:sucursal-changed', handler as any);
+        return () => window.removeEventListener('ironhub:sucursal-changed', handler as any);
+    }, [reloadOverview, refreshTables]);
 
     useEffect(() => {
         const t = setTimeout(() => setUsuariosSearchDebounced(usuariosSearch), 300);
@@ -335,6 +355,14 @@ function OwnerDashboard() {
                                 Dashboard del dueño
                             </h1>
                             <p className="text-sm text-slate-400 mt-1">KPIs reales, reportes, tablas y acciones rápidas.</p>
+                            <div className="text-xs text-slate-500 mt-1">
+                                Vista:{' '}
+                                <span className="text-slate-300">
+                                    {scope?.mode === 'sucursal' && scope?.sucursal_nombre
+                                        ? `Sucursal - ${scope.sucursal_nombre}`
+                                        : 'General'}
+                                </span>
+                            </div>
                             {error ? <div className="text-xs text-danger-400 mt-2">{error}</div> : null}
                             {loading ? <div className="text-xs text-slate-500 mt-2">Cargando datos…</div> : null}
                         </div>
@@ -726,7 +754,12 @@ function OwnerDashboard() {
 
                         <ChartCard title="Lista de espera (eventos recientes)" subtitle="Posición de los últimos eventos">
                             <BarChart values={waitlistSeries} barClassName="fill-primary-500/45" />
-                            <div className="mt-2 text-xs text-slate-500">eventos: {formatNumber(waitlistEvents.length)}</div>
+                            <div className="mt-2 text-xs text-slate-500">
+                                eventos: {formatNumber(waitlistEvents.length)}
+                                {scope?.mode === 'general' && waitlistEvents.some((e) => Boolean(e.sucursal_nombre)) ? (
+                                    <span className="ml-2">• con sucursal</span>
+                                ) : null}
+                            </div>
                         </ChartCard>
 
                         <ChartCard title="Retención (cohortes 6 meses)" subtitle="Aproximación por cohorte/mes">
@@ -744,7 +777,12 @@ function OwnerDashboard() {
                                 {delinquencyAlerts.length ? (
                                     delinquencyAlerts.map((a) => (
                                         <div key={String(a.usuario_id)} className="flex items-center justify-between gap-3 text-sm">
-                                            <span className="text-slate-200 truncate">{a.usuario_nombre || `Usuario ${a.usuario_id}`}</span>
+                                            <span className="text-slate-200 truncate">
+                                                {a.usuario_nombre || `Usuario ${a.usuario_id}`}
+                                                {scope?.mode === 'general' && a.sucursal_nombre ? (
+                                                    <span className="text-slate-500"> · {a.sucursal_nombre}</span>
+                                                ) : null}
+                                            </span>
                                             <span className="text-slate-500">{a.ultimo_pago ? formatDateRelative(a.ultimo_pago) : 'sin pagos'}</span>
                                         </div>
                                     ))
@@ -787,6 +825,7 @@ function OwnerDashboard() {
                                     <th className="text-left font-medium py-2 pr-4">Nombre</th>
                                     <th className="text-left font-medium py-2 pr-4">DNI</th>
                                     <th className="text-left font-medium py-2 pr-4">Teléfono</th>
+                                    <th className="text-left font-medium py-2 pr-4">Sucursal</th>
                                     <th className="text-left font-medium py-2 pr-4">Estado</th>
                                     <th className="text-left font-medium py-2 pr-4">Alta</th>
                                 </tr>
@@ -797,6 +836,7 @@ function OwnerDashboard() {
                                         <td className="py-2 pr-4 text-slate-200">{u.nombre}</td>
                                         <td className="py-2 pr-4 text-slate-400">{u.dni}</td>
                                         <td className="py-2 pr-4 text-slate-400">{u.telefono || '-'}</td>
+                                        <td className="py-2 pr-4 text-slate-400">{(u as any).sucursal_registro_nombre || '-'}</td>
                                         <td className="py-2 pr-4">
                                             {u.activo ? (
                                                 <span className="text-emerald-300">Activo</span>
@@ -809,7 +849,7 @@ function OwnerDashboard() {
                                 ))}
                                 {!usuarios.length ? (
                                     <tr>
-                                        <td className="py-3 text-slate-400" colSpan={5}>
+                                        <td className="py-3 text-slate-400" colSpan={6}>
                                             Sin resultados
                                         </td>
                                     </tr>
@@ -861,6 +901,7 @@ function OwnerDashboard() {
                                 <tr className="text-slate-500">
                                     <th className="text-left font-medium py-2 pr-4">Fecha</th>
                                     <th className="text-left font-medium py-2 pr-4">Usuario</th>
+                                    <th className="text-left font-medium py-2 pr-4">Sucursal</th>
                                     <th className="text-left font-medium py-2 pr-4">Monto</th>
                                     <th className="text-left font-medium py-2 pr-4">Método</th>
                                 </tr>
@@ -870,13 +911,14 @@ function OwnerDashboard() {
                                     <tr key={String(p.id)} className="border-t border-slate-800/60">
                                         <td className="py-2 pr-4 text-slate-400">{formatDate(p.fecha_pago)}</td>
                                         <td className="py-2 pr-4 text-slate-200">{p.usuario_nombre || `#${p.usuario_id}`}</td>
+                                        <td className="py-2 pr-4 text-slate-400">{(p as any).sucursal_nombre || '-'}</td>
                                         <td className="py-2 pr-4 text-slate-200">{formatCurrency(Number(p.monto || 0))}</td>
                                         <td className="py-2 pr-4 text-slate-400">{p.metodo_pago || '-'}</td>
                                     </tr>
                                 ))}
                                 {!pagos.length ? (
                                     <tr>
-                                        <td className="py-3 text-slate-400" colSpan={4}>
+                                        <td className="py-3 text-slate-400" colSpan={5}>
                                             Sin pagos
                                         </td>
                                     </tr>
@@ -936,6 +978,9 @@ function OwnerDashboard() {
                                             <div className="text-xs text-slate-500">{String(m?.estado || m?.status || '')}</div>
                                         </div>
                                         <div className="text-xs text-slate-500 mt-1 truncate">{String(m?.telefono || m?.phone || '')}</div>
+                                        {scope?.mode === 'general' && (m as any)?.sucursal_nombre ? (
+                                            <div className="text-xs text-slate-600 mt-1 truncate">{String((m as any)?.sucursal_nombre || '')}</div>
+                                        ) : null}
                                     </div>
                                 ))}
                                 {!waPendientes.length ? <div className="text-sm text-slate-400">Sin pendientes</div> : null}
@@ -962,6 +1007,7 @@ function OwnerDashboard() {
                                     <th className="text-left font-medium py-2 pr-4">Fecha</th>
                                     <th className="text-left font-medium py-2 pr-4">Usuario</th>
                                     <th className="text-left font-medium py-2 pr-4">Tipo</th>
+                                    <th className="text-left font-medium py-2 pr-4">Sucursal</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -970,11 +1016,12 @@ function OwnerDashboard() {
                                         <td className="py-2 pr-4 text-slate-400">{formatDate(a.fecha)}</td>
                                         <td className="py-2 pr-4 text-slate-200">{a.usuario_nombre || `#${a.usuario_id}`}</td>
                                         <td className="py-2 pr-4 text-slate-400">{a.tipo || '-'}</td>
+                                        <td className="py-2 pr-4 text-slate-400">{(a as any).sucursal_nombre || '-'}</td>
                                     </tr>
                                 ))}
                                 {!asistencias.length ? (
                                     <tr>
-                                        <td className="py-3 text-slate-400" colSpan={3}>
+                                        <td className="py-3 text-slate-400" colSpan={4}>
                                             Sin asistencias recientes
                                         </td>
                                     </tr>

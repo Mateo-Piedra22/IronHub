@@ -16,6 +16,7 @@ from sqlalchemy import text, select, func
 from sqlalchemy.dialects.postgresql import insert
 
 from src.services.base import BaseService
+from src.database.clase_profesor_schema import ensure_clase_profesor_schema
 from src.database.orm_models import (
     Profesor,
     HorarioProfesor,
@@ -133,49 +134,115 @@ class ProfesorService(BaseService):
 
     # ========== CRUD ==========
 
-    def obtener_profesores(self) -> List[Dict[str, Any]]:
-        """Get basics of all professors."""
+    def obtener_profesores(
+        self, *, sucursal_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """Get basics of all professors, optionally filtered by sucursal."""
         try:
-            stmt = select(Profesor).order_by(Profesor.id)
-            profesores = self.db.scalars(stmt).all()
-            return [
-                {
-                    "id": p.id,
-                    "nombre": p.usuario.nombre if p.usuario else "Unknown",
-                    "email": None,
-                    "telefono": p.usuario.telefono if p.usuario else None,
-                    "activo": p.usuario.activo if p.usuario else False,
-                    "created_at": p.fecha_creacion.isoformat()
-                    if p.fecha_creacion
-                    else None,
-                    "usuario_id": p.usuario_id,
-                    "tipo": p.tipo,
-                    "scopes": (
-                        [
-                            str(x)
-                            for x in (
-                                self.db.execute(
-                                    text(
-                                        "SELECT scopes FROM staff_permissions WHERE usuario_id = :uid LIMIT 1"
-                                    ),
-                                    {"uid": int(p.usuario_id or 0)},
-                                ).scalar()
-                                or []
-                            )
-                            if x
-                        ]
-                        if p.usuario_id
-                        else []
+            sid: Optional[int] = None
+            try:
+                sid = int(sucursal_id) if sucursal_id is not None else None
+            except Exception:
+                sid = None
+            if sid is not None and sid <= 0:
+                sid = None
+
+            rows = (
+                self.db.execute(
+                    text(
+                        """
+                        SELECT
+                          p.id AS profesor_id,
+                          p.usuario_id,
+                          u.nombre,
+                          u.telefono,
+                          u.activo,
+                          p.tipo,
+                          p.estado,
+                          p.fecha_creacion,
+                          sp.scopes,
+                          ARRAY_REMOVE(ARRAY_AGG(DISTINCT us.sucursal_id), NULL) AS sucursal_ids,
+                          ARRAY_REMOVE(ARRAY_AGG(DISTINCT s.nombre), NULL) AS sucursal_nombres
+                        FROM profesores p
+                        JOIN usuarios u ON u.id = p.usuario_id
+                        LEFT JOIN staff_permissions sp ON sp.usuario_id = p.usuario_id
+                        LEFT JOIN usuario_sucursales us ON us.usuario_id = p.usuario_id
+                        LEFT JOIN sucursales s ON s.id = us.sucursal_id
+                        WHERE (
+                          :sid IS NULL
+                          OR us.sucursal_id = :sid
+                          OR EXISTS (
+                            SELECT 1
+                            FROM profesor_clase_asignaciones a
+                            JOIN clases_horarios ch ON ch.id = a.clase_horario_id
+                            JOIN clases c ON c.id = ch.clase_id
+                            WHERE a.profesor_id = p.id
+                              AND a.activa = TRUE
+                              AND c.sucursal_id = :sid
+                          )
+                        )
+                        GROUP BY p.id, p.usuario_id, u.nombre, u.telefono, u.activo, p.tipo, p.estado, p.fecha_creacion, sp.scopes
+                        ORDER BY p.id ASC
+                        """
                     ),
-                }
-                for p in profesores
-            ]
+                    {"sid": sid},
+                )
+                .mappings()
+                .all()
+            )
+
+            out: List[Dict[str, Any]] = []
+            for r in rows or []:
+                ids = r.get("sucursal_ids") or []
+                nombres = r.get("sucursal_nombres") or []
+                sucursales: List[Dict[str, Any]] = []
+                try:
+                    for i, name in zip(list(ids), list(nombres)):
+                        try:
+                            sucursales.append({"id": int(i), "nombre": str(name or "")})
+                        except Exception:
+                            pass
+                except Exception:
+                    sucursales = []
+
+                scopes = r.get("scopes") or []
+                try:
+                    scopes = [str(x) for x in list(scopes) if x]
+                except Exception:
+                    scopes = []
+
+                fecha_creacion = r.get("fecha_creacion")
+                out.append(
+                    {
+                        "id": int(r.get("profesor_id") or 0),
+                        "nombre": r.get("nombre") or "Unknown",
+                        "email": None,
+                        "telefono": r.get("telefono") or None,
+                        "activo": bool(r.get("activo"))
+                        if r.get("activo") is not None
+                        else False,
+                        "created_at": fecha_creacion.isoformat()
+                        if hasattr(fecha_creacion, "isoformat") and fecha_creacion
+                        else None,
+                        "usuario_id": r.get("usuario_id"),
+                        "tipo": r.get("tipo"),
+                        "estado": r.get("estado"),
+                        "scopes": scopes,
+                        "sucursales": sucursales,
+                    }
+                )
+            return out
         except Exception as e:
             logger.error(f"Error getting profesores: {e}")
             return []
 
     def crear_profesor(
-        self, nombre: str, email: Optional[str], telefono: Optional[str]
+        self,
+        nombre: str,
+        email: Optional[str],
+        telefono: Optional[str],
+        *,
+        sucursal_id: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Create a new profesor by creating a Usuario (role='profesor') and then a Profesor profile.
@@ -198,6 +265,29 @@ class ProfesorService(BaseService):
             self.db.add(usuario)
             self.db.commit()  # commit to get ID
             self.db.refresh(usuario)
+
+            try:
+                sid = int(sucursal_id) if sucursal_id is not None else None
+            except Exception:
+                sid = None
+            if sid is not None and sid > 0:
+                try:
+                    self.db.execute(
+                        text(
+                            """
+                            INSERT INTO usuario_sucursales(usuario_id, sucursal_id)
+                            VALUES (:uid, :sid)
+                            ON CONFLICT (usuario_id, sucursal_id) DO NOTHING
+                            """
+                        ),
+                        {"uid": int(usuario.id), "sid": int(sid)},
+                    )
+                    self.db.commit()
+                except Exception:
+                    try:
+                        self.db.rollback()
+                    except Exception:
+                        pass
 
             # 2. Create Profesor
             profesor = Profesor(
@@ -490,14 +580,26 @@ class ProfesorService(BaseService):
         )
 
     # ========== Sesiones (ProfesorHoraTrabajada) ==========
-    def obtener_sesion_activa(self, profesor_id: int) -> Optional[Dict[str, Any]]:
+    def obtener_sesion_activa(
+        self, profesor_id: int, *, sucursal_id: Optional[int] = None
+    ) -> Optional[Dict[str, Any]]:
         try:
+            sid = None
+            try:
+                sid = int(sucursal_id) if sucursal_id is not None else None
+            except Exception:
+                sid = None
             s = (
                 self.db.execute(
                     select(ProfesorHoraTrabajada)
                     .where(
                         ProfesorHoraTrabajada.profesor_id == int(profesor_id),
                         ProfesorHoraTrabajada.hora_fin == None,
+                    )
+                    .where(
+                        ProfesorHoraTrabajada.sucursal_id == int(sid)
+                        if sid is not None and sid > 0
+                        else text("1=1")
                     )
                     .order_by(ProfesorHoraTrabajada.hora_inicio.desc())
                     .limit(1)
@@ -510,6 +612,7 @@ class ProfesorService(BaseService):
             return {
                 "id": s.id,
                 "profesor_id": s.profesor_id,
+                "sucursal_id": getattr(s, "sucursal_id", None),
                 "inicio": self._local_naive_iso(s.hora_inicio),
                 "fin": None,
                 "hora_inicio": self._local_time_hhmm(s.hora_inicio),
@@ -520,12 +623,23 @@ class ProfesorService(BaseService):
             return None
 
     def obtener_sesiones(
-        self, profesor_id: int, desde: Optional[str] = None, hasta: Optional[str] = None
+        self,
+        profesor_id: int,
+        desde: Optional[str] = None,
+        hasta: Optional[str] = None,
+        *,
+        sucursal_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         try:
             stmt = select(ProfesorHoraTrabajada).where(
                 ProfesorHoraTrabajada.profesor_id == profesor_id
             )
+            try:
+                sid = int(sucursal_id) if sucursal_id is not None else None
+            except Exception:
+                sid = None
+            if sid is not None and sid > 0:
+                stmt = stmt.where(ProfesorHoraTrabajada.sucursal_id == int(sid))
             if desde:
                 stmt = stmt.where(
                     ProfesorHoraTrabajada.fecha
@@ -546,6 +660,7 @@ class ProfesorService(BaseService):
                 {
                     "id": s.id,
                     "profesor_id": s.profesor_id,
+                    "sucursal_id": getattr(s, "sucursal_id", None),
                     "inicio": self._local_naive_iso(s.hora_inicio),
                     "fin": self._local_naive_iso(s.hora_fin),
                     "hora_inicio": self._local_time_hhmm(s.hora_inicio),
@@ -1065,3 +1180,139 @@ class ProfesorService(BaseService):
             logger.error(f"Error setting professor password: {e}")
             self.db.rollback()
             return False
+
+    def profesor_trabaja_en_sucursal(self, profesor_id: int, sucursal_id: int) -> bool:
+        try:
+            row = (
+                self.db.execute(
+                    text(
+                        """
+                        SELECT 1
+                        FROM profesores p
+                        JOIN usuario_sucursales us ON us.usuario_id = p.usuario_id
+                        WHERE p.id = :pid AND us.sucursal_id = :sid
+                        LIMIT 1
+                        """
+                    ),
+                    {"pid": int(profesor_id), "sid": int(sucursal_id)},
+                )
+                .fetchone()
+            )
+            return row is not None
+        except Exception:
+            return False
+
+    def obtener_clases_asignadas(
+        self, profesor_id: int, *, sucursal_id: int
+    ) -> List[int]:
+        try:
+            ensure_clase_profesor_schema(self.db)
+            rows = (
+                self.db.execute(
+                    text(
+                        """
+                        SELECT a.clase_id
+                        FROM clase_profesor_asignaciones a
+                        JOIN clases c ON c.id = a.clase_id
+                        WHERE a.profesor_id = :pid
+                          AND a.activa = TRUE
+                          AND c.sucursal_id = :sid
+                        ORDER BY a.clase_id ASC
+                        """
+                    ),
+                    {"pid": int(profesor_id), "sid": int(sucursal_id)},
+                )
+                .fetchall()
+            )
+            out: List[int] = []
+            for r in rows or []:
+                try:
+                    out.append(int(r[0]))
+                except Exception:
+                    pass
+            return out
+        except Exception:
+            return []
+
+    def actualizar_clases_asignadas(
+        self, profesor_id: int, *, sucursal_id: int, clase_ids: List[int]
+    ) -> Dict[str, Any]:
+        try:
+            try:
+                sid = int(sucursal_id)
+                pid = int(profesor_id)
+            except Exception:
+                return {"ok": False, "error": "invalid_args"}
+
+            ensure_clase_profesor_schema(self.db)
+            if not self.profesor_trabaja_en_sucursal(pid, sid):
+                return {"ok": False, "error": "profesor_no_trabaja_en_sucursal"}
+
+            ids: List[int] = []
+            for x in clase_ids or []:
+                try:
+                    v = int(x)
+                    if v > 0:
+                        ids.append(v)
+                except Exception:
+                    pass
+            ids = sorted(set(ids))
+
+            allowed_rows = (
+                self.db.execute(
+                    text(
+                        """
+                        SELECT id
+                        FROM clases
+                        WHERE sucursal_id = :sid
+                          AND activa = TRUE
+                          AND id = ANY(:ids)
+                        """
+                    ),
+                    {"sid": sid, "ids": ids},
+                )
+                .fetchall()
+                if ids
+                else []
+            )
+            allowed_ids = set()
+            for r in allowed_rows or []:
+                try:
+                    allowed_ids.add(int(r[0]))
+                except Exception:
+                    pass
+            ids = [x for x in ids if x in allowed_ids]
+
+            self.db.execute(
+                text(
+                    """
+                    UPDATE clase_profesor_asignaciones a
+                    SET activa = FALSE, updated_at = NOW()
+                    FROM clases c
+                    WHERE a.clase_id = c.id
+                      AND a.profesor_id = :pid
+                      AND c.sucursal_id = :sid
+                    """
+                ),
+                {"pid": pid, "sid": sid},
+            )
+            for cid in ids:
+                self.db.execute(
+                    text(
+                        """
+                        INSERT INTO clase_profesor_asignaciones(clase_id, profesor_id, activa, created_at, updated_at)
+                        VALUES (:cid, :pid, TRUE, NOW(), NOW())
+                        ON CONFLICT (clase_id, profesor_id)
+                        DO UPDATE SET activa = TRUE, updated_at = NOW()
+                        """
+                    ),
+                    {"cid": int(cid), "pid": pid},
+                )
+            self.db.commit()
+            return {"ok": True, "clase_ids": ids}
+        except Exception as e:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+            return {"ok": False, "error": str(e)}

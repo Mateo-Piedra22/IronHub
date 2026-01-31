@@ -126,19 +126,21 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
                     </div>
 
                     <div className="flex items-center gap-2">
-                        {sucursales.length > 1 ? (
+                        {sucursales.length >= 1 ? (
                             <select
                                 className="h-9 rounded-lg bg-slate-800/60 border border-slate-700/60 text-slate-200 text-sm px-3 outline-none focus:ring-2 focus:ring-primary-500/40 disabled:opacity-60"
                                 value={sucursalActualId ?? ''}
                                 disabled={switchingSucursal}
                                 onChange={async (e) => {
-                                    const nextId = Number(e.target.value);
-                                    if (!nextId || nextId === sucursalActualId) return;
+                                    const nextIdRaw = String(e.target.value || '');
+                                    const nextId = nextIdRaw ? Number(nextIdRaw) : null;
+                                    if ((nextId ?? null) === (sucursalActualId ?? null)) return;
                                     setSwitchingSucursal(true);
                                     try {
                                         const r = await api.seleccionarSucursal(nextId);
                                         if (r.ok) {
                                             setSucursalActualId(nextId);
+                                            window.dispatchEvent(new Event('ironhub:sucursal-changed'));
                                             router.refresh();
                                         }
                                     } finally {
@@ -146,9 +148,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
                                     }
                                 }}
                             >
-                                <option value="" disabled>
-                                    Seleccionar sucursal
-                                </option>
+                                <option value="">General</option>
                                 {sucursales.map((s) => (
                                     <option key={s.id} value={s.id}>
                                         {s.nombre}

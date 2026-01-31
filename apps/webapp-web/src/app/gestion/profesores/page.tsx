@@ -340,10 +340,16 @@ export default function ProfesoresPage() {
         try {
             const res = await api.getProfesores();
             if (res.ok && res.data) {
-                setProfesores(res.data.profesores);
-                // Select first by default
-                if (res.data.profesores.length > 0 && !selectedProfesor) {
-                    setSelectedProfesor(res.data.profesores[0]);
+                const list = (res.data.profesores || []) as any[];
+                setProfesores(list);
+                const currentId = selectedProfesor?.id;
+                const found = currentId ? list.find((p) => Number(p?.id) === Number(currentId)) : null;
+                if (found) {
+                    setSelectedProfesor(found as any);
+                } else if (list.length > 0) {
+                    setSelectedProfesor(list[0] as any);
+                } else {
+                    setSelectedProfesor(null);
                 }
             }
         } catch {
@@ -393,6 +399,15 @@ export default function ProfesoresPage() {
 
     useEffect(() => {
         loadProfesores();
+    }, [loadProfesores]);
+
+    useEffect(() => {
+        const handler = () => {
+            setSelectedProfesor(null);
+            void loadProfesores();
+        };
+        window.addEventListener('ironhub:sucursal-changed', handler as any);
+        return () => window.removeEventListener('ironhub:sucursal-changed', handler as any);
     }, [loadProfesores]);
 
     useEffect(() => {

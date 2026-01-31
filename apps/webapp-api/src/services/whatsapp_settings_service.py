@@ -7,7 +7,7 @@ import logging
 import os
 
 import requests
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -688,8 +688,8 @@ class WhatsAppSettingsService(BaseService):
             logger.error(f"WhatsAppSettingsService.upsert_manual_config error: {e}")
             return self.get_ui_config()
 
-    def get_state(self) -> Dict[str, Any]:
-        row = self._get_active_config_row()
+    def get_state(self, *, sucursal_id: Optional[int] = None) -> Dict[str, Any]:
+        row = self._get_active_config_row(sucursal_id=sucursal_id)
         token_raw = getattr(row, "access_token", "") if row else ""
         valid = bool(
             (getattr(row, "phone_id", "") or "").strip()
@@ -703,16 +703,29 @@ class WhatsAppSettingsService(BaseService):
             "configuracion_valida": bool(valid),
         }
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self, *, sucursal_id: Optional[int] = None) -> Dict[str, Any]:
         try:
+            sid = None
+            try:
+                sid = int(sucursal_id) if sucursal_id is not None else None
+            except Exception:
+                sid = None
+            if sid is not None and sid <= 0:
+                sid = None
             total = (
-                self.db.execute(select(func.count(WhatsappMessage.id))).scalar() or 0
+                self.db.execute(
+                    select(func.count(WhatsappMessage.id)).where(
+                        WhatsappMessage.sucursal_id == sid if sid is not None else text("1=1")
+                    )
+                ).scalar()
+                or 0
             )
             since_30 = self._now_utc_naive() - timedelta(days=30)
             ultimo_mes = (
                 self.db.execute(
                     select(func.count(WhatsappMessage.id)).where(
-                        WhatsappMessage.sent_at >= since_30
+                        WhatsappMessage.sent_at >= since_30,
+                        WhatsappMessage.sucursal_id == sid if sid is not None else text("1=1"),
                     )
                 ).scalar()
                 or 0
@@ -721,14 +734,22 @@ class WhatsAppSettingsService(BaseService):
                 self.db.execute(
                     select(
                         WhatsappMessage.message_type, func.count(WhatsappMessage.id)
-                    ).group_by(WhatsappMessage.message_type)
+                    )
+                    .where(
+                        WhatsappMessage.sucursal_id == sid if sid is not None else text("1=1")
+                    )
+                    .group_by(WhatsappMessage.message_type)
                 ).all()
             )
             by_status = dict(
                 self.db.execute(
                     select(
                         WhatsappMessage.status, func.count(WhatsappMessage.id)
-                    ).group_by(WhatsappMessage.status)
+                    )
+                    .where(
+                        WhatsappMessage.sucursal_id == sid if sid is not None else text("1=1")
+                    )
+                    .group_by(WhatsappMessage.status)
                 ).all()
             )
             return {

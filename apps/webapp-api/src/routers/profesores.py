@@ -11,7 +11,13 @@ except Exception:
 from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
-from src.dependencies import require_gestion_access, require_owner, get_profesor_service, require_feature
+from src.dependencies import (
+    require_gestion_access,
+    require_owner,
+    get_profesor_service,
+    require_feature,
+    require_sucursal_selected,
+)
 from src.security.session_claims import OWNER_ROLES
 from src.services.profesor_service import ProfesorService
 
@@ -56,11 +62,9 @@ async def api_profesores_list(
     request: Request,
     _=Depends(require_gestion_access),
     svc: ProfesorService = Depends(get_profesor_service),
+    sucursal_id: int = Depends(require_sucursal_selected),
 ):
-    """List all profesores. Professors can see all for metric viewing."""
-    # Note: Professors can VIEW all professors for metrics, but cannot EDIT them
-    # The edit/delete restrictions are enforced by require_owner on those endpoints
-    return {"profesores": svc.obtener_profesores()}
+    return {"profesores": svc.obtener_profesores(sucursal_id=int(sucursal_id))}
 
 
 @router.post("/api/profesores")
@@ -68,6 +72,7 @@ async def api_profesores_create(
     request: Request,
     _=Depends(require_owner),
     svc: ProfesorService = Depends(get_profesor_service),
+    sucursal_id: int = Depends(require_sucursal_selected),
 ):
     """Create a new profesor."""
     try:
@@ -79,6 +84,7 @@ async def api_profesores_create(
             nombre,
             (payload.get("email") or "").strip() or None,
             (payload.get("telefono") or "").strip() or None,
+            sucursal_id=int(sucursal_id),
         )
         return result if result else {"ok": True}
     except HTTPException:
@@ -156,6 +162,38 @@ async def api_profesor_delete(
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+# === Asignaciones de Clases ===
+
+
+@router.get("/api/profesores/{profesor_id}/clases-asignadas")
+async def api_profesor_clases_asignadas_get(
+    profesor_id: int,
+    request: Request,
+    _=Depends(require_owner),
+    svc: ProfesorService = Depends(get_profesor_service),
+    sucursal_id: int = Depends(require_sucursal_selected),
+):
+    _assert_profesor_access(request, profesor_id)
+    return {"clase_ids": svc.obtener_clases_asignadas(int(profesor_id), sucursal_id=int(sucursal_id))}
+
+
+@router.put("/api/profesores/{profesor_id}/clases-asignadas")
+async def api_profesor_clases_asignadas_put(
+    profesor_id: int,
+    request: Request,
+    _=Depends(require_owner),
+    svc: ProfesorService = Depends(get_profesor_service),
+    sucursal_id: int = Depends(require_sucursal_selected),
+):
+    _assert_profesor_access(request, profesor_id)
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    clase_ids = payload.get("clase_ids") or []
+    return svc.actualizar_clases_asignadas(int(profesor_id), sucursal_id=int(sucursal_id), clase_ids=clase_ids)
+
+
 # === Sesiones ===
 
 
@@ -165,6 +203,7 @@ async def api_profesor_sesiones(
     request: Request,
     _=Depends(require_gestion_access),
     svc: ProfesorService = Depends(get_profesor_service),
+    sucursal_id: int = Depends(require_sucursal_selected),
 ):
     """Get professor sessions."""
     _assert_profesor_access(request, profesor_id)
@@ -173,6 +212,7 @@ async def api_profesor_sesiones(
             profesor_id,
             request.query_params.get("desde"),
             request.query_params.get("hasta"),
+            sucursal_id=int(sucursal_id),
         )
     }
 
@@ -183,10 +223,11 @@ async def api_profesor_sesion_activa(
     request: Request,
     _=Depends(require_gestion_access),
     svc: ProfesorService = Depends(get_profesor_service),
+    sucursal_id: int = Depends(require_sucursal_selected),
 ):
     """Get active session for professor, if any."""
     _assert_profesor_access(request, profesor_id)
-    return {"sesion": svc.obtener_sesion_activa(profesor_id)}
+    return {"sesion": svc.obtener_sesion_activa(profesor_id, sucursal_id=int(sucursal_id))}
 
 
 @router.post("/api/profesores/{profesor_id}/sesiones/start")
@@ -195,10 +236,11 @@ async def api_profesor_sesion_start(
     request: Request,
     _=Depends(require_gestion_access),
     svc: ProfesorService = Depends(get_profesor_service),
+    sucursal_id: int = Depends(require_sucursal_selected),
 ):
     """Start a new session."""
     _assert_profesor_access(request, profesor_id)
-    result = svc.iniciar_sesion(profesor_id, request.session.get("sucursal_id"))
+    result = svc.iniciar_sesion(profesor_id, int(sucursal_id))
     if result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
     return result

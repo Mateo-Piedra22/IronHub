@@ -21,6 +21,7 @@ from src.dependencies import (
     require_feature,
     get_audit_service,
     require_scope_gestion,
+    require_sucursal_selected,
 )
 from src.services.whatsapp_service import WhatsAppService
 from src.services.whatsapp_dispatch_service import WhatsAppDispatchService
@@ -69,14 +70,68 @@ def _redact_whatsapp_state_for_role(
         return state
 
 
+def _is_missing_table_error(e: Exception, table_name: str) -> bool:
+    try:
+        msg = str(e)
+    except Exception:
+        msg = ""
+    t = str(table_name or "").strip().lower()
+    if not t:
+        return False
+    if "undefinedtable" in msg.lower():
+        return True
+    if f'relation "{t}" does not exist' in msg.lower():
+        return True
+    return False
+
+
+def _ensure_whatsapp_triggers_table(db: Session) -> None:
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS whatsapp_triggers (
+              trigger_key TEXT PRIMARY KEY,
+              enabled BOOLEAN NOT NULL DEFAULT FALSE,
+              template_name TEXT NULL,
+              cooldown_minutes INTEGER NOT NULL DEFAULT 1440,
+              last_run_at TIMESTAMP NULL
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            INSERT INTO whatsapp_triggers(trigger_key, enabled, template_name, cooldown_minutes)
+            VALUES
+              ('overdue_daily', FALSE, NULL, 1440),
+              ('due_today_daily', FALSE, NULL, 1440),
+              ('due_soon_daily', FALSE, NULL, 1440)
+            ON CONFLICT (trigger_key) DO NOTHING
+            """
+        )
+    )
+
+
 @router.get("/api/whatsapp/state")
 async def api_whatsapp_state(
     request: Request,
     _=Depends(require_gestion_access),
     st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service),
+    sucursal_id: Optional[int] = None,
 ):
     try:
-        state = st.get_state()
+        sid = None
+        try:
+            sid = int(sucursal_id) if sucursal_id is not None else None
+        except Exception:
+            sid = None
+        if sid is None:
+            try:
+                sid = int(request.session.get("sucursal_id") or 0) or None
+            except Exception:
+                sid = None
+        state = st.get_state(sucursal_id=sid)
         available = bool(state.get("disponible"))
         config_valid = bool(state.get("configuracion_valida"))
         enabled = bool(state.get("habilitado") and config_valid)
@@ -226,7 +281,9 @@ async def api_whatsapp_pendientes(
 @router.get("/api/whatsapp/mensajes")
 async def api_whatsapp_mensajes(
     request: Request,
-    _=Depends(require_owner),
+    _scope=Depends(require_scope_gestion("whatsapp:read")),
+    sucursal_id: int = Depends(require_sucursal_selected),
+    _=Depends(require_gestion_access),
     svc: WhatsAppService = Depends(get_whatsapp_service),
     dias: int = 30,
     status: str = "",
@@ -235,15 +292,13 @@ async def api_whatsapp_mensajes(
     scope: str = "branch",
 ):
     try:
-        sid = None
-        if str(scope or "").strip().lower() in ("branch", "sucursal"):
-            sid = request.session.get("sucursal_id")
+        sid = int(sucursal_id)
         data = svc.list_messages(
             dias=int(dias),
             status=str(status or "").strip() or None,
             page=int(page),
             limit=int(limit),
-            sucursal_id=int(sid) if sid is not None else None,
+            sucursal_id=int(sid),
         )
         if not isinstance(data, dict) or not data.get("ok"):
             return data
@@ -318,12 +373,13 @@ async def api_whatsapp_mensajes(
 @router.get("/api/whatsapp/status")
 async def api_whatsapp_status(
     request: Request,
+    sucursal_id: int = Depends(require_sucursal_selected),
     _=Depends(require_gestion_access),
     st: WhatsAppSettingsService = Depends(get_whatsapp_settings_service),
 ):
     """Alias for /api/whatsapp/state."""
     try:
-        return await api_whatsapp_state(request, st=st)
+        return await api_whatsapp_state(request, st=st, sucursal_id=int(sucursal_id))
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -837,13 +893,38 @@ async def api_whatsapp_triggers_list(
     _=Depends(require_owner),
     db: Session = Depends(get_db_session),
 ):
-    rows = db.execute(
-        text("""
-        SELECT trigger_key, enabled, template_name, cooldown_minutes, last_run_at
-        FROM whatsapp_triggers
-        ORDER BY trigger_key ASC
-    """)
-    ).fetchall()
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT trigger_key, enabled, template_name, cooldown_minutes, last_run_at
+                FROM whatsapp_triggers
+                ORDER BY trigger_key ASC
+                """
+            )
+        ).fetchall()
+    except Exception as e:
+        if _is_missing_table_error(e, "whatsapp_triggers"):
+            try:
+                _ensure_whatsapp_triggers_table(db)
+                db.commit()
+                rows = db.execute(
+                    text(
+                        """
+                        SELECT trigger_key, enabled, template_name, cooldown_minutes, last_run_at
+                        FROM whatsapp_triggers
+                        ORDER BY trigger_key ASC
+                        """
+                    )
+                ).fetchall()
+            except Exception:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                rows = []
+        else:
+            raise
     return {
         "triggers": [
             {
@@ -881,23 +962,62 @@ async def api_whatsapp_triggers_upsert(
         ).fetchone()
     except Exception:
         old_row = None
+        try:
+            _ensure_whatsapp_triggers_table(db)
+            db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
     try:
         cooldown_minutes = (
             int(cooldown_minutes) if cooldown_minutes is not None else 1440
         )
     except Exception:
         cooldown_minutes = 1440
-    db.execute(
-        text("""
-            INSERT INTO whatsapp_triggers (trigger_key, enabled, template_name, cooldown_minutes)
-            VALUES (:k, :en, :tpl, :cd)
-            ON CONFLICT (trigger_key) DO UPDATE
-            SET enabled = EXCLUDED.enabled,
-                template_name = EXCLUDED.template_name,
-                cooldown_minutes = EXCLUDED.cooldown_minutes
-        """),
-        {"k": trigger_key, "en": enabled, "tpl": template_name, "cd": cooldown_minutes},
-    )
+    try:
+        db.execute(
+            text(
+                """
+                INSERT INTO whatsapp_triggers (trigger_key, enabled, template_name, cooldown_minutes)
+                VALUES (:k, :en, :tpl, :cd)
+                ON CONFLICT (trigger_key) DO UPDATE
+                SET enabled = EXCLUDED.enabled,
+                    template_name = EXCLUDED.template_name,
+                    cooldown_minutes = EXCLUDED.cooldown_minutes
+                """
+            ),
+            {
+                "k": trigger_key,
+                "en": enabled,
+                "tpl": template_name,
+                "cd": cooldown_minutes,
+            },
+        )
+    except Exception as e:
+        if _is_missing_table_error(e, "whatsapp_triggers"):
+            _ensure_whatsapp_triggers_table(db)
+            db.execute(
+                text(
+                    """
+                    INSERT INTO whatsapp_triggers (trigger_key, enabled, template_name, cooldown_minutes)
+                    VALUES (:k, :en, :tpl, :cd)
+                    ON CONFLICT (trigger_key) DO UPDATE
+                    SET enabled = EXCLUDED.enabled,
+                        template_name = EXCLUDED.template_name,
+                        cooldown_minutes = EXCLUDED.cooldown_minutes
+                    """
+                ),
+                {
+                    "k": trigger_key,
+                    "en": enabled,
+                    "tpl": template_name,
+                    "cd": cooldown_minutes,
+                },
+            )
+        else:
+            raise
     db.commit()
     try:
         audit.log_from_request(
@@ -945,12 +1065,36 @@ async def api_whatsapp_automation_run(
     if trigger_keys and not isinstance(trigger_keys, list):
         trigger_keys = None
 
-    triggers = db.execute(
-        text("""
-        SELECT trigger_key, enabled, cooldown_minutes, last_run_at
-        FROM whatsapp_triggers
-    """)
-    ).fetchall()
+    try:
+        triggers = db.execute(
+            text(
+                """
+                SELECT trigger_key, enabled, cooldown_minutes, last_run_at
+                FROM whatsapp_triggers
+                """
+            )
+        ).fetchall()
+    except Exception as e:
+        if _is_missing_table_error(e, "whatsapp_triggers"):
+            try:
+                _ensure_whatsapp_triggers_table(db)
+                db.commit()
+                triggers = db.execute(
+                    text(
+                        """
+                        SELECT trigger_key, enabled, cooldown_minutes, last_run_at
+                        FROM whatsapp_triggers
+                        """
+                    )
+                ).fetchall()
+            except Exception:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                triggers = []
+        else:
+            raise
     trig_map = {
         r[0]: {
             "enabled": bool(r[1]),

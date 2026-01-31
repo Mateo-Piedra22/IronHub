@@ -21,6 +21,8 @@ import {
     type ProfesorConfig,
     type ProfesorResumen,
     type Usuario,
+    type Sucursal,
+    type Clase,
 } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { formatTime, formatCurrency, cn } from '@/lib/utils';
@@ -87,6 +89,14 @@ export default function ProfesorDetailModal({
     });
     const [configLoading, setConfigLoading] = useState(false);
     const [usuarios, setUsuarios] = useState<Usuario[]>([]);
+    const [sucursales, setSucursales] = useState<Sucursal[]>([]);
+    const [sucursalActualId, setSucursalActualId] = useState<number | null>(null);
+    const [editBranches, setEditBranches] = useState<number[]>([]);
+    const [branchesSaving, setBranchesSaving] = useState(false);
+    const [clases, setClases] = useState<Clase[]>([]);
+    const [clasesLoading, setClasesLoading] = useState(false);
+    const [editClases, setEditClases] = useState<number[]>([]);
+    const [clasesSaving, setClasesSaving] = useState(false);
 
     // Password state
     const [newPassword, setNewPassword] = useState('');
@@ -113,10 +123,12 @@ export default function ProfesorDetailModal({
     useEffect(() => {
         if (profesor && isOpen) {
             setEditScopes((profesor.scopes || []) as any);
+            setEditBranches(((profesor as any)?.sucursales || []).map((s: any) => Number(s?.id)).filter((x: any) => Number.isFinite(x)));
             loadHorarios();
             loadResumen();
             loadConfig();
             loadUsuarios();
+            loadSucursales();
             (async () => {
                 try {
                     const boot = await api.getBootstrap('auto');
@@ -183,6 +195,52 @@ export default function ProfesorDetailModal({
         }
     };
 
+    const loadSucursales = async () => {
+        const res = await api.getSucursales();
+        if (res.ok && res.data?.ok) {
+            setSucursales((res.data.items || []).filter((s) => !!s.activa));
+            setSucursalActualId((res.data.sucursal_actual_id ?? null) as any);
+        } else {
+            setSucursales([]);
+            setSucursalActualId(null);
+        }
+    };
+
+    const loadClases = async () => {
+        if (!sucursalActualId) {
+            setClases([]);
+            return;
+        }
+        setClasesLoading(true);
+        try {
+            const res = await api.getClases();
+            if (res.ok && res.data) {
+                setClases((res.data.clases || []).filter((c: any) => !!(c as any).activa));
+            } else {
+                setClases([]);
+            }
+        } finally {
+            setClasesLoading(false);
+        }
+    };
+
+    const loadClasesAsignadas = async () => {
+        if (!profesor?.id || !sucursalActualId) {
+            setEditClases([]);
+            return;
+        }
+        try {
+            const res = await api.getProfesorClasesAsignadas(profesor.id);
+            if (res.ok && res.data?.clase_ids) {
+                setEditClases((res.data.clase_ids || []).map((x) => Number(x)).filter((x) => Number.isFinite(x)));
+            } else {
+                setEditClases([]);
+            }
+        } catch {
+            setEditClases([]);
+        }
+    };
+
     const isModuleEnabled = (key: string) => {
         if (!moduleFlags) return true;
         if (Object.prototype.hasOwnProperty.call(moduleFlags, key)) return moduleFlags[key] !== false;
@@ -245,6 +303,72 @@ export default function ProfesorDetailModal({
             setPermsLoading(false);
         }
     };
+
+    const toggleBranch = (id: number, enabled: boolean) => {
+        const sid = Number(id);
+        if (!Number.isFinite(sid) || sid <= 0) return;
+        setEditBranches((prev) => {
+            const has = prev.includes(sid);
+            if (enabled && !has) return [...prev, sid];
+            if (!enabled && has) return prev.filter((x) => x !== sid);
+            return prev;
+        });
+    };
+
+    const saveBranches = async () => {
+        if (!profesor?.usuario_id) return;
+        setBranchesSaving(true);
+        try {
+            const ids = Array.from(new Set(editBranches)).filter((x) => Number.isFinite(x) && x > 0);
+            const res = await api.updateStaff(profesor.usuario_id, { sucursales: ids } as any);
+            if (!res.ok) throw new Error(res.error || 'No se pudieron guardar sucursales');
+            success('Sucursales actualizadas');
+            onRefresh();
+        } catch (e) {
+            error(e instanceof Error ? e.message : 'No se pudieron guardar sucursales');
+        } finally {
+            setBranchesSaving(false);
+        }
+    };
+
+    const toggleClase = (id: number, enabled: boolean) => {
+        const cid = Number(id);
+        if (!Number.isFinite(cid) || cid <= 0) return;
+        setEditClases((prev) => {
+            const has = prev.includes(cid);
+            if (enabled && !has) return [...prev, cid];
+            if (!enabled && has) return prev.filter((x) => x !== cid);
+            return prev;
+        });
+    };
+
+    const saveClases = async () => {
+        if (!profesor?.id) return;
+        if (!sucursalActualId) return;
+        const canAssign = editBranches.includes(sucursalActualId);
+        if (!canAssign) {
+            error('El profesor no está asignado a la sucursal actual');
+            return;
+        }
+        setClasesSaving(true);
+        try {
+            const ids = Array.from(new Set(editClases)).filter((x) => Number.isFinite(x) && x > 0);
+            const res = await api.updateProfesorClasesAsignadas(profesor.id, { clase_ids: ids });
+            if (!res.ok || !(res.data as any)?.ok) throw new Error(res.error || (res.data as any)?.error || 'No se pudieron guardar clases');
+            success('Clases asignadas actualizadas');
+            onRefresh();
+        } catch (e) {
+            error(e instanceof Error ? e.message : 'No se pudieron guardar clases');
+        } finally {
+            setClasesSaving(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!isOpen) return;
+        void loadClases();
+        void loadClasesAsignadas();
+    }, [isOpen, sucursalActualId, profesor?.id]);
 
     // Horario CRUD
     const handleAddHorario = async () => {
@@ -588,6 +712,79 @@ export default function ProfesorDetailModal({
                                 if (!(rol === 'owner' || rol === 'admin')) return null;
                                 return (
                                     <div className="space-y-3 pt-4 border-t border-slate-800">
+                                        <h4 className="text-sm font-medium text-white flex items-center gap-1">
+                                            <User className="w-4 h-4" />
+                                            Sucursales del profesor
+                                        </h4>
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                            {sucursales.map((s) => {
+                                                const on = editBranches.includes(s.id);
+                                                return (
+                                                    <button
+                                                        key={s.id}
+                                                        type="button"
+                                                        onClick={() => toggleBranch(s.id, !on)}
+                                                        className={cn(
+                                                            'h-10 px-3 rounded-xl border text-sm transition-colors text-left',
+                                                            on
+                                                                ? 'bg-primary-500/20 border-primary-500/40 text-primary-200'
+                                                                : 'bg-slate-950/30 border-slate-800/60 text-slate-200 hover:bg-slate-900/40'
+                                                        )}
+                                                    >
+                                                        {s.nombre}
+                                                    </button>
+                                                );
+                                            })}
+                                            {!sucursales.length ? <div className="text-sm text-slate-400">Sin sucursales</div> : null}
+                                        </div>
+                                        <div className="flex justify-end">
+                                            <Button onClick={saveBranches} isLoading={branchesSaving} variant="secondary" disabled={!profesor?.usuario_id}>
+                                                Guardar sucursales
+                                            </Button>
+                                        </div>
+
+                                        <div className="border-t border-slate-800 pt-4" />
+
+                                        <h4 className="text-sm font-medium text-white flex items-center gap-1">
+                                            <Settings className="w-4 h-4" />
+                                            Clases (sucursal actual)
+                                        </h4>
+                                        {!sucursalActualId ? (
+                                            <div className="text-sm text-slate-400">Seleccioná una sucursal para asignar clases.</div>
+                                        ) : !editBranches.includes(sucursalActualId) ? (
+                                            <div className="text-sm text-slate-400">El profesor no trabaja en la sucursal seleccionada.</div>
+                                        ) : clasesLoading ? (
+                                            <div className="text-sm text-slate-400">Cargando clases…</div>
+                                        ) : (
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                {clases.map((c) => {
+                                                    const on = editClases.includes(c.id);
+                                                    return (
+                                                        <button
+                                                            key={c.id}
+                                                            type="button"
+                                                            onClick={() => toggleClase(c.id, !on)}
+                                                            className={cn(
+                                                                'h-10 px-3 rounded-xl border text-sm transition-colors text-left',
+                                                                on
+                                                                    ? 'bg-primary-500/20 border-primary-500/40 text-primary-200'
+                                                                    : 'bg-slate-950/30 border-slate-800/60 text-slate-200 hover:bg-slate-900/40'
+                                                            )}
+                                                        >
+                                                            {c.nombre}
+                                                        </button>
+                                                    );
+                                                })}
+                                                {!clases.length ? <div className="text-sm text-slate-400">Sin clases</div> : null}
+                                            </div>
+                                        )}
+                                        <div className="flex justify-end">
+                                            <Button onClick={saveClases} isLoading={clasesSaving} variant="secondary" disabled={!profesor?.id || !sucursalActualId || !editBranches.includes(sucursalActualId)}>
+                                                Guardar clases
+                                            </Button>
+                                        </div>
+
+                                        <div className="border-t border-slate-800 pt-4" />
                                         <h4 className="text-sm font-medium text-white flex items-center gap-1">
                                             <Settings className="w-4 h-4" />
                                             Permisos (por módulo)

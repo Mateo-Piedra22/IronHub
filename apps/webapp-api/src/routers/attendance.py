@@ -14,6 +14,7 @@ from src.dependencies import (
     get_attendance_service,
     require_feature,
     require_sucursal_selected,
+    require_sucursal_selected_optional,
     require_scope_gestion,
 )
 from src.services.attendance_service import AttendanceService
@@ -394,7 +395,7 @@ async def api_checkin_create_token(
 @router.get("/api/asistencias")
 async def api_asistencias_list(
     request: Request,
-    sucursal_id: int = Depends(require_sucursal_selected),
+    sucursal_id: Optional[int] = Depends(require_sucursal_selected_optional),
     svc: AttendanceService = Depends(get_attendance_service),
 ):
     """List attendance records with optional filters. Returns {asistencias: [], total}."""
@@ -428,7 +429,9 @@ async def api_asistencias_list(
         uid_filter = (
             int(usuario_id) if (usuario_id and str(usuario_id).isdigit()) else None
         )
-        suc_filter = int(sucursal_id) if bool(logged_in) else None
+        if bool(logged_in) and sucursal_id is None:
+            raise HTTPException(status_code=428, detail="Sucursal requerida")
+        suc_filter = int(sucursal_id) if (bool(logged_in) and sucursal_id is not None) else None
         out = svc.obtener_asistencias_detalle_paginadas(
             usuario_id=uid_filter,
             start=desde,
@@ -450,7 +453,7 @@ async def api_asistencias_list(
 @router.get("/api/usuario_asistencias")
 async def api_usuario_asistencias(
     request: Request,
-    sucursal_id: int = Depends(require_sucursal_selected),
+    sucursal_id: Optional[int] = Depends(require_sucursal_selected_optional),
     svc: AttendanceService = Depends(get_attendance_service),
 ):
     """Get attendance records for a specific user. Returns {asistencias: []}."""
@@ -465,6 +468,8 @@ async def api_usuario_asistencias(
 
         if (not logged_in) and (session_user_id is not None):
             usuario_id = str(int(session_user_id))
+        if bool(logged_in) and sucursal_id is None:
+            raise HTTPException(status_code=428, detail="Sucursal requerida")
 
         if not usuario_id or not str(usuario_id).isdigit():
             raise HTTPException(status_code=400, detail="usuario_id requerido")

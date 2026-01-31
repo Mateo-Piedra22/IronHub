@@ -34,6 +34,32 @@ class ReportsService(BaseService):
             return sid
         return None
 
+    def _user_access_clause_sql(
+        self, *, user_alias: str = "u", tipo_cuota_alias: str = "tc"
+    ) -> str:
+        ua = str(user_alias or "u").strip()
+        tc = str(tipo_cuota_alias or "tc").strip()
+        return f"""
+            COALESCE((
+                SELECT uas.allow
+                FROM usuario_accesos_sucursales uas
+                WHERE uas.usuario_id = {ua}.id
+                  AND uas.sucursal_id = :sid
+                  AND (uas.starts_at IS NULL OR uas.starts_at <= NOW())
+                  AND (uas.ends_at IS NULL OR uas.ends_at >= NOW())
+                ORDER BY uas.id DESC
+                LIMIT 1
+            ), (
+                COALESCE({tc}.all_sucursales, FALSE)
+                OR EXISTS (
+                    SELECT 1
+                    FROM tipo_cuota_sucursales tcs
+                    WHERE tcs.tipo_cuota_id = {tc}.id
+                      AND tcs.sucursal_id = :sid
+                )
+            )) = TRUE
+        """
+
     # ========== KPIs ==========
 
     def obtener_kpis(self, sucursal_id: Optional[int] = None) -> Dict[str, Any]:
@@ -42,18 +68,51 @@ class ReportsService(BaseService):
             today = date.today()
             sid = self._effective_sucursal_id(sucursal_id)
 
-            activos = (
-                self.db.query(func.count(Usuario.id))
-                .filter(Usuario.activo == True)
-                .scalar()
-                or 0
-            )
-            inactivos = (
-                self.db.query(func.count(Usuario.id))
-                .filter(Usuario.activo == False)
-                .scalar()
-                or 0
-            )
+            if sid is None:
+                activos = (
+                    self.db.query(func.count(Usuario.id))
+                    .filter(Usuario.activo == True)
+                    .scalar()
+                    or 0
+                )
+                inactivos = (
+                    self.db.query(func.count(Usuario.id))
+                    .filter(Usuario.activo == False)
+                    .scalar()
+                    or 0
+                )
+            else:
+                access = self._user_access_clause_sql(user_alias="u", tipo_cuota_alias="tc")
+                activos = (
+                    self.db.execute(
+                        text(
+                            f"""
+                            SELECT COUNT(*)
+                            FROM usuarios u
+                            LEFT JOIN tipos_cuota tc ON LOWER(tc.nombre) = LOWER(u.tipo_cuota)
+                            WHERE u.activo = TRUE
+                              AND {access}
+                            """
+                        ),
+                        {"sid": int(sid)},
+                    ).scalar()
+                    or 0
+                )
+                inactivos = (
+                    self.db.execute(
+                        text(
+                            f"""
+                            SELECT COUNT(*)
+                            FROM usuarios u
+                            LEFT JOIN tipos_cuota tc ON LOWER(tc.nombre) = LOWER(u.tipo_cuota)
+                            WHERE u.activo = FALSE
+                              AND {access}
+                            """
+                        ),
+                        {"sid": int(sid)},
+                    ).scalar()
+                    or 0
+                )
 
             ingresos = (
                 self.db.query(func.sum(Pago.monto))
@@ -61,6 +120,7 @@ class ReportsService(BaseService):
                     func.date_trunc("month", Pago.fecha_pago)
                     == func.date_trunc("month", func.current_date())
                 )
+                .filter(*( [Pago.sucursal_id == sid] if sid is not None else [] ))
                 .scalar()
                 or 0.0
             )
@@ -69,19 +129,37 @@ class ReportsService(BaseService):
                 self.db.query(func.count(Asistencia.id))
                 .filter(
                     Asistencia.fecha == func.current_date(),
-                    *( [Asistencia.sucursal_id == sid] if sid is not None else [] ),
                 )
+                .filter(Asistencia.sucursal_id == sid if sid is not None else text("1=1"))
                 .scalar()
                 or 0
             )
 
             limit_date = today - timedelta(days=30)
-            nuevos = (
-                self.db.query(func.count(Usuario.id))
-                .filter(Usuario.fecha_registro >= limit_date)
-                .scalar()
-                or 0
-            )
+            if sid is None:
+                nuevos = (
+                    self.db.query(func.count(Usuario.id))
+                    .filter(Usuario.fecha_registro >= limit_date)
+                    .scalar()
+                    or 0
+                )
+            else:
+                access = self._user_access_clause_sql(user_alias="u", tipo_cuota_alias="tc")
+                nuevos = (
+                    self.db.execute(
+                        text(
+                            f"""
+                            SELECT COUNT(*)
+                            FROM usuarios u
+                            LEFT JOIN tipos_cuota tc ON LOWER(tc.nombre) = LOWER(u.tipo_cuota)
+                            WHERE u.fecha_registro >= :limit_date
+                              AND {access}
+                            """
+                        ),
+                        {"sid": int(sid), "limit_date": limit_date},
+                    ).scalar()
+                    or 0
+                )
 
             return {
                 "total_activos": activos,
@@ -104,37 +182,62 @@ class ReportsService(BaseService):
         """Get advanced KPIs (churn rate, avg payment)."""
         try:
             limit_date = datetime.now() - timedelta(days=30)
-            _ = self._effective_sucursal_id(sucursal_id)
+            sid = self._effective_sucursal_id(sucursal_id)
 
-            churned = (
-                self.db.query(func.count(Usuario.id))
-                .filter(
-                    Usuario.activo == False,
-                    # Assuming 'updated_at' equivalent is needed. ORM doesn't show updated_at?
-                    # orm_models.py doesn't show updated_at for Usuario.
-                    # Assuming we rely on status change history or just last 30 days registration?
-                    # Use fallback: deactivated recently? We don't have 'fecha_baja'.
-                    # We will approximate with modification date if available or just check inactives created > 30 days ago?
-                    # Original SQL used updated_at. Let's use a workaround or 0 if field missing.
-                    # Actually, skipping churn calculation accuracy improvement for now, just ORM parity with what exists or reasonable approximation.
-                    # Use fecha_registro for now as there is no updated_at in model shown.
-                    Usuario.fecha_registro
-                    >= limit_date,  # This is technically "New Inactives" not churned.
+            if sid is None:
+                churned = (
+                    self.db.query(func.count(Usuario.id))
+                    .filter(
+                        Usuario.activo == False,
+                        Usuario.fecha_registro >= limit_date,
+                    )
+                    .scalar()
+                    or 0
                 )
-                .scalar()
-                or 0
-            )
-
-            total_active = (
-                self.db.query(func.count(Usuario.id))
-                .filter(Usuario.activo == True)
-                .scalar()
-                or 1
-            )
+                total_active = (
+                    self.db.query(func.count(Usuario.id))
+                    .filter(Usuario.activo == True)
+                    .scalar()
+                    or 1
+                )
+            else:
+                access = self._user_access_clause_sql(user_alias="u", tipo_cuota_alias="tc")
+                churned = (
+                    self.db.execute(
+                        text(
+                            f"""
+                            SELECT COUNT(*)
+                            FROM usuarios u
+                            LEFT JOIN tipos_cuota tc ON LOWER(tc.nombre) = LOWER(u.tipo_cuota)
+                            WHERE u.activo = FALSE
+                              AND u.fecha_registro >= :limit_date
+                              AND {access}
+                            """
+                        ),
+                        {"sid": int(sid), "limit_date": limit_date},
+                    ).scalar()
+                    or 0
+                )
+                total_active = (
+                    self.db.execute(
+                        text(
+                            f"""
+                            SELECT COUNT(*)
+                            FROM usuarios u
+                            LEFT JOIN tipos_cuota tc ON LOWER(tc.nombre) = LOWER(u.tipo_cuota)
+                            WHERE u.activo = TRUE
+                              AND {access}
+                            """
+                        ),
+                        {"sid": int(sid)},
+                    ).scalar()
+                    or 1
+                )
 
             avg_pago = (
                 self.db.query(func.avg(Pago.monto))
                 .filter(Pago.fecha_pago >= limit_date)
+                .filter(*( [Pago.sucursal_id == sid] if sid is not None else [] ))
                 .scalar()
                 or 0.0
             )
@@ -150,14 +253,33 @@ class ReportsService(BaseService):
             logger.error(f"Error getting advanced KPIs: {e}")
             return {}
 
-    def obtener_activos_inactivos(self) -> Dict[str, int]:
+    def obtener_activos_inactivos(self, sucursal_id: Optional[int] = None) -> Dict[str, int]:
         """Get active/inactive user counts."""
         try:
-            result = (
-                self.db.query(Usuario.activo, func.count(Usuario.id))
-                .group_by(Usuario.activo)
-                .all()
-            )
+            sid = self._effective_sucursal_id(sucursal_id)
+            if sid is None:
+                result = (
+                    self.db.query(Usuario.activo, func.count(Usuario.id))
+                    .group_by(Usuario.activo)
+                    .all()
+                )
+            else:
+                access = self._user_access_clause_sql(user_alias="u", tipo_cuota_alias="tc")
+                result = (
+                    self.db.execute(
+                        text(
+                            f"""
+                            SELECT u.activo, COUNT(*) AS total
+                            FROM usuarios u
+                            LEFT JOIN tipos_cuota tc ON LOWER(tc.nombre) = LOWER(u.tipo_cuota)
+                            WHERE {access}
+                            GROUP BY u.activo
+                            """
+                        ),
+                        {"sid": int(sid)},
+                    )
+                    .all()
+                )
             counts = {"activos": 0, "inactivos": 0}
             for status, count in result:
                 if status:
@@ -171,9 +293,10 @@ class ReportsService(BaseService):
 
     # ========== 12-Month Trends ==========
 
-    def obtener_ingresos_12m(self) -> List[Dict[str, Any]]:
+    def obtener_ingresos_12m(self, sucursal_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """Get income by month for last 12 months."""
         try:
+            sid = self._effective_sucursal_id(sucursal_id)
             result = (
                 self.db.query(
                     func.to_char(Pago.fecha_pago, "YYYY-MM").label("mes"),
@@ -185,6 +308,7 @@ class ReportsService(BaseService):
                         "month", func.current_date() - text("INTERVAL '11 months'")
                     )
                 )
+                .filter(*( [Pago.sucursal_id == sid] if sid is not None else [] ))
                 .group_by("mes")
                 .order_by("mes")
                 .all()
@@ -195,33 +319,56 @@ class ReportsService(BaseService):
             logger.error(f"Error getting ingresos 12m: {e}")
             return []
 
-    def obtener_nuevos_12m(self) -> List[Dict[str, Any]]:
+    def obtener_nuevos_12m(self, sucursal_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """Get new users by month for last 12 months."""
         try:
-            result = (
-                self.db.query(
-                    func.to_char(Usuario.fecha_registro, "YYYY-MM").label("mes"),
-                    func.count(Usuario.id).label("total"),
-                )
-                .filter(
-                    Usuario.fecha_registro
-                    >= func.date_trunc(
-                        "month", func.current_date() - text("INTERVAL '11 months'")
+            sid = self._effective_sucursal_id(sucursal_id)
+            if sid is None:
+                result = (
+                    self.db.query(
+                        func.to_char(Usuario.fecha_registro, "YYYY-MM").label("mes"),
+                        func.count(Usuario.id).label("total"),
                     )
+                    .filter(
+                        Usuario.fecha_registro
+                        >= func.date_trunc(
+                            "month", func.current_date() - text("INTERVAL '11 months'")
+                        )
+                    )
+                    .group_by("mes")
+                    .order_by("mes")
+                    .all()
                 )
-                .group_by("mes")
-                .order_by("mes")
+                return [{"mes": r.mes, "total": int(r.total or 0)} for r in result]
+
+            access = self._user_access_clause_sql(user_alias="u", tipo_cuota_alias="tc")
+            rows = (
+                self.db.execute(
+                    text(
+                        f"""
+                        SELECT TO_CHAR(u.fecha_registro, 'YYYY-MM') AS mes, COUNT(*) AS total
+                        FROM usuarios u
+                        LEFT JOIN tipos_cuota tc ON LOWER(tc.nombre) = LOWER(u.tipo_cuota)
+                        WHERE u.fecha_registro >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '11 months')
+                          AND {access}
+                        GROUP BY mes
+                        ORDER BY mes
+                        """
+                    ),
+                    {"sid": int(sid)},
+                )
+                .mappings()
                 .all()
             )
-
-            return [{"mes": r.mes, "total": int(r.total or 0)} for r in result]
+            return [{"mes": r.get("mes"), "total": int(r.get("total") or 0)} for r in (rows or [])]
         except Exception as e:
             logger.error(f"Error getting nuevos 12m: {e}")
             return []
 
-    def obtener_arpu_12m(self) -> List[Dict[str, Any]]:
+    def obtener_arpu_12m(self, sucursal_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """Get ARPU by month for last 12 months."""
         try:
+            sid = self._effective_sucursal_id(sucursal_id)
             # ARPU = Revenue / Unique Users
             result = (
                 self.db.query(
@@ -237,6 +384,7 @@ class ReportsService(BaseService):
                         "month", func.current_date() - text("INTERVAL '11 months'")
                     )
                 )
+                .filter(*( [Pago.sucursal_id == sid] if sid is not None else [] ))
                 .group_by("mes")
                 .order_by("mes")
                 .all()
@@ -249,9 +397,10 @@ class ReportsService(BaseService):
 
     # ========== Cohort and Retention ==========
 
-    def obtener_cohort_6m(self) -> List[Dict[str, Any]]:
+    def obtener_cohort_6m(self, sucursal_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """Get 6-month cohort retention data."""
         try:
+            sid = self._effective_sucursal_id(sucursal_id)
             # Calculating retention is complex in ORM pure syntax without window functions logic sometimes.
             # Reuse raw SQL text inside execute if usage is too complex for standard ORM/Models,
             # BUT we should try to map it.
@@ -260,15 +409,34 @@ class ReportsService(BaseService):
             # Original used: cohorts CTE.
             # We'll adapt column names: created_at -> fecha_registro.
 
-            query = text("""
-                WITH cohorts AS (
-                    SELECT id, DATE_TRUNC('month', fecha_registro) as cohort_month, activo
-                    FROM usuarios WHERE fecha_registro >= CURRENT_DATE - INTERVAL '6 months'
+            if sid is None:
+                query = text(
+                    """
+                    WITH cohorts AS (
+                        SELECT id, DATE_TRUNC('month', fecha_registro) as cohort_month, activo
+                        FROM usuarios WHERE fecha_registro >= CURRENT_DATE - INTERVAL '6 months'
+                    )
+                    SELECT TO_CHAR(cohort_month, 'YYYY-MM') as cohort, COUNT(*) as total, SUM(CASE WHEN activo THEN 1 ELSE 0 END) as retained
+                    FROM cohorts GROUP BY cohort_month ORDER BY cohort_month
+                    """
                 )
-                SELECT TO_CHAR(cohort_month, 'YYYY-MM') as cohort, COUNT(*) as total, SUM(CASE WHEN activo THEN 1 ELSE 0 END) as retained
-                FROM cohorts GROUP BY cohort_month ORDER BY cohort_month
-            """)
-            result = self.db.execute(query)
+                result = self.db.execute(query)
+            else:
+                access = self._user_access_clause_sql(user_alias="u", tipo_cuota_alias="tc")
+                query = text(
+                    f"""
+                    WITH cohorts AS (
+                        SELECT u.id, DATE_TRUNC('month', u.fecha_registro) as cohort_month, u.activo
+                        FROM usuarios u
+                        LEFT JOIN tipos_cuota tc ON LOWER(tc.nombre) = LOWER(u.tipo_cuota)
+                        WHERE u.fecha_registro >= CURRENT_DATE - INTERVAL '6 months'
+                          AND {access}
+                    )
+                    SELECT TO_CHAR(cohort_month, 'YYYY-MM') as cohort, COUNT(*) as total, SUM(CASE WHEN activo THEN 1 ELSE 0 END) as retained
+                    FROM cohorts GROUP BY cohort_month ORDER BY cohort_month
+                    """
+                )
+                result = self.db.execute(query, {"sid": int(sid)})
 
             cohorts = []
             for r in result.fetchall():
@@ -288,9 +456,10 @@ class ReportsService(BaseService):
             logger.error(f"Error getting cohort: {e}")
             return []
 
-    def obtener_arpa_por_tipo(self) -> List[Dict[str, Any]]:
+    def obtener_arpa_por_tipo(self, sucursal_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """Get ARPA by quota type."""
         try:
+            sid = self._effective_sucursal_id(sucursal_id)
             # Join Pagos, Usuarios, TiposCuota (if linked via FK or just string)
             # Model Usuario has 'tipo_cuota' as String(100) (NOT ID).
             # But the original SQL used `u.tipo_cuota_id = tc.id`.
@@ -311,6 +480,7 @@ class ReportsService(BaseService):
                 .filter(
                     Pago.fecha_pago >= func.current_date() - text("INTERVAL '3 months'")
                 )
+                .filter(*( [Pago.sucursal_id == sid] if sid is not None else [] ))
                 .group_by(Usuario.tipo_cuota)
                 .order_by(desc("arpa"))
                 .all()
@@ -321,40 +491,93 @@ class ReportsService(BaseService):
             logger.error(f"Error getting ARPA by type: {e}")
             return []
 
-    def obtener_estado_pagos(self) -> Dict[str, int]:
+    def obtener_estado_pagos(self, sucursal_id: Optional[int] = None) -> Dict[str, int]:
         """Get payment status distribution."""
         try:
             today = date.today()
+            sid = self._effective_sucursal_id(sucursal_id)
 
-            has_pago = exists().where(Pago.usuario_id == Usuario.id)
-
-            sin_pagos = (
-                self.db.query(func.count(Usuario.id))
-                .filter(Usuario.activo == True)
-                .filter(~has_pago)
-                .scalar()
-                or 0
-            )
-
-            al_dia = (
-                self.db.query(func.count(Usuario.id))
-                .filter(Usuario.activo == True)
-                .filter(has_pago)
-                .filter(Usuario.fecha_proximo_vencimiento != None)
-                .filter(Usuario.fecha_proximo_vencimiento >= today)
-                .scalar()
-                or 0
-            )
-
-            vencido = (
-                self.db.query(func.count(Usuario.id))
-                .filter(Usuario.activo == True)
-                .filter(has_pago)
-                .filter(Usuario.fecha_proximo_vencimiento != None)
-                .filter(Usuario.fecha_proximo_vencimiento < today)
-                .scalar()
-                or 0
-            )
+            if sid is None:
+                has_pago = exists().where(Pago.usuario_id == Usuario.id)
+                sin_pagos = (
+                    self.db.query(func.count(Usuario.id))
+                    .filter(Usuario.activo == True)
+                    .filter(~has_pago)
+                    .scalar()
+                    or 0
+                )
+                al_dia = (
+                    self.db.query(func.count(Usuario.id))
+                    .filter(Usuario.activo == True)
+                    .filter(has_pago)
+                    .filter(Usuario.fecha_proximo_vencimiento != None)
+                    .filter(Usuario.fecha_proximo_vencimiento >= today)
+                    .scalar()
+                    or 0
+                )
+                vencido = (
+                    self.db.query(func.count(Usuario.id))
+                    .filter(Usuario.activo == True)
+                    .filter(has_pago)
+                    .filter(Usuario.fecha_proximo_vencimiento != None)
+                    .filter(Usuario.fecha_proximo_vencimiento < today)
+                    .scalar()
+                    or 0
+                )
+            else:
+                access = self._user_access_clause_sql(user_alias="u", tipo_cuota_alias="tc")
+                sin_pagos = (
+                    self.db.execute(
+                        text(
+                            f"""
+                            SELECT COUNT(*)
+                            FROM usuarios u
+                            LEFT JOIN tipos_cuota tc ON LOWER(tc.nombre) = LOWER(u.tipo_cuota)
+                            WHERE u.activo = TRUE
+                              AND {access}
+                              AND NOT EXISTS (SELECT 1 FROM pagos p WHERE p.usuario_id = u.id)
+                            """
+                        ),
+                        {"sid": int(sid)},
+                    ).scalar()
+                    or 0
+                )
+                al_dia = (
+                    self.db.execute(
+                        text(
+                            f"""
+                            SELECT COUNT(*)
+                            FROM usuarios u
+                            LEFT JOIN tipos_cuota tc ON LOWER(tc.nombre) = LOWER(u.tipo_cuota)
+                            WHERE u.activo = TRUE
+                              AND {access}
+                              AND EXISTS (SELECT 1 FROM pagos p WHERE p.usuario_id = u.id)
+                              AND u.fecha_proximo_vencimiento IS NOT NULL
+                              AND u.fecha_proximo_vencimiento >= :today
+                            """
+                        ),
+                        {"sid": int(sid), "today": today},
+                    ).scalar()
+                    or 0
+                )
+                vencido = (
+                    self.db.execute(
+                        text(
+                            f"""
+                            SELECT COUNT(*)
+                            FROM usuarios u
+                            LEFT JOIN tipos_cuota tc ON LOWER(tc.nombre) = LOWER(u.tipo_cuota)
+                            WHERE u.activo = TRUE
+                              AND {access}
+                              AND EXISTS (SELECT 1 FROM pagos p WHERE p.usuario_id = u.id)
+                              AND u.fecha_proximo_vencimiento IS NOT NULL
+                              AND u.fecha_proximo_vencimiento < :today
+                            """
+                        ),
+                        {"sid": int(sid), "today": today},
+                    ).scalar()
+                    or 0
+                )
 
             return {
                 "al_dia": int(al_dia),
@@ -365,20 +588,29 @@ class ReportsService(BaseService):
             logger.error(f"Error getting payment status: {e}")
             return {"al_dia": 0, "vencido": 0, "sin_pagos": 0}
 
-    def obtener_eventos_espera(self) -> List[Dict[str, Any]]:
+    def obtener_eventos_espera(self, sucursal_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """Get recent waitlist events."""
         try:
-            from src.models import (
-                ClaseListaEspera,
-            )  # Import here to avoid circular if any
+            sid = self._effective_sucursal_id(sucursal_id)
+            from src.models.orm_models import Clase, ClaseHorario, ClaseListaEspera, Sucursal
 
-            result = (
-                self.db.query(ClaseListaEspera, Usuario.nombre)
+            q = (
+                self.db.query(
+                    ClaseListaEspera,
+                    Usuario.nombre,
+                    Clase.sucursal_id,
+                    Sucursal.nombre.label("sucursal_nombre"),
+                )
                 .join(Usuario, ClaseListaEspera.usuario_id == Usuario.id)
+                .join(ClaseHorario, ClaseListaEspera.clase_horario_id == ClaseHorario.id)
+                .join(Clase, ClaseHorario.clase_id == Clase.id)
+                .outerjoin(Sucursal, Clase.sucursal_id == Sucursal.id)
                 .order_by(desc(ClaseListaEspera.fecha_creacion))
                 .limit(20)
-                .all()
             )
+            if sid is not None:
+                q = q.filter(Clase.sucursal_id == int(sid))
+            result = q.all()
 
             return [
                 {
@@ -388,6 +620,8 @@ class ReportsService(BaseService):
                     "fecha": item.ClaseListaEspera.fecha_creacion.isoformat()
                     if item.ClaseListaEspera.fecha_creacion
                     else None,
+                    "sucursal_id": int(item.sucursal_id) if item.sucursal_id is not None else None,
+                    "sucursal_nombre": item.sucursal_nombre,
                 }
                 for item in result
             ]
@@ -396,52 +630,115 @@ class ReportsService(BaseService):
             logger.error(f"Error getting waitlist events: {e}")
             return []
 
-    def obtener_alertas_morosidad(self) -> List[Dict[str, Any]]:
+    def obtener_alertas_morosidad(self, sucursal_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """Get recent delinquency alerts (Active users with overdue status)."""
         try:
             today = date.today()
+            sid = self._effective_sucursal_id(sucursal_id)
 
-            subq = (
-                self.db.query(
-                    Pago.usuario_id, func.max(Pago.fecha_pago).label("last_payment")
-                )
-                .group_by(Pago.usuario_id)
-                .subquery()
-            )
-
-            q = (
-                self.db.query(Usuario, subq.c.last_payment)
-                .outerjoin(subq, Usuario.id == subq.c.usuario_id)
-                .filter(Usuario.activo == True)
-                .filter(
-                    or_(
-                        Usuario.fecha_proximo_vencimiento == None,
-                        Usuario.fecha_proximo_vencimiento < today,
+            if sid is None:
+                subq = (
+                    self.db.query(
+                        Pago.usuario_id, func.max(Pago.fecha_pago).label("last_payment")
                     )
+                    .group_by(Pago.usuario_id)
+                    .subquery()
                 )
-                .order_by(Usuario.nombre)
-                .limit(20)
+
+                q = (
+                    self.db.query(Usuario, subq.c.last_payment)
+                    .outerjoin(subq, Usuario.id == subq.c.usuario_id)
+                    .filter(Usuario.activo == True)
+                    .filter(
+                        or_(
+                            Usuario.fecha_proximo_vencimiento == None,
+                            Usuario.fecha_proximo_vencimiento < today,
+                        )
+                    )
+                    .order_by(Usuario.nombre)
+                    .limit(20)
+                )
+
+                out: list[dict[str, Any]] = []
+                for r in q.all():
+                    try:
+                        fpv = getattr(r.Usuario, "fecha_proximo_vencimiento", None)
+                        dias_restantes = (fpv - today).days if fpv else None
+                    except Exception:
+                        dias_restantes = None
+                    out.append(
+                        {
+                            "usuario_id": int(r.Usuario.id),
+                            "usuario_nombre": r.Usuario.nombre,
+                            "ultimo_pago": r.last_payment.isoformat()
+                            if r.last_payment
+                            else None,
+                            "fecha_proximo_vencimiento": fpv.isoformat()
+                            if fpv
+                            else None,
+                            "dias_restantes": dias_restantes,
+                            "cuotas_vencidas": int(
+                                getattr(r.Usuario, "cuotas_vencidas", 0) or 0
+                            ),
+                            "sucursal_id": getattr(r.Usuario, "sucursal_registro_id", None),
+                            "sucursal_nombre": None,
+                        }
+                    )
+                return out
+
+            access = self._user_access_clause_sql(user_alias="u", tipo_cuota_alias="tc")
+            rows = (
+                self.db.execute(
+                    text(
+                        f"""
+                        WITH last_pay AS (
+                          SELECT usuario_id, MAX(fecha_pago) AS last_payment
+                          FROM pagos
+                          GROUP BY usuario_id
+                        )
+                        SELECT
+                          u.id,
+                          u.nombre,
+                          lp.last_payment,
+                          u.fecha_proximo_vencimiento,
+                          COALESCE(u.cuotas_vencidas, 0) AS cuotas_vencidas,
+                          u.sucursal_registro_id,
+                          s.nombre AS sucursal_nombre
+                        FROM usuarios u
+                        LEFT JOIN last_pay lp ON lp.usuario_id = u.id
+                        LEFT JOIN sucursales s ON s.id = u.sucursal_registro_id
+                        LEFT JOIN tipos_cuota tc ON LOWER(tc.nombre) = LOWER(u.tipo_cuota)
+                        WHERE u.activo = TRUE
+                          AND (u.fecha_proximo_vencimiento IS NULL OR u.fecha_proximo_vencimiento < :today)
+                          AND {access}
+                        ORDER BY u.nombre ASC
+                        LIMIT 20
+                        """
+                    ),
+                    {"sid": int(sid), "today": today},
+                )
+                .mappings()
+                .all()
             )
 
             out: list[dict[str, Any]] = []
-            for r in q.all():
+            for r in rows or []:
+                fpv = r.get("fecha_proximo_vencimiento")
                 try:
-                    fpv = getattr(r.Usuario, "fecha_proximo_vencimiento", None)
                     dias_restantes = (fpv - today).days if fpv else None
                 except Exception:
                     dias_restantes = None
+                last_payment = r.get("last_payment")
                 out.append(
                     {
-                        "usuario_id": int(r.Usuario.id),
-                        "usuario_nombre": r.Usuario.nombre,
-                        "ultimo_pago": r.last_payment.isoformat()
-                        if r.last_payment
-                        else None,
+                        "usuario_id": int(r.get("id") or 0),
+                        "usuario_nombre": r.get("nombre"),
+                        "ultimo_pago": last_payment.isoformat() if last_payment else None,
                         "fecha_proximo_vencimiento": fpv.isoformat() if fpv else None,
                         "dias_restantes": dias_restantes,
-                        "cuotas_vencidas": int(
-                            getattr(r.Usuario, "cuotas_vencidas", 0) or 0
-                        ),
+                        "cuotas_vencidas": int(r.get("cuotas_vencidas") or 0),
+                        "sucursal_id": r.get("sucursal_registro_id"),
+                        "sucursal_nombre": r.get("sucursal_nombre"),
                     }
                 )
             return out

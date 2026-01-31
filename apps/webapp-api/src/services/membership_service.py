@@ -76,6 +76,25 @@ class MembershipService:
             return False, "Membresía no válida para esta sucursal"
         return True, ""
 
+    def check_access_any(self, usuario_id: int) -> Tuple[Optional[bool], str]:
+        m = self.get_active_membership(int(usuario_id))
+        if not m:
+            return None, ""
+        if bool(m.get("all_sucursales")):
+            return True, ""
+        mid = m.get("id")
+        if not mid:
+            return False, "Membresía inválida"
+        rows = self.db.execute(
+            text(
+                "SELECT sucursal_id FROM membership_sucursales WHERE membership_id = :mid LIMIT 1"
+            ),
+            {"mid": int(mid)},
+        ).fetchone()
+        if rows is None:
+            return False, "Membresía sin sucursales habilitadas"
+        return True, ""
+
     def set_active_membership(
         self,
         usuario_id: int,

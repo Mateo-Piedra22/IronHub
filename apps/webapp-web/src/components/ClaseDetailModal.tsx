@@ -63,6 +63,8 @@ export default function ClaseDetailModal({
 }: ClaseDetailModalProps) {
     const { success, error } = useToast();
     const [activeTab, setActiveTab] = useState<TabType>('horarios');
+    const [assignedProfesorIds, setAssignedProfesorIds] = useState<number[] | null>(null);
+    const [assignedProfesoresLoading, setAssignedProfesoresLoading] = useState(false);
 
     // Horarios
     const [horarios, setHorarios] = useState<ClaseHorario[]>([]);
@@ -117,6 +119,7 @@ export default function ClaseDetailModal({
     useEffect(() => {
         if (clase && isOpen) {
             loadHorarios();
+            void loadProfesoresAsignados();
             setActiveTab('horarios');
             setUsuarios([]);
             setUsuariosSearch('');
@@ -136,6 +139,17 @@ export default function ClaseDetailModal({
         }
     }, [selectedHorarioId]);
 
+    useEffect(() => {
+        if (!isOpen || !clase?.id) return;
+        if (!assignedProfesorIds || assignedProfesorIds.length === 0) return;
+        const first = assignedProfesorIds[0];
+        if (!Number.isFinite(first)) return;
+        setHorarioForm((prev) => {
+            if (prev.profesor_id && assignedProfesorIds.includes(prev.profesor_id)) return prev;
+            return { ...prev, profesor_id: Number(first) };
+        });
+    }, [assignedProfesorIds, clase?.id, isOpen]);
+
     const loadHorarios = async () => {
         if (!clase) return;
         const res = await api.getClaseHorarios(clase.id);
@@ -144,6 +158,27 @@ export default function ClaseDetailModal({
             if (res.data.horarios.length > 0 && !selectedHorarioId) {
                 setSelectedHorarioId(res.data.horarios[0].id);
             }
+        }
+    };
+
+    const loadProfesoresAsignados = async () => {
+        if (!clase?.id) return;
+        setAssignedProfesoresLoading(true);
+        try {
+            const res = await api.getClaseProfesoresAsignados(clase.id);
+            if (res.ok && res.data?.profesor_ids) {
+                setAssignedProfesorIds(
+                    (res.data.profesor_ids || [])
+                        .map((x) => Number(x))
+                        .filter((x) => Number.isFinite(x))
+                );
+            } else {
+                setAssignedProfesorIds([]);
+            }
+        } catch {
+            setAssignedProfesorIds([]);
+        } finally {
+            setAssignedProfesoresLoading(false);
         }
     };
 
@@ -523,6 +558,13 @@ export default function ClaseDetailModal({
     const availableUsuarios = usuarios.filter(u => !inscriptoIds.has(u.id));
     const availableForWaitlist = usuarios.filter(u => !inscriptoIds.has(u.id) && !esperaIds.has(u.id));
 
+    const profesoresParaClase = useMemo(() => {
+        if (assignedProfesoresLoading) return profesores;
+        if (!assignedProfesorIds || assignedProfesorIds.length === 0) return profesores;
+        const setIds = new Set(assignedProfesorIds);
+        return profesores.filter((p) => setIds.has(p.id));
+    }, [profesores, assignedProfesorIds, assignedProfesoresLoading]);
+
     const selectedHorario = horarios.find(h => h.id === selectedHorarioId);
 
     if (!isOpen || !clase) return null;
@@ -612,7 +654,7 @@ export default function ClaseDetailModal({
                                         value={horarioForm.profesor_id?.toString() || ''}
                                         onChange={(e) => setHorarioForm({ ...horarioForm, profesor_id: e.target.value ? Number(e.target.value) : undefined })}
                                         placeholder="Profesor"
-                                        options={profesores.map(p => ({ value: p.id.toString(), label: p.nombre }))}
+                                        options={profesoresParaClase.map(p => ({ value: p.id.toString(), label: p.nombre }))}
                                     />
                                     <div className="flex gap-2">
                                         <Input
@@ -1224,7 +1266,7 @@ export default function ClaseDetailModal({
                         value={editHorarioForm.profesor_id?.toString() || ''}
                         onChange={(e) => setEditHorarioForm({ ...editHorarioForm, profesor_id: e.target.value ? Number(e.target.value) : undefined })}
                         placeholder="Profesor"
-                        options={profesores.map((p) => ({ value: p.id.toString(), label: p.nombre }))}
+                        options={profesoresParaClase.map((p) => ({ value: p.id.toString(), label: p.nombre }))}
                     />
                     <Input type="time" value={editHorarioForm.hora_inicio} onChange={(e) => setEditHorarioForm({ ...editHorarioForm, hora_inicio: e.target.value })} />
                     <Input type="time" value={editHorarioForm.hora_fin} onChange={(e) => setEditHorarioForm({ ...editHorarioForm, hora_fin: e.target.value })} />

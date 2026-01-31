@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from src.services.base import BaseService
+from src.database.clase_profesor_schema import ensure_clase_profesor_schema
 
 logger = logging.getLogger(__name__)
 
@@ -209,12 +210,18 @@ class InscripcionesService(BaseService):
         try:
             result = self.db.execute(
                 text("""
-                SELECT id, nombre, color, activo 
-                FROM clase_tipos WHERE activo = TRUE ORDER BY nombre
+                SELECT id, nombre, descripcion, activo
+                FROM tipos_clases WHERE activo = TRUE ORDER BY nombre
             """)
             )
             return [
-                {"id": r[0], "nombre": r[1], "color": r[2], "activo": r[3]}
+                {
+                    "id": r[0],
+                    "nombre": r[1],
+                    "descripcion": r[2],
+                    "color": None,
+                    "activo": r[3],
+                }
                 for r in result.fetchall()
             ]
         except Exception as e:
@@ -228,14 +235,20 @@ class InscripcionesService(BaseService):
         try:
             result = self.db.execute(
                 text(
-                    "INSERT INTO clase_tipos (nombre, color) VALUES (:nombre, :color) RETURNING id, nombre, color, activo"
+                    "INSERT INTO tipos_clases (nombre, descripcion, activo, created_at, updated_at) VALUES (:nombre, NULL, TRUE, NOW(), NOW()) RETURNING id, nombre, descripcion, activo"
                 ),
-                {"nombre": nombre, "color": color},
+                {"nombre": nombre},
             )
             row = result.fetchone()
             self.db.commit()
             return (
-                {"id": row[0], "nombre": row[1], "color": row[2], "activo": row[3]}
+                {
+                    "id": row[0],
+                    "nombre": row[1],
+                    "descripcion": row[2],
+                    "color": None,
+                    "activo": row[3],
+                }
                 if row
                 else None
             )
@@ -248,7 +261,7 @@ class InscripcionesService(BaseService):
         """Soft delete a class type."""
         try:
             self.db.execute(
-                text("UPDATE clase_tipos SET activo = FALSE WHERE id = :id"),
+                text("UPDATE tipos_clases SET activo = FALSE, updated_at = NOW() WHERE id = :id"),
                 {"id": tipo_id},
             )
             self.db.commit()
@@ -257,6 +270,41 @@ class InscripcionesService(BaseService):
             logger.error(f"Error deleting class type: {e}")
             self.db.rollback()
             return False
+
+    def obtener_profesores_asignados_a_clase(
+        self, clase_id: int, *, sucursal_id: Optional[int] = None
+    ) -> List[int]:
+        try:
+            sid = int(sucursal_id) if sucursal_id is not None else None
+        except Exception:
+            sid = None
+        if sid is not None and not self._clase_accessible(int(clase_id), sid):
+            return []
+        try:
+            ensure_clase_profesor_schema(self.db)
+            rows = self.db.execute(
+                text(
+                    """
+                    SELECT a.profesor_id
+                    FROM clase_profesor_asignaciones a
+                    JOIN clases c ON c.id = a.clase_id
+                    WHERE a.clase_id = :cid
+                      AND a.activa = TRUE
+                      AND (:sid IS NULL OR c.sucursal_id = :sid)
+                    ORDER BY a.profesor_id ASC
+                    """
+                ),
+                {"cid": int(clase_id), "sid": sid},
+            ).fetchall()
+            out: List[int] = []
+            for r in rows or []:
+                try:
+                    out.append(int(r[0]))
+                except Exception:
+                    pass
+            return out
+        except Exception:
+            return []
 
     # ========== Clase Horarios ==========
 

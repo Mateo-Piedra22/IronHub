@@ -488,6 +488,7 @@ export default function ConfiguracionPage() {
     const router = useRouter();
     const pathname = usePathname();
     const { user, isLoading: authLoading } = useAuth();
+    const readOnlyModules = (pathname || '').startsWith('/dashboard');
 
     useEffect(() => {
         const p = pathname || '';
@@ -689,7 +690,9 @@ export default function ConfiguracionPage() {
                 <div className="space-y-3">
                     <div className="card p-4">
                         <div className="text-sm text-slate-300">
-                            Activá o desactivá módulos del panel de gestión. Desactivar Configuración puede ocultar esta pantalla.
+                            {readOnlyModules
+                                ? 'Panel informativo. Los módulos se gestionan desde Admin.'
+                                : 'Activá o desactivá módulos del panel de gestión. Desactivar Configuración puede ocultar esta pantalla.'}
                         </div>
                     </div>
                     <div className="card p-4 space-y-3">
@@ -699,7 +702,9 @@ export default function ConfiguracionPage() {
                                 <input
                                     type="checkbox"
                                     checked={modules[m.key] !== false}
+                                    disabled={readOnlyModules}
                                     onChange={(e) => {
+                                        if (readOnlyModules) return;
                                         const next = { ...(featureFlags.modules || {}) };
                                         next[m.key] = e.target.checked;
                                         setFeatureFlags({ ...(featureFlags || { modules: {} }), modules: next });
@@ -707,16 +712,18 @@ export default function ConfiguracionPage() {
                                 />
                             </label>
                         ))}
-                        <div className="flex items-center justify-end pt-2">
-                            <Button
-                                size="sm"
-                                onClick={handleSaveFeatureFlags}
-                                isLoading={featureFlagsSaving}
-                                disabled={featureFlagsSaving || featureFlagsLoading}
-                            >
-                                Guardar
-                            </Button>
-                        </div>
+                        {!readOnlyModules ? (
+                            <div className="flex items-center justify-end pt-2">
+                                <Button
+                                    size="sm"
+                                    onClick={handleSaveFeatureFlags}
+                                    isLoading={featureFlagsSaving}
+                                    disabled={featureFlagsSaving || featureFlagsLoading}
+                                >
+                                    Guardar
+                                </Button>
+                            </div>
+                        ) : null}
                     </div>
                 </div>
             );
