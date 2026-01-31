@@ -1041,7 +1041,18 @@ class AdminService:
             payload = json.dumps(merged, ensure_ascii=False)
         except Exception:
             payload = '{"modules":{}}'
-        try:
+        did_provision = False
+
+        def _maybe_provision() -> None:
+            nonlocal did_provision
+            if did_provision:
+                return
+            st = self.tenant_migration_status(int(gym_id))
+            if st.get("ok") and str(st.get("status") or "") in ("uninitialized", "outdated"):
+                self.provision_tenant_migrations(int(gym_id))
+                did_provision = True
+
+        def _do_update() -> None:
             with eng.begin() as conn:
                 if sid is None or sid <= 0:
                     conn.execute(
@@ -1056,27 +1067,72 @@ class AdminService:
                         ),
                         {"flags": payload},
                     )
-                else:
-                    conn.execute(
-                        text(
-                            """
-                            INSERT INTO feature_flags_overrides (sucursal_id, flags, updated_at)
-                            VALUES (:sid, :flags::jsonb, NOW())
-                            ON CONFLICT (sucursal_id) DO UPDATE SET
-                                flags = EXCLUDED.flags,
-                                updated_at = EXCLUDED.updated_at
-                            """
-                        ),
-                        {"sid": int(sid), "flags": payload},
-                    )
-        except Exception:
+                    return
+
+                reg_suc = conn.execute(text("SELECT to_regclass('sucursales')")).scalar()
+                if not reg_suc:
+                    raise RuntimeError("schema_missing:sucursales")
+                exists = conn.execute(
+                    text("SELECT 1 FROM sucursales WHERE id = :sid LIMIT 1"),
+                    {"sid": int(sid)},
+                ).fetchone()
+                if not exists:
+                    raise RuntimeError("branch_not_found")
+
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO feature_flags_overrides (sucursal_id, flags, updated_at)
+                        VALUES (:sid, :flags::jsonb, NOW())
+                        ON CONFLICT (sucursal_id) DO UPDATE SET
+                            flags = EXCLUDED.flags,
+                            updated_at = EXCLUDED.updated_at
+                        """
+                    ),
+                    {"sid": int(sid), "flags": payload},
+                )
+
+        try:
+            _maybe_provision()
+            _do_update()
+        except Exception as e:
+            msg = str(e).lower()
+            if str(e) == "branch_not_found":
+                return {"ok": False, "error": "branch_not_found", "branch_id": int(sid or 0), "flags": merged}
+            if "schema_missing:" in str(e):
+                err_code = "schema_missing"
+            elif (
+                ("does not exist" in msg and ("relation" in msg or "table" in msg))
+                or "undefined_table" in msg
+                or "relation" in msg and "does not exist" in msg
+            ):
+                err_code = "schema_missing"
+            elif "invalid input syntax for type json" in msg:
+                err_code = "invalid_flags"
+            elif "permission denied" in msg:
+                err_code = "permission_denied"
+            elif "violates foreign key constraint" in msg or "foreign key" in msg:
+                err_code = "fk_violation"
+            elif "timeout" in msg:
+                err_code = "timeout"
+            else:
+                err_code = "update_failed"
+
+            if err_code == "schema_missing" and not did_provision:
+                try:
+                    _maybe_provision()
+                    _do_update()
+                    return {"ok": True, "flags": merged}
+                except Exception:
+                    pass
+
             logger.exception(
                 "Error updating feature flags (gym_id=%s scope=%s branch_id=%s)",
                 int(gym_id),
                 str(scope),
                 branch_id,
             )
-            return {"ok": False, "error": "update_failed", "flags": merged}
+            return {"ok": False, "error": err_code, "flags": merged}
         return {"ok": True, "flags": merged}
 
     def _ensure_entitlements_schema(self, eng) -> None:

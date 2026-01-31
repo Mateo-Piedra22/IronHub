@@ -36,6 +36,13 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     const [tenantMigration, setTenantMigration] = useState<TenantMigrationStatus | null>(null);
     const [tenantMigrationLoading, setTenantMigrationLoading] = useState(false);
     const [tenantProvisioning, setTenantProvisioning] = useState(false);
+    const normalizeBranchCode = (v: string) =>
+        String(v || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9_-]/g, '')
+            .slice(0, 40);
+    const branchCodeRe = /^[a-z0-9][a-z0-9_-]{1,39}$/;
 
     // Plans & Subscription Manual Assignment
     const [plans, setPlans] = useState<any[]>([]);
@@ -86,6 +93,21 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         timezone: '',
         status: 'active',
     });
+    const branchDraftCodeNorm = useMemo(
+        () => normalizeBranchCode(String(branchDraft.code || '')),
+        [branchDraft.code]
+    );
+    const branchDraftCodeError = useMemo(() => {
+        const nameOk = String(branchDraft.name || '').trim().length > 0;
+        const codeRaw = String(branchDraft.code || '').trim();
+        if (!nameOk || !codeRaw) return '';
+        if (!branchCodeRe.test(branchDraftCodeNorm)) return 'Formato inválido (2-40, minúsculas, números, _ o -)';
+        const exists = branches.some(
+            (b) => String(b.code || '').toLowerCase() === branchDraftCodeNorm.toLowerCase()
+        );
+        if (exists) return 'El código ya existe';
+        return '';
+    }, [branchDraft.name, branchDraft.code, branchDraftCodeNorm, branches]);
     const [featureFlagsScope, setFeatureFlagsScope] = useState<'gym' | 'branch'>('gym');
     const [featureFlagsBranchId, setFeatureFlagsBranchId] = useState<number>(0);
     const [featureFlags, setFeatureFlags] = useState<FeatureFlags>({ modules: {} });
@@ -434,9 +456,18 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     const createBranch = async () => {
         setBranchSaving(true);
         try {
+            const codeNorm = normalizeBranchCode(String(branchDraft.code || ''));
+            if (!branchCodeRe.test(codeNorm)) {
+                showMessage('Código inválido (min 2, max 40; minúsculas/números/_/-)');
+                return;
+            }
+            if (branches.some((b) => String(b.code || '').toLowerCase() === codeNorm.toLowerCase())) {
+                showMessage('El código ya existe');
+                return;
+            }
             const payload: GymBranchCreateInput = {
                 name: String(branchDraft.name || '').trim(),
-                code: String(branchDraft.code || '').trim(),
+                code: codeNorm,
                 address: String(branchDraft.address || '').trim() ? String(branchDraft.address || '').trim() : null,
                 timezone: String(branchDraft.timezone || '').trim() ? String(branchDraft.timezone || '').trim() : null,
             };
@@ -1760,6 +1791,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                                 <label className="text-xs text-slate-400 block mb-1">Código</label>
                                                 <input className="input w-full" value={String(branchDraft.code || '')} onChange={(e) => setBranchDraft({ ...branchDraft, code: e.target.value })} />
                                                 <div className="text-[11px] text-slate-500 mt-1">Minúsculas, sin espacios. Ej: principal, centro, sede-norte</div>
+                                                {!!branchDraftCodeError && <div className="text-[11px] text-danger-400 mt-1">{branchDraftCodeError}</div>}
                                             </div>
                                             <div>
                                                 <label className="text-xs text-slate-400 block mb-1">Timezone</label>
@@ -1772,7 +1804,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                         </div>
                                         <div className="flex items-center justify-end gap-2 pt-5">
                                             <button onClick={() => setBranchCreateOpen(false)} disabled={branchSaving} className="btn-secondary">Cancelar</button>
-                                            <button onClick={createBranch} disabled={branchSaving || !String(branchDraft.name || '').trim() || !String(branchDraft.code || '').trim()} className="btn-primary flex items-center gap-2">
+                                            <button onClick={createBranch} disabled={branchSaving || !String(branchDraft.name || '').trim() || !String(branchDraft.code || '').trim() || !!branchDraftCodeError} className="btn-primary flex items-center gap-2">
                                                 {branchSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
                                                 Crear
                                             </button>

@@ -1603,7 +1603,12 @@ async def set_gym_feature_flags(request: Request, gym_id: int, scope: str = "gym
     except Exception:
         data = {}
     flags = data.get("flags") if isinstance(data, dict) else {}
-    return adm.set_gym_feature_flags(int(gym_id), flags, scope=scope, branch_id=int(branch_id) if branch_id else None)
+    result = adm.set_gym_feature_flags(
+        int(gym_id), flags, scope=scope, branch_id=int(branch_id) if branch_id else None
+    )
+    if not bool(result.get("ok")):
+        return JSONResponse(result, status_code=400)
+    return result
 
 
 @app.get("/gyms/{gym_id}/tipos-cuota")

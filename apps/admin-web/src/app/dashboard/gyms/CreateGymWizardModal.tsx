@@ -50,6 +50,36 @@ export function CreateGymWizardModal({
         ownerPassword?: string;
     } | null>(null);
 
+    const normalizeBranchCode = (v: string) =>
+        String(v || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9_-]/g, '')
+            .slice(0, 40);
+
+    const branchCodeRe = /^[a-z0-9][a-z0-9_-]{1,39}$/;
+
+    const branchIssues = useMemo(() => {
+        const normalizedCodes = branches.map((b) => normalizeBranchCode(String(b.code || '')));
+        const counts = new Map<string, number>();
+        for (const c of normalizedCodes) {
+            if (!c) continue;
+            counts.set(c, (counts.get(c) || 0) + 1);
+        }
+        const perIndex = branches.map((b, idx) => {
+            const name = String(b.name || '').trim();
+            const rawCode = String(b.code || '');
+            const code = normalizedCodes[idx];
+            if (!name && !rawCode.trim()) return null;
+            if (!name.trim()) return 'Nombre requerido';
+            if (!code) return 'Código requerido';
+            if (!branchCodeRe.test(code)) return 'Formato inválido (2-40, minúsculas, números, _ o -)';
+            if ((counts.get(code) || 0) > 1) return 'Código duplicado (debe ser único)';
+            return null;
+        });
+        return { perIndex, normalizedCodes };
+    }, [branches]);
+
     const normalizedSubdomain = useMemo(() => {
         const raw = String(subdominio || '').trim().toLowerCase();
         return raw.replace(/[^a-z0-9-]/g, '').slice(0, 40);
@@ -59,14 +89,15 @@ export function CreateGymWizardModal({
         if (step === 1) return nombre.trim().length >= 2;
         if (step === 2) {
             const filtered = branches.filter((b) => String(b.name || '').trim() && String(b.code || '').trim());
-            return filtered.length > 0;
+            if (filtered.length === 0) return false;
+            return !(branchIssues.perIndex || []).some(Boolean);
         }
         if (step === 3) {
             if (!useCustomPassword) return true;
             return ownerPassword.trim().length >= 8;
         }
         return true;
-    }, [step, nombre, branches, useCustomPassword, ownerPassword]);
+    }, [step, nombre, branches, branchIssues, useCustomPassword, ownerPassword]);
 
     const resetAll = () => {
         setStep(1);
@@ -143,10 +174,14 @@ export function CreateGymWizardModal({
         setSubmitting(true);
         setError('');
         try {
+            if ((branchIssues.perIndex || []).some(Boolean)) {
+                setError('Revisá los códigos de sucursal (duplicados o formato inválido)');
+                return;
+            }
             const cleanedBranches = branches
                 .map((b) => ({
                     name: String(b.name || '').trim(),
-                    code: String(b.code || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 40),
+                    code: normalizeBranchCode(String(b.code || '')),
                     address: String(b.address || '').trim() ? String(b.address || '').trim() : null,
                     timezone: String(b.timezone || '').trim() ? String(b.timezone || '').trim() : null,
                 }))
@@ -269,7 +304,12 @@ export function CreateGymWizardModal({
                                                 <div>
                                                     <label className="text-xs text-slate-400 block mb-1">Código</label>
                                                     <input className="input w-full" value={String(b.code || '')} onChange={(e) => updateBranch(idx, { code: e.target.value })} />
-                                                    <div className="text-[11px] text-slate-500 mt-1">Minúsculas, sin espacios. Ej: principal, centro, sede-norte</div>
+                                                    <div className="text-[11px] text-slate-500 mt-1">
+                                                        Minúsculas, sin espacios. Ej: principal, centro, sede-norte
+                                                    </div>
+                                                    {branchIssues.perIndex[idx] && (
+                                                        <div className="text-[11px] text-danger-400 mt-1">{branchIssues.perIndex[idx]}</div>
+                                                    )}
                                                 </div>
                                                 <div>
                                                     <label className="text-xs text-slate-400 block mb-1">Timezone</label>
