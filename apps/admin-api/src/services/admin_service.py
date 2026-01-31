@@ -1055,6 +1055,11 @@ class AdminService:
         def _do_update() -> None:
             with eng.begin() as conn:
                 if sid is None or sid <= 0:
+                    reg_ff = conn.execute(
+                        text("SELECT to_regclass('public.feature_flags')")
+                    ).scalar()
+                    if not reg_ff:
+                        raise RuntimeError("schema_missing:feature_flags")
                     conn.execute(
                         text(
                             """
@@ -1072,6 +1077,11 @@ class AdminService:
                 reg_suc = conn.execute(text("SELECT to_regclass('sucursales')")).scalar()
                 if not reg_suc:
                     raise RuntimeError("schema_missing:sucursales")
+                reg_ov = conn.execute(
+                    text("SELECT to_regclass('public.feature_flags_overrides')")
+                ).scalar()
+                if not reg_ov:
+                    raise RuntimeError("schema_missing:feature_flags_overrides")
                 exists = conn.execute(
                     text("SELECT 1 FROM sucursales WHERE id = :sid LIMIT 1"),
                     {"sid": int(sid)},
@@ -1097,8 +1107,24 @@ class AdminService:
             _do_update()
         except Exception as e:
             msg = str(e).lower()
+            detail: Dict[str, Any] = {}
+            try:
+                detail["exc_type"] = type(e).__name__
+                orig = getattr(e, "orig", None)
+                if orig is not None:
+                    detail["orig_type"] = type(orig).__name__
+                    pgcode = getattr(orig, "pgcode", None)
+                    if pgcode:
+                        detail["pgcode"] = str(pgcode)
+            except Exception:
+                detail = {}
             if str(e) == "branch_not_found":
-                return {"ok": False, "error": "branch_not_found", "branch_id": int(sid or 0), "flags": merged}
+                return {
+                    "ok": False,
+                    "error": "branch_not_found",
+                    "branch_id": int(sid or 0),
+                    "flags": merged,
+                }
             if "schema_missing:" in str(e):
                 err_code = "schema_missing"
             elif (
@@ -1132,7 +1158,10 @@ class AdminService:
                 str(scope),
                 branch_id,
             )
-            return {"ok": False, "error": err_code, "flags": merged}
+            out: Dict[str, Any] = {"ok": False, "error": err_code, "flags": merged}
+            if detail:
+                out["error_detail"] = detail
+            return out
         return {"ok": True, "flags": merged}
 
     def _ensure_entitlements_schema(self, eng) -> None:
