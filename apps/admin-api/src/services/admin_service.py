@@ -944,7 +944,7 @@ class AdminService:
                 )
                 conn.execute(
                     text(
-                        "INSERT INTO feature_flags (id, flags) VALUES (1, :flags::jsonb) ON CONFLICT (id) DO NOTHING"
+                        "INSERT INTO feature_flags (id, flags) VALUES (1, CAST(:flags AS JSONB)) ON CONFLICT (id) DO NOTHING"
                     ),
                     {"flags": payload},
                 )
@@ -1064,7 +1064,7 @@ class AdminService:
                         text(
                             """
                             INSERT INTO feature_flags (id, flags, updated_at)
-                            VALUES (1, :flags::jsonb, NOW())
+                            VALUES (1, CAST(:flags AS JSONB), NOW())
                             ON CONFLICT (id) DO UPDATE SET
                                 flags = EXCLUDED.flags,
                                 updated_at = EXCLUDED.updated_at
@@ -1093,7 +1093,7 @@ class AdminService:
                     text(
                         """
                         INSERT INTO feature_flags_overrides (sucursal_id, flags, updated_at)
-                        VALUES (:sid, :flags::jsonb, NOW())
+                        VALUES (:sid, CAST(:flags AS JSONB), NOW())
                         ON CONFLICT (sucursal_id) DO UPDATE SET
                             flags = EXCLUDED.flags,
                             updated_at = EXCLUDED.updated_at
