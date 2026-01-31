@@ -74,7 +74,7 @@ export interface TenantMigrationStatus {
     db_name?: string;
     head?: string | null;
     current?: string | null;
-    status?: 'up_to_date' | 'outdated' | 'uninitialized' | 'unknown';
+    status?: 'up_to_date' | 'outdated' | 'uninitialized' | 'unknown' | 'db_missing';
 }
 
 export interface Metrics {

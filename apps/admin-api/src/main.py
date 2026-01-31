@@ -673,6 +673,26 @@ async def create_gym_v2(request: Request, payload: GymCreateV2Input):
     created_branches: List[Dict[str, Any]] = []
     bulk_res: Optional[Dict[str, Any]] = None
     if branches:
+        st0 = adm.tenant_migration_status(gym_id)
+        if st0.get("ok") and str(st0.get("status") or "") in (
+            "uninitialized",
+            "outdated",
+        ):
+            try:
+                adm.provision_tenant_migrations(gym_id)
+            except Exception:
+                pass
+        st1 = adm.tenant_migration_status(gym_id)
+        if not st1.get("ok") or str(st1.get("status") or "") != "up_to_date":
+            try:
+                adm.eliminar_gimnasio(gym_id)
+            except Exception:
+                pass
+            return JSONResponse(
+                {"ok": False, "error": "tenant_migrations_failed", "gym_id": gym_id, "status": st1},
+                status_code=500,
+            )
+
         bulk_items = [b.model_dump() for b in branches]
         bulk_res = adm.bulk_crear_sucursales(gym_id, bulk_items)
 

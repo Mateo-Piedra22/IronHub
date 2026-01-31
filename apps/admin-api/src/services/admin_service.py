@@ -177,6 +177,37 @@ class AdminService:
             "application_name": application_name or "gym_management_admin",
         }
 
+    @staticmethod
+    def resolve_tenant_db_params() -> Dict[str, Any]:
+        base = AdminService.resolve_admin_db_params()
+        host = os.getenv("TENANT_DB_HOST", "").strip()
+        port_raw = os.getenv("TENANT_DB_PORT", "").strip()
+        user = os.getenv("TENANT_DB_USER", "").strip()
+        password = os.getenv("TENANT_DB_PASSWORD", "")
+        sslmode = os.getenv("TENANT_DB_SSLMODE", "").strip()
+        try:
+            port = int(port_raw) if port_raw else int(base.get("port") or 5432)
+        except Exception:
+            port = int(base.get("port") or 5432)
+        if not sslmode:
+            sslmode = str(base.get("sslmode") or "require").strip()
+        try:
+            connect_timeout = int(os.getenv("TENANT_DB_CONNECT_TIMEOUT", "").strip() or 10)
+        except Exception:
+            connect_timeout = 10
+        application_name = os.getenv(
+            "TENANT_DB_APPLICATION_NAME", "tenant_provisioner"
+        ).strip()
+        return {
+            "host": host or str(base.get("host") or ""),
+            "port": port,
+            "user": user or str(base.get("user") or ""),
+            "password": password if password != "" else str(base.get("password") or ""),
+            "sslmode": sslmode or "require",
+            "connect_timeout": connect_timeout,
+            "application_name": application_name or "tenant_provisioner",
+        }
+
     def _ensure_schema(self) -> None:
         with self.db.get_connection_context() as conn:
             cur = conn.cursor()
@@ -762,8 +793,7 @@ class AdminService:
         db_name = str(gym.get("db_name") or "").strip()
         if not db_name:
             return None
-        params = self.resolve_admin_db_params()
-        params["database"] = db_name
+        params = self.resolve_tenant_db_params()
         user = params.get("user")
         password = params.get("password")
         host = params.get("host")
@@ -788,8 +818,9 @@ class AdminService:
 
         try:
             with eng.connect() as conn:
-                reg = conn.execute(text("SELECT to_regclass('public.alembic_version')")).scalar()
-                if not reg:
+                reg_ver = conn.execute(text("SELECT to_regclass('alembic_version')")).scalar()
+                reg_suc = conn.execute(text("SELECT to_regclass('sucursales')")).scalar()
+                if not reg_ver or not reg_suc:
                     return {
                         "ok": True,
                         "gym_id": int(gym_id),
@@ -800,12 +831,24 @@ class AdminService:
                     }
                 row = conn.execute(text("SELECT version_num FROM alembic_version")).fetchone()
                 current = str(row[0]) if row and row[0] is not None else None
-        except Exception:
+        except Exception as e:
+            msg = str(e).lower()
+            if ("does not exist" in msg and "database" in msg) or ("invalidcatalogname" in msg):
+                return {
+                    "ok": True,
+                    "gym_id": int(gym_id),
+                    "db_name": db_name,
+                    "head": head,
+                    "current": None,
+                    "status": "db_missing",
+                }
             logger.exception("Error checking tenant migration status (gym_id=%s)", int(gym_id))
             return {"ok": False, "error": "status_check_failed", "db_name": db_name, "head": head}
 
-        if not head or not current:
+        if not head:
             status = "unknown"
+        elif not current:
+            status = "uninitialized"
         elif current == head:
             status = "up_to_date"
         else:
@@ -828,7 +871,7 @@ class AdminService:
         if not db_name:
             return {"ok": False, "error": "db_name_missing"}
 
-        params = self.resolve_admin_db_params()
+        params = self.resolve_tenant_db_params()
         try:
             migrate_tenant_db(
                 user=str(params.get("user") or ""),
@@ -2751,7 +2794,7 @@ class AdminService:
             raise RuntimeError("invalid_db_name")
 
         token = (os.getenv("NEON_API_TOKEN") or "").strip()
-        base = self.resolve_admin_db_params()
+        base = self.resolve_tenant_db_params()
         if token and requests is not None:
             host = str(base.get("host") or "").strip().lower()
             comp_host = host.replace("-pooler.", ".")
@@ -3589,9 +3632,7 @@ class AdminService:
     def _get_tenant_engine(self, db_name: str):
         """Get SQLAlchemy engine for a tenant database."""
         try:
-            params = self.db.params.copy()
-            params["database"] = db_name
-
+            params = self.resolve_tenant_db_params()
             conn_str = f"postgresql://{params.get('user')}:{params.get('password')}@{params.get('host')}:{params.get('port')}/{db_name}?sslmode={params.get('sslmode', 'require')}"
             return create_engine(conn_str, pool_pre_ping=True)
         except Exception as e:

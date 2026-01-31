@@ -125,8 +125,11 @@ def _lock_key(name: str) -> int:
 def _advisory_lock(conn, *, name: str, timeout_seconds: int) -> None:
     key = _lock_key(name)
     deadline = time.time() + float(max(1, int(timeout_seconds)))
+    lock_conn = conn.execution_options(isolation_level="AUTOCOMMIT")
     while True:
-        got = conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": key}).scalar()
+        got = lock_conn.execute(
+            text("SELECT pg_try_advisory_lock(:k)"), {"k": key}
+        ).scalar()
         if bool(got):
             break
         if time.time() >= deadline:
@@ -136,7 +139,7 @@ def _advisory_lock(conn, *, name: str, timeout_seconds: int) -> None:
         yield
     finally:
         try:
-            conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": key})
+            lock_conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": key})
         except Exception:
             pass
 
@@ -193,8 +196,16 @@ def migrate_tenant_db(
     try:
         with engine.connect() as conn:
             with _advisory_lock(conn, name=f"tenant:{db_name}", timeout_seconds=300):
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
                 cfg.attributes["connection"] = conn
                 command.upgrade(cfg, "head")
+                try:
+                    conn.commit()
+                except Exception:
+                    pass
                 if head:
                     row = conn.execute(
                         text("SELECT version_num FROM alembic_version")

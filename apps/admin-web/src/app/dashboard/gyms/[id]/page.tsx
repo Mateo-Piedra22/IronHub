@@ -1524,6 +1524,8 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                                 <span className="font-medium">
                                                     {tenantMigration.status === 'up_to_date'
                                                         ? 'Al día'
+                                                        : tenantMigration.status === 'db_missing'
+                                                            ? 'DB no existe'
                                                         : tenantMigration.status === 'outdated'
                                                             ? 'Desactualizado'
                                                             : tenantMigration.status === 'uninitialized'
