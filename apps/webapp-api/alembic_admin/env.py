@@ -3,6 +3,7 @@ import os
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
+from sqlalchemy import text
 
 config = context.config
 if config.config_file_name is not None:
@@ -36,6 +37,23 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        try:
+            connection.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS alembic_version (version_num VARCHAR(128) NOT NULL)"
+                )
+            )
+            connection.execute(
+                text(
+                    "ALTER TABLE IF EXISTS alembic_version ALTER COLUMN version_num TYPE VARCHAR(128)"
+                )
+            )
+            try:
+                connection.commit()
+            except Exception:
+                pass
+        except Exception:
+            pass
         context.configure(connection=connection)
         with context.begin_transaction():
             context.run_migrations()

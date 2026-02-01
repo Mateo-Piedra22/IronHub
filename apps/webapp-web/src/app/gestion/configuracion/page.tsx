@@ -488,19 +488,45 @@ export default function ConfiguracionPage() {
     const router = useRouter();
     const pathname = usePathname();
     const { user, isLoading: authLoading } = useAuth();
+    const [sessionRole, setSessionRole] = useState<string>('');
+    const [sessionScopes, setSessionScopes] = useState<string[]>([]);
     const readOnlyModules = (pathname || '').startsWith('/dashboard');
+
+    useEffect(() => {
+        (async () => {
+            try {
+                const r = await api.getSession('gestion');
+                if (r.ok && (r.data as any)?.user) {
+                    setSessionRole(String((r.data as any).user.rol || ''));
+                    setSessionScopes((((r.data as any).user.scopes || []) as any[]).map((s) => String(s)));
+                } else {
+                    setSessionRole('');
+                    setSessionScopes([]);
+                }
+            } catch {
+                setSessionRole('');
+                setSessionScopes([]);
+            }
+        })();
+    }, []);
+
+    const canWrite = (() => {
+        const r = String(sessionRole || user?.rol || '').toLowerCase();
+        if (r === 'owner' || r === 'admin') return true;
+        return sessionScopes.includes('configuracion:write');
+    })();
 
     useEffect(() => {
         const p = pathname || '';
         if (!p.startsWith('/gestion/configuracion')) return;
         if (authLoading) return;
-        const rol = String(user?.rol || '').toLowerCase();
+        const rol = String(sessionRole || user?.rol || '').toLowerCase();
         if (rol === 'owner' || rol === 'admin') {
             router.replace('/dashboard/configuracion');
         } else {
             router.replace('/gestion');
         }
-    }, [pathname, authLoading, user?.rol, router]);
+    }, [pathname, authLoading, sessionRole, user?.rol, router]);
 
     // State
     const [loading, setLoading] = useState(true);
@@ -626,6 +652,12 @@ export default function ConfiguracionPage() {
         }
     };
 
+    const requireWrite = () => {
+        if (canWrite) return true;
+        error('Sin permisos para modificar');
+        return false;
+    };
+
     // Delete handler
     const handleDelete = async () => {
         if (!itemToDelete) return;
@@ -665,6 +697,10 @@ export default function ConfiguracionPage() {
         { key: 'clases', label: 'Clases' },
         { key: 'asistencias', label: 'Asistencias' },
         { key: 'whatsapp', label: 'WhatsApp' },
+        { key: 'bulk_actions', label: 'Acciones masivas (danger zone)' },
+        { key: 'soporte', label: 'Soporte' },
+        { key: 'novedades', label: 'Novedades' },
+        { key: 'accesos', label: 'Accesos (molinete/puerta)' },
         { key: 'configuracion', label: 'Configuración' },
         { key: 'reportes', label: 'Reportes' },
         { key: 'entitlements_v2', label: 'Accesos avanzados (multi-sucursal y clases)' },
@@ -686,6 +722,9 @@ export default function ConfiguracionPage() {
 
         if (activeTab === 'modulos') {
             const modules = (featureFlags && featureFlags.modules) || {};
+            const features = (featureFlags && (featureFlags as any).features) || {};
+            const bulkActions = (features && (features as any).bulk_actions) || {};
+            const bulkModuleEnabled = modules['bulk_actions'] !== false;
             return (
                 <div className="space-y-3">
                     <div className="card p-4">
@@ -725,6 +764,131 @@ export default function ConfiguracionPage() {
                             </div>
                         ) : null}
                     </div>
+                    <div className="card p-4 space-y-3">
+                        <div className="text-sm font-semibold text-white">Acciones masivas</div>
+                        <div className="text-sm text-slate-300">
+                            Estas opciones controlan sub-funcionalidades dentro del módulo. Si el módulo está apagado, nada de esto se expone.
+                        </div>
+                        <label className="flex items-center justify-between gap-3 py-1">
+                            <span className={cn('text-sm', bulkModuleEnabled ? 'text-white' : 'text-slate-500')}>
+                                Importación de usuarios
+                            </span>
+                            <input
+                                type="checkbox"
+                                checked={bulkModuleEnabled && bulkActions['usuarios_import'] !== false}
+                                disabled={readOnlyModules || !bulkModuleEnabled}
+                                onChange={(e) => {
+                                    if (readOnlyModules) return;
+                                    const nextFeatures: any = { ...(featureFlags as any).features };
+                                    const nextBulk: any = { ...(nextFeatures?.bulk_actions || {}) };
+                                    nextBulk['usuarios_import'] = e.target.checked;
+                                    nextFeatures.bulk_actions = nextBulk;
+                                    setFeatureFlags({ ...(featureFlags || { modules: {} }), ...(featureFlags as any), features: nextFeatures } as any);
+                                }}
+                            />
+                        </label>
+                        {!readOnlyModules ? (
+                            <div className="flex items-center justify-end pt-2">
+                                <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={handleSaveFeatureFlags}
+                                    isLoading={featureFlagsSaving}
+                                    disabled={featureFlagsSaving || featureFlagsLoading}
+                                >
+                                    Guardar subflags
+                                </Button>
+                            </div>
+                        ) : null}
+                    </div>
+                    <div className="card p-4 space-y-3">
+                        <div className="text-sm font-semibold text-white">Usuarios</div>
+                        <div className="text-sm text-slate-300">Control fino de acciones sensibles del módulo Usuarios.</div>
+                        {[
+                            { key: 'create', label: 'Alta / creación' },
+                            { key: 'update', label: 'Edición / actualización' },
+                            { key: 'pin', label: 'Set / reset de PIN' },
+                            { key: 'delete', label: 'Eliminación' },
+                        ].map((it) => {
+                            const enabled = modules['usuarios'] !== false;
+                            const current = ((features && (features as any).usuarios) || {}) as any;
+                            return (
+                                <label key={it.key} className="flex items-center justify-between gap-3 py-1">
+                                    <span className={cn('text-sm', enabled ? 'text-white' : 'text-slate-500')}>{it.label}</span>
+                                    <input
+                                        type="checkbox"
+                                        checked={enabled && current[it.key] !== false}
+                                        disabled={readOnlyModules || !enabled}
+                                        onChange={(e) => {
+                                            if (readOnlyModules) return;
+                                            const nextFeatures: any = { ...(featureFlags as any).features };
+                                            const next: any = { ...(nextFeatures?.usuarios || {}) };
+                                            next[it.key] = e.target.checked;
+                                            nextFeatures.usuarios = next;
+                                            setFeatureFlags({ ...(featureFlags || { modules: {} }), ...(featureFlags as any), features: nextFeatures } as any);
+                                        }}
+                                    />
+                                </label>
+                            );
+                        })}
+                        {!readOnlyModules ? (
+                            <div className="flex items-center justify-end pt-2">
+                                <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={handleSaveFeatureFlags}
+                                    isLoading={featureFlagsSaving}
+                                    disabled={featureFlagsSaving || featureFlagsLoading}
+                                >
+                                    Guardar subflags
+                                </Button>
+                            </div>
+                        ) : null}
+                    </div>
+                    <div className="card p-4 space-y-3">
+                        <div className="text-sm font-semibold text-white">Pagos</div>
+                        <div className="text-sm text-slate-300">Control fino de acciones de pagos y exportación.</div>
+                        {[
+                            { key: 'create', label: 'Crear pago' },
+                            { key: 'update', label: 'Editar pago' },
+                            { key: 'delete', label: 'Eliminar pago' },
+                            { key: 'export', label: 'Exportaciones' },
+                        ].map((it) => {
+                            const enabled = modules['pagos'] !== false;
+                            const current = ((features && (features as any).pagos) || {}) as any;
+                            return (
+                                <label key={it.key} className="flex items-center justify-between gap-3 py-1">
+                                    <span className={cn('text-sm', enabled ? 'text-white' : 'text-slate-500')}>{it.label}</span>
+                                    <input
+                                        type="checkbox"
+                                        checked={enabled && current[it.key] !== false}
+                                        disabled={readOnlyModules || !enabled}
+                                        onChange={(e) => {
+                                            if (readOnlyModules) return;
+                                            const nextFeatures: any = { ...(featureFlags as any).features };
+                                            const next: any = { ...(nextFeatures?.pagos || {}) };
+                                            next[it.key] = e.target.checked;
+                                            nextFeatures.pagos = next;
+                                            setFeatureFlags({ ...(featureFlags || { modules: {} }), ...(featureFlags as any), features: nextFeatures } as any);
+                                        }}
+                                    />
+                                </label>
+                            );
+                        })}
+                        {!readOnlyModules ? (
+                            <div className="flex items-center justify-end pt-2">
+                                <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={handleSaveFeatureFlags}
+                                    isLoading={featureFlagsSaving}
+                                    disabled={featureFlagsSaving || featureFlagsLoading}
+                                >
+                                    Guardar subflags
+                                </Button>
+                            </div>
+                        ) : null}
+                    </div>
                 </div>
             );
         }
@@ -751,7 +915,10 @@ export default function ConfiguracionPage() {
                     >
                         <div className="flex items-center gap-4">
                             <button
-                                onClick={() => handleToggle(activeTab === 'cuotas' ? 'cuota' : activeTab === 'metodos' ? 'metodo' : 'concepto', item)}
+                                onClick={() => {
+                                    if (!requireWrite()) return;
+                                    handleToggle(activeTab === 'cuotas' ? 'cuota' : activeTab === 'metodos' ? 'metodo' : 'concepto', item);
+                                }}
                                 className={cn(
                                     'w-8 h-8 rounded-lg flex items-center justify-center transition-colors',
                                     item.activo
@@ -774,6 +941,7 @@ export default function ConfiguracionPage() {
                         <div className="flex items-center gap-1">
                             <button
                                 onClick={() => {
+                                    if (!requireWrite()) return;
                                     if (activeTab === 'cuotas') {
                                         setCuotaToEdit(item as TipoCuota);
                                         setCuotaFormOpen(true);
@@ -789,6 +957,7 @@ export default function ConfiguracionPage() {
                             {activeTab === 'cuotas' ? (
                                 <button
                                     onClick={() => {
+                                        if (!requireWrite()) return;
                                         setCuotaEntitlementsItem(item as TipoCuota);
                                         setCuotaEntitlementsOpen(true);
                                     }}
@@ -799,6 +968,7 @@ export default function ConfiguracionPage() {
                             ) : null}
                             <button
                                 onClick={() => {
+                                    if (!requireWrite()) return;
                                     setItemToDelete({
                                         type: activeTab === 'cuotas' ? 'cuota' : activeTab === 'metodos' ? 'metodo' : 'concepto',
                                         item,
@@ -922,6 +1092,7 @@ export default function ConfiguracionPage() {
                             size="sm"
                             leftIcon={<Plus className="w-4 h-4" />}
                             onClick={() => {
+                                if (!requireWrite()) return;
                                 if (activeTab === 'cuotas') {
                                     setCuotaToEdit(null);
                                     setCuotaFormOpen(true);
@@ -930,6 +1101,7 @@ export default function ConfiguracionPage() {
                                     setSimpleFormOpen(true);
                                 }
                             }}
+                            disabled={!canWrite}
                         >
                             Agregar
                         </Button>

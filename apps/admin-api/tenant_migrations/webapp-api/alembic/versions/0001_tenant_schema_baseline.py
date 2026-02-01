@@ -131,18 +131,6 @@ def upgrade() -> None:
 \tUNIQUE (codigo)
 );\n    """)
 
-    op.execute("""\nCREATE TABLE IF NOT EXISTS theme_scheduling_config (
-\tid SERIAL NOT NULL, 
-\tclave VARCHAR(100) NOT NULL, 
-\tvalor TEXT NOT NULL, 
-\tconfig_data JSONB, 
-\tconfig_type VARCHAR(50) DEFAULT 'general', 
-\tdescripcion TEXT, 
-\tfecha_actualizacion TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL, 
-\tPRIMARY KEY (id), 
-\tUNIQUE (clave)
-);\n    """)
-
     op.execute("""\nCREATE TABLE IF NOT EXISTS tipos_clases (
 \tid SERIAL NOT NULL, 
 \tnombre VARCHAR(255) NOT NULL, 
@@ -208,25 +196,6 @@ def upgrade() -> None:
 \tCONSTRAINT work_session_pauses_kind_check CHECK (session_kind IN ('profesor','staff'))
 );\n    """)
 
-    op.execute("""\nCREATE TABLE IF NOT EXISTS acciones_masivas_pendientes (
-\tid SERIAL NOT NULL, 
-\toperation_id VARCHAR(100) NOT NULL, 
-\ttipo VARCHAR(50) NOT NULL, 
-\tdescripcion TEXT, 
-\tusuario_ids INTEGER[] NOT NULL, 
-\tparametros JSONB, 
-\testado VARCHAR(20) DEFAULT 'pendiente', 
-\tfecha_programada TIMESTAMP WITHOUT TIME ZONE, 
-\tfecha_creacion TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL, 
-\tfecha_ejecucion TIMESTAMP WITHOUT TIME ZONE, 
-\tcreado_por INTEGER, 
-\tresultado JSONB, 
-\terror_message TEXT, 
-\tPRIMARY KEY (id), 
-\tUNIQUE (operation_id), 
-\tFOREIGN KEY(creado_por) REFERENCES usuarios (id) ON DELETE SET NULL
-);\n    """)
-
     op.execute("""\nCREATE TABLE IF NOT EXISTS asistencias (
 \tid SERIAL NOT NULL, 
 \tusuario_id INTEGER NOT NULL, 
@@ -281,19 +250,6 @@ def upgrade() -> None:
 \tFOREIGN KEY(sucursal_id) REFERENCES sucursales (id) ON DELETE SET NULL
 );\n    """)
 
-    op.execute("""\nCREATE TABLE IF NOT EXISTS custom_themes (
-\tid SERIAL NOT NULL, 
-\tnombre VARCHAR(100) NOT NULL, 
-\tname VARCHAR(100) NOT NULL, 
-\tdata JSONB, 
-\tcolores JSONB NOT NULL, 
-\tactivo BOOLEAN DEFAULT 'true' NOT NULL, 
-\tfecha_creacion TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL, 
-\tusuario_creador_id INTEGER, 
-\tPRIMARY KEY (id), 
-\tFOREIGN KEY(usuario_creador_id) REFERENCES usuarios (id)
-);\n    """)
-
     op.execute("""\nCREATE TABLE IF NOT EXISTS ejercicios (
 \tid SERIAL NOT NULL, 
 \tnombre VARCHAR(255) NOT NULL, 
@@ -316,26 +272,6 @@ def upgrade() -> None:
 \tupdated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL, 
 \tPRIMARY KEY (sucursal_id), 
 \tFOREIGN KEY(sucursal_id) REFERENCES sucursales (id) ON DELETE CASCADE
-);\n    """)
-
-    op.execute("""\nCREATE TABLE IF NOT EXISTS maintenance_tasks (
-\tid SERIAL NOT NULL, 
-\ttask_name TEXT NOT NULL, 
-\ttask_type TEXT NOT NULL, 
-\tdescription TEXT, 
-\tscheduled_at TIMESTAMP WITHOUT TIME ZONE, 
-\texecuted_at TIMESTAMP WITHOUT TIME ZONE, 
-\tstatus TEXT DEFAULT 'pending', 
-\tresult TEXT, 
-\terror_message TEXT, 
-\tcreated_by INTEGER, 
-\texecuted_by INTEGER, 
-\tauto_schedule BOOLEAN DEFAULT 'false', 
-\tfrequency_days INTEGER, 
-\tnext_execution TIMESTAMP WITHOUT TIME ZONE, 
-\tPRIMARY KEY (id), 
-\tFOREIGN KEY(created_by) REFERENCES usuarios (id), 
-\tFOREIGN KEY(executed_by) REFERENCES usuarios (id)
 );\n    """)
 
     op.execute("""\nCREATE TABLE IF NOT EXISTS memberships (
@@ -430,21 +366,6 @@ def upgrade() -> None:
 \tCONSTRAINT staff_profiles_estado_check CHECK (estado IN ('activo', 'inactivo', 'vacaciones')), 
 \tUNIQUE (usuario_id), 
 \tFOREIGN KEY(usuario_id) REFERENCES usuarios (id) ON DELETE CASCADE
-);\n    """)
-
-    op.execute("""\nCREATE TABLE IF NOT EXISTS system_diagnostics (
-\tid SERIAL NOT NULL, 
-\ttimestamp TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL, 
-\tdiagnostic_type TEXT NOT NULL, 
-\tcomponent TEXT NOT NULL, 
-\tstatus TEXT NOT NULL, 
-\tdetails TEXT, 
-\tmetrics TEXT, 
-\tresolved BOOLEAN DEFAULT 'false', 
-\tresolved_at TIMESTAMP WITHOUT TIME ZONE, 
-\tresolved_by INTEGER, 
-\tPRIMARY KEY (id), 
-\tFOREIGN KEY(resolved_by) REFERENCES usuarios (id)
 );\n    """)
 
     op.execute("""\nCREATE TABLE IF NOT EXISTS tipo_cuota_clases_permisos (
@@ -831,29 +752,6 @@ def upgrade() -> None:
 \tFOREIGN KEY(sucursal_id) REFERENCES sucursales (id) ON DELETE SET NULL
 );\n    """)
 
-    op.execute("""\nCREATE TABLE IF NOT EXISTS theme_schedules (
-\tid SERIAL NOT NULL, 
-\tname VARCHAR(200) NOT NULL, 
-\ttheme_name VARCHAR(100) NOT NULL, 
-\ttheme_id INTEGER, 
-\tstart_time TIME WITHOUT TIME ZONE NOT NULL, 
-\tend_time TIME WITHOUT TIME ZONE NOT NULL, 
-\tmonday BOOLEAN DEFAULT 'false', 
-\ttuesday BOOLEAN DEFAULT 'false', 
-\twednesday BOOLEAN DEFAULT 'false', 
-\tthursday BOOLEAN DEFAULT 'false', 
-\tfriday BOOLEAN DEFAULT 'false', 
-\tsaturday BOOLEAN DEFAULT 'false', 
-\tsunday BOOLEAN DEFAULT 'false', 
-\tis_active BOOLEAN DEFAULT 'true', 
-\tfecha_inicio DATE, 
-\tfecha_fin DATE, 
-\tactivo BOOLEAN DEFAULT 'true', 
-\tfecha_creacion TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL, 
-\tPRIMARY KEY (id), 
-\tFOREIGN KEY(theme_id) REFERENCES custom_themes (id)
-);\n    """)
-
     op.execute("""\nCREATE TABLE IF NOT EXISTS clase_asistencia_historial (
 \tid SERIAL NOT NULL, 
 \tclase_horario_id INTEGER NOT NULL, 
@@ -999,12 +897,6 @@ def upgrade() -> None:
 
     op.execute("""\nCREATE UNIQUE INDEX IF NOT EXISTS uniq_work_session_pause_active ON work_session_pauses (session_kind, session_id) WHERE ended_at IS NULL;\n    """)
 
-    op.execute("""\nCREATE INDEX IF NOT EXISTS idx_acciones_masivas_estado ON acciones_masivas_pendientes (estado);\n    """)
-
-    op.execute("""\nCREATE INDEX IF NOT EXISTS idx_acciones_masivas_fecha_programada ON acciones_masivas_pendientes (fecha_programada);\n    """)
-
-    op.execute("""\nCREATE INDEX IF NOT EXISTS idx_acciones_masivas_usuario_ids ON acciones_masivas_pendientes USING gin (usuario_ids);\n    """)
-
     op.execute("ALTER TABLE IF EXISTS asistencias ADD COLUMN IF NOT EXISTS sucursal_id INTEGER;")
     op.execute("ALTER TABLE IF EXISTS checkin_pending ADD COLUMN IF NOT EXISTS sucursal_id INTEGER;")
     op.execute("ALTER TABLE IF EXISTS clases ADD COLUMN IF NOT EXISTS sucursal_id INTEGER;")
@@ -1046,14 +938,6 @@ def upgrade() -> None:
 
     op.execute("""\nCREATE INDEX IF NOT EXISTS idx_clases_tipo_clase_id ON clases (tipo_clase_id);\n    """)
 
-    op.execute("""\nCREATE INDEX IF NOT EXISTS idx_custom_themes_activo ON custom_themes (activo);\n    """)
-
-    op.execute("""\nCREATE INDEX IF NOT EXISTS idx_maintenance_tasks_next_execution ON maintenance_tasks (next_execution);\n    """)
-
-    op.execute("""\nCREATE INDEX IF NOT EXISTS idx_maintenance_tasks_scheduled ON maintenance_tasks (scheduled_at);\n    """)
-
-    op.execute("""\nCREATE INDEX IF NOT EXISTS idx_maintenance_tasks_status ON maintenance_tasks (status);\n    """)
-
     op.execute("""\nCREATE INDEX IF NOT EXISTS idx_memberships_status_end_date ON memberships (status, end_date);\n    """)
 
     op.execute("""\nCREATE INDEX IF NOT EXISTS idx_memberships_usuario_status ON memberships (usuario_id, status);\n    """)
@@ -1075,12 +959,6 @@ def upgrade() -> None:
     op.execute("""\nCREATE INDEX IF NOT EXISTS idx_rutinas_usuario_id ON rutinas (usuario_id);\n    """)
 
     op.execute("""\nCREATE UNIQUE INDEX IF NOT EXISTS idx_rutinas_uuid_rutina ON rutinas (uuid_rutina);\n    """)
-
-    op.execute("""\nCREATE INDEX IF NOT EXISTS idx_system_diagnostics_status ON system_diagnostics (status);\n    """)
-
-    op.execute("""\nCREATE INDEX IF NOT EXISTS idx_system_diagnostics_timestamp ON system_diagnostics (timestamp);\n    """)
-
-    op.execute("""\nCREATE INDEX IF NOT EXISTS idx_system_diagnostics_type ON system_diagnostics (diagnostic_type);\n    """)
 
     op.execute("""\nCREATE INDEX IF NOT EXISTS idx_tipo_cuota_clases_permiso_sucursal ON tipo_cuota_clases_permisos (sucursal_id);\n    """)
 
@@ -1199,12 +1077,6 @@ def upgrade() -> None:
     op.execute("""\nCREATE INDEX IF NOT EXISTS idx_staff_sessions_sucursal_id ON staff_sessions (sucursal_id);\n    """)
 
     op.execute("""\nCREATE UNIQUE INDEX IF NOT EXISTS uniq_sesion_activa_por_staff ON staff_sessions (staff_id) WHERE hora_fin IS NULL;\n    """)
-
-    op.execute("""\nCREATE INDEX IF NOT EXISTS idx_theme_schedules_activo ON theme_schedules (activo);\n    """)
-
-    op.execute("""\nCREATE INDEX IF NOT EXISTS idx_theme_schedules_fechas ON theme_schedules (fecha_inicio, fecha_fin);\n    """)
-
-    op.execute("""\nCREATE INDEX IF NOT EXISTS idx_theme_schedules_theme_id ON theme_schedules (theme_id);\n    """)
 
     op.execute("""\nCREATE INDEX IF NOT EXISTS idx_clase_asistencia_historial_clase_horario_id ON clase_asistencia_historial (clase_horario_id);\n    """)
 

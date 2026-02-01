@@ -19,7 +19,8 @@ import {
     Home,
     MessageSquare,
     Clock,
-    Briefcase
+    Briefcase,
+    KeyRound
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ToastContainer, Modal, Button } from '@/components/ui';
@@ -35,6 +36,7 @@ const navigation = [
     { key: 'ejercicios', name: 'Ejercicios', href: '/gestion/ejercicios', icon: Dumbbell, description: 'Biblioteca de ejercicios' },
     { key: 'clases', name: 'Clases', href: '/gestion/clases', icon: CalendarDays, description: 'Horarios grupales' },
     { key: 'asistencias', name: 'Asistencias', href: '/gestion/asistencias', icon: ScanLine, description: 'Check-in y registro' },
+    { key: 'accesos', name: 'Accesos', href: '/gestion/accesos', icon: KeyRound, description: 'Molinete/puerta' },
     { key: 'whatsapp', name: 'WhatsApp', href: '/gestion/whatsapp', icon: MessageSquare, description: 'Mensajes y API' },
 ];
 
@@ -198,12 +200,19 @@ export default function AdminLayout({
 
                         {/* Logo */}
                         <Link href="/gestion/usuarios" className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center shadow-sm">
+                            <div
+                                className={cn(
+                                    'w-9 h-9 rounded-xl shadow-sm overflow-hidden flex items-center justify-center',
+                                    gymLogoUrl
+                                        ? 'bg-transparent'
+                                        : 'bg-gradient-to-br from-primary-500 to-primary-700'
+                                )}
+                            >
                                 {gymLogoUrl ? (
                                     <img
                                         src={gymLogoUrl}
                                         alt="Logo"
-                                        className="w-6 h-6 object-contain bg-white/90 rounded-md p-1"
+                                        className="w-full h-full object-contain"
                                         onError={() => setGymLogoUrl('')}
                                     />
                                 ) : (
@@ -318,9 +327,16 @@ export default function AdminLayout({
                                 {/* Header */}
                                 <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800">
                                     <div className="flex items-center gap-3">
-                                        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center">
+                                        <div
+                                            className={cn(
+                                                'w-9 h-9 rounded-xl overflow-hidden flex items-center justify-center',
+                                                gymLogoUrl
+                                                    ? 'bg-transparent'
+                                                    : 'bg-gradient-to-br from-primary-500 to-primary-700'
+                                            )}
+                                        >
                                             {gymLogoUrl ? (
-                                                <img src={gymLogoUrl} alt="Logo" className="w-6 h-6 object-contain bg-white/90 rounded-md p-1" />
+                                                <img src={gymLogoUrl} alt="Logo" className="w-full h-full object-contain" />
                                             ) : (
                                                 <Dumbbell className="w-4 h-4 text-white" />
                                             )}

@@ -18,6 +18,7 @@ from src.dependencies import (
     get_reports_service,
     get_whatsapp_service,
     get_whatsapp_settings_service,
+    require_feature,
     require_owner,
 )
 from src.models.orm_models import (
@@ -661,6 +662,12 @@ async def api_owner_dashboard_export_csv(
 ):
     sid = _get_optional_sucursal_id(request, db)
     t = str(type or "").strip().lower()
+    try:
+        if t == "pagos":
+            await require_feature("pagos")(request, db)
+            await require_feature("pagos:export")(request, db)
+    except Exception:
+        raise
     if t == "usuarios":
         def _load():
             rows = db.execute(

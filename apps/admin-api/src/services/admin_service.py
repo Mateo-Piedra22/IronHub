@@ -48,7 +48,30 @@ DEFAULT_FEATURE_FLAGS: Dict[str, Any] = {
         "configuracion": True,
         "reportes": True,
         "entitlements_v2": False,
+        "bulk_actions": False,
+        "soporte": True,
+        "novedades": True,
+        "accesos": False,
     }
+    ,
+    "features": {
+        "bulk_actions": {
+            "usuarios_import": True,
+        }
+        ,
+        "usuarios": {
+            "create": True,
+            "update": True,
+            "delete": True,
+            "pin": True,
+        },
+        "pagos": {
+            "create": True,
+            "update": True,
+            "delete": True,
+            "export": True,
+        },
+    },
 }
 
 
@@ -392,6 +415,162 @@ class AdminService:
                 try:
                     cur.execute(
                         """
+                        CREATE TABLE IF NOT EXISTS support_tickets (
+                            id BIGSERIAL PRIMARY KEY,
+                            gym_id BIGINT NULL REFERENCES gyms(id) ON DELETE SET NULL,
+                            tenant TEXT NOT NULL,
+                            user_id BIGINT NULL,
+                            user_role TEXT NULL,
+                            sucursal_id BIGINT NULL,
+                            subject TEXT NOT NULL,
+                            category TEXT NOT NULL DEFAULT 'general',
+                            priority TEXT NOT NULL DEFAULT 'medium',
+                            status TEXT NOT NULL DEFAULT 'open',
+                            origin_url TEXT NULL,
+                            user_agent TEXT NULL,
+                            meta JSONB NULL,
+                            last_message_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+                            last_message_sender TEXT NULL,
+                            unread_by_admin BOOLEAN NOT NULL DEFAULT TRUE,
+                            unread_by_client BOOLEAN NOT NULL DEFAULT FALSE,
+                            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+                            updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                        )
+                        """
+                    )
+                    cur.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_support_tickets_tenant_status ON support_tickets(tenant, status)"
+                    )
+                    cur.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_support_tickets_status_priority ON support_tickets(status, priority)"
+                    )
+                    cur.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_support_tickets_last_message_at_desc ON support_tickets(last_message_at DESC)"
+                    )
+                    cur.execute("ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS assigned_to TEXT NULL")
+                    cur.execute("ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS tags JSONB NULL")
+                    cur.execute(
+                        "ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS first_response_due_at TIMESTAMP WITHOUT TIME ZONE NULL"
+                    )
+                    cur.execute(
+                        "ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS next_response_due_at TIMESTAMP WITHOUT TIME ZONE NULL"
+                    )
+                    cur.execute(
+                        "ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS first_response_at TIMESTAMP WITHOUT TIME ZONE NULL"
+                    )
+                    cur.execute(
+                        "ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP WITHOUT TIME ZONE NULL"
+                    )
+                    cur.execute(
+                        "ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS closed_at TIMESTAMP WITHOUT TIME ZONE NULL"
+                    )
+                    cur.execute(
+                        "ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS last_admin_read_at TIMESTAMP WITHOUT TIME ZONE NULL"
+                    )
+                    cur.execute(
+                        "ALTER TABLE support_tickets ADD COLUMN IF NOT EXISTS last_client_read_at TIMESTAMP WITHOUT TIME ZONE NULL"
+                    )
+                    cur.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_support_tickets_next_response_due_at ON support_tickets(next_response_due_at)"
+                    )
+                    cur.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_support_tickets_assigned_to ON support_tickets(assigned_to)"
+                    )
+                except Exception:
+                    pass
+                try:
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS support_ticket_messages (
+                            id BIGSERIAL PRIMARY KEY,
+                            ticket_id BIGINT NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+                            sender_type TEXT NOT NULL,
+                            sender_id BIGINT NULL,
+                            content TEXT NOT NULL,
+                            attachments JSONB NULL,
+                            read_by_recipient BOOLEAN NOT NULL DEFAULT FALSE,
+                            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                        )
+                        """
+                    )
+                    cur.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_support_ticket_messages_ticket_created ON support_ticket_messages(ticket_id, created_at ASC)"
+                    )
+                except Exception:
+                    pass
+                try:
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS support_tenant_settings (
+                            tenant TEXT PRIMARY KEY,
+                            timezone TEXT NULL,
+                            sla_seconds JSONB NOT NULL DEFAULT '{}'::jsonb,
+                            updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+                            updated_by TEXT NULL
+                        )
+                        """
+                    )
+                    cur.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_support_tenant_settings_tenant ON support_tenant_settings(tenant)"
+                    )
+                except Exception:
+                    pass
+                try:
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS changelogs (
+                            id BIGSERIAL PRIMARY KEY,
+                            version TEXT NOT NULL,
+                            title TEXT NOT NULL,
+                            body_markdown TEXT NOT NULL,
+                            change_type TEXT NOT NULL DEFAULT 'improvement',
+                            image_url TEXT NULL,
+                            is_published BOOLEAN NOT NULL DEFAULT FALSE,
+                            published_at TIMESTAMP WITHOUT TIME ZONE NULL,
+                            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+                            updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+                            created_by TEXT NULL,
+                            updated_by TEXT NULL
+                        )
+                        """
+                    )
+                    cur.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_changelogs_published_at_desc ON changelogs(is_published, published_at DESC)"
+                    )
+                    cur.execute(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_changelogs_version ON changelogs(version)"
+                    )
+                    cur.execute("ALTER TABLE changelogs ADD COLUMN IF NOT EXISTS audience_roles JSONB NULL")
+                    cur.execute("ALTER TABLE changelogs ADD COLUMN IF NOT EXISTS audience_tenants JSONB NULL")
+                    cur.execute("ALTER TABLE changelogs ADD COLUMN IF NOT EXISTS audience_modules JSONB NULL")
+                    cur.execute("ALTER TABLE changelogs ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT FALSE")
+                    cur.execute("ALTER TABLE changelogs ADD COLUMN IF NOT EXISTS min_app_version TEXT NULL")
+                    cur.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_changelogs_pinned_published_at_desc ON changelogs(pinned DESC, published_at DESC)"
+                    )
+                except Exception:
+                    pass
+                try:
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS changelog_reads (
+                            tenant TEXT NOT NULL,
+                            user_id BIGINT NOT NULL,
+                            user_role TEXT NOT NULL DEFAULT 'user',
+                            last_seen_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW(),
+                            last_seen_changelog_id BIGINT NULL,
+                            PRIMARY KEY (tenant, user_id, user_role)
+                        )
+                        """
+                    )
+                    cur.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_changelog_reads_tenant_seen_at ON changelog_reads(tenant, last_seen_at DESC)"
+                    )
+                except Exception:
+                    pass
+                try:
+                    cur.execute(
+                        """
                         CREATE TABLE IF NOT EXISTS admin_job_runs (
                             id BIGSERIAL PRIMARY KEY,
                             run_id TEXT NOT NULL UNIQUE,
@@ -428,6 +607,38 @@ class AdminService:
                     )
                     """
                 )
+
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS gym_branding (
+                        gym_id BIGINT PRIMARY KEY REFERENCES gyms(id) ON DELETE CASCADE,
+                        nombre_publico TEXT NULL,
+                        direccion TEXT NULL,
+                        logo_url TEXT NULL,
+                        color_primario TEXT NULL,
+                        color_secundario TEXT NULL,
+                        color_fondo TEXT NULL,
+                        color_texto TEXT NULL,
+                        updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                    )
+                    """
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_gym_branding_updated_at ON gym_branding (updated_at)"
+                )
+
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS rate_limit_buckets (
+                        key TEXT PRIMARY KEY,
+                        count INTEGER NOT NULL,
+                        expires_at TIMESTAMP WITHOUT TIME ZONE NOT NULL
+                    )
+                    """
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_rate_limit_buckets_expires_at ON rate_limit_buckets (expires_at)"
+                )
                 try:
                     cur.execute(
                         "CREATE INDEX IF NOT EXISTS idx_whatsapp_template_catalog_active ON whatsapp_template_catalog (active)"
@@ -443,6 +654,38 @@ class AdminService:
                 try:
                     cur.execute(
                         "CREATE INDEX IF NOT EXISTS idx_gyms_status ON gyms (status)"
+                    )
+                except Exception:
+                    pass
+                try:
+                    cur.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_gyms_production_ready ON gyms (production_ready)"
+                    )
+                except Exception:
+                    pass
+                try:
+                    cur.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_gyms_production_ready_at ON gyms (production_ready_at DESC)"
+                    )
+                except Exception:
+                    pass
+
+                try:
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS whatsapp_onboarding_events (
+                            id BIGSERIAL PRIMARY KEY,
+                            subdominio TEXT NOT NULL,
+                            event_type TEXT NOT NULL,
+                            severity TEXT NOT NULL,
+                            message TEXT NOT NULL,
+                            details JSONB,
+                            created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                        )
+                        """
+                    )
+                    cur.execute(
+                        "CREATE INDEX IF NOT EXISTS idx_whatsapp_onboarding_events_subdominio_created ON whatsapp_onboarding_events (subdominio, created_at DESC)"
                     )
                 except Exception:
                     pass
@@ -913,11 +1156,42 @@ class AdminService:
             return {"ok": False, "error": "list_failed", "items": [], "limit": lim, "offset": off, "status": st}
 
     def _merge_feature_flags(self, base: Dict[str, Any], other: Dict[str, Any]) -> Dict[str, Any]:
-        out: Dict[str, Any] = {"modules": dict((base or {}).get("modules") or {})}
+        def _merge_bool_tree(b: Any, o: Any) -> Any:
+            if isinstance(b, dict) and isinstance(o, dict):
+                out2: Dict[str, Any] = {str(k): v for k, v in b.items()}
+                for k, v in o.items():
+                    ks = str(k)
+                    if ks in out2:
+                        out2[ks] = _merge_bool_tree(out2[ks], v)
+                    else:
+                        out2[ks] = _merge_bool_tree({}, v) if isinstance(v, dict) else bool(v)
+                return out2
+            if isinstance(o, dict):
+                return {str(k): _merge_bool_tree({}, v) for k, v in o.items()}
+            return bool(o)
+
+        out: Dict[str, Any] = dict(base or {})
+
+        bm = (base or {}).get("modules") if isinstance(base, dict) else None
+        om = (other or {}).get("modules") if isinstance(other, dict) else None
+        modules = dict(bm or {}) if isinstance(bm, dict) else {}
+        if isinstance(om, dict):
+            modules.update({str(k): bool(v) for k, v in om.items()})
+        out["modules"] = modules
+
+        bf = (base or {}).get("features") if isinstance(base, dict) else None
+        of = (other or {}).get("features") if isinstance(other, dict) else None
+        features = dict(bf or {}) if isinstance(bf, dict) else {}
+        if isinstance(of, dict):
+            features = _merge_bool_tree(features, of)
+        out["features"] = features
+
         try:
-            om = other.get("modules") if isinstance(other, dict) else None
-            if isinstance(om, dict):
-                out["modules"].update({str(k): bool(v) for k, v in om.items()})
+            if isinstance(other, dict):
+                for k, v in other.items():
+                    if k in ("modules", "features"):
+                        continue
+                    out[k] = v
         except Exception:
             pass
         return out
@@ -3429,21 +3703,24 @@ class AdminService:
                 Bucket=bucket, Key=key, Body=file_content, ContentType=content_type
             )
 
-            # Build public URL (Cloudflare R2 or B2 public bucket)
-            cdn_domain = os.getenv("CDN_CUSTOM_DOMAIN", "") or os.getenv(
-                "B2_CDN_DOMAIN", ""
-            )
-            if cdn_domain:
-                if not cdn_domain.startswith("http"):
-                    cdn_domain = f"https://{cdn_domain}"
-                public_url = f"{cdn_domain}/{key}"
-            else:
-                # Fallback to B2 native URL
-                endpoint = os.getenv("B2_ENDPOINT_URL", "").strip()
-                if endpoint:
-                    public_url = f"{endpoint}/{bucket}/{key}"
-                else:
-                    public_url = f"https://{bucket}.s3.backblazeb2.com/{key}"
+            def _b2_direct_public_base() -> str:
+                raw = (os.getenv("B2_PUBLIC_BASE_URL") or "").strip().rstrip("/")
+                if raw:
+                    if not raw.startswith("http://") and not raw.startswith("https://"):
+                        raw = f"https://{raw.lstrip('/')}"
+                    if raw.endswith("/file"):
+                        raw = raw[:-5]
+                    if "backblazeb2.com" in raw.lower():
+                        return raw
+
+                ep = (os.getenv("B2_ENDPOINT_URL") or "").strip().lower()
+                ep = ep.replace("https://", "").replace("http://", "")
+                m = re.search(r"-(\d{3})\.backblazeb2\.com", ep)
+                if m:
+                    return f"https://f{m.group(1)}.backblazeb2.com"
+                return "https://f000.backblazeb2.com"
+
+            public_url = f"{_b2_direct_public_base()}/file/{bucket}/{key}"
 
             logger.info(f"Uploaded asset for gym {gym_id}: {key}")
             return {"ok": True, "url": public_url, "key": key}
@@ -3464,40 +3741,42 @@ class AdminService:
             if not subdominio:
                 return {"ok": False, "error": "invalid_subdomain"}
 
-            # Get gym's tenant database
-            db_name = gym.get("db_name")
-            if not db_name:
-                return {"ok": False, "error": "no_tenant_db"}
-
-            # Save branding to configuracion table in tenant DB
-            engine = self._get_tenant_engine(db_name)
-            if not engine:
-                return {"ok": False, "error": "could_not_connect_tenant"}
-
-            Session = sessionmaker(bind=engine)
-            session = Session()
             try:
-                # Branding config keys
-                config_keys = {
-                    "logo_url": branding.get("logo_url", ""),
-                    "gym_logo_url": branding.get("logo_url", ""),
-                    "nombre_publico": branding.get("nombre_publico", ""),
-                    "direccion": branding.get("direccion", ""),
-                    "color_primario": branding.get("color_primario", "#6366f1"),
-                    "color_secundario": branding.get("color_secundario", "#22c55e"),
-                    "color_fondo": branding.get("color_fondo", "#0a0a0a"),
-                    "color_texto": branding.get("color_texto", "#ffffff"),
-                }
-
-                for key, value in config_keys.items():
-                    # Upsert each config
-                    existing = session.query(Configuracion).filter_by(clave=key).first()
-                    if existing:
-                        existing.valor = str(value)
-                    else:
-                        session.add(Configuracion(clave=key, valor=str(value)))
-
-                session.commit()
+                with self.db.get_connection_context() as conn:
+                    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                    payload = {
+                        "gym_id": int(gym_id),
+                        "nombre_publico": branding.get("nombre_publico"),
+                        "direccion": branding.get("direccion"),
+                        "logo_url": branding.get("logo_url"),
+                        "color_primario": branding.get("color_primario"),
+                        "color_secundario": branding.get("color_secundario"),
+                        "color_fondo": branding.get("color_fondo"),
+                        "color_texto": branding.get("color_texto"),
+                    }
+                    cur.execute(
+                        """
+                        INSERT INTO gym_branding (
+                            gym_id, nombre_publico, direccion, logo_url,
+                            color_primario, color_secundario, color_fondo, color_texto, updated_at
+                        )
+                        VALUES (
+                            %(gym_id)s, %(nombre_publico)s, %(direccion)s, %(logo_url)s,
+                            %(color_primario)s, %(color_secundario)s, %(color_fondo)s, %(color_texto)s, NOW()
+                        )
+                        ON CONFLICT (gym_id) DO UPDATE SET
+                            nombre_publico = COALESCE(EXCLUDED.nombre_publico, gym_branding.nombre_publico),
+                            direccion = COALESCE(EXCLUDED.direccion, gym_branding.direccion),
+                            logo_url = COALESCE(EXCLUDED.logo_url, gym_branding.logo_url),
+                            color_primario = COALESCE(EXCLUDED.color_primario, gym_branding.color_primario),
+                            color_secundario = COALESCE(EXCLUDED.color_secundario, gym_branding.color_secundario),
+                            color_fondo = COALESCE(EXCLUDED.color_fondo, gym_branding.color_fondo),
+                            color_texto = COALESCE(EXCLUDED.color_texto, gym_branding.color_texto),
+                            updated_at = NOW()
+                        """,
+                        payload,
+                    )
+                    conn.commit()
 
                 self.log_action(
                     "owner",
@@ -3507,8 +3786,7 @@ class AdminService:
                 )
                 return {"ok": True}
             finally:
-                session.close()
-                engine.dispose()
+                pass
         except Exception as e:
             logger.error(f"Error saving branding for gym {gym_id}: {e}")
             return {"ok": False, "error": str(e)}
@@ -3520,56 +3798,31 @@ class AdminService:
             if not gym:
                 return {}
 
-            db_name = gym.get("db_name")
-            if not db_name:
-                return {}
-
-            engine = self._get_tenant_engine(db_name)
-            if not engine:
-                return {}
-
-            Session = sessionmaker(bind=engine)
-            session = Session()
             try:
-                branding = {}
-                config_keys = [
-                    "logo_url",
-                    "gym_logo_url",
-                    "nombre_publico",
-                    "direccion",
-                    "color_primario",
-                    "color_secundario",
-                    "color_fondo",
-                    "color_texto",
-                ]
-
-                db_values = {}
-                for key in config_keys:
-                    config = session.query(Configuracion).filter_by(clave=key).first()
-                    if config:
-                        db_values[key] = config.valor
-
-                branding = db_values.copy()
-
-                # Fallback logic for logo: gym_config (legacy) > gym_logo_url > logo_url
-                if not branding.get("logo_url"):
-                    # Check legacy table
-                    try:
-                        legacy_row = session.execute(
-                            text("SELECT logo_url FROM gym_config LIMIT 1")
-                        ).fetchone()
-                        if legacy_row and legacy_row[0]:
-                            branding["logo_url"] = str(legacy_row[0]).strip()
-                    except Exception:
-                        pass
-
-                if not branding.get("logo_url") and branding.get("gym_logo_url"):
-                    branding["logo_url"] = branding["gym_logo_url"]
-
-                return branding
+                with self.db.get_connection_context() as conn:
+                    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                    cur.execute(
+                        """
+                        SELECT nombre_publico, direccion, logo_url,
+                               color_primario, color_secundario, color_fondo, color_texto
+                        FROM gym_branding
+                        WHERE gym_id = %s
+                        LIMIT 1
+                        """,
+                        (int(gym_id),),
+                    )
+                    row = cur.fetchone() or {}
+                return {
+                    "nombre_publico": row.get("nombre_publico") or "",
+                    "direccion": row.get("direccion") or "",
+                    "logo_url": row.get("logo_url") or "",
+                    "color_primario": row.get("color_primario") or "#3b82f6",
+                    "color_secundario": row.get("color_secundario") or "#10b981",
+                    "color_fondo": row.get("color_fondo") or "#020617",
+                    "color_texto": row.get("color_texto") or "#ffffff",
+                }
             finally:
-                session.close()
-                engine.dispose()
+                pass
         except Exception as e:
             logger.error(f"Error getting branding for gym {gym_id}: {e}")
             return {}
@@ -7091,3 +7344,651 @@ class AdminService:
                 }
         except Exception:
             return {"active": 0, "total": 0, "stats": {}, "mrr": 0.0}
+
+    def list_support_tickets(
+        self,
+        *,
+        status: Optional[str] = None,
+        priority: Optional[str] = None,
+        tenant: Optional[str] = None,
+        assignee: Optional[str] = None,
+        q: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 30,
+    ) -> Dict[str, Any]:
+        st = str(status or "").strip().lower() or None
+        pr = str(priority or "").strip().lower() or None
+        tn = str(tenant or "").strip().lower() or None
+        asg = str(assignee or "").strip().lower() or None
+        qq = str(q or "").strip()
+        p = max(1, int(page or 1))
+        ps = max(1, min(int(page_size or 30), 100))
+        where_terms: List[str] = []
+        params: List[Any] = []
+        if st:
+            where_terms.append("t.status = %s")
+            params.append(st)
+        if pr:
+            where_terms.append("t.priority = %s")
+            params.append(pr)
+        if tn:
+            where_terms.append("LOWER(t.tenant) = %s")
+            params.append(tn)
+        if asg:
+            where_terms.append("LOWER(COALESCE(t.assigned_to, '')) = %s")
+            params.append(asg)
+        if qq:
+            where_terms.append(
+                "(t.subject ILIKE %s OR t.tenant ILIKE %s OR COALESCE(t.assigned_to,'') ILIKE %s)"
+            )
+            params.extend([f"%{qq}%", f"%{qq}%", f"%{qq}%"])
+        where_sql = (" WHERE " + " AND ".join(where_terms)) if where_terms else ""
+        with self.db.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute(f"SELECT COUNT(*) FROM support_tickets t{where_sql}", params)
+            total_row = cur.fetchone()
+            total = int(total_row[0]) if total_row else 0
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                f"""
+                SELECT
+                  t.*,
+                  g.nombre AS gym_nombre,
+                  CASE
+                    WHEN t.next_response_due_at IS NOT NULL
+                      AND t.next_response_due_at < NOW()
+                      AND t.status NOT IN ('resolved','closed')
+                    THEN TRUE
+                    ELSE FALSE
+                  END AS is_overdue,
+                  CASE
+                    WHEN t.next_response_due_at IS NOT NULL
+                      AND t.next_response_due_at < NOW()
+                    THEN EXTRACT(EPOCH FROM (NOW() - t.next_response_due_at))::BIGINT
+                    ELSE 0
+                  END AS overdue_seconds
+                FROM support_tickets t
+                LEFT JOIN gyms g ON g.id = t.gym_id
+                {where_sql}
+                ORDER BY t.last_message_at DESC, t.id DESC
+                LIMIT %s OFFSET %s
+                """,
+                params + [ps, (p - 1) * ps],
+            )
+            rows = cur.fetchall() or []
+        return {"ok": True, "items": [dict(r) for r in rows], "total": total, "page": p, "page_size": ps}
+
+    def get_support_ticket(self, ticket_id: int) -> Dict[str, Any]:
+        tid = int(ticket_id)
+        with self.db.get_connection_context() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """
+                SELECT t.*, g.nombre AS gym_nombre
+                FROM support_tickets t
+                LEFT JOIN gyms g ON g.id = t.gym_id
+                WHERE t.id = %s
+                LIMIT 1
+                """,
+                (tid,),
+            )
+            t = cur.fetchone()
+            if not t:
+                return {"ok": False, "error": "not_found"}
+            try:
+                cur2 = conn.cursor()
+                cur2.execute(
+                    "UPDATE support_tickets SET unread_by_admin = FALSE, last_admin_read_at = NOW(), updated_at = NOW() WHERE id = %s",
+                    (tid,),
+                )
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            cur.execute(
+                """
+                SELECT id, ticket_id, sender_type, sender_id, content, attachments, read_by_recipient, created_at
+                FROM support_ticket_messages
+                WHERE ticket_id = %s
+                ORDER BY created_at ASC, id ASC
+                """,
+                (tid,),
+            )
+            msgs = cur.fetchall() or []
+        return {"ok": True, "ticket": dict(t), "messages": [dict(m) for m in msgs]}
+
+    def _support_sla_seconds(self, priority: str) -> int:
+        p = str(priority or "").strip().lower()
+        if p == "critical":
+            return 2 * 60 * 60
+        if p == "high":
+            return 6 * 60 * 60
+        if p == "medium":
+            return 24 * 60 * 60
+        if p == "low":
+            return 72 * 60 * 60
+        return 24 * 60 * 60
+
+    def update_support_ticket(
+        self,
+        ticket_id: int,
+        *,
+        status: Optional[str] = None,
+        priority: Optional[str] = None,
+        assigned_to: Optional[str] = None,
+        tags: Optional[List[Any]] = None,
+        by: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        tid = int(ticket_id)
+        st = str(status or "").strip().lower() if status is not None else None
+        pr = str(priority or "").strip().lower() if priority is not None else None
+        asg = str(assigned_to or "").strip() if assigned_to is not None else None
+        tags_val = tags if isinstance(tags, list) else None
+        updates: List[str] = []
+        params: List[Any] = []
+        if st is not None:
+            if not st:
+                return {"ok": False, "error": "invalid_status"}
+            updates.append("status = %s")
+            params.append(st)
+            if st == "resolved":
+                updates.append("resolved_at = COALESCE(resolved_at, NOW())")
+            if st == "closed":
+                updates.append("closed_at = COALESCE(closed_at, NOW())")
+        if pr is not None:
+            if not pr:
+                return {"ok": False, "error": "invalid_priority"}
+            updates.append("priority = %s")
+            params.append(pr)
+        if asg is not None:
+            updates.append("assigned_to = %s")
+            params.append(asg or None)
+        if tags_val is not None:
+            try:
+                updates.append("tags = CAST(%s AS JSONB)")
+                params.append(json.dumps(tags_val, ensure_ascii=False))
+            except Exception:
+                updates.append("tags = CAST(%s AS JSONB)")
+                params.append("[]")
+        if not updates:
+            return {"ok": True}
+        updates.append("updated_at = NOW()")
+        params.append(tid)
+        with self.db.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                f"UPDATE support_tickets SET {', '.join(updates)} WHERE id = %s RETURNING id",
+                tuple(params),
+            )
+            row = cur.fetchone()
+            conn.commit()
+        if not row:
+            return {"ok": False, "error": "not_found"}
+        try:
+            self.log_action(str(by or "admin"), "support_ticket_update", tid, {"status": st, "priority": pr, "assigned_to": asg})
+        except Exception:
+            pass
+        return {"ok": True}
+
+    def update_support_ticket_status(self, ticket_id: int, status: str, *, by: Optional[str] = None) -> Dict[str, Any]:
+        return self.update_support_ticket(ticket_id, status=status, by=by)
+
+    def reply_support_ticket_admin(
+        self, ticket_id: int, content: str, *, by: Optional[str] = None, attachments: Optional[List[Any]] = None
+    ) -> Dict[str, Any]:
+        tid = int(ticket_id)
+        msg = str(content or "").strip()
+        if not msg:
+            return {"ok": False, "error": "empty_message"}
+        try:
+            att = attachments if isinstance(attachments, list) else []
+            att_json = json.dumps(att, ensure_ascii=False)
+        except Exception:
+            att_json = "[]"
+        with self.db.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO support_ticket_messages(ticket_id, sender_type, sender_id, content, attachments, read_by_recipient, created_at)
+                VALUES (%s, 'admin', NULL, %s, CAST(%s AS JSONB), FALSE, NOW())
+                """,
+                (tid, msg, att_json),
+            )
+            cur.execute(
+                """
+                UPDATE support_tickets
+                SET
+                  last_message_at = NOW(),
+                  last_message_sender = 'admin',
+                  unread_by_admin = FALSE,
+                  unread_by_client = TRUE,
+                  status = CASE
+                    WHEN status IN ('resolved', 'closed') THEN status
+                    ELSE 'waiting_client'
+                  END,
+                  first_response_at = COALESCE(first_response_at, NOW()),
+                  next_response_due_at = NULL,
+                  updated_at = NOW()
+                WHERE id = %s
+                """,
+                (tid,),
+            )
+            conn.commit()
+        try:
+            self.log_action(str(by or "admin"), "support_ticket_reply_admin", tid, None)
+        except Exception:
+            pass
+        return {"ok": True}
+
+    def internal_note_support_ticket(self, ticket_id: int, content: str, *, by: Optional[str] = None) -> Dict[str, Any]:
+        tid = int(ticket_id)
+        msg = str(content or "").strip()
+        if not msg:
+            return {"ok": False, "error": "empty_message"}
+        with self.db.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO support_ticket_messages(ticket_id, sender_type, sender_id, content, attachments, read_by_recipient, created_at)
+                VALUES (%s, 'internal', NULL, %s, CAST('[]' AS JSONB), TRUE, NOW())
+                """,
+                (tid, msg),
+            )
+            cur.execute("UPDATE support_tickets SET updated_at = NOW() WHERE id = %s", (tid,))
+            conn.commit()
+        try:
+            self.log_action(str(by or "admin"), "support_ticket_internal_note", tid, None)
+        except Exception:
+            pass
+        return {"ok": True}
+
+    def support_ops_summary(self) -> Dict[str, Any]:
+        with self.db.get_connection_context() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """
+                SELECT
+                  SUM(CASE WHEN status NOT IN ('resolved','closed') THEN 1 ELSE 0 END)::BIGINT AS active_total,
+                  SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END)::BIGINT AS open_total,
+                  SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END)::BIGINT AS in_progress_total,
+                  SUM(CASE WHEN status = 'waiting_client' THEN 1 ELSE 0 END)::BIGINT AS waiting_client_total,
+                  SUM(CASE WHEN status IN ('resolved','closed') THEN 1 ELSE 0 END)::BIGINT AS done_total,
+                  SUM(CASE WHEN COALESCE(assigned_to,'') = '' AND status NOT IN ('resolved','closed') THEN 1 ELSE 0 END)::BIGINT AS unassigned_total,
+                  SUM(CASE WHEN next_response_due_at IS NOT NULL AND next_response_due_at < NOW() AND status NOT IN ('resolved','closed') THEN 1 ELSE 0 END)::BIGINT AS overdue_total,
+                  SUM(CASE WHEN next_response_due_at IS NOT NULL AND next_response_due_at < (NOW() + INTERVAL '1 hour') AND status NOT IN ('resolved','closed') THEN 1 ELSE 0 END)::BIGINT AS due_1h_total,
+                  SUM(CASE WHEN next_response_due_at IS NOT NULL AND next_response_due_at < (NOW() + INTERVAL '6 hours') AND status NOT IN ('resolved','closed') THEN 1 ELSE 0 END)::BIGINT AS due_6h_total,
+                  SUM(CASE WHEN next_response_due_at IS NOT NULL AND next_response_due_at < (NOW() + INTERVAL '24 hours') AND status NOT IN ('resolved','closed') THEN 1 ELSE 0 END)::BIGINT AS due_24h_total
+                FROM support_tickets
+                """
+            )
+            totals = cur.fetchone() or {}
+
+            cur.execute(
+                """
+                SELECT
+                  COALESCE(NULLIF(TRIM(assigned_to),''), '__unassigned__') AS assignee,
+                  COUNT(*)::BIGINT AS total,
+                  SUM(CASE WHEN next_response_due_at IS NOT NULL AND next_response_due_at < NOW() AND status NOT IN ('resolved','closed') THEN 1 ELSE 0 END)::BIGINT AS overdue
+                FROM support_tickets
+                WHERE status NOT IN ('resolved','closed')
+                GROUP BY 1
+                ORDER BY overdue DESC, total DESC, assignee ASC
+                LIMIT 50
+                """
+            )
+            by_assignee = [dict(r) for r in (cur.fetchall() or [])]
+
+            cur.execute(
+                """
+                SELECT
+                  LOWER(tenant) AS tenant,
+                  COUNT(*)::BIGINT AS total,
+                  SUM(CASE WHEN next_response_due_at IS NOT NULL AND next_response_due_at < NOW() AND status NOT IN ('resolved','closed') THEN 1 ELSE 0 END)::BIGINT AS overdue
+                FROM support_tickets
+                WHERE status NOT IN ('resolved','closed')
+                GROUP BY 1
+                ORDER BY overdue DESC, total DESC, tenant ASC
+                LIMIT 50
+                """
+            )
+            by_tenant = [dict(r) for r in (cur.fetchall() or [])]
+
+        return {"ok": True, "totals": dict(totals), "by_assignee": by_assignee, "by_tenant": by_tenant}
+
+    def batch_update_support_tickets(self, ticket_ids: List[int], data: Dict[str, Any], *, by: Optional[str] = None) -> Dict[str, Any]:
+        ids: List[int] = []
+        for x in ticket_ids or []:
+            try:
+                ids.append(int(x))
+            except Exception:
+                continue
+        ids = sorted(set([i for i in ids if i > 0]))[:500]
+        if not ids:
+            return {"ok": False, "error": "no_ticket_ids"}
+
+        updates: List[str] = []
+        params: List[Any] = []
+        status = data.get("status")
+        if status is not None:
+            st = str(status or "").strip().lower()
+            if not st:
+                return {"ok": False, "error": "invalid_status"}
+            updates.append("status = %s")
+            params.append(st)
+            if st == "resolved":
+                updates.append("resolved_at = COALESCE(resolved_at, NOW())")
+            if st == "closed":
+                updates.append("closed_at = COALESCE(closed_at, NOW())")
+
+        priority = data.get("priority")
+        if priority is not None:
+            pr = str(priority or "").strip().lower()
+            if not pr:
+                return {"ok": False, "error": "invalid_priority"}
+            updates.append("priority = %s")
+            params.append(pr)
+
+        assigned_to = data.get("assigned_to")
+        if assigned_to is not None:
+            asg = str(assigned_to or "").strip()
+            updates.append("assigned_to = %s")
+            params.append(asg or None)
+
+        tag_add = data.get("tag_add")
+        if tag_add is not None:
+            t = str(tag_add or "").strip()
+            if t:
+                updates.append(
+                    "tags = (SELECT jsonb_agg(DISTINCT x) FROM (SELECT jsonb_array_elements_text(COALESCE(tags,'[]'::jsonb)) AS x UNION SELECT %s AS x) s)"
+                )
+                params.append(t)
+
+        tag_remove = data.get("tag_remove")
+        if tag_remove is not None:
+            t = str(tag_remove or "").strip()
+            if t:
+                updates.append(
+                    "tags = (SELECT COALESCE(jsonb_agg(x), '[]'::jsonb) FROM (SELECT jsonb_array_elements_text(COALESCE(tags,'[]'::jsonb)) AS x) s WHERE x <> %s)"
+                )
+                params.append(t)
+
+        if not updates:
+            return {"ok": True, "updated": 0}
+
+        updates.append("updated_at = NOW()")
+        params.append(tuple(ids))
+        with self.db.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                f"UPDATE support_tickets SET {', '.join(updates)} WHERE id = ANY(%s) RETURNING id",
+                tuple(params),
+            )
+            rows = cur.fetchall() or []
+            conn.commit()
+
+        try:
+            self.log_action(str(by or "admin"), "support_ticket_batch_update", 0, {"ids": ids, "data": data})
+        except Exception:
+            pass
+        return {"ok": True, "updated": len(rows)}
+
+    def get_support_tenant_settings(self, tenant: str) -> Dict[str, Any]:
+        tn = str(tenant or "").strip().lower()
+        if not tn:
+            return {"ok": False, "error": "invalid_tenant"}
+        with self.db.get_connection_context() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT tenant, timezone, sla_seconds, updated_at, updated_by FROM support_tenant_settings WHERE tenant = %s LIMIT 1",
+                (tn,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return {"ok": True, "settings": {"tenant": tn, "timezone": None, "sla_seconds": {}}}
+        return {"ok": True, "settings": dict(row)}
+
+    def set_support_tenant_settings(self, tenant: str, payload: Dict[str, Any], *, by: Optional[str] = None) -> Dict[str, Any]:
+        tn = str(tenant or "").strip().lower()
+        if not tn:
+            return {"ok": False, "error": "invalid_tenant"}
+        tz = str((payload or {}).get("timezone") or "").strip()[:64] or None
+        sla = (payload or {}).get("sla_seconds")
+        if not isinstance(sla, dict):
+            sla = {}
+        try:
+            sla_json = json.dumps(sla, ensure_ascii=False)
+        except Exception:
+            sla_json = "{}"
+        with self.db.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO support_tenant_settings(tenant, timezone, sla_seconds, updated_at, updated_by)
+                VALUES (%s, %s, CAST(%s AS JSONB), NOW(), %s)
+                ON CONFLICT (tenant) DO UPDATE SET
+                    timezone = EXCLUDED.timezone,
+                    sla_seconds = EXCLUDED.sla_seconds,
+                    updated_at = EXCLUDED.updated_at,
+                    updated_by = EXCLUDED.updated_by
+                """,
+                (tn, tz, sla_json, by),
+            )
+            conn.commit()
+        try:
+            self.log_action(str(by or "admin"), "support_tenant_settings", 0, {"tenant": tn})
+        except Exception:
+            pass
+        return self.get_support_tenant_settings(tn)
+
+    def list_changelogs_admin(self, *, include_drafts: bool = True, page: int = 1, page_size: int = 30) -> Dict[str, Any]:
+        p = max(1, int(page or 1))
+        ps = max(1, min(int(page_size or 30), 100))
+        where_sql = "" if include_drafts else " WHERE is_published = TRUE"
+        with self.db.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute(f"SELECT COUNT(*) FROM changelogs{where_sql}")
+            total = int((cur.fetchone() or [0])[0] or 0)
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                f"""
+                SELECT id, version, title, body_markdown, change_type, image_url, is_published, published_at, pinned, min_app_version,
+                       audience_roles, audience_tenants, audience_modules,
+                       created_at, updated_at
+                FROM changelogs
+                {where_sql}
+                ORDER BY COALESCE(published_at, created_at) DESC, id DESC
+                LIMIT %s OFFSET %s
+                """,
+                (ps, (p - 1) * ps),
+            )
+            rows = cur.fetchall() or []
+        return {"ok": True, "items": [dict(r) for r in rows], "total": total, "page": p, "page_size": ps}
+
+    def create_changelog(self, data: Dict[str, Any], *, by: Optional[str] = None) -> Dict[str, Any]:
+        version = str((data or {}).get("version") or "").strip()[:50]
+        title = str((data or {}).get("title") or "").strip()[:255]
+        body = str((data or {}).get("body_markdown") or "").strip()
+        ctype = str((data or {}).get("change_type") or "improvement").strip().lower()[:50]
+        image_url = str((data or {}).get("image_url") or "").strip()[:500] or None
+        is_published = bool((data or {}).get("is_published"))
+        published_at = datetime.utcnow() if is_published else None
+        pinned = bool((data or {}).get("pinned"))
+        min_app_version = str((data or {}).get("min_app_version") or "").strip()[:50] or None
+        audience_roles = (data or {}).get("audience_roles")
+        audience_tenants = (data or {}).get("audience_tenants")
+        audience_modules = (data or {}).get("audience_modules")
+        if not isinstance(audience_roles, list):
+            audience_roles = []
+        if not isinstance(audience_modules, list):
+            audience_modules = []
+        if not isinstance(audience_tenants, dict):
+            audience_tenants = {}
+        try:
+            audience_roles_json = json.dumps([str(x).strip() for x in audience_roles if str(x).strip()], ensure_ascii=False)
+        except Exception:
+            audience_roles_json = "[]"
+        try:
+            audience_modules_json = json.dumps([str(x).strip() for x in audience_modules if str(x).strip()], ensure_ascii=False)
+        except Exception:
+            audience_modules_json = "[]"
+        try:
+            include = audience_tenants.get("include") if isinstance(audience_tenants, dict) else []
+            exclude = audience_tenants.get("exclude") if isinstance(audience_tenants, dict) else []
+            obj = {
+                "include": [str(x).strip().lower() for x in (include or []) if str(x).strip()],
+                "exclude": [str(x).strip().lower() for x in (exclude or []) if str(x).strip()],
+            }
+            audience_tenants_json = json.dumps(obj, ensure_ascii=False)
+        except Exception:
+            audience_tenants_json = "{}"
+        if not version or not title or not body:
+            return {"ok": False, "error": "invalid_payload"}
+        with self.db.get_connection_context() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """
+                INSERT INTO changelogs(
+                    version, title, body_markdown, change_type, image_url,
+                    is_published, published_at, pinned, min_app_version,
+                    audience_roles, audience_tenants, audience_modules,
+                    created_at, updated_at, created_by, updated_by
+                )
+                VALUES (
+                    %s,%s,%s,%s,%s,
+                    %s,%s,%s,%s,
+                    CAST(%s AS JSONB), CAST(%s AS JSONB), CAST(%s AS JSONB),
+                    NOW(),NOW(),%s,%s
+                )
+                RETURNING id
+                """,
+                (
+                    version,
+                    title,
+                    body,
+                    ctype,
+                    image_url,
+                    is_published,
+                    published_at,
+                    pinned,
+                    min_app_version,
+                    audience_roles_json,
+                    audience_tenants_json,
+                    audience_modules_json,
+                    by,
+                    by,
+                ),
+            )
+            row = cur.fetchone()
+            conn.commit()
+        if not row:
+            return {"ok": False, "error": "create_failed"}
+        try:
+            self.log_action(str(by or "admin"), "changelog_create", int(row["id"]), {"version": version})
+        except Exception:
+            pass
+        return {"ok": True, "id": int(row["id"])}
+
+    def update_changelog(self, changelog_id: int, data: Dict[str, Any], *, by: Optional[str] = None) -> Dict[str, Any]:
+        cid = int(changelog_id)
+        with self.db.get_connection_context() as conn:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT id, is_published FROM changelogs WHERE id = %s LIMIT 1", (cid,))
+            cur_row = cur.fetchone()
+            if not cur_row:
+                return {"ok": False, "error": "not_found"}
+            prev_published = bool(cur_row.get("is_published"))
+            version = str((data or {}).get("version") or "").strip()[:50]
+            title = str((data or {}).get("title") or "").strip()[:255]
+            body = str((data or {}).get("body_markdown") or "").strip()
+            ctype = str((data or {}).get("change_type") or "improvement").strip().lower()[:50]
+            image_url = str((data or {}).get("image_url") or "").strip()[:500] or None
+            is_published = bool((data or {}).get("is_published"))
+            pinned = bool((data or {}).get("pinned"))
+            min_app_version = str((data or {}).get("min_app_version") or "").strip()[:50] or None
+            published_at = datetime.utcnow() if (is_published and not prev_published) else None
+            audience_roles = (data or {}).get("audience_roles")
+            audience_tenants = (data or {}).get("audience_tenants")
+            audience_modules = (data or {}).get("audience_modules")
+            if not isinstance(audience_roles, list):
+                audience_roles = []
+            if not isinstance(audience_modules, list):
+                audience_modules = []
+            if not isinstance(audience_tenants, dict):
+                audience_tenants = {}
+            try:
+                audience_roles_json = json.dumps([str(x).strip() for x in audience_roles if str(x).strip()], ensure_ascii=False)
+            except Exception:
+                audience_roles_json = "[]"
+            try:
+                audience_modules_json = json.dumps([str(x).strip() for x in audience_modules if str(x).strip()], ensure_ascii=False)
+            except Exception:
+                audience_modules_json = "[]"
+            try:
+                include = audience_tenants.get("include") if isinstance(audience_tenants, dict) else []
+                exclude = audience_tenants.get("exclude") if isinstance(audience_tenants, dict) else []
+                obj = {
+                    "include": [str(x).strip().lower() for x in (include or []) if str(x).strip()],
+                    "exclude": [str(x).strip().lower() for x in (exclude or []) if str(x).strip()],
+                }
+                audience_tenants_json = json.dumps(obj, ensure_ascii=False)
+            except Exception:
+                audience_tenants_json = "{}"
+            cur.execute(
+                """
+                UPDATE changelogs
+                SET version = %s,
+                    title = %s,
+                    body_markdown = %s,
+                    change_type = %s,
+                    image_url = %s,
+                    is_published = %s,
+                    published_at = CASE WHEN %s THEN COALESCE(published_at, NOW()) ELSE published_at END,
+                    pinned = %s,
+                    min_app_version = %s,
+                    audience_roles = CAST(%s AS JSONB),
+                    audience_tenants = CAST(%s AS JSONB),
+                    audience_modules = CAST(%s AS JSONB),
+                    updated_at = NOW(),
+                    updated_by = %s
+                WHERE id = %s
+                """,
+                (
+                    version,
+                    title,
+                    body,
+                    ctype,
+                    image_url,
+                    is_published,
+                    bool(published_at is not None),
+                    pinned,
+                    min_app_version,
+                    audience_roles_json,
+                    audience_tenants_json,
+                    audience_modules_json,
+                    by,
+                    cid,
+                ),
+            )
+            conn.commit()
+        try:
+            self.log_action(str(by or "admin"), "changelog_update", cid, {"published": is_published})
+        except Exception:
+            pass
+        return {"ok": True}
+
+    def delete_changelog(self, changelog_id: int, *, by: Optional[str] = None) -> Dict[str, Any]:
+        cid = int(changelog_id)
+        with self.db.get_connection_context() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM changelogs WHERE id = %s RETURNING id", (cid,))
+            row = cur.fetchone()
+            conn.commit()
+        if not row:
+            return {"ok": False, "error": "not_found"}
+        try:
+            self.log_action(str(by or "admin"), "changelog_delete", cid, None)
+        except Exception:
+            pass
+        return {"ok": True}

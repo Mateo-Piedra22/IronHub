@@ -1044,6 +1044,11 @@ from src.routers import memberships
 from src.routers import entitlements
 from src.routers import work_sessions
 from src.routers import owner_dashboard
+from src.routers import team
+from src.routers import bulk_actions
+from src.routers import support
+from src.routers import changelogs
+from src.routers import access_control
 
 # Include routers
 app.include_router(auth.router, tags=["Auth"])
@@ -1061,7 +1066,12 @@ app.include_router(entitlements.router, tags=["Entitlements"])
 app.include_router(profesores.router, tags=["Profesores"])
 app.include_router(reports.router, tags=["Reports"])
 app.include_router(owner_dashboard.router, tags=["Owner Dashboard"])
+app.include_router(bulk_actions.router, tags=["Bulk Actions"])
+app.include_router(support.router, tags=["Support"])
+app.include_router(changelogs.router, tags=["Changelogs"])
+app.include_router(access_control.router, tags=["Access Control"])
 app.include_router(admin.router, tags=["Admin"])
 app.include_router(meta_review.router, tags=["Meta Review"])
 app.include_router(staff.router, tags=["Staff"])
 app.include_router(work_sessions.router, tags=["Work Sessions"])
+app.include_router(team.router, tags=["Team"])

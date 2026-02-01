@@ -93,7 +93,7 @@ def _normalize_key_layout(key: str) -> str:
         folder_part = parts[1]
         if tenant_part.endswith("-assets"):
             return s
-        if folder_part not in ("logos", "videos", "exercises", "uploads"):
+        if folder_part not in ("logos", "videos", "exercises", "uploads", "support", "changelog"):
             return s
         # Rewrite tenant folder
         return f"{prefix}{tenant_part}-assets/{rest.split('/', 1)[1]}"
@@ -446,6 +446,7 @@ def get_file_url(file_path: str) -> str:
         try:
             parsed = urllib.parse.urlparse(file_path)
             path = parsed.path or ""
+            host = str(parsed.netloc or "").lower()
 
             # Any host: if URL contains /file/<bucket>/<key>, rewrite to direct B2
             marker = f"/file/{B2_BUCKET_NAME}/"
@@ -453,6 +454,22 @@ def get_file_url(file_path: str) -> str:
                 key = path.split(marker, 1)[1].lstrip("/")
                 if key and ".." not in key:
                     return get_cdn_url(_normalize_key_layout(key))
+
+            # Backblaze S3-style URLs:
+            # - https://<bucket>.s3.backblazeb2.com/<key>
+            # - https://s3.<region>.backblazeb2.com/<bucket>/<key>
+            try:
+                if "backblazeb2.com" in host and "/file/" not in path:
+                    p = path.lstrip("/")
+                    if p and ".." not in p:
+                        if host.endswith(".s3.backblazeb2.com") and host.count(".") >= 3:
+                            return get_cdn_url(_normalize_key_layout(p))
+                        if host.startswith("s3.") and host.endswith(".backblazeb2.com"):
+                            parts = p.split("/", 1)
+                            if len(parts) == 2 and parts[0] == str(B2_BUCKET_NAME):
+                                return get_cdn_url(_normalize_key_layout(parts[1]))
+            except Exception:
+                pass
 
             # Legacy CDN mapping directly to keys (e.g. https://<cdn>/<assets/...>)
             try:
@@ -464,6 +481,16 @@ def get_file_url(file_path: str) -> str:
                         for seg in ("logos", "videos", "exercises", "uploads")
                     ):
                         return get_cdn_url(_normalize_key_layout(key2))
+            except Exception:
+                pass
+
+            # CDN/custom-domain URLs that map directly to a B2 key (admin assets):
+            # e.g. https://<domain>/<subdominio>-assets/<file>
+            try:
+                key3 = path.lstrip("/")
+                first = key3.split("/", 1)[0] if key3 else ""
+                if key3 and ".." not in key3 and first.endswith("-assets"):
+                    return get_cdn_url(_normalize_key_layout(key3))
             except Exception:
                 pass
 

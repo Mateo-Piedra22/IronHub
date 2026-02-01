@@ -232,7 +232,11 @@ async def api_usuarios_list(
 
 @router.put(
     "/api/usuarios/{usuario_id}/pin",
-    dependencies=[Depends(require_feature("usuarios")), Depends(require_scope("usuarios:write"))],
+    dependencies=[
+        Depends(require_feature("usuarios")),
+        Depends(require_feature("usuarios:pin")),
+        Depends(require_scope("usuarios:write")),
+    ],
 )
 async def api_usuario_pin_set(
     usuario_id: int,
@@ -465,7 +469,10 @@ async def api_usuario_get(
         )
 
 
-@router.post("/api/usuarios", dependencies=[Depends(require_feature("usuarios"))])
+@router.post(
+    "/api/usuarios",
+    dependencies=[Depends(require_feature("usuarios")), Depends(require_feature("usuarios:create"))],
+)
 async def api_usuario_create(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -556,7 +563,10 @@ async def api_usuario_create(
         )
 
 
-@router.put("/api/usuarios/{usuario_id}", dependencies=[Depends(require_feature("usuarios"))])
+@router.put(
+    "/api/usuarios/{usuario_id}",
+    dependencies=[Depends(require_feature("usuarios")), Depends(require_feature("usuarios:update"))],
+)
 async def api_usuario_update(
     usuario_id: int,
     request: Request,
@@ -611,7 +621,10 @@ async def api_usuario_update(
         )
 
 
-@router.delete("/api/usuarios/{usuario_id}", dependencies=[Depends(require_feature("usuarios"))])
+@router.delete(
+    "/api/usuarios/{usuario_id}",
+    dependencies=[Depends(require_feature("usuarios")), Depends(require_feature("usuarios:delete"))],
+)
 async def api_usuario_delete(
     usuario_id: int,
     request: Request,

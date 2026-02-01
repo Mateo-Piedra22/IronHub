@@ -403,6 +403,12 @@ export interface GymData {
 export interface PublicGymData {
     gym_name?: string;
     logo_url?: string;
+    theme?: {
+        primary?: string | null;
+        secondary?: string | null;
+        background?: string | null;
+        text?: string | null;
+    };
 }
 
 export interface MaintenanceStatus {
@@ -431,6 +437,7 @@ export interface BootstrapPayload {
 
 export interface FeatureFlags {
     modules?: Record<string, boolean>;
+    features?: Record<string, any>;
 }
 
 export interface SessionUser {
@@ -462,6 +469,20 @@ export interface StaffItem {
     staff?: { tipo?: string | null; estado?: string | null } | null;
     sucursales: number[];
     scopes: string[];
+}
+
+export interface TeamMember {
+    id: number;
+    nombre: string;
+    dni?: string;
+    telefono?: string;
+    rol: string;
+    activo: boolean;
+    sucursales: number[];
+    scopes: string[];
+    kind: 'profesor' | 'staff' | 'usuario';
+    staff: null | { tipo: string | null; estado: string | null };
+    profesor: null | { id: number; tipo: string | null; estado: string | null };
 }
 
 export interface Membership {
@@ -711,6 +732,115 @@ export interface ReciboPreview {
     mostrar_metodo: boolean;
     mostrar_dni: boolean;
 }
+
+export type BulkJob = {
+    id: number;
+    kind: string;
+    status: string;
+    created_at?: string;
+    updated_at?: string;
+    rows_total: number;
+    rows_valid: number;
+    rows_invalid: number;
+    applied_count: number;
+    error_count: number;
+    failure_reason?: string | null;
+};
+
+export type BulkPreviewRow = {
+    row_index: number;
+    data: Record<string, any>;
+    errors?: string[];
+    warnings?: string[];
+    is_valid?: boolean;
+    applied?: boolean;
+    result?: any;
+};
+
+export type SupportTicket = {
+    id: number;
+    tenant: string;
+    subject: string;
+    category: string;
+    priority: string;
+    status: string;
+    origin_url?: string | null;
+    last_message_at?: string;
+    last_message_sender?: string | null;
+    unread_by_client?: boolean;
+    created_at?: string;
+    updated_at?: string;
+};
+
+export type SupportMessage = {
+    id: number;
+    ticket_id: number;
+    sender_type: 'client' | 'admin';
+    content: string;
+    attachments?: any;
+    created_at?: string;
+};
+
+export type ChangelogItem = {
+    id: number;
+    version: string;
+    title: string;
+    body_markdown: string;
+    change_type: string;
+    image_url?: string | null;
+    published_at?: string | null;
+};
+
+export type AccessDevice = {
+    id: number;
+    sucursal_id?: number | null;
+    name: string;
+    enabled: boolean;
+    device_public_id: string;
+    config?: any;
+    last_seen_at?: string | null;
+    created_at?: string;
+    updated_at?: string;
+};
+
+export type AccessEvent = {
+    id: number;
+    created_at?: string;
+    event_type: string;
+    decision: string;
+    reason?: string | null;
+    unlock?: boolean;
+    unlock_ms?: number | null;
+    sucursal_id?: number | null;
+    device_id?: number | null;
+    subject_usuario_id?: number | null;
+    input_value_masked?: string | null;
+};
+
+export type AccessCommand = {
+    id: number;
+    device_id: number;
+    command_type: string;
+    status: string;
+    request_id?: string | null;
+    actor_usuario_id?: number | null;
+    payload?: any;
+    result?: any;
+    created_at?: string | null;
+    claimed_at?: string | null;
+    acked_at?: string | null;
+    expires_at?: string | null;
+};
+
+export type AccessCredential = {
+    id: number;
+    usuario_id: number;
+    credential_type: string;
+    label?: string | null;
+    active: boolean;
+    created_at?: string;
+    updated_at?: string;
+};
 
 // === API Client Class ===
 class ApiClient {
@@ -1112,6 +1242,107 @@ class ApiClient {
         } catch {
         }
         return res;
+    }
+
+    async listAccessDevices() {
+        return this.request<{ ok: boolean; items: AccessDevice[] }>('/api/access/devices');
+    }
+
+    async accessBootstrap() {
+        return this.request<{ ok: boolean; tenant: string }>('/api/access/bootstrap');
+    }
+
+    async listAccessDeviceCommands(deviceId: number, params?: { limit?: number }) {
+        const qp = new URLSearchParams();
+        if (params?.limit) qp.set('limit', String(params.limit));
+        const q = qp.toString() ? `?${qp.toString()}` : '';
+        return this.request<{ ok: boolean; items: AccessCommand[] }>(`/api/access/devices/${deviceId}/commands${q}`);
+    }
+
+    async cancelAccessDeviceCommand(deviceId: number, commandId: number) {
+        return this.request<{ ok: boolean; idempotent?: boolean }>(`/api/access/devices/${deviceId}/commands/${commandId}/cancel`, {
+            method: 'POST',
+            body: JSON.stringify({}),
+        });
+    }
+
+    async createAccessDevice(payload: { name: string; sucursal_id?: number | null; config?: any }) {
+        return this.request<{ ok: boolean; device: any; pairing_code: string; pairing_expires_at: string }>('/api/access/devices', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        });
+    }
+
+    async updateAccessDevice(deviceId: number, payload: Partial<{ name: string; enabled: boolean; sucursal_id: number | null; config: any }>) {
+        return this.request<{ ok: boolean }>(`/api/access/devices/${deviceId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(payload),
+        });
+    }
+
+    async rotateAccessDevicePairing(deviceId: number) {
+        return this.request<{ ok: boolean; pairing_code: string; pairing_expires_at: string }>(`/api/access/devices/${deviceId}/rotate-pairing`, {
+            method: 'POST',
+            body: JSON.stringify({}),
+        });
+    }
+
+    async revokeAccessDeviceToken(deviceId: number) {
+        return this.request<{ ok: boolean }>(`/api/access/devices/${deviceId}/revoke-token`, {
+            method: 'POST',
+            body: JSON.stringify({}),
+        });
+    }
+
+    async remoteUnlockAccessDevice(deviceId: number, payload?: { unlock_ms?: number; reason?: string; request_id?: string }) {
+        return this.request<{ ok: boolean; command_id?: number }>(`/api/access/devices/${deviceId}/remote-unlock`, {
+            method: 'POST',
+            body: JSON.stringify(payload || {}),
+        });
+    }
+
+    async startAccessDeviceEnrollment(deviceId: number, payload: { usuario_id: number; credential_type: 'fob' | 'card'; overwrite?: boolean; expires_seconds?: number }) {
+        return this.request<{ ok: boolean; enroll_mode: any }>(`/api/access/devices/${deviceId}/enrollment`, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        });
+    }
+
+    async clearAccessDeviceEnrollment(deviceId: number) {
+        return this.request<{ ok: boolean }>(`/api/access/devices/${deviceId}/enrollment/clear`, {
+            method: 'POST',
+            body: JSON.stringify({}),
+        });
+    }
+
+    async listAccessEvents(params?: { page?: number; limit?: number; sucursal_id?: number; device_id?: number }) {
+        const qp = new URLSearchParams();
+        if (params?.page) qp.set('page', String(params.page));
+        if (params?.limit) qp.set('limit', String(params.limit));
+        if (params?.sucursal_id) qp.set('sucursal_id', String(params.sucursal_id));
+        if (params?.device_id) qp.set('device_id', String(params.device_id));
+        const q = qp.toString() ? `?${qp.toString()}` : '';
+        return this.request<{ ok: boolean; items: AccessEvent[]; page: number; limit: number }>(`/api/access/events${q}`);
+    }
+
+    async listAccessCredentials(params?: { usuario_id?: number }) {
+        const q = params?.usuario_id ? `?usuario_id=${encodeURIComponent(String(params.usuario_id))}` : '';
+        return this.request<{ ok: boolean; items: AccessCredential[] }>(`/api/access/credentials${q}`);
+    }
+
+    async createAccessCredential(payload: { usuario_id: number; credential_type: string; value: string; label?: string | null }) {
+        return this.request<{ ok: boolean }>('/api/access/credentials', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        });
+    }
+
+    async deleteAccessCredential(credentialId: number) {
+        return this.request<{ ok: boolean }>(`/api/access/credentials/${credentialId}`, { method: 'DELETE' });
+    }
+
+    async getUsuarioAccessCredentials() {
+        return this.request<{ ok: boolean; items: AccessCredential[] }>('/api/usuario/credentials');
     }
 
     async getPublicGymData() {
@@ -1799,9 +2030,32 @@ class ApiClient {
         return this.request<{ mensajes: any[] }>(`/api/whatsapp/pendientes${query ? `?${query}` : ''}`);
     }
 
+    async getTeam(params?: { search?: string; all?: boolean; sucursal_id?: number }) {
+        const searchParams = new URLSearchParams();
+        if (params?.search) searchParams.set('search', params.search);
+        if (params?.all !== undefined) searchParams.set('all', String(params.all));
+        if (params?.sucursal_id !== undefined) searchParams.set('sucursal_id', String(params.sucursal_id));
+        const query = searchParams.toString();
+        return this.request<{ ok: boolean; items: TeamMember[] }>(`/api/team${query ? `?${query}` : ''}`);
+    }
+
+    async promoteTeamMember(data: { usuario_id: number; kind: 'staff' | 'profesor'; rol?: string }) {
+        return this.request<{ ok: boolean; usuario_id: number; kind: string; profesor_id?: number }>('/api/team/promote', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    }
+
     // === Profesores CRUD ===
     async createProfesor(data: { nombre: string; email?: string; telefono?: string }) {
         return this.request<Profesor>('/api/profesores', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    }
+
+    async createProfesorPerfil(data: { usuario_id: number }) {
+        return this.request<{ ok: boolean; profesor_id: number; usuario_id: number }>('/api/profesores/perfil', {
             method: 'POST',
             body: JSON.stringify(data),
         });
@@ -2500,6 +2754,145 @@ class ApiClient {
         } catch (error) {
             return { ok: false, error: 'Error de conexión' };
         }
+    }
+
+    async downloadBulkTemplate(kind: string, format: 'csv' | 'xlsx') {
+        const url = `${this.baseUrl}/api/bulk/templates/${encodeURIComponent(kind)}.${format}`;
+        try {
+            const response = await fetch(url, {
+                credentials: 'include',
+                headers: {
+                    'X-Tenant': typeof window !== 'undefined' ? getCurrentTenant() : '',
+                },
+            });
+            if (!response.ok) {
+                return { ok: false, error: 'Error al descargar template' };
+            }
+            return { ok: true, data: await response.blob() };
+        } catch {
+            return { ok: false, error: 'Error de conexión' };
+        }
+    }
+
+    async bulkPreview(kind: string, file: File) {
+        const url = `${this.baseUrl}/api/bulk/jobs/preview?kind=${encodeURIComponent(kind)}`;
+        const form = new FormData();
+        form.append('file', file);
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'X-Tenant': typeof window !== 'undefined' ? getCurrentTenant() : '',
+                },
+                body: form,
+            });
+            if (!response.ok) {
+                const j = await response.json().catch(() => null);
+                return { ok: false, error: j?.detail || j?.error || 'Error al previsualizar' };
+            }
+            return { ok: true, data: await response.json() as { ok: boolean; job: BulkJob; preview: { columns: string[]; rows: BulkPreviewRow[] } } };
+        } catch {
+            return { ok: false, error: 'Error de conexión' };
+        }
+    }
+
+    async bulkGetJob(jobId: number) {
+        return this.request<{ ok: boolean; job: BulkJob; rows: BulkPreviewRow[] }>(`/api/bulk/jobs/${jobId}`);
+    }
+
+    async bulkUpdateRow(jobId: number, rowIndex: number, data: Record<string, any>) {
+        return this.request<{ ok: boolean; job: BulkJob; row_index: number; data: any; errors: string[]; warnings: string[] }>(`/api/bulk/jobs/${jobId}/rows/${rowIndex}`, {
+            method: 'PUT',
+            body: JSON.stringify({ data }),
+        });
+    }
+
+    async bulkConfirm(jobId: number) {
+        return this.request<{ ok: boolean; job: BulkJob }>(`/api/bulk/jobs/${jobId}/confirm`, {
+            method: 'POST',
+            body: JSON.stringify({ confirmation: 'CONFIRMAR' }),
+        });
+    }
+
+    async bulkRun(jobId: number, expectedRows: number) {
+        return this.request<{ ok: boolean; job: BulkJob }>(`/api/bulk/jobs/${jobId}/run`, {
+            method: 'POST',
+            body: JSON.stringify({ confirmation: 'EJECUTAR', expected_rows: expectedRows }),
+        });
+    }
+
+    async bulkCancel(jobId: number) {
+        return this.request<{ ok: boolean; job: BulkJob }>(`/api/bulk/jobs/${jobId}/cancel`, {
+            method: 'POST',
+            body: JSON.stringify({}),
+        });
+    }
+
+    async uploadSupportAttachment(file: File) {
+        const url = `${this.baseUrl}/api/support/attachments`;
+        const form = new FormData();
+        form.append('file', file);
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'X-Tenant': typeof window !== 'undefined' ? getCurrentTenant() : '',
+                },
+                body: form,
+            });
+            if (!response.ok) {
+                const j = await response.json().catch(() => null);
+                return { ok: false, error: j?.detail || 'Error al subir adjunto' };
+            }
+            return { ok: true, data: await response.json() as { ok: boolean; attachment: any } };
+        } catch {
+            return { ok: false, error: 'Error de conexión' };
+        }
+    }
+
+    async createSupportTicket(payload: { subject: string; category?: string; priority?: string; message: string; attachments?: any[]; origin_url?: string }) {
+        return this.request<{ ok: boolean; ticket_id: number }>(`/api/support/tickets`, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        });
+    }
+
+    async listSupportTickets(params?: { status?: string; page?: number; limit?: number }) {
+        const sp = new URLSearchParams();
+        if (params?.status) sp.set('status', params.status);
+        if (params?.page) sp.set('page', String(params.page));
+        if (params?.limit) sp.set('limit', String(params.limit));
+        const q = sp.toString();
+        return this.request<{ ok: boolean; items: SupportTicket[]; total: number; limit: number; offset: number; viewer: any }>(`/api/support/tickets${q ? `?${q}` : ''}`);
+    }
+
+    async getSupportTicket(ticketId: number) {
+        return this.request<{ ok: boolean; ticket: SupportTicket; messages: SupportMessage[] }>(`/api/support/tickets/${ticketId}`);
+    }
+
+    async replySupportTicket(ticketId: number, payload: { message: string; attachments?: any[] }) {
+        return this.request<{ ok: boolean }>(`/api/support/tickets/${ticketId}/reply`, {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        });
+    }
+
+    async getChangelogStatus() {
+        return this.request<{ ok: boolean; has_unread: boolean; latest: any }>(`/api/changelogs/status`);
+    }
+
+    async listChangelogs(params?: { page?: number; limit?: number }) {
+        const sp = new URLSearchParams();
+        if (params?.page) sp.set('page', String(params.page));
+        if (params?.limit) sp.set('limit', String(params.limit));
+        const q = sp.toString();
+        return this.request<{ ok: boolean; items: ChangelogItem[]; total: number; limit: number; offset: number }>(`/api/changelogs${q ? `?${q}` : ''}`);
+    }
+
+    async markChangelogsRead() {
+        return this.request<{ ok: boolean }>(`/api/changelogs/read`, { method: 'POST', body: JSON.stringify({}) });
     }
 
 }

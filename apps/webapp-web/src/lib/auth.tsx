@@ -29,7 +29,7 @@ export function useAuth() {
 // Protected routes config
 const protectedRoutes = {
     '/gestion': ['owner', 'admin', 'profesor', 'empleado', 'recepcionista', 'staff'],
-    '/dashboard': ['owner', 'admin'],
+    '/dashboard': ['owner', 'admin', 'profesor', 'empleado', 'recepcionista', 'staff'],
     '/usuario': ['user', 'owner', 'admin', 'profesor', 'empleado', 'recepcionista', 'staff'],
 };
 
@@ -114,7 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 if (matchedRoute === '/gestion') {
                     router.replace('/gestion-login');
                 } else if (matchedRoute === '/dashboard') {
-                    router.replace('/login');
+                    router.replace('/gestion-login');
                 } else {
                     router.replace('/usuario-login');
                 }

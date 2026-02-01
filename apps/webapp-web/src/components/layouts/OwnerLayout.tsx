@@ -2,8 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
-import { BarChart3, Building2, Home, LogOut, Menu, Settings, Users, X, ChevronRight, MessageSquare, ShieldCheck, UsersRound } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { BarChart3, Building2, Home, LogOut, Menu, Settings, Users, X, ChevronRight, MessageSquare, UsersRound, UploadCloud, LifeBuoy, Megaphone } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ToastContainer } from '@/components/ui';
 import { cn } from '@/lib/utils';
@@ -14,8 +14,10 @@ const navigation = [
     { key: 'sucursales', name: 'Sucursales', href: '/dashboard/sucursales', icon: Building2, description: 'Datos, WhatsApp, estado' },
     { key: 'equipo', name: 'Equipo', href: '/dashboard/equipo', icon: UsersRound, description: 'Profesores y staff' },
     { key: 'whatsapp', name: 'WhatsApp', href: '/dashboard/whatsapp', icon: MessageSquare, description: 'Admin, salud, cola' },
+    { key: 'acciones_masivas', name: 'Acciones masivas', href: '/dashboard/acciones-masivas', icon: UploadCloud, description: 'Importaciones seguras' },
+    { key: 'soporte', name: 'Soporte', href: '/dashboard/soporte', icon: LifeBuoy, description: 'Tickets con el equipo' },
+    { key: 'novedades', name: 'Novedades', href: '/dashboard/novedades', icon: Megaphone, description: 'Changelog y anuncios' },
     { key: 'configuracion', name: 'Configuración', href: '/dashboard/configuracion', icon: Settings, description: 'Flags, ajustes, control' },
-    { key: 'meta_review', name: 'Meta Review', href: '/dashboard/meta-review', icon: ShieldCheck, description: 'Acceso puntual' },
     { key: 'gestion', name: 'Gestión', href: '/gestion/usuarios', icon: Users, description: 'Panel operativo' },
 ];
 
@@ -29,6 +31,9 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
     const [sucursalActualId, setSucursalActualId] = useState<number | null>(null);
     const [switchingSucursal, setSwitchingSucursal] = useState(false);
     const [moduleFlags, setModuleFlags] = useState<Record<string, boolean> | null>(null);
+    const [userRole, setUserRole] = useState<string>('');
+    const [userScopes, setUserScopes] = useState<string[]>([]);
+    const [hasUnreadChangelog, setHasUnreadChangelog] = useState(false);
 
     useEffect(() => {
         const loadBranding = async () => {
@@ -45,31 +50,90 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
                 } else {
                     setModuleFlags(null);
                 }
+                try {
+                    const st = await api.getChangelogStatus();
+                    if (st.ok && st.data?.ok) {
+                        setHasUnreadChangelog(!!(st.data as any).has_unread);
+                    } else {
+                        setHasUnreadChangelog(false);
+                    }
+                } catch {
+                    setHasUnreadChangelog(false);
+                }
             } catch {
                 setGymLogoUrl('');
                 setSucursales([]);
                 setSucursalActualId(null);
                 setModuleFlags(null);
+                setHasUnreadChangelog(false);
             }
         };
         loadBranding();
     }, []);
 
-    const navItems = navigation.filter((item) => {
-        if (item.key === 'overview' || item.key === 'gestion' || item.key === 'meta_review') return true;
-        if (item.key === 'configuracion') return true;
-        if (item.key === 'equipo') {
+    useEffect(() => {
+        const loadSession = async () => {
+            try {
+                const r = await api.getSession('auto');
+                if (r.ok && (r.data as any)?.user) {
+                    setUserRole(String((r.data as any).user.rol || ''));
+                    setUserScopes((((r.data as any).user.scopes || []) as any[]).map((s) => String(s)));
+                } else {
+                    setUserRole('');
+                    setUserScopes([]);
+                }
+            } catch {
+                setUserRole('');
+                setUserScopes([]);
+            }
+        };
+        loadSession();
+    }, []);
+
+    const canAccessConfiguracion = useMemo(() => {
+        const roleNorm = String(userRole || '').toLowerCase();
+        if (roleNorm === 'owner' || roleNorm === 'admin') return true;
+        return userScopes.includes('configuracion:read') || userScopes.includes('configuracion:write');
+    }, [userRole, userScopes]);
+
+    const navItems = useMemo(() => {
+        const roleNorm = String(userRole || '').toLowerCase();
+        const isOwner = roleNorm === 'owner' || roleNorm === 'admin';
+        return navigation.filter((item) => {
+            if (item.key === 'gestion') return true;
+            if (item.key === 'configuracion') return canAccessConfiguracion;
+            if (!isOwner) return false;
+            if (item.key === 'acciones_masivas') {
+                if (!moduleFlags) return false;
+                return moduleFlags['bulk_actions'] !== false;
+            }
+            if (item.key === 'overview') return true;
+            if (item.key === 'equipo') {
+                if (!moduleFlags) return true;
+                const emp = moduleFlags['empleados'];
+                const prof = moduleFlags['profesores'];
+                return emp !== false || prof !== false;
+            }
             if (!moduleFlags) return true;
-            const emp = moduleFlags['empleados'];
-            const prof = moduleFlags['profesores'];
-            return emp !== false || prof !== false;
+            if (Object.prototype.hasOwnProperty.call(moduleFlags, item.key)) {
+                return moduleFlags[item.key] !== false;
+            }
+            return true;
+        });
+    }, [canAccessConfiguracion, moduleFlags, userRole]);
+
+    useEffect(() => {
+        const roleNorm = String(userRole || '').toLowerCase();
+        if (!roleNorm) return;
+        if (roleNorm === 'owner' || roleNorm === 'admin') return;
+        const p = String(pathname || '');
+        if (p.startsWith('/dashboard/configuracion')) return;
+        if (canAccessConfiguracion) {
+            router.replace('/dashboard/configuracion');
+        } else {
+            router.replace('/gestion/usuarios');
         }
-        if (!moduleFlags) return true;
-        if (Object.prototype.hasOwnProperty.call(moduleFlags, item.key)) {
-            return moduleFlags[item.key] !== false;
-        }
-        return true;
-    });
+    }, [canAccessConfiguracion, pathname, router, userRole]);
 
     const handleLogout = async () => {
         setLoggingOut(true);
@@ -81,7 +145,13 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
         }
     };
 
-    const currentSection = navigation.find((item) => pathname === item.href || pathname?.startsWith(item.href + '/'));
+    const isNavActive = (href: string) => {
+        if (!pathname) return false;
+        if (href === '/dashboard') return pathname === '/dashboard';
+        return pathname === href || pathname.startsWith(href + '/');
+    };
+
+    const currentSection = navigation.find((item) => isNavActive(item.href));
 
     return (
         <div className="min-h-screen bg-slate-950">
@@ -99,12 +169,19 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
                         </button>
 
                         <Link href="/dashboard" className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center shadow-sm">
+                            <div
+                                className={cn(
+                                    'w-9 h-9 rounded-xl shadow-sm overflow-hidden flex items-center justify-center',
+                                    gymLogoUrl
+                                        ? 'bg-transparent'
+                                        : 'bg-gradient-to-br from-primary-500 to-primary-700'
+                                )}
+                            >
                                 {gymLogoUrl ? (
                                     <img
                                         src={gymLogoUrl}
                                         alt="Logo"
-                                        className="w-6 h-6 object-contain bg-white/90 rounded-md p-1"
+                                        className="w-full h-full object-contain"
                                         onError={() => setGymLogoUrl('')}
                                     />
                                 ) : (
@@ -195,9 +272,16 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
                             <div className="h-full flex flex-col min-h-0">
                                 <div className="h-16 flex items-center justify-between px-4 border-b border-slate-800">
                                     <div className="flex items-center gap-3">
-                                        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center">
+                                        <div
+                                            className={cn(
+                                                'w-9 h-9 rounded-xl overflow-hidden flex items-center justify-center',
+                                                gymLogoUrl
+                                                    ? 'bg-transparent'
+                                                    : 'bg-gradient-to-br from-primary-500 to-primary-700'
+                                            )}
+                                        >
                                             {gymLogoUrl ? (
-                                                <img src={gymLogoUrl} alt="Logo" className="w-6 h-6 object-contain bg-white/90 rounded-md p-1" />
+                                                <img src={gymLogoUrl} alt="Logo" className="w-full h-full object-contain" />
                                             ) : (
                                                 <BarChart3 className="w-4 h-4 text-white" />
                                             )}
@@ -213,7 +297,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
                                 </div>
                                 <nav className="flex-1 min-h-0 p-4 space-y-1 overflow-y-auto overflow-x-auto">
                                     {navItems.map((item) => {
-                                        const isActive = pathname === item.href || pathname?.startsWith(item.href + '/');
+                                        const isActive = isNavActive(item.href);
                                         const isHash = item.href.startsWith('/dashboard#');
                                         return (
                                             <Link
@@ -229,7 +313,12 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
                                             >
                                                 <item.icon className="w-5 h-5 flex-shrink-0" />
                                                 <div>
-                                                    <div className="font-medium">{item.name}</div>
+                                                    <div className="font-medium flex items-center gap-2">
+                                                        <span>{item.name}</span>
+                                                        {item.key === 'novedades' && hasUnreadChangelog ? (
+                                                            <span className="w-2 h-2 rounded-full bg-red-500" />
+                                                        ) : null}
+                                                    </div>
                                                     <div className="text-xs text-slate-500">{item.description}</div>
                                                 </div>
                                             </Link>
@@ -245,7 +334,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
             <aside className="hidden lg:block fixed top-16 left-0 bottom-0 w-64 border-r border-slate-800/50 bg-slate-900/50 backdrop-blur-lg">
                 <nav className="p-4 space-y-1 overflow-y-auto overflow-x-auto h-full">
                     {navItems.map((item) => {
-                        const isActive = pathname === item.href || pathname?.startsWith(item.href + '/');
+                        const isActive = isNavActive(item.href);
                         const isHash = item.href.startsWith('/dashboard#');
                         return (
                             <Link
@@ -258,7 +347,12 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
                             >
                                 <item.icon className="w-5 h-5 flex-shrink-0" />
                                 <div>
-                                    <div className="font-medium">{item.name}</div>
+                                    <div className="font-medium flex items-center gap-2">
+                                        <span>{item.name}</span>
+                                        {item.key === 'novedades' && hasUnreadChangelog ? (
+                                            <span className="w-2 h-2 rounded-full bg-red-500" />
+                                        ) : null}
+                                    </div>
                                     <div className="text-xs text-slate-500">{item.description}</div>
                                 </div>
                             </Link>

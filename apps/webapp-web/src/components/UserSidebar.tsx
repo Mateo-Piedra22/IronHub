@@ -30,9 +30,10 @@ import {
     FileDown,
     RefreshCw,
     CreditCard,
+    KeyRound,
 } from 'lucide-react';
 import { Button, Modal, ConfirmModal, Input, useToast } from '@/components/ui';
-import { api, type Usuario, type Etiqueta, type Estado, type Pago, type EstadoTemplate, type Asistencia, type Membership, type Sucursal, type UsuarioEntitlements } from '@/lib/api';
+import { api, type AccessCredential, type AccessDevice, type Usuario, type Etiqueta, type Estado, type Pago, type EstadoTemplate, type Asistencia, type Membership, type Sucursal, type UsuarioEntitlements } from '@/lib/api';
 import { formatDate, formatCurrency, getWhatsAppLink, cn } from '@/lib/utils';
 
 interface UserSidebarProps {
@@ -47,7 +48,7 @@ interface UserSidebarProps {
     onCreateRutina?: (usuario: Usuario) => void;
 }
 
-type TabType = 'resumen' | 'notas' | 'etiquetas' | 'estados' | 'membresia' | 'accesos';
+type TabType = 'resumen' | 'notas' | 'etiquetas' | 'estados' | 'membresia' | 'accesos' | 'credenciales';
 
 export default function UserSidebar({
     usuario,
@@ -66,6 +67,21 @@ export default function UserSidebar({
     const [entitlementsSummaryLoading, setEntitlementsSummaryLoading] = useState(false);
     const [entitlementsSummary, setEntitlementsSummary] = useState<UsuarioEntitlements | null>(null);
 
+    const [accessCreds, setAccessCreds] = useState<AccessCredential[]>([]);
+    const [accessCredsLoading, setAccessCredsLoading] = useState(false);
+    const [accessCredType, setAccessCredType] = useState<'fob' | 'card'>('fob');
+    const [accessCredValue, setAccessCredValue] = useState('');
+    const [accessCredLabel, setAccessCredLabel] = useState('');
+    const [accessCredSaving, setAccessCredSaving] = useState(false);
+    const [accessCredDelete, setAccessCredDelete] = useState<{ open: boolean; id?: number; label?: string | null }>({ open: false });
+    const [enrollDevices, setEnrollDevices] = useState<AccessDevice[]>([]);
+    const [enrollDevicesLoading, setEnrollDevicesLoading] = useState(false);
+    const [enrollDeviceId, setEnrollDeviceId] = useState<string>('');
+    const [enrollType, setEnrollType] = useState<'fob' | 'card'>('fob');
+    const [enrollOverwrite, setEnrollOverwrite] = useState(true);
+    const [enrollExpiresSeconds, setEnrollExpiresSeconds] = useState('90');
+    const [enrollSaving, setEnrollSaving] = useState(false);
+
     // Notas
     const [notas, setNotas] = useState('');
     const [notasSaving, setNotasSaving] = useState(false);
@@ -76,7 +92,146 @@ export default function UserSidebar({
         setEntitlementsSummary(null);
         setEntitlementsModalOpen(false);
         setEntitlementsSummaryLoading(false);
+        setAccessCreds([]);
+        setAccessCredType('fob');
+        setAccessCredValue('');
+        setAccessCredLabel('');
+        setAccessCredDelete({ open: false });
+        setEnrollDevices([]);
+        setEnrollDeviceId('');
+        setEnrollType('fob');
+        setEnrollOverwrite(true);
+        setEnrollExpiresSeconds('90');
     }, [usuario?.id]);
+
+    const loadEnrollDevices = useCallback(async () => {
+        setEnrollDevicesLoading(true);
+        try {
+            const res = await api.listAccessDevices();
+            if (res.ok && res.data?.ok) {
+                setEnrollDevices(res.data.items || []);
+                if (!enrollDeviceId && (res.data.items || []).length > 0) {
+                    setEnrollDeviceId(String((res.data.items || [])[0]?.id || ''));
+                }
+            } else {
+                setEnrollDevices([]);
+            }
+        } finally {
+            setEnrollDevicesLoading(false);
+        }
+    }, [enrollDeviceId]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        if (activeTab !== 'credenciales') return;
+        void loadEnrollDevices();
+    }, [isOpen, activeTab, loadEnrollDevices]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        if (activeTab !== 'credenciales') return;
+        const t = setInterval(() => {
+            void loadEnrollDevices();
+        }, 2000);
+        return () => clearInterval(t);
+    }, [isOpen, activeTab, loadEnrollDevices]);
+
+    const startEnrollment = useCallback(async () => {
+        if (!usuario?.id) return;
+        const did = Number(enrollDeviceId);
+        if (!Number.isFinite(did) || did <= 0) return;
+        const ms = enrollExpiresSeconds.trim();
+        const exp = Number(ms);
+        setEnrollSaving(true);
+        try {
+            const res = await api.startAccessDeviceEnrollment(did, {
+                usuario_id: usuario.id,
+                credential_type: enrollType,
+                overwrite: enrollOverwrite,
+                expires_seconds: Number.isFinite(exp) ? exp : 90,
+            });
+            if (!res.ok || !res.data?.ok) throw new Error(res.error || 'No se pudo iniciar');
+            success('Portal de enrolamiento iniciado');
+        } catch (e) {
+            error(e instanceof Error ? e.message : 'Error');
+        } finally {
+            setEnrollSaving(false);
+        }
+    }, [usuario?.id, enrollDeviceId, enrollType, enrollOverwrite, enrollExpiresSeconds, success, error]);
+
+    const clearEnrollment = useCallback(async () => {
+        const did = Number(enrollDeviceId);
+        if (!Number.isFinite(did) || did <= 0) return;
+        setEnrollSaving(true);
+        try {
+            const res = await api.clearAccessDeviceEnrollment(did);
+            if (!res.ok || !res.data?.ok) throw new Error(res.error || 'No se pudo cancelar');
+            success('Portal cancelado');
+        } catch (e) {
+            error(e instanceof Error ? e.message : 'Error');
+        } finally {
+            setEnrollSaving(false);
+        }
+    }, [enrollDeviceId, success, error]);
+
+    const loadAccessCreds = useCallback(async () => {
+        if (!usuario?.id) return;
+        setAccessCredsLoading(true);
+        try {
+            const res = await api.listAccessCredentials({ usuario_id: usuario.id });
+            if (res.ok && res.data?.ok) {
+                setAccessCreds(res.data.items || []);
+            } else {
+                setAccessCreds([]);
+            }
+        } finally {
+            setAccessCredsLoading(false);
+        }
+    }, [usuario?.id]);
+
+    useEffect(() => {
+        void loadAccessCreds();
+    }, [loadAccessCreds]);
+
+    const createAccessCredential = useCallback(async () => {
+        if (!usuario?.id) return;
+        const v = accessCredValue.trim();
+        if (!v) return;
+        setAccessCredSaving(true);
+        try {
+            const res = await api.createAccessCredential({
+                usuario_id: usuario.id,
+                credential_type: accessCredType,
+                value: v,
+                label: accessCredLabel.trim() || null,
+            });
+            if (!res.ok || !res.data?.ok) throw new Error(res.error || 'No se pudo crear');
+            success('Credencial registrada');
+            setAccessCredValue('');
+            setAccessCredLabel('');
+            await loadAccessCreds();
+        } catch (e) {
+            error(e instanceof Error ? e.message : 'Error');
+        } finally {
+            setAccessCredSaving(false);
+        }
+    }, [usuario?.id, accessCredValue, accessCredLabel, accessCredType, loadAccessCreds, success, error]);
+
+    const deleteAccessCredential = useCallback(async () => {
+        if (!accessCredDelete.id) return;
+        setAccessCredSaving(true);
+        try {
+            const res = await api.deleteAccessCredential(accessCredDelete.id);
+            if (!res.ok || !res.data?.ok) throw new Error(res.error || 'No se pudo eliminar');
+            success('Credencial desactivada');
+            setAccessCredDelete({ open: false });
+            await loadAccessCreds();
+        } catch (e) {
+            error(e instanceof Error ? e.message : 'Error');
+        } finally {
+            setAccessCredSaving(false);
+        }
+    }, [accessCredDelete.id, loadAccessCreds, success, error]);
 
     const loadEntitlementsSummary = useCallback(async () => {
         if (!usuario?.id) return;
@@ -1056,6 +1211,7 @@ export default function UserSidebar({
                         { id: 'resumen', label: 'Resumen', icon: History },
                         { id: 'membresia', label: 'Membresía', icon: CreditCard },
                         { id: 'accesos', label: 'Accesos', icon: UserCheck },
+                        { id: 'credenciales', label: 'Credenciales', icon: KeyRound },
                         { id: 'notas', label: 'Notas', icon: FileText },
                         { id: 'etiquetas', label: 'Etiquetas', icon: Tag },
                         { id: 'estados', label: 'Estados', icon: Flag },
@@ -1381,6 +1537,188 @@ export default function UserSidebar({
                                     </div>
                                 </>
                             )}
+                        </div>
+                    )}
+
+                    {activeTab === 'credenciales' && (
+                        <div className="space-y-4">
+                            <div className="rounded-lg bg-slate-800 border border-slate-700 p-3 space-y-3">
+                                <div>
+                                    <div className="text-xs font-medium text-slate-500">Portal temporal (en agente)</div>
+                                    <div className="text-xs text-slate-500 mt-1">
+                                        Seleccioná un device con sucursal y el agente esperará la lectura del llavero/tarjeta.
+                                    </div>
+                                </div>
+                                {enrollDevicesLoading ? (
+                                    <div className="text-sm text-slate-500">Cargando devices…</div>
+                                ) : (
+                                    <>
+                                        <select
+                                            className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-200"
+                                            value={enrollDeviceId}
+                                            onChange={(e) => setEnrollDeviceId(e.target.value)}
+                                        >
+                                            {enrollDevices.map((d) => (
+                                                <option key={d.id} value={String(d.id)}>
+                                                    {d.name} {d.sucursal_id ? `(Sucursal #${d.sucursal_id})` : '(Sin sucursal)'}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        {(() => {
+                                            const d = enrollDevices.find((x) => String(x.id) === String(enrollDeviceId));
+                                            if (!d) return null;
+                                            const ls = (d as any).last_seen_at ? String((d as any).last_seen_at) : '';
+                                            const t = ls ? Date.parse(ls) : NaN;
+                                            const online = Number.isFinite(t) ? Date.now() - t < 90_000 : false;
+                                            const cfg: any = (d as any).config && typeof (d as any).config === 'object' ? (d as any).config : {};
+                                            const em = cfg?.enroll_mode && typeof cfg.enroll_mode === 'object' ? cfg.enroll_mode : null;
+                                            const rt = cfg?.runtime_status && typeof cfg.runtime_status === 'object' ? cfg.runtime_status : null;
+                                            const rtAt = rt?.updated_at ? Date.parse(String(rt.updated_at)) : NaN;
+                                            const rtFresh = Number.isFinite(rtAt) ? Date.now() - rtAt < 20_000 : false;
+                                            const ready = Boolean(rt?.enroll_ready) && rtFresh;
+                                            const lt = rt?.last_test && typeof rt.last_test === 'object' ? rt.last_test : null;
+                                            const ltLabel = lt?.kind ? String(lt.kind) : '';
+                                            const ltAt = lt?.at ? String(lt.at) : '';
+                                            const ltOk = lt ? Boolean(lt.ok) : false;
+                                            return (
+                                                <div className="text-xs text-slate-500">
+                                                    Estado: {online ? 'online' : 'offline'}
+                                                    {ls ? ` · last_seen ${ls}` : ''}
+                                                    {em?.enabled ? ` · enroll activo (#${em.usuario_id} ${String(em.credential_type || '').toUpperCase()})` : ''}
+                                                    {ready ? ' · ready' : ''}
+                                                    {ltLabel ? ` · last_test ${ltLabel} ${ltOk ? 'ok' : 'fail'} ${ltAt ? `@ ${ltAt}` : ''}` : ''}
+                                                </div>
+                                            );
+                                        })()}
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                            <select
+                                                className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-200"
+                                                value={enrollType}
+                                                onChange={(e) => setEnrollType(e.target.value as 'fob' | 'card')}
+                                            >
+                                                <option value="fob">Llavero</option>
+                                                <option value="card">Tarjeta</option>
+                                            </select>
+                                            <Input
+                                                value={enrollExpiresSeconds}
+                                                onChange={(e) => setEnrollExpiresSeconds(e.target.value)}
+                                                placeholder="Expira (seg) ej 90"
+                                            />
+                                        </div>
+                                        <label className="flex items-center gap-2 text-sm text-slate-300">
+                                            <input type="checkbox" checked={enrollOverwrite} onChange={(e) => setEnrollOverwrite(e.target.checked)} />
+                                            Sobrescribir (desactiva credenciales previas del mismo tipo)
+                                        </label>
+                                        <div className="flex items-center justify-between gap-2">
+                                            <Button size="sm" variant="secondary" onClick={loadEnrollDevices} disabled={enrollSaving}>
+                                                <RefreshCw className="w-3 h-3 mr-1" />
+                                                Refrescar
+                                            </Button>
+                                            <div className="flex gap-2">
+                                                <Button size="sm" variant="danger" onClick={clearEnrollment} disabled={enrollSaving || !enrollDeviceId}>
+                                                    Cancelar
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    onClick={startEnrollment}
+                                                    disabled={
+                                                        enrollSaving ||
+                                                        !enrollDeviceId ||
+                                                        !(enrollDevices.find((d) => String(d.id) === String(enrollDeviceId))?.sucursal_id)
+                                                    }
+                                                >
+                                                    {enrollSaving && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}
+                                                    Iniciar
+                                                </Button>
+                                            </div>
+                                        </div>
+                                        {enrollDeviceId && !(enrollDevices.find((d) => String(d.id) === String(enrollDeviceId))?.sucursal_id) ? (
+                                            <div className="text-xs text-amber-400">
+                                                Este device no tiene sucursal vinculada. Vinculalo primero para habilitar el portal.
+                                            </div>
+                                        ) : (
+                                            <div className="text-xs text-slate-500">
+                                                En el Access Agent del device seleccionado, escaneá la credencial una sola vez.
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+                            </div>
+
+                            <div className="rounded-lg bg-slate-800 border border-slate-700 p-3 space-y-3">
+                                <div>
+                                    <div className="text-xs font-medium text-slate-500">Credenciales de acceso</div>
+                                    <div className="text-xs text-slate-500 mt-1">Llavero / tarjeta habilitados para molinete/puerta.</div>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    <select
+                                        className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-200"
+                                        value={accessCredType}
+                                        onChange={(e) => setAccessCredType(e.target.value as 'fob' | 'card')}
+                                    >
+                                        <option value="fob">Llavero</option>
+                                        <option value="card">Tarjeta</option>
+                                    </select>
+                                    <Input
+                                        value={accessCredLabel}
+                                        onChange={(e) => setAccessCredLabel(e.target.value)}
+                                        placeholder="Etiqueta (opcional)"
+                                    />
+                                </div>
+                                <Input
+                                    value={accessCredValue}
+                                    onChange={(e) => setAccessCredValue(e.target.value)}
+                                    placeholder="Escaneá / pegá la credencial…"
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') void createAccessCredential();
+                                    }}
+                                />
+                                <div className="flex justify-end">
+                                    <Button size="sm" onClick={createAccessCredential} disabled={accessCredSaving || !accessCredValue.trim()}>
+                                        {accessCredSaving ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Plus className="w-3 h-3 mr-1" />}
+                                        Agregar
+                                    </Button>
+                                </div>
+                            </div>
+
+                            <div className="rounded-lg bg-slate-800 border border-slate-700 p-3 space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <div className="text-xs font-medium text-slate-500">Registradas</div>
+                                    <Button size="sm" variant="secondary" onClick={loadAccessCreds} disabled={accessCredsLoading}>
+                                        <RefreshCw className={`w-3 h-3 ${accessCredsLoading ? 'animate-spin' : ''}`} />
+                                    </Button>
+                                </div>
+                                {accessCredsLoading ? (
+                                    <div className="text-sm text-slate-500">Cargando…</div>
+                                ) : accessCreds.length === 0 ? (
+                                    <div className="text-sm text-slate-500">Sin credenciales.</div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {accessCreds.map((c) => (
+                                            <div
+                                                key={c.id}
+                                                className="flex items-center justify-between gap-2 rounded-lg bg-slate-900/40 border border-slate-700 px-3 py-2"
+                                            >
+                                                <div className="min-w-0">
+                                                    <div className="text-sm text-slate-200 truncate">{c.label || c.credential_type}</div>
+                                                    <div className="text-xs text-slate-500 truncate">{c.credential_type.toUpperCase()}</div>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <div className={`text-xs ${c.active ? 'text-success-400' : 'text-slate-500'}`}>
+                                                        {c.active ? 'Activa' : 'Inactiva'}
+                                                    </div>
+                                                    <button
+                                                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                                                        onClick={() => setAccessCredDelete({ open: true, id: c.id, label: c.label })}
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     )}
 
@@ -1878,6 +2216,18 @@ export default function UserSidebar({
                         setAsistenciaLoading(false);
                     }
                 }}
+            />
+
+            <ConfirmModal
+                isOpen={accessCredDelete.open}
+                onClose={() => setAccessCredDelete({ open: false })}
+                title="Desactivar credencial"
+                message="La credencial dejará de funcionar para el acceso."
+                confirmText="Desactivar"
+                cancelText="Cancelar"
+                variant="danger"
+                isLoading={accessCredSaving}
+                onConfirm={deleteAccessCredential}
             />
 
             {/* Click outside to close */}

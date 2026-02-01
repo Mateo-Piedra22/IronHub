@@ -2485,3 +2485,212 @@ async def gym_whatsapp_health(request: Request, gym_id: int):
             {**result, "ok": False, "error": str(err or "Error")}, status_code=200
         )
     return JSONResponse(result, status_code=200)
+
+
+@app.get("/support/tickets")
+async def admin_list_support_tickets(
+    request: Request,
+    status: str = Query(None),
+    priority: str = Query(None),
+    tenant: str = Query(None),
+    assignee: str = Query(None),
+    q: str = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(30, ge=1, le=200),
+):
+    require_admin(request)
+    adm = get_admin_service()
+    return adm.list_support_tickets(
+        status=status, priority=priority, tenant=tenant, assignee=assignee, q=q, page=page, page_size=page_size
+    )
+
+
+@app.get("/support/tickets/{ticket_id}")
+async def admin_get_support_ticket(request: Request, ticket_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    result = adm.get_support_ticket(int(ticket_id))
+    if not result.get("ok"):
+        raise HTTPException(status_code=404, detail="Not found")
+    return result
+
+
+@app.patch("/support/tickets/{ticket_id}/status")
+async def admin_update_support_ticket_status(request: Request, ticket_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    st = str((payload or {}).get("status") or "").strip()
+    result = adm.update_support_ticket_status(int(ticket_id), st, by="owner")
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
+    return result
+
+
+@app.post("/support/tickets/{ticket_id}/reply")
+async def admin_reply_support_ticket(request: Request, ticket_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    msg = str((payload or {}).get("message") or "").strip()
+    attachments = (payload or {}).get("attachments")
+    result = adm.reply_support_ticket_admin(
+        int(ticket_id), msg, by="owner", attachments=attachments if isinstance(attachments, list) else []
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
+    return result
+
+
+@app.post("/support/tickets/{ticket_id}/internal-note")
+async def admin_internal_note_support_ticket(request: Request, ticket_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    msg = str((payload or {}).get("message") or "").strip()
+    result = adm.internal_note_support_ticket(int(ticket_id), msg, by="owner")
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
+    return result
+
+
+@app.patch("/support/tickets/{ticket_id}")
+async def admin_patch_support_ticket(request: Request, ticket_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    tags = payload.get("tags")
+    if isinstance(tags, str):
+        tags = [t.strip() for t in tags.split(",") if t.strip()]
+    if tags is not None and not isinstance(tags, list):
+        tags = None
+    result = adm.update_support_ticket(
+        int(ticket_id),
+        status=str(payload.get("status")).strip() if payload.get("status") is not None else None,
+        priority=str(payload.get("priority")).strip() if payload.get("priority") is not None else None,
+        assigned_to=str(payload.get("assigned_to")).strip() if payload.get("assigned_to") is not None else None,
+        tags=tags,
+        by="owner",
+    )
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
+    return result
+
+
+@app.get("/support/ops/summary")
+async def admin_support_ops_summary(request: Request):
+    require_admin(request)
+    adm = get_admin_service()
+    return adm.support_ops_summary()
+
+
+@app.post("/support/tickets/batch")
+async def admin_batch_support_tickets(request: Request):
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    ids = payload.get("ticket_ids") or payload.get("ids") or []
+    data = payload.get("data") or payload.get("update") or {}
+    if not isinstance(ids, list):
+        ids = []
+    if not isinstance(data, dict):
+        data = {}
+    result = adm.batch_update_support_tickets([int(x) for x in ids if str(x).isdigit()], data, by="owner")
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
+    return result
+
+
+@app.get("/support/tenants/{tenant}/settings")
+async def admin_get_support_tenant_settings(request: Request, tenant: str):
+    require_admin(request)
+    adm = get_admin_service()
+    result = adm.get_support_tenant_settings(str(tenant))
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
+    return result
+
+
+@app.put("/support/tenants/{tenant}/settings")
+async def admin_set_support_tenant_settings(request: Request, tenant: str):
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    result = adm.set_support_tenant_settings(str(tenant), payload, by="owner")
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
+    return result
+
+
+@app.get("/changelogs")
+async def admin_list_changelogs(
+    request: Request,
+    include_drafts: bool = Query(True),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(30, ge=1, le=200),
+):
+    require_admin(request)
+    adm = get_admin_service()
+    return adm.list_changelogs_admin(include_drafts=bool(include_drafts), page=page, page_size=page_size)
+
+
+@app.post("/changelogs")
+async def admin_create_changelog(request: Request):
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    result = adm.create_changelog(payload if isinstance(payload, dict) else {}, by="owner")
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
+    return result
+
+
+@app.put("/changelogs/{changelog_id}")
+async def admin_update_changelog(request: Request, changelog_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    result = adm.update_changelog(int(changelog_id), payload if isinstance(payload, dict) else {}, by="owner")
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=str(result.get("error") or "Error"))
+    return result
+
+
+@app.delete("/changelogs/{changelog_id}")
+async def admin_delete_changelog(request: Request, changelog_id: int):
+    require_admin(request)
+    adm = get_admin_service()
+    result = adm.delete_changelog(int(changelog_id), by="owner")
+    if not result.get("ok"):
+        raise HTTPException(status_code=404, detail="Not found")
+    return result

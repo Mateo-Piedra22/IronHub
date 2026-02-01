@@ -310,16 +310,53 @@ class ProfesorService(BaseService):
             self.db.rollback()
             return None
 
-    def crear_perfil_profesor(self, usuario_id: int, data: Dict[str, Any]) -> int:
-        """Create a profesor profile for an existing user."""
-        u = self.db.get(Usuario, int(usuario_id))
+    def crear_perfil_profesor(self, usuario_id: int, data: Dict[str, Any], *, sucursal_id: Optional[int] = None) -> int:
+        """Create or update a profesor profile for an existing user (idempotent)."""
+        uid = int(usuario_id)
+        u = self.db.get(Usuario, uid)
         if u is not None:
             try:
                 u.rol = "profesor"
             except Exception:
                 pass
+
+        try:
+            sid = int(sucursal_id) if sucursal_id is not None else None
+        except Exception:
+            sid = None
+        if sid is not None and sid > 0:
+            try:
+                self.db.execute(
+                    text(
+                        """
+                        INSERT INTO usuario_sucursales(usuario_id, sucursal_id)
+                        VALUES (:uid, :sid)
+                        ON CONFLICT (usuario_id, sucursal_id) DO NOTHING
+                        """
+                    ),
+                    {"uid": int(uid), "sid": int(sid)},
+                )
+            except Exception:
+                pass
+
+        existing = self.db.execute(
+            select(Profesor).where(Profesor.usuario_id == uid).limit(1)
+        ).scalar_one_or_none()
+        if existing:
+            existing.especialidades = data.get("especialidades", existing.especialidades)
+            existing.certificaciones = data.get("certificaciones", existing.certificaciones)
+            existing.experiencia_años = data.get("experiencia_anios", existing.experiencia_años or 0)
+            existing.tarifa_por_hora = data.get("tarifa_por_hora", existing.tarifa_por_hora or 0.0)
+            existing.biografia = data.get("biografia", existing.biografia)
+            existing.telefono_emergencia = data.get("telefono_emergencia", existing.telefono_emergencia)
+            if not existing.fecha_contratacion:
+                existing.fecha_contratacion = self._today_local_date()
+            self.db.commit()
+            self.db.refresh(existing)
+            return int(existing.id)
+
         profesor = Profesor(
-            usuario_id=usuario_id,
+            usuario_id=uid,
             especialidades=data.get("especialidades"),
             certificaciones=data.get("certificaciones"),
             experiencia_años=data.get("experiencia_anios", 0),
@@ -331,7 +368,7 @@ class ProfesorService(BaseService):
         self.db.add(profesor)
         self.db.commit()
         self.db.refresh(profesor)
-        return profesor.id
+        return int(profesor.id)
 
     def obtener_profesor(self, profesor_id: int) -> Optional[Dict[str, Any]]:
         try:

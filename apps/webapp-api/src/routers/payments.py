@@ -990,7 +990,10 @@ async def api_pago_resumen(
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@router.put("/api/pagos/{pago_id}", dependencies=[Depends(require_feature("pagos"))])
+@router.put(
+    "/api/pagos/{pago_id}",
+    dependencies=[Depends(require_feature("pagos")), Depends(require_feature("pagos:update"))],
+)
 async def api_pago_update(
     pago_id: int,
     request: Request,
@@ -1847,7 +1850,10 @@ async def api_recibos_config_put(
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@router.post("/api/pagos", dependencies=[Depends(require_feature("pagos"))])
+@router.post(
+    "/api/pagos",
+    dependencies=[Depends(require_feature("pagos")), Depends(require_feature("pagos:create"))],
+)
 async def api_pagos_create(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -2278,7 +2284,10 @@ async def api_pagos_update(
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@router.delete("/api/pagos/{pago_id}", dependencies=[Depends(require_feature("pagos"))])
+@router.delete(
+    "/api/pagos/{pago_id}",
+    dependencies=[Depends(require_feature("pagos")), Depends(require_feature("pagos:delete"))],
+)
 async def api_pagos_delete(
     pago_id: int,
     request: Request,

@@ -37,15 +37,25 @@ interface ProfesorFormModalProps {
 
 function ProfesorFormModal({ isOpen, onClose, profesor, onSuccess }: ProfesorFormModalProps) {
     const [loading, setLoading] = useState(false);
+    const [createMode, setCreateMode] = useState<'nuevo' | 'existente'>('nuevo');
     const [formData, setFormData] = useState({
         nombre: '',
         email: '',
         telefono: '',
     });
+    const [existingSearch, setExistingSearch] = useState('');
+    const [existingLoading, setExistingLoading] = useState(false);
+    const [existingUsers, setExistingUsers] = useState<Array<{ id: number; nombre: string; dni?: string; email?: string }>>([]);
+    const [existingUserId, setExistingUserId] = useState<number | null>(null);
     const { success, error } = useToast();
 
     useEffect(() => {
         if (isOpen) {
+            setCreateMode('nuevo');
+            setExistingSearch('');
+            setExistingLoading(false);
+            setExistingUsers([]);
+            setExistingUserId(null);
             if (profesor) {
                 setFormData({
                     nombre: profesor.nombre || '',
@@ -58,11 +68,45 @@ function ProfesorFormModal({ isOpen, onClose, profesor, onSuccess }: ProfesorFor
         }
     }, [isOpen, profesor]);
 
+    const searchUsuariosExistentes = async () => {
+        const term = existingSearch.trim();
+        if (!term) {
+            setExistingUsers([]);
+            return;
+        }
+        setExistingLoading(true);
+        try {
+            const res = await api.getUsuarios({ search: term, limit: 10 });
+            if (res.ok && res.data?.usuarios) {
+                const mapped = (res.data.usuarios || []).map((u) => ({
+                    id: u.id,
+                    nombre: u.nombre,
+                    dni: (u as any).dni,
+                    email: (u as any).email,
+                }));
+                setExistingUsers(mapped);
+            } else {
+                setExistingUsers([]);
+            }
+        } catch {
+            setExistingUsers([]);
+        } finally {
+            setExistingLoading(false);
+        }
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!formData.nombre.trim()) {
-            error('El nombre es requerido');
-            return;
+        if (!profesor && createMode === 'existente') {
+            if (!existingUserId) {
+                error('Seleccioná un usuario existente');
+                return;
+            }
+        } else {
+            if (!formData.nombre.trim()) {
+                error('El nombre es requerido');
+                return;
+            }
         }
 
         setLoading(true);
@@ -77,13 +121,24 @@ function ProfesorFormModal({ isOpen, onClose, profesor, onSuccess }: ProfesorFor
                     error(res.error || 'Error al actualizar');
                 }
             } else {
-                const res = await api.createProfesor(formData);
-                if (res.ok) {
-                    success('Profesor creado');
-                    onSuccess();
-                    onClose();
+                if (createMode === 'existente') {
+                    const res = await api.createProfesorPerfil({ usuario_id: existingUserId as number });
+                    if (res.ok) {
+                        success('Profesor asociado');
+                        onSuccess();
+                        onClose();
+                    } else {
+                        error(res.error || 'Error al asociar');
+                    }
                 } else {
-                    error(res.error || 'Error al crear');
+                    const res = await api.createProfesor(formData);
+                    if (res.ok) {
+                        success('Profesor creado');
+                        onSuccess();
+                        onClose();
+                    } else {
+                        error(res.error || 'Error al crear');
+                    }
                 }
             }
         } catch {
@@ -111,26 +166,106 @@ function ProfesorFormModal({ isOpen, onClose, profesor, onSuccess }: ProfesorFor
             }
         >
             <form onSubmit={handleSubmit} className="space-y-4">
-                <Input
-                    label="Nombre"
-                    value={formData.nombre}
-                    onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-                    placeholder="Nombre del profesor"
-                    required
-                />
-                <Input
-                    label="Email"
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    placeholder="profesor@email.com"
-                />
-                <Input
-                    label="Teléfono"
-                    value={formData.telefono}
-                    onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
-                    placeholder="3434567890"
-                />
+                {!profesor ? (
+                    <div className="grid grid-cols-2 gap-2">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setCreateMode('nuevo');
+                                setExistingUsers([]);
+                                setExistingUserId(null);
+                            }}
+                            className={cn(
+                                'h-10 rounded-xl border text-sm font-semibold transition-colors',
+                                createMode === 'nuevo'
+                                    ? 'bg-primary-500/20 border-primary-500/40 text-primary-200'
+                                    : 'bg-slate-950/30 border-slate-800/60 text-slate-200 hover:bg-slate-900/40'
+                            )}
+                        >
+                            Nuevo
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setCreateMode('existente');
+                                setFormData({ nombre: '', email: '', telefono: '' });
+                            }}
+                            className={cn(
+                                'h-10 rounded-xl border text-sm font-semibold transition-colors',
+                                createMode === 'existente'
+                                    ? 'bg-primary-500/20 border-primary-500/40 text-primary-200'
+                                    : 'bg-slate-950/30 border-slate-800/60 text-slate-200 hover:bg-slate-900/40'
+                            )}
+                        >
+                            Existente
+                        </button>
+                    </div>
+                ) : null}
+
+                {!profesor && createMode === 'existente' ? (
+                    <div className="space-y-2">
+                        <div className="flex gap-2">
+                            <Input
+                                label="Buscar usuario"
+                                value={existingSearch}
+                                onChange={(e) => setExistingSearch(e.target.value)}
+                                placeholder="Nombre, DNI o email"
+                            />
+                            <div className="pt-6">
+                                <Button variant="secondary" onClick={() => void searchUsuariosExistentes()} isLoading={existingLoading}>
+                                    Buscar
+                                </Button>
+                            </div>
+                        </div>
+                        <div className="space-y-2">
+                            {existingUsers.map((u) => {
+                                const on = existingUserId === u.id;
+                                return (
+                                    <button
+                                        key={u.id}
+                                        type="button"
+                                        onClick={() => setExistingUserId(u.id)}
+                                        className={cn(
+                                            'w-full p-3 rounded-xl border text-left transition-colors',
+                                            on
+                                                ? 'bg-primary-500/20 border-primary-500/40 text-primary-200'
+                                                : 'bg-slate-950/30 border-slate-800/60 text-slate-200 hover:bg-slate-900/40'
+                                        )}
+                                    >
+                                        <div className="text-sm font-medium">{u.nombre}</div>
+                                        <div className="text-xs text-slate-400">{u.dni || '—'} {u.email ? `• ${u.email}` : ''}</div>
+                                    </button>
+                                );
+                            })}
+                            {!existingLoading && existingSearch.trim() && existingUsers.length === 0 ? (
+                                <div className="text-sm text-slate-400">Sin resultados</div>
+                            ) : null}
+                        </div>
+                    </div>
+                ) : (
+                    <>
+                        <Input
+                            label="Nombre"
+                            value={formData.nombre}
+                            onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
+                            placeholder="Nombre del profesor"
+                            required
+                        />
+                        <Input
+                            label="Email"
+                            type="email"
+                            value={formData.email}
+                            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                            placeholder="profesor@email.com"
+                        />
+                        <Input
+                            label="Teléfono"
+                            value={formData.telefono}
+                            onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
+                            placeholder="3434567890"
+                        />
+                    </>
+                )}
             </form>
         </Modal>
     );

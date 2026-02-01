@@ -225,13 +225,15 @@ export default function GestionLoginPage() {
                         initial={{ scale: 0.8 }}
                         animate={{ scale: 1 }}
                         transition={{ delay: 0.1 }}
-                        className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-700 shadow-md mb-4"
+                        className={`inline-flex items-center justify-center w-16 h-16 rounded-2xl shadow-md mb-4 overflow-hidden ${
+                            gymLogoUrl ? 'bg-transparent' : 'bg-gradient-to-br from-primary-500 to-primary-700'
+                        }`}
                     >
                         {gymLogoUrl ? (
                             <img
                                 src={gymLogoUrl}
                                 alt="Logo"
-                                className="w-10 h-10 object-contain bg-white/90 rounded-xl p-2"
+                                className="w-full h-full object-contain"
                                 onError={() => setGymLogoUrl('')}
                             />
                         ) : (

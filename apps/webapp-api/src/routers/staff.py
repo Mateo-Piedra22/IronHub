@@ -48,6 +48,15 @@ async def api_staff_update(
     audit: AuditService = Depends(get_audit_service),
 ):
     try:
+        try:
+            current = svc.db.execute(
+                text("SELECT rol FROM usuarios WHERE id = :id LIMIT 1"), {"id": int(usuario_id)}
+            ).fetchone()
+            rol_actual = str(current[0] or "").strip().lower() if current else ""
+        except Exception:
+            rol_actual = ""
+        if rol_actual in ("dueño", "dueno", "owner"):
+            raise HTTPException(status_code=403, detail="Forbidden")
         old_state = svc.get_staff_item(int(usuario_id))
         payload = await request.json()
         rol = payload.get("rol")

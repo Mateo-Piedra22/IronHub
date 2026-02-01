@@ -2,7 +2,7 @@ from typing import List, Dict
 from datetime import datetime, timedelta
 from sqlalchemy import select, func
 from .base import BaseRepository
-from ..orm_models import AuditLog, Usuario, SystemDiagnostics
+from ..orm_models import AuditLog, Usuario
 
 
 class AuditRepository(BaseRepository):

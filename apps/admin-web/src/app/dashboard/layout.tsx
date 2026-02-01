@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import {
     Dumbbell, LayoutDashboard, Building2, Users, CreditCard,
-    MessageSquare, Settings, LogOut, ChevronRight
+    MessageSquare, Settings, LogOut, ChevronRight, LifeBuoy, Megaphone, ShieldAlert
 } from 'lucide-react';
 
 const navigation = [
@@ -15,6 +15,9 @@ const navigation = [
     { name: 'Suscripciones', href: '/dashboard/subscriptions', icon: CreditCard },
     { name: 'Pagos', href: '/dashboard/payments', icon: CreditCard },
     { name: 'WhatsApp', href: '/dashboard/whatsapp', icon: MessageSquare },
+    { name: 'Tickets', href: '/dashboard/support', icon: LifeBuoy },
+    { name: 'Soporte Ops', href: '/dashboard/support-ops', icon: ShieldAlert },
+    { name: 'Changelogs', href: '/dashboard/changelogs', icon: Megaphone },
     { name: 'Configuración', href: '/dashboard/settings', icon: Settings },
 ];
 

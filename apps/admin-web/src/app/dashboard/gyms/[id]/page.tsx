@@ -1227,6 +1227,10 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         configuracion: true,
         reportes: true,
         entitlements_v2: false,
+        bulk_actions: false,
+        soporte: true,
+        novedades: true,
+        accesos: false,
     };
 
     const moduleOptions: Array<{ key: string; label: string }> = [
@@ -1239,6 +1243,10 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         { key: 'clases', label: 'Clases' },
         { key: 'asistencias', label: 'Asistencias' },
         { key: 'whatsapp', label: 'WhatsApp' },
+        { key: 'bulk_actions', label: 'Acciones masivas (danger zone)' },
+        { key: 'soporte', label: 'Soporte' },
+        { key: 'novedades', label: 'Novedades' },
+        { key: 'accesos', label: 'Accesos (molinete/puerta)' },
         { key: 'configuracion', label: 'Configuración' },
         { key: 'reportes', label: 'Reportes' },
         { key: 'entitlements_v2', label: 'Accesos avanzados (multi-sucursal y clases)' },

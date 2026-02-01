@@ -87,44 +87,79 @@ def _get_branding_for_tenant(tenant: str) -> Dict[str, Any]:
 
     gym_name = "Gimnasio"
     logo_url: Optional[str] = None
+    theme: Dict[str, Any] = {}
     if tenant:
         try:
-            factory = get_tenant_session_factory(tenant)
-            if factory:
-                session = factory()
-                try:
-                    cfg = (
-                        GymConfigService(session).obtener_configuracion_gimnasio() or {}
+            ses = AdminSessionLocal()
+            try:
+                row = (
+                    ses.execute(
+                        text(
+                            """
+                            SELECT g.nombre AS gym_name,
+                                   b.nombre_publico,
+                                   b.logo_url,
+                                   b.color_primario,
+                                   b.color_secundario,
+                                   b.color_fondo,
+                                   b.color_texto
+                            FROM gyms g
+                            LEFT JOIN gym_branding b ON b.gym_id = g.id
+                            WHERE g.subdominio = :t
+                            LIMIT 1
+                            """
+                        ),
+                        {"t": str(tenant).strip().lower()},
                     )
-                    gym_name = str(cfg.get("gym_name") or cfg.get("nombre") or gym_name)
-                    logo_url = (
-                        cfg.get("logo_url")
-                        or cfg.get("gym_logo_url")
-                        or cfg.get("main_logo_url")
-                    )
-                finally:
-                    session.close()
+                    .mappings()
+                    .first()
+                )
+                if row:
+                    gym_name = str(row.get("nombre_publico") or row.get("gym_name") or gym_name)
+                    logo_url = str(row.get("logo_url") or "").strip() or None
+                    theme = {
+                        "primary": str(row.get("color_primario") or "").strip() or None,
+                        "secondary": str(row.get("color_secundario") or "").strip() or None,
+                        "background": str(row.get("color_fondo") or "").strip() or None,
+                        "text": str(row.get("color_texto") or "").strip() or None,
+                    }
+            finally:
+                ses.close()
         except Exception:
             pass
 
+        if not logo_url:
+            try:
+                factory = get_tenant_session_factory(tenant)
+                if factory:
+                    session = factory()
+                    try:
+                        cfg = GymConfigService(session).obtener_configuracion_gimnasio() or {}
+                        gym_name = str(cfg.get("gym_name") or cfg.get("nombre") or gym_name)
+                        logo_url = (
+                            cfg.get("logo_url")
+                            or cfg.get("gym_logo_url")
+                            or cfg.get("main_logo_url")
+                        )
+                    finally:
+                        session.close()
+            except Exception:
+                pass
+
     if logo_url:
         try:
-            s = str(logo_url).strip()
-            if s and not s.startswith("http") and not s.startswith("/"):
-                from src.services.b2_storage import get_file_url
+            from src.services.b2_storage import get_file_url
 
-                logo_url = get_file_url(s)
-            else:
-                logo_url = s
+            logo_url = get_file_url(str(logo_url).strip())
         except Exception:
-            logo_url = None
+            logo_url = str(logo_url).strip() or None
 
     if not logo_url:
         logo_url = _resolve_logo_url()
     if not gym_name:
         gym_name = get_gym_name("Gimnasio")
 
-    payload = {"gym_name": gym_name, "logo_url": logo_url}
+    payload = {"gym_name": gym_name, "logo_url": logo_url, "theme": theme}
     _GYM_DATA_PUBLIC_CACHE[cache_key] = {"ts": now, "data": payload}
     return payload
 
@@ -348,6 +383,8 @@ async def api_bootstrap(request: Request, context: str = "auto"):
                     ff = FeatureFlagsService(ses).get_flags(sucursal_id=current_sucursal_id)
                     if isinstance(ff, dict) and isinstance(ff.get("modules"), dict):
                         flags["modules"] = ff.get("modules")
+                    if isinstance(ff, dict) and isinstance(ff.get("features"), dict):
+                        flags["features"] = ff.get("features")
                 finally:
                     ses.close()
     except Exception:

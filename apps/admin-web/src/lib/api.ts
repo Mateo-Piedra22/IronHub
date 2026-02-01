@@ -274,6 +274,64 @@ export interface GymBranchUpdateInput {
 
 export interface FeatureFlags {
     modules: Record<string, boolean>;
+    features?: Record<string, any>;
+}
+
+export interface SupportTicketAdmin {
+    id: number;
+    tenant: string;
+    gym_id?: number | null;
+    gym_nombre?: string | null;
+    user_id?: number | null;
+    user_role?: string | null;
+    sucursal_id?: number | null;
+    subject: string;
+    category: string;
+    priority: string;
+    status: string;
+    origin_url?: string | null;
+    user_agent?: string | null;
+    last_message_at?: string;
+    last_message_sender?: string | null;
+    unread_by_admin?: boolean;
+    unread_by_client?: boolean;
+    assigned_to?: string | null;
+    tags?: any;
+    first_response_due_at?: string | null;
+    next_response_due_at?: string | null;
+    first_response_at?: string | null;
+    is_overdue?: boolean;
+    overdue_seconds?: number;
+    created_at?: string;
+    updated_at?: string;
+}
+
+export interface SupportTicketMessageAdmin {
+    id: number;
+    ticket_id: number;
+    sender_type: string;
+    sender_id?: number | null;
+    content: string;
+    attachments?: any;
+    created_at?: string;
+}
+
+export interface ChangelogAdminItem {
+    id: number;
+    version: string;
+    title: string;
+    body_markdown: string;
+    change_type: string;
+    image_url?: string | null;
+    is_published: boolean;
+    published_at?: string | null;
+    pinned?: boolean;
+    min_app_version?: string | null;
+    audience_roles?: any;
+    audience_tenants?: any;
+    audience_modules?: any;
+    created_at?: string;
+    updated_at?: string;
 }
 
 export interface GymTipoCuotaItem {
@@ -961,6 +1019,98 @@ export const api = {
         request<{ ok: boolean; events: Array<{ event_type: string; severity: string; message: string; details: any; created_at: string }> }>(
             `/gyms/${gymId}/whatsapp/onboarding-events?limit=${limit}`
         ),
+
+    // ========== SUPPORT / TICKETS ==========
+    listSupportTickets: (params?: { status?: string; priority?: string; tenant?: string; assignee?: string; q?: string; page?: number; page_size?: number }) => {
+        const qp = new URLSearchParams();
+        if (params?.status) qp.set('status', params.status);
+        if (params?.priority) qp.set('priority', params.priority);
+        if (params?.tenant) qp.set('tenant', params.tenant);
+        if (params?.assignee) qp.set('assignee', params.assignee);
+        if (params?.q) qp.set('q', params.q);
+        if (params?.page) qp.set('page', String(params.page));
+        if (params?.page_size) qp.set('page_size', String(params.page_size));
+        const q = qp.toString() ? `?${qp.toString()}` : '';
+        return request<{ ok: boolean; items: SupportTicketAdmin[]; total: number; page: number; page_size: number }>(`/support/tickets${q}`);
+    },
+
+    getSupportTicket: (ticketId: number) =>
+        request<{ ok: boolean; ticket: SupportTicketAdmin; messages: SupportTicketMessageAdmin[] }>(`/support/tickets/${ticketId}`),
+
+    updateSupportTicketStatus: (ticketId: number, status: string) =>
+        request<{ ok: boolean }>(`/support/tickets/${ticketId}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status }),
+        }),
+
+    patchSupportTicket: (ticketId: number, data: { status?: string; priority?: string; assigned_to?: string | null; tags?: any }) =>
+        request<{ ok: boolean }>(`/support/tickets/${ticketId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        }),
+
+    replySupportTicket: (ticketId: number, message: string, attachments: any[] = []) =>
+        request<{ ok: boolean }>(`/support/tickets/${ticketId}/reply`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message, attachments }),
+        }),
+
+    internalNoteSupportTicket: (ticketId: number, message: string) =>
+        request<{ ok: boolean }>(`/support/tickets/${ticketId}/internal-note`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message }),
+        }),
+
+    getSupportOpsSummary: () =>
+        request<{ ok: boolean; totals: any; by_assignee: any[]; by_tenant: any[] }>(`/support/ops/summary`),
+
+    batchUpdateSupportTickets: (ticketIds: number[], data: any) =>
+        request<{ ok: boolean; updated: number }>(`/support/tickets/batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ticket_ids: ticketIds, data }),
+        }),
+
+    getSupportTenantSettings: (tenant: string) =>
+        request<{ ok: boolean; settings: any }>(`/support/tenants/${encodeURIComponent(tenant)}/settings`),
+
+    setSupportTenantSettings: (tenant: string, payload: any) =>
+        request<{ ok: boolean; settings: any }>(`/support/tenants/${encodeURIComponent(tenant)}/settings`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        }),
+
+    // ========== CHANGELOGS ==========
+    listChangelogs: (params?: { include_drafts?: boolean; page?: number; page_size?: number }) => {
+        const qp = new URLSearchParams();
+        if (params?.include_drafts !== undefined) qp.set('include_drafts', String(params.include_drafts));
+        if (params?.page) qp.set('page', String(params.page));
+        if (params?.page_size) qp.set('page_size', String(params.page_size));
+        const q = qp.toString() ? `?${qp.toString()}` : '';
+        return request<{ ok: boolean; items: ChangelogAdminItem[]; total: number; page: number; page_size: number }>(`/changelogs${q}`);
+    },
+
+    createChangelog: (data: Omit<ChangelogAdminItem, 'id'>) =>
+        request<{ ok: boolean; id: number }>(`/changelogs`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        }),
+
+    updateChangelog: (id: number, data: Omit<ChangelogAdminItem, 'id'>) =>
+        request<{ ok: boolean }>(`/changelogs/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        }),
+
+    deleteChangelog: (id: number) =>
+        request<{ ok: boolean }>(`/changelogs/${id}`, { method: 'DELETE' }),
 
     // ========== PAYMENT MANAGEMENT (Restored from deprecated) ==========
 

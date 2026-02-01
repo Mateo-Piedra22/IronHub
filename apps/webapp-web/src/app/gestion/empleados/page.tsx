@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Briefcase, Copy, KeyRound, RefreshCw, Search, Shield } from 'lucide-react';
+import { Briefcase, Copy, KeyRound, Plus, RefreshCw, Search, Shield } from 'lucide-react';
 import { Button, Input, Modal, useToast } from '@/components/ui';
 import { api, type StaffItem, type Sucursal } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -25,6 +25,18 @@ const permissionModules = [
     { key: 'reportes', label: 'Reportes', read: 'reportes:read', write: null },
 ] as const;
 
+const tipoOptions = [
+    { value: 'empleado', label: 'Empleado' },
+    { value: 'recepcionista', label: 'Recepcionista' },
+    { value: 'staff', label: 'Staff' },
+    { value: 'profesor', label: 'Profesor' },
+] as const;
+
+const estadoOptions = [
+    { value: 'activo', label: 'Activo' },
+    { value: 'inactivo', label: 'Inactivo' },
+] as const;
+
 export default function EmpleadosPage() {
     const { toast } = useToast();
     const [loading, setLoading] = useState(true);
@@ -35,6 +47,7 @@ export default function EmpleadosPage() {
     const [search, setSearch] = useState('');
     const [items, setItems] = useState<StaffItem[]>([]);
     const [sucursales, setSucursales] = useState<Sucursal[]>([]);
+    const [sucursalActualId, setSucursalActualId] = useState<number | null>(null);
     const [moduleFlags, setModuleFlags] = useState<Record<string, boolean> | null>(null);
     const [open, setOpen] = useState(false);
     const [selected, setSelected] = useState<StaffItem | null>(null);
@@ -44,6 +57,17 @@ export default function EmpleadosPage() {
     const [editScopes, setEditScopes] = useState<string[]>([]);
     const [editTipo, setEditTipo] = useState<string>('empleado');
     const [editEstado, setEditEstado] = useState<string>('activo');
+    const [createOpen, setCreateOpen] = useState(false);
+    const [createSaving, setCreateSaving] = useState(false);
+    const [createNombre, setCreateNombre] = useState('');
+    const [createDni, setCreateDni] = useState('');
+    const [createTelefono, setCreateTelefono] = useState('');
+    const [createRole, setCreateRole] = useState('empleado');
+    const [createMode, setCreateMode] = useState<'nuevo' | 'existente'>('nuevo');
+    const [existingSearch, setExistingSearch] = useState('');
+    const [existingLoading, setExistingLoading] = useState(false);
+    const [existingUsers, setExistingUsers] = useState<Array<{ id: number; nombre: string; dni?: string; email?: string }>>([]);
+    const [existingUserId, setExistingUserId] = useState<number | null>(null);
 
     const filtered = useMemo(() => {
         const t = search.trim().toLowerCase();
@@ -70,6 +94,7 @@ export default function EmpleadosPage() {
             if (!sucRes.ok) throw new Error(sucRes.error || 'Error cargando sucursales');
             setItems(staffRes.data?.items || []);
             setSucursales((sucRes.data?.items || []).filter((s) => !!s.activa));
+            setSucursalActualId((sucRes.data?.sucursal_actual_id ?? null) as any);
             if (bootRes.ok && (bootRes.data as any)?.flags?.modules) {
                 setModuleFlags(((bootRes.data as any).flags.modules || null) as any);
             } else {
@@ -98,6 +123,15 @@ export default function EmpleadosPage() {
     }, []);
 
     const openEdit = (item: StaffItem) => {
+        const r = String(item.rol || '').trim().toLowerCase();
+        if (r === 'owner' || r === 'dueño' || r === 'dueno') {
+            toast({
+                title: 'Acción no permitida',
+                description: 'No se puede editar el usuario Dueño desde este panel.',
+                variant: 'error',
+            });
+            return;
+        }
         setSelected(item);
         setEditRole(item.rol || 'empleado');
         setEditActive(!!item.activo);
@@ -108,6 +142,78 @@ export default function EmpleadosPage() {
         setPinDraft('');
         setPinLast('');
         setOpen(true);
+    };
+
+    const createStaff = async () => {
+        const rol = String(createRole || '').trim().toLowerCase();
+        const defaultBranches = sucursalActualId ? [sucursalActualId] : [];
+        setCreateSaving(true);
+        try {
+            if (createMode === 'existente') {
+                if (!existingUserId) throw new Error('Seleccioná un usuario existente');
+                const res = await api.updateStaff(existingUserId, {
+                    rol,
+                    activo: true,
+                    sucursales: defaultBranches,
+                    scopes: [],
+                    tipo: rol,
+                    estado: 'activo',
+                } as any);
+                if (!res.ok) throw new Error(res.error || 'No se pudo asociar');
+            } else {
+                const nombre = String(createNombre || '').trim();
+                const dni = String(createDni || '').trim();
+                const telefono = String(createTelefono || '').trim();
+                if (!nombre || !dni) {
+                    toast({ title: 'Falta información', description: 'Nombre y DNI son obligatorios', variant: 'error' });
+                    return;
+                }
+                const res = await api.createUsuario({ nombre, dni, telefono, rol } as any);
+                if (!res.ok || !res.data?.id) throw new Error(res.error || 'No se pudo crear');
+            }
+            toast({ title: 'Creado', description: 'Staff creado correctamente', variant: 'success' });
+            setCreateOpen(false);
+            setCreateNombre('');
+            setCreateDni('');
+            setCreateTelefono('');
+            setCreateRole('empleado');
+            setCreateMode('nuevo');
+            setExistingSearch('');
+            setExistingUsers([]);
+            setExistingUserId(null);
+            await load();
+        } catch (e) {
+            toast({ title: 'No se pudo crear', description: e instanceof Error ? e.message : 'Error inesperado', variant: 'error' });
+        } finally {
+            setCreateSaving(false);
+        }
+    };
+
+    const searchUsuariosExistentes = async () => {
+        const term = String(existingSearch || '').trim();
+        if (!term) {
+            setExistingUsers([]);
+            return;
+        }
+        setExistingLoading(true);
+        try {
+            const res = await api.getUsuarios({ search: term, limit: 10 });
+            if (res.ok && res.data?.usuarios) {
+                const mapped = (res.data.usuarios || []).map((u) => ({
+                    id: u.id,
+                    nombre: u.nombre,
+                    dni: (u as any).dni,
+                    email: (u as any).email,
+                }));
+                setExistingUsers(mapped);
+            } else {
+                setExistingUsers([]);
+            }
+        } catch {
+            setExistingUsers([]);
+        } finally {
+            setExistingLoading(false);
+        }
     };
 
     const toggleScope = (scope: string, enabled: boolean) => {
@@ -257,6 +363,14 @@ export default function EmpleadosPage() {
                 <div className="flex gap-2">
                     <Button
                         variant="secondary"
+                        onClick={() => setCreateOpen(true)}
+                        leftIcon={<Plus className="w-4 h-4" />}
+                        disabled={loading}
+                    >
+                        Crear staff
+                    </Button>
+                    <Button
+                        variant="secondary"
                         onClick={() => {
                             void load();
                         }}
@@ -293,7 +407,10 @@ export default function EmpleadosPage() {
                     <div className="p-4 text-sm text-slate-400">Sin resultados.</div>
                 ) : (
                     <div className="divide-y divide-slate-800/60">
-                        {filtered.map((u) => (
+                        {filtered.map((u) => {
+                            const r = String(u.rol || '').trim().toLowerCase();
+                            const isOwner = r === 'owner' || r === 'dueño' || r === 'dueno';
+                            return (
                             <div key={u.id} className="grid grid-cols-12 gap-3 px-4 py-3 items-center">
                                 <div className="col-span-5">
                                     <div className="text-sm font-medium text-white">{u.nombre}</div>
@@ -303,15 +420,137 @@ export default function EmpleadosPage() {
                                 <div className="col-span-2 text-sm text-slate-200">{(u.sucursales || []).length}</div>
                                 <div className="col-span-1 text-sm text-slate-200">{u.activo ? 'Sí' : 'No'}</div>
                                 <div className="col-span-2 text-right">
-                                    <Button size="sm" variant="secondary" leftIcon={<Shield className="w-4 h-4" />} onClick={() => openEdit(u)}>
+                                    <Button size="sm" variant="secondary" leftIcon={<Shield className="w-4 h-4" />} onClick={() => openEdit(u)} disabled={isOwner}>
                                         Editar
                                     </Button>
                                 </div>
                             </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </div>
+
+            <Modal
+                isOpen={createOpen}
+                onClose={() => setCreateOpen(false)}
+                title="Crear staff"
+                size="md"
+                footer={
+                    <div className="flex justify-end gap-2">
+                        <Button variant="secondary" onClick={() => setCreateOpen(false)} disabled={createSaving}>
+                            Cancelar
+                        </Button>
+                        <Button onClick={createStaff} isLoading={createSaving}>
+                            Crear
+                        </Button>
+                    </div>
+                }
+            >
+                <div className="p-6 space-y-4">
+                    <div className="grid grid-cols-2 gap-2">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setCreateMode('nuevo');
+                                setExistingUsers([]);
+                                setExistingUserId(null);
+                            }}
+                            className={cn(
+                                'h-10 rounded-xl border text-sm font-semibold transition-colors',
+                                createMode === 'nuevo'
+                                    ? 'bg-primary-500/20 border-primary-500/40 text-primary-200'
+                                    : 'bg-slate-950/30 border-slate-800/60 text-slate-200 hover:bg-slate-900/40'
+                            )}
+                        >
+                            Nuevo usuario
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setCreateMode('existente');
+                                setCreateNombre('');
+                                setCreateDni('');
+                                setCreateTelefono('');
+                            }}
+                            className={cn(
+                                'h-10 rounded-xl border text-sm font-semibold transition-colors',
+                                createMode === 'existente'
+                                    ? 'bg-primary-500/20 border-primary-500/40 text-primary-200'
+                                    : 'bg-slate-950/30 border-slate-800/60 text-slate-200 hover:bg-slate-900/40'
+                            )}
+                        >
+                            Usuario existente
+                        </button>
+                    </div>
+
+                    {createMode === 'existente' ? (
+                        <div className="space-y-2">
+                            <div className="text-sm font-medium text-slate-200">Buscar usuario</div>
+                            <div className="flex gap-2">
+                                <Input value={existingSearch} onChange={(e) => setExistingSearch(e.target.value)} placeholder="Nombre, DNI o email" />
+                                <Button variant="secondary" onClick={() => void searchUsuariosExistentes()} isLoading={existingLoading}>
+                                    Buscar
+                                </Button>
+                            </div>
+                            <div className="space-y-2">
+                                {existingUsers.map((u) => {
+                                    const on = existingUserId === u.id;
+                                    return (
+                                        <button
+                                            key={u.id}
+                                            type="button"
+                                            onClick={() => setExistingUserId(u.id)}
+                                            className={cn(
+                                                'w-full p-3 rounded-xl border text-left transition-colors',
+                                                on
+                                                    ? 'bg-primary-500/20 border-primary-500/40 text-primary-200'
+                                                    : 'bg-slate-950/30 border-slate-800/60 text-slate-200 hover:bg-slate-900/40'
+                                            )}
+                                        >
+                                            <div className="text-sm font-medium">{u.nombre}</div>
+                                            <div className="text-xs text-slate-400">{u.dni || '—'} {u.email ? `• ${u.email}` : ''}</div>
+                                        </button>
+                                    );
+                                })}
+                                {!existingLoading && existingSearch.trim() && existingUsers.length === 0 ? (
+                                    <div className="text-sm text-slate-400">Sin resultados</div>
+                                ) : null}
+                            </div>
+                        </div>
+                    ) : (
+                        <>
+                            <div className="space-y-2">
+                                <div className="text-sm font-medium text-slate-200">Nombre</div>
+                                <Input value={createNombre} onChange={(e) => setCreateNombre(e.target.value)} placeholder="Nombre y apellido" />
+                            </div>
+                            <div className="space-y-2">
+                                <div className="text-sm font-medium text-slate-200">DNI</div>
+                                <Input value={createDni} onChange={(e) => setCreateDni(e.target.value)} placeholder="DNI" />
+                            </div>
+                            <div className="space-y-2">
+                                <div className="text-sm font-medium text-slate-200">Teléfono</div>
+                                <Input value={createTelefono} onChange={(e) => setCreateTelefono(e.target.value)} placeholder="Teléfono" />
+                            </div>
+                        </>
+                    )}
+                    <div className="space-y-2">
+                        <div className="text-sm font-medium text-slate-200">Rol</div>
+                        <select
+                            className="w-full h-10 rounded-xl bg-slate-950/40 border border-slate-800/60 text-slate-200 px-3 outline-none focus:ring-2 focus:ring-primary-500/40"
+                            value={createRole}
+                            onChange={(e) => setCreateRole(e.target.value)}
+                        >
+                            {roleOptions.map((o) => (
+                                <option key={o.value} value={o.value}>
+                                    {o.label}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="text-xs text-slate-500">Se asigna automáticamente a la sucursal actual.</div>
+                </div>
+            </Modal>
 
             <Modal
                 isOpen={open}
@@ -362,11 +601,31 @@ export default function EmpleadosPage() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <div className="text-sm font-medium text-slate-200">Tipo</div>
-                            <Input value={editTipo} onChange={(e) => setEditTipo(e.target.value)} placeholder="empleado / recepcionista" />
+                            <select
+                                className="w-full h-10 rounded-xl bg-slate-950/40 border border-slate-800/60 text-slate-200 px-3 outline-none focus:ring-2 focus:ring-primary-500/40"
+                                value={editTipo}
+                                onChange={(e) => setEditTipo(e.target.value)}
+                            >
+                                {tipoOptions.map((o) => (
+                                    <option key={o.value} value={o.value}>
+                                        {o.label}
+                                    </option>
+                                ))}
+                            </select>
                         </div>
                         <div className="space-y-2">
                             <div className="text-sm font-medium text-slate-200">Estado</div>
-                            <Input value={editEstado} onChange={(e) => setEditEstado(e.target.value)} placeholder="activo / inactivo" />
+                            <select
+                                className="w-full h-10 rounded-xl bg-slate-950/40 border border-slate-800/60 text-slate-200 px-3 outline-none focus:ring-2 focus:ring-primary-500/40"
+                                value={editEstado}
+                                onChange={(e) => setEditEstado(e.target.value)}
+                            >
+                                {estadoOptions.map((o) => (
+                                    <option key={o.value} value={o.value}>
+                                        {o.label}
+                                    </option>
+                                ))}
+                            </select>
                         </div>
                     </div>
 
@@ -394,39 +653,43 @@ export default function EmpleadosPage() {
                     <div className="space-y-3">
                         <div className="text-sm font-medium text-slate-200">Permisos</div>
                         <div className="space-y-2">
-                            {permissionModules.filter((m) => isModuleEnabled(m.key)).map((m) => {
+                            {permissionModules.map((m) => {
+                                const enabledByModule = isModuleEnabled(m.key);
                                 const readOn = editScopes.includes(m.read) || (m.write ? editScopes.includes(m.write) : false);
                                 const writeOn = m.write ? editScopes.includes(m.write) : false;
                                 const extra = (m as any).extra as readonly string[] | undefined;
                                 const configOn = extra ? extra.every((s) => editScopes.includes(s)) : false;
                                 return (
-                                    <div key={m.key} className="flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-800/60 bg-slate-950/20">
+                                    <div key={m.key} className={cn('flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-800/60', enabledByModule ? 'bg-slate-950/20' : 'bg-slate-950/10 opacity-60')}>
                                         <div className="min-w-0">
                                             <div className="text-sm font-medium text-white truncate">{m.label}</div>
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <button
                                                 type="button"
+                                                disabled={!enabledByModule}
                                                 onClick={() => setModuleRead(m.key, m.read, m.write, extra, !readOn)}
                                                 className={cn(
                                                     'h-9 px-3 rounded-xl border text-xs font-semibold transition-colors',
                                                     readOn
                                                         ? 'bg-primary-500/20 border-primary-500/40 text-primary-200'
                                                         : 'bg-slate-950/30 border-slate-800/60 text-slate-200 hover:bg-slate-900/40'
+                                                    ,
+                                                    !enabledByModule ? 'cursor-not-allowed hover:bg-slate-950/30' : ''
                                                 )}
                                             >
                                                 Ver
                                             </button>
                                             <button
                                                 type="button"
-                                                disabled={!m.write}
+                                                disabled={!enabledByModule || !m.write}
                                                 onClick={() => setModuleWrite(m.key, m.read, m.write, !writeOn)}
                                                 className={cn(
                                                     'h-9 px-3 rounded-xl border text-xs font-semibold transition-colors',
                                                     writeOn
                                                         ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-200'
                                                         : 'bg-slate-950/30 border-slate-800/60 text-slate-200 hover:bg-slate-900/40',
-                                                    !m.write ? 'opacity-50 cursor-not-allowed hover:bg-slate-950/30' : ''
+                                                    (!enabledByModule || !m.write) ? 'opacity-50 cursor-not-allowed hover:bg-slate-950/30' : ''
                                                 )}
                                             >
                                                 Usar
@@ -434,6 +697,7 @@ export default function EmpleadosPage() {
                                             {extra ? (
                                                 <button
                                                     type="button"
+                                                    disabled={!enabledByModule}
                                                     onClick={() => {
                                                         const next = !configOn;
                                                         for (const s of extra) toggleScope(s, next);
@@ -444,6 +708,8 @@ export default function EmpleadosPage() {
                                                         configOn
                                                             ? 'bg-violet-500/15 border-violet-500/30 text-violet-200'
                                                             : 'bg-slate-950/30 border-slate-800/60 text-slate-200 hover:bg-slate-900/40'
+                                                        ,
+                                                        !enabledByModule ? 'cursor-not-allowed hover:bg-slate-950/30' : ''
                                                     )}
                                                 >
                                                     Config

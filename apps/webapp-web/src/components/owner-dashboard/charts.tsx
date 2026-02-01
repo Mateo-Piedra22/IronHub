@@ -41,7 +41,6 @@ export function LineChart({
     strokeClassName?: string;
     fillClassName?: string;
 }) {
-    const hasValues = useMemo(() => (data || []).some((n) => Number.isFinite(n)), [data]);
     const { dLine, dArea } = useMemo(() => {
         const values = (data || []).filter((n) => Number.isFinite(n)) as number[];
         if (!values.length) return { dLine: '', dArea: '' };
@@ -64,11 +63,6 @@ export function LineChart({
                 <path d="M 0 100 L 100 100" className="stroke-slate-800/60" fill="none" strokeWidth="1" />
                 {dArea ? <path d={dArea} className={cn(fillClassName)} /> : null}
                 {dLine ? <path d={dLine} className={cn(strokeClassName)} fill="none" strokeWidth="2" /> : null}
-                {!hasValues ? (
-                    <text x="50" y="52" textAnchor="middle" className="fill-slate-500" fontSize="10">
-                        Sin datos
-                    </text>
-                ) : null}
             </svg>
         </div>
     );
@@ -83,7 +77,6 @@ export function BarChart({
     height?: number;
     barClassName?: string;
 }) {
-    const hasValues = useMemo(() => (values || []).length > 0, [values]);
     const bars = useMemo(() => {
         const vals = (values || []).map((v) => (Number.isFinite(v) ? Number(v) : 0));
         const max = Math.max(1, ...vals);
@@ -104,11 +97,6 @@ export function BarChart({
                 {bars.map((b, i) => (
                     <rect key={i} x={b.x} y={b.y} width={b.w} height={b.h} className={cn(barClassName)} rx="1" ry="1" />
                 ))}
-                {!hasValues ? (
-                    <text x="50" y="52" textAnchor="middle" className="fill-slate-500" fontSize="10">
-                        Sin datos
-                    </text>
-                ) : null}
             </svg>
         </div>
     );
@@ -128,14 +116,16 @@ export function DonutChart({
     const totalRaw = segments.reduce((acc, s) => acc + (Number.isFinite(s.value) ? s.value : 0), 0);
     const total = totalRaw || 1;
     let offset = 0;
+    const showEmpty = !segments.length || totalRaw <= 0;
+    const legendSegments = showEmpty ? [{ label: 'Total', value: 0, className: 'stroke-slate-500' }] : segments;
 
     return (
         <div className="flex items-center gap-4">
             <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
                 <circle cx={size / 2} cy={size / 2} r={radius} stroke="rgba(148,163,184,0.25)" strokeWidth={thickness} fill="none" />
-                {!segments.length || totalRaw <= 0 ? (
-                    <text x={size / 2} y={size / 2 + 4} textAnchor="middle" className="fill-slate-500" fontSize="10">
-                        Sin datos
+                {showEmpty ? (
+                    <text x={size / 2} y={size / 2 + 4} textAnchor="middle" className="fill-slate-400" fontSize="12">
+                        0
                     </text>
                 ) : null}
                 {segments.map((s) => {
@@ -162,7 +152,7 @@ export function DonutChart({
                 })}
             </svg>
             <div className="space-y-1">
-                {segments.map((s) => (
+                {legendSegments.map((s) => (
                     <div key={s.label} className="flex items-center gap-2 text-sm">
                         <div className={cn('w-2.5 h-2.5 rounded-full', s.className.replace('stroke-', 'bg-'))} />
                         <div className="text-slate-300">{s.label}</div>
@@ -179,16 +169,15 @@ export function HeatmapTable({
 }: {
     cohorts: Array<{ cohort: string; values: number[] }>;
 }) {
-    const cols = useMemo(() => {
+    const computedCols = useMemo(() => {
         let maxCols = 0;
         for (const c of cohorts || []) {
             maxCols = Math.max(maxCols, Array.isArray(c.values) ? c.values.length : 0);
         }
         return maxCols;
     }, [cohorts]);
-    if (!(cohorts || []).length || cols <= 0) {
-        return <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 text-sm text-slate-400">Sin datos</div>;
-    }
+    const cols = (cohorts || []).length && computedCols > 0 ? computedCols : 6;
+    const cohortsSafe = (cohorts || []).length && computedCols > 0 ? cohorts : [{ cohort: '—', values: Array.from({ length: cols }).map(() => NaN) }];
 
     const cellClass = (v: number) => {
         if (!Number.isFinite(v)) return 'bg-slate-900/50 text-slate-500';
@@ -213,7 +202,7 @@ export function HeatmapTable({
                     </tr>
                 </thead>
                 <tbody>
-                    {(cohorts || []).map((c) => (
+                    {cohortsSafe.map((c) => (
                         <tr key={c.cohort} className="border-t border-slate-800/60">
                             <td className="py-2 pr-3 text-slate-300">{c.cohort}</td>
                             {Array.from({ length: cols }).map((_, i) => {

@@ -151,8 +151,6 @@ export default function StationPage() {
                         setShowCelebration(true);
                         playSuccessSound();
 
-                        // Regenerate token immediately
-                        await fetch(`${API_BASE}/api/checkin/station/regenerate/${stationKey}`, { method: 'POST' });
                         await loadToken();
 
                         // Hide celebration after 3 seconds

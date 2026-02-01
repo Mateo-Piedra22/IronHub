@@ -99,6 +99,7 @@ async def api_profesor_profile_create(
     request: Request,
     _=Depends(require_owner),
     svc: ProfesorService = Depends(get_profesor_service),
+    sucursal_id: int = Depends(require_sucursal_selected),
 ):
     try:
         payload = await request.json()
@@ -111,7 +112,9 @@ async def api_profesor_profile_create(
     if not usuario_id:
         raise HTTPException(status_code=400, detail="usuario_id requerido")
     try:
-        profesor_id = int(svc.crear_perfil_profesor(int(usuario_id), payload or {}))
+        profesor_id = int(
+            svc.crear_perfil_profesor(int(usuario_id), payload or {}, sucursal_id=int(sucursal_id))
+        )
         return {"ok": True, "profesor_id": profesor_id, "usuario_id": int(usuario_id)}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

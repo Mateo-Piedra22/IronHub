@@ -5,6 +5,7 @@
 - [Arquitectura](architecture/overview.md)
 - [Servicios y apps](architecture/components.md)
 - [Multi-tenant](architecture/multi-tenancy.md)
+- [Access Control (molinete/puerta)](access-control/README.md)
 - [Migraciones](database/migrations.md)
 - [Schema audit](database/schema-audit.md)
 - [Deploy y operaciones](operations/deployment.md)

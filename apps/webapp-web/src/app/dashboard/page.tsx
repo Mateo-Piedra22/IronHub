@@ -769,7 +769,7 @@ function OwnerDashboard() {
                         </ChartCard>
 
                         <ChartCard title="WhatsApp por estado" subtitle="Mensajes enviados por estado (histórico)">
-                            {waStatusSegments.length ? <DonutChart segments={waStatusSegments} /> : <div className="text-sm text-slate-400">Sin datos</div>}
+                            <DonutChart segments={waStatusSegments} />
                         </ChartCard>
 
                         <ChartCard title="Morosidad (top 20)" subtitle="Usuarios activos sin pago reciente">

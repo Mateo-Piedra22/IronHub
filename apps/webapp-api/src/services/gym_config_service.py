@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 
 from src.services.base import BaseService
-from src.database.orm_models import GymConfig, Configuracion, CustomTheme
+from src.database.orm_models import GymConfig, Configuracion
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,19 @@ class GymConfigService(BaseService):
         """
         config = {}
         try:
-            # 1. Load from GymConfig table (assuming single row for gym details)
+            # 1. Load from Configuracion table (general key-value settings)
+            settings = self.db.execute(select(Configuracion)).scalars().all()
+            for setting in settings:
+                key = setting.clave
+                value = setting.valor
+                # Try to parse JSON values
+                try:
+                    config[key] = json.loads(value) if value else None
+                except (json.JSONDecodeError, TypeError):
+                    config[key] = value
+
+            # 2. Load from GymConfig table (single row for gym details)
+            # GymConfig overrides Configuracion for overlapping keys.
             gym_info = self.db.execute(select(GymConfig).limit(1)).scalar_one_or_none()
             if gym_info:
                 config.update(
@@ -54,17 +66,6 @@ class GymConfigService(BaseService):
                         "logo_url": gym_info.logo_url,
                     }
                 )
-
-            # 2. Load from Configuracion table (general key-value settings)
-            settings = self.db.execute(select(Configuracion)).scalars().all()
-            for setting in settings:
-                key = setting.clave
-                value = setting.valor
-                # Try to parse JSON values
-                try:
-                    config[key] = json.loads(value) if value else None
-                except (json.JSONDecodeError, TypeError):
-                    config[key] = value
 
             return config
         except Exception as e:
@@ -134,31 +135,6 @@ class GymConfigService(BaseService):
         return self.actualizar_configuracion_gimnasio(
             {"logo_url": url, "gym_logo_url": url}
         )
-
-    # =========================================================================
-    # THEMES (CustomTheme & ThemeSchedule)
-    # =========================================================================
-
-    def obtener_temas(self) -> list[CustomTheme]:
-        """Obtener todos los temas personalizados."""
-        return self.db.scalars(select(CustomTheme)).all()
-
-    def obtener_tema(self, tema_id: int) -> Optional[CustomTheme]:
-        """Obtener un tema por ID."""
-        return self.db.get(CustomTheme, tema_id)
-
-    def crear_tema(self, datos: Dict[str, Any]) -> CustomTheme:
-        """Crear un nuevo tema."""
-        tema = CustomTheme(
-            nombre=datos["nombre"],
-            name=datos["name"],
-            colores=datos["colores"],
-            activo=datos.get("activo", True),
-            usuario_creador_id=datos.get("usuario_creador_id"),
-        )
-        self.db.add(tema)
-        self.db.commit()
-        return tema
 
     # =========================================================================
     # SUBSCRIPTION STATUS (Admin DB Integration)

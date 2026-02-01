@@ -49,12 +49,16 @@ export default function DashboardLayout({
                     <div className="flex items-center justify-between">
                         {/* Logo */}
                         <Link href="/usuario" className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center shadow-sm">
+                            <div
+                                className={`w-10 h-10 rounded-xl shadow-sm overflow-hidden flex items-center justify-center ${
+                                    gymLogoUrl ? 'bg-transparent' : 'bg-gradient-to-br from-primary-500 to-primary-700'
+                                }`}
+                            >
                                 {gymLogoUrl ? (
                                     <img
                                         src={gymLogoUrl}
                                         alt="Logo"
-                                        className="w-7 h-7 object-contain bg-white/90 rounded-md p-1"
+                                        className="w-full h-full object-contain"
                                         onError={() => setGymLogoUrl('')}
                                     />
                                 ) : (

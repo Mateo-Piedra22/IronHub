@@ -33,7 +33,7 @@ class StaffService(BaseService):
         show_all: bool = False,
     ) -> List[Dict[str, Any]]:
         term = str(search or "").strip().lower()
-        owner_like_roles = ["owner", "dueño", "dueno", "admin", "administrador"]
+        owner_like_roles = ["owner", "dueño", "dueno"]
         staff_like_roles = [
             "profesor",
             "empleado",
@@ -42,7 +42,7 @@ class StaffService(BaseService):
             "admin",
             "administrador",
         ]
-        roles = list({*owner_like_roles, *staff_like_roles})
+        roles = list({*staff_like_roles})
         stmt = (
             select(Usuario)
             .where(Usuario.rol.in_(roles))
@@ -55,11 +55,8 @@ class StaffService(BaseService):
                 sid = None
             if sid is not None and sid > 0:
                 stmt = stmt.where(
-                    (func.lower(func.coalesce(Usuario.rol, "")).in_(owner_like_roles))
-                    | (
-                        text(
-                            "EXISTS (SELECT 1 FROM usuario_sucursales us WHERE us.usuario_id = usuarios.id AND us.sucursal_id = :sid)"
-                        )
+                    text(
+                        "EXISTS (SELECT 1 FROM usuario_sucursales us WHERE us.usuario_id = usuarios.id AND us.sucursal_id = :sid)"
                     )
                 ).params(sid=sid)
         if term:

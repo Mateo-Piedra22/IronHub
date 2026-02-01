@@ -1,9 +1,11 @@
 'use client';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ToastContainer } from '@/components/ui';
 import { AuthProvider } from '@/lib/auth';
+import { api } from '@/lib/api';
+import { applyGymTheme } from '@/lib/branding';
 
 export function Providers({ children }: { children: React.ReactNode }) {
     const [queryClient] = useState(() => new QueryClient({
@@ -14,6 +16,18 @@ export function Providers({ children }: { children: React.ReactNode }) {
             },
         },
     }));
+
+    useEffect(() => {
+        (async () => {
+            try {
+                const res = await api.getBootstrap('auto');
+                if (res.ok && (res.data as any)?.gym?.theme) {
+                    applyGymTheme(((res.data as any).gym.theme || null) as any);
+                }
+            } catch {
+            }
+        })();
+    }, []);
 
     return (
         <QueryClientProvider client={queryClient}>

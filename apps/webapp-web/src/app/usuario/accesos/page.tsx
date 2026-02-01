@@ -3,21 +3,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Building2, Loader2, Lock, ShieldCheck } from 'lucide-react';
-import { api, type UsuarioEntitlements } from '@/lib/api';
+import { api, type AccessCredential, type UsuarioEntitlements } from '@/lib/api';
 
 export default function AccesosPage() {
     const [data, setData] = useState<UsuarioEntitlements | null>(null);
+    const [credentials, setCredentials] = useState<AccessCredential[]>([]);
     const [loading, setLoading] = useState(true);
 
     const load = useCallback(async () => {
         setLoading(true);
         try {
-            const res = await api.getUsuarioEntitlements();
-            if (res.ok && res.data) {
-                setData(res.data);
-            } else {
-                setData(null);
-            }
+            const [res, cred] = await Promise.all([api.getUsuarioEntitlements(), api.getUsuarioAccessCredentials()]);
+            setData(res.ok && res.data ? res.data : null);
+            setCredentials(cred.ok && cred.data?.ok ? cred.data.items || [] : []);
         } finally {
             setLoading(false);
         }
@@ -149,7 +147,40 @@ export default function AccesosPage() {
                     </div>
                 )}
             </motion.div>
+
+            <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.15 }}
+                className="card overflow-hidden"
+            >
+                <div className="p-4 border-b border-slate-800/50 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <Lock className="w-4 h-4 text-slate-400" />
+                        <h2 className="font-semibold text-white">Mis credenciales</h2>
+                    </div>
+                    <div className="text-xs text-slate-500">{credentials.length}</div>
+                </div>
+                <div className="divide-y divide-neutral-800/50">
+                    {credentials.length === 0 ? (
+                        <div className="p-6 text-sm text-slate-400">
+                            No tenés credenciales registradas. Si usás llavero/tarjeta, pedí el alta en recepción.
+                        </div>
+                    ) : (
+                        credentials.map((c) => (
+                            <div key={c.id} className="p-4 flex items-center justify-between gap-2">
+                                <div className="min-w-0">
+                                    <div className="text-sm font-medium text-white truncate">{c.label || c.credential_type}</div>
+                                    <div className="text-xs text-slate-500">{c.credential_type.toUpperCase()}</div>
+                                </div>
+                                <div className={`text-xs ${c.active ? 'text-success-400' : 'text-slate-500'}`}>
+                                    {c.active ? 'Activa' : 'Inactiva'}
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </motion.div>
         </div>
     );
 }
-

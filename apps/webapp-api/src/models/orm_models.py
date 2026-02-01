@@ -1713,81 +1713,6 @@ class HistorialEstado(Base):
     )
 
 
-# --- Themes & Configuration ---
-
-
-class CustomTheme(Base):
-    __tablename__ = "custom_themes"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    nombre: Mapped[str] = mapped_column(String(100), nullable=False)
-    name: Mapped[str] = mapped_column(String(100), nullable=False)
-    data: Mapped[Optional[dict]] = mapped_column(JSONB)
-    colores: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    activo: Mapped[bool] = mapped_column(Boolean, server_default="true")
-    fecha_creacion: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.current_timestamp()
-    )
-    usuario_creador_id: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"))
-
-    schedules: Mapped[List["ThemeSchedule"]] = relationship(
-        "ThemeSchedule", back_populates="theme"
-    )
-
-    __table_args__ = (Index("idx_custom_themes_activo", "activo"),)
-
-
-class ThemeSchedule(Base):
-    __tablename__ = "theme_schedules"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(200), nullable=False)
-    theme_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    theme_id: Mapped[Optional[int]] = mapped_column(ForeignKey("custom_themes.id"))
-    start_time: Mapped[time] = mapped_column(Time, nullable=False)
-    end_time: Mapped[time] = mapped_column(Time, nullable=False)
-    monday: Mapped[Optional[bool]] = mapped_column(Boolean, server_default="false")
-    tuesday: Mapped[Optional[bool]] = mapped_column(Boolean, server_default="false")
-    wednesday: Mapped[Optional[bool]] = mapped_column(Boolean, server_default="false")
-    thursday: Mapped[Optional[bool]] = mapped_column(Boolean, server_default="false")
-    friday: Mapped[Optional[bool]] = mapped_column(Boolean, server_default="false")
-    saturday: Mapped[Optional[bool]] = mapped_column(Boolean, server_default="false")
-    sunday: Mapped[Optional[bool]] = mapped_column(Boolean, server_default="false")
-    is_active: Mapped[Optional[bool]] = mapped_column(Boolean, server_default="true")
-    fecha_inicio: Mapped[Optional[date]] = mapped_column(Date)
-    fecha_fin: Mapped[Optional[date]] = mapped_column(Date)
-    activo: Mapped[Optional[bool]] = mapped_column(Boolean, server_default="true")
-    fecha_creacion: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.current_timestamp()
-    )
-
-    theme: Mapped[Optional["CustomTheme"]] = relationship(
-        "CustomTheme", back_populates="schedules"
-    )
-
-    __table_args__ = (
-        Index("idx_theme_schedules_activo", "activo"),
-        Index("idx_theme_schedules_fechas", "fecha_inicio", "fecha_fin"),
-        Index("idx_theme_schedules_theme_id", "theme_id"),
-    )
-
-
-class ThemeSchedulingConfig(Base):
-    __tablename__ = "theme_scheduling_config"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    clave: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    valor: Mapped[str] = mapped_column(Text, nullable=False)
-    config_data: Mapped[Optional[dict]] = mapped_column(JSONB)
-    config_type: Mapped[Optional[str]] = mapped_column(
-        String(50), server_default="general"
-    )
-    descripcion: Mapped[Optional[str]] = mapped_column(Text)
-    fecha_actualizacion: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.current_timestamp()
-    )
-
-
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 
@@ -1808,42 +1733,6 @@ class AuditLog(Base):
     )
 
     __table_args__ = (Index("idx_audit_logs_user_id", "user_id"),)
-
-
-class AccionMasivaPendiente(Base):
-    __tablename__ = "acciones_masivas_pendientes"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    operation_id: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    tipo: Mapped[str] = mapped_column(String(50), nullable=False)
-    descripcion: Mapped[Optional[str]] = mapped_column(Text)
-    usuario_ids: Mapped[List[int]] = mapped_column(ARRAY(Integer), nullable=False)
-    parametros: Mapped[Optional[dict]] = mapped_column(JSONB)
-    estado: Mapped[Optional[str]] = mapped_column(
-        String(20), server_default="pendiente"
-    )
-    fecha_programada: Mapped[Optional[datetime]] = mapped_column(DateTime)
-    fecha_creacion: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.current_timestamp()
-    )
-    fecha_ejecucion: Mapped[Optional[datetime]] = mapped_column(DateTime)
-    creado_por: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("usuarios.id", ondelete="SET NULL")
-    )
-    resultado: Mapped[Optional[dict]] = mapped_column(JSONB)
-    error_message: Mapped[Optional[str]] = mapped_column(Text)
-
-    creador: Mapped[Optional["Usuario"]] = relationship(
-        "Usuario", foreign_keys=[creado_por]
-    )
-
-    __table_args__ = (
-        Index("idx_acciones_masivas_estado", "estado"),
-        Index(
-            "idx_acciones_masivas_usuario_ids", "usuario_ids", postgresql_using="gin"
-        ),
-        Index("idx_acciones_masivas_fecha_programada", "fecha_programada"),
-    )
 
 
 class CheckinPending(Base):
@@ -1925,59 +1814,6 @@ class Configuracion(Base):
     valor: Mapped[str] = mapped_column(Text, nullable=False)
     tipo: Mapped[Optional[str]] = mapped_column(String(50), server_default="string")
     descripcion: Mapped[Optional[str]] = mapped_column(Text)
-
-
-# --- System Diagnostics & Maintenance ---
-
-
-class SystemDiagnostics(Base):
-    __tablename__ = "system_diagnostics"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    timestamp: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.current_timestamp()
-    )
-    diagnostic_type: Mapped[str] = mapped_column(Text, nullable=False)
-    component: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(Text, nullable=False)
-    details: Mapped[Optional[str]] = mapped_column(Text)
-    metrics: Mapped[Optional[str]] = mapped_column(Text)
-    resolved: Mapped[Optional[bool]] = mapped_column(Boolean, server_default="false")
-    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
-    resolved_by: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"))
-
-    __table_args__ = (
-        Index("idx_system_diagnostics_timestamp", "timestamp"),
-        Index("idx_system_diagnostics_type", "diagnostic_type"),
-        Index("idx_system_diagnostics_status", "status"),
-    )
-
-
-class MaintenanceTask(Base):
-    __tablename__ = "maintenance_tasks"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    task_name: Mapped[str] = mapped_column(Text, nullable=False)
-    task_type: Mapped[str] = mapped_column(Text, nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text)
-    scheduled_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
-    executed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
-    status: Mapped[Optional[str]] = mapped_column(Text, server_default="pending")
-    result: Mapped[Optional[str]] = mapped_column(Text)
-    error_message: Mapped[Optional[str]] = mapped_column(Text)
-    created_by: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"))
-    executed_by: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"))
-    auto_schedule: Mapped[Optional[bool]] = mapped_column(
-        Boolean, server_default="false"
-    )
-    frequency_days: Mapped[Optional[int]] = mapped_column(Integer)
-    next_execution: Mapped[Optional[datetime]] = mapped_column(DateTime)
-
-    __table_args__ = (
-        Index("idx_maintenance_tasks_status", "status"),
-        Index("idx_maintenance_tasks_scheduled", "scheduled_at"),
-        Index("idx_maintenance_tasks_next_execution", "next_execution"),
-    )
 
 
 class ClaseAsistenciaHistorial(Base):

@@ -1,4 +1,5 @@
 import logging
+import json
 import secrets
 import hashlib
 from datetime import date, timedelta
@@ -7,6 +8,7 @@ from typing import Optional, Dict
 from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from src.dependencies import (
     require_gestion_access,
@@ -132,6 +134,15 @@ async def api_checkin(
         ok, msg = svc.validar_token_y_registrar(
             token, int(socio_id), int(sucursal_id)
         )
+        if ok:
+            try:
+                _enqueue_auto_unlock_for_sucursal(svc.db, int(sucursal_id), request_id=f"user_token:{token}", source="user_qr")
+                svc.db.commit()
+            except Exception:
+                try:
+                    svc.db.rollback()
+                except Exception:
+                    pass
 
         sucursal_nombre = None
         try:
@@ -280,6 +291,21 @@ async def api_checkin_by_dni(
             ok, msg = svc.registrar_asistencia_por_dni(
                 dni, request.session.get("sucursal_id")
             )
+        if ok:
+            sid = request.session.get("sucursal_id")
+            try:
+                sid = int(sid) if sid is not None else None
+            except Exception:
+                sid = None
+            if sid:
+                try:
+                    _enqueue_auto_unlock_for_sucursal(svc.db, int(sid), request_id=f"dni:{dni}", source="dni_checkin")
+                    svc.db.commit()
+                except Exception:
+                    try:
+                        svc.db.rollback()
+                    except Exception:
+                        pass
 
         payload = {
             "ok": ok,
@@ -794,13 +820,12 @@ async def api_station_token(
 async def api_station_regenerate(
     station_key: str, svc: AttendanceService = Depends(get_attendance_service)
 ):
-    """Force regenerate station token (public - used after each check-in)."""
+    """Legacy alias of /api/checkin/station/token (public)."""
     try:
         sucursal_id = svc.validar_station_key(station_key)
         if not sucursal_id:
             return JSONResponse({"error": "Station key inválida"}, status_code=404)
-        token_data = svc.crear_station_token(int(sucursal_id))
-        return token_data
+        return svc.obtener_station_token_activo(int(sucursal_id))
     except Exception as e:
         logger.error(f"Error regenerating station token: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -824,6 +849,52 @@ async def api_station_recent(
     except Exception as e:
         logger.error(f"Error getting recent check-ins: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+def _enqueue_auto_unlock_for_sucursal(db: Session, sucursal_id: int, *, request_id: str, source: str) -> None:
+    rid = str(request_id or "").strip()[:80]
+    if not rid:
+        return
+    src = str(source or "").strip()[:40] or "checkin"
+    row = db.execute(
+        text(
+            """
+            SELECT id, config
+            FROM access_devices
+            WHERE sucursal_id = :sid AND enabled = TRUE
+            ORDER BY id ASC
+            """
+        ),
+        {"sid": int(sucursal_id)},
+    ).mappings().all()
+    target_id = None
+    unlock_ms = 2500
+    for r in row:
+        cfg = r.get("config") if isinstance(r.get("config"), dict) else {}
+        if not bool(cfg.get("allow_remote_unlock")):
+            continue
+        if not bool(cfg.get("station_auto_unlock")):
+            continue
+        try:
+            unlock_ms = int(cfg.get("station_unlock_ms") or cfg.get("unlock_ms") or 2500)
+        except Exception:
+            unlock_ms = 2500
+        unlock_ms = max(250, min(unlock_ms, 15000))
+        target_id = int(r.get("id") or 0)
+        break
+    if not target_id:
+        return
+    payload = {"unlock_ms": unlock_ms, "source": src}
+    db.execute(
+        text(
+            """
+            INSERT INTO access_commands(device_id, command_type, payload, status, request_id, actor_usuario_id, expires_at, created_at)
+            VALUES (:did, 'unlock', CAST(:p AS JSONB), 'pending', :rid, NULL, NOW() + INTERVAL '15 seconds', NOW())
+            ON CONFLICT (device_id, request_id) DO NOTHING
+            """
+        ),
+        {"did": int(target_id), "rid": rid, "p": json.dumps(payload, ensure_ascii=False)},
+    )
 
 
 @router.post("/api/checkin/station/scan")
@@ -885,6 +956,21 @@ async def api_station_scan(
 
         # Validate and register
         ok, msg, user_data = svc.validar_station_scan(token, int(usuario_id))
+        if ok and isinstance(user_data, dict):
+            sid = user_data.get("branch_id") or user_data.get("sucursal_id")
+            try:
+                sid = int(sid) if sid is not None else None
+            except Exception:
+                sid = None
+            if sid:
+                try:
+                    _enqueue_auto_unlock_for_sucursal(svc.db, int(sid), request_id=f"station:{token}", source="station_qr")
+                    svc.db.commit()
+                except Exception:
+                    try:
+                        svc.db.rollback()
+                    except Exception:
+                        pass
 
         payload = {"ok": ok, "mensaje": msg, "usuario": user_data}
         status_code = 200 if ok else 400
