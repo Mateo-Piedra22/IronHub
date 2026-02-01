@@ -238,7 +238,7 @@ public sealed class MainForm : Form
         tabs.TabPages.Add(tpInput);
         tabs.TabPages.Add(tpTests);
 
-        void AddTitle(Control c, string text)
+        int AddTitle(Control c, string text)
         {
             var t = new Label
             {
@@ -250,24 +250,27 @@ public sealed class MainForm : Form
                 Font = new System.Drawing.Font("Segoe UI", 9, System.Drawing.FontStyle.Bold)
             };
             c.Controls.Add(t);
+            return t.Bottom;
         }
 
-        AddTitle(tpPairing, "Pairing (desde Gestión → Accesos → Dispositivos → Pairing)");
+        var pairTitleBottom = AddTitle(tpPairing, "Pairing (desde Gestión → Accesos → Dispositivos → Pairing)");
 
         var pairHelp = new TextBox
         {
             Left = 16,
-            Top = 46,
+            Top = pairTitleBottom + 8,
             Width = 720,
             Height = 70,
             Multiline = true,
             ReadOnly = true,
             TabStop = false,
+            BorderStyle = BorderStyle.FixedSingle,
             Text = "Tip: copiá el bloque de Pairing desde Gestión y usá Pegar.\r\nBase URL debe ser la API (ej: https://api.ironhub.motiona.xyz)."
         };
         tpPairing.Controls.Add(pairHelp);
+        _tips.SetToolTip(pairHelp, "Si ves HTML/<!DOCTYPE> al hacer Pair, la Base URL no es la API.");
 
-        int y = 132;
+        int y = pairHelp.Bottom + 16;
         tpPairing.Controls.Add(MkLabel("Tenant:", 16, y));
         _tenant.Left = 200;
         _tenant.Top = y - 2;
@@ -324,8 +327,8 @@ public sealed class MainForm : Form
         _validateBtn.Click += async (_, _) => await ForceSyncAsync();
         tpPairing.Controls.Add(_validateBtn);
 
-        AddTitle(tpUnlock, "Apertura (salida hacia molinete/puerta)");
-        y = 52;
+        var unlockTitleBottom = AddTitle(tpUnlock, "Apertura (salida hacia molinete/puerta)");
+        y = unlockTitleBottom + 14;
         tpUnlock.Controls.Add(MkLabel("Método:", 16, y));
         _unlockMethod.Left = 200;
         _unlockMethod.Top = y - 2;
@@ -401,8 +404,8 @@ public sealed class MainForm : Form
         _unlockMs.Increment = 250;
         tpUnlock.Controls.Add(_unlockMs);
 
-        AddTitle(tpInput, "Lecturas (entrada) y operación");
-        y = 52;
+        var inputTitleBottom = AddTitle(tpInput, "Lecturas (entrada) y operación");
+        y = inputTitleBottom + 14;
         tpInput.Controls.Add(MkLabel("Modo:", 16, y));
         _accessMode.Left = 200;
         _accessMode.Top = y - 2;
@@ -555,8 +558,8 @@ public sealed class MainForm : Form
         };
         tpInput.Controls.Add(inputHint);
 
-        AddTitle(tpTests, "Pruebas de apertura");
-        y = 52;
+        var testsTitleBottom = AddTitle(tpTests, "Pruebas de apertura");
+        y = testsTitleBottom + 14;
         tpTests.Controls.Add(MkLabel("Test GET URL:", 16, y));
         _testGetUrl.Left = 200;
         _testGetUrl.Top = y - 2;
@@ -667,7 +670,7 @@ public sealed class MainForm : Form
 
     private static Label MkLabel(string t, int x, int y)
     {
-        return new Label { Left = x, Top = y, Width = 190, Text = t };
+        return new Label { Left = x, Top = y, Width = 170, Text = t };
     }
 
     private void ToggleConfig(bool? open = null)
