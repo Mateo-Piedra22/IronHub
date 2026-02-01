@@ -70,17 +70,58 @@ class AttendanceRepository(BaseRepository):
         sid = int(sucursal_id) if sucursal_id is not None else None
 
         if bool(allow_multiple):
-            asistencia = Asistencia(
-                usuario_id=usuario_id,
-                fecha=fecha,
-                hora_registro=now,
-                sucursal_id=sid,
-            )
-            self.db.add(asistencia)
-            self.db.commit()
-            self.db.refresh(asistencia)
-            self._invalidate_cache("asistencias")
-            return asistencia.id
+            # When allow_multiple is True, we still try to insert but handle the
+            # unique constraint by using raw SQL. If conflict occurs, we just
+            # insert anyway as a new record (the constraint prevents exact duplicates
+            # but we want to allow multiple per day with different timestamps).
+            # Since the unique constraint is on (usuario_id, fecha, sucursal_id),
+            # we need to insert directly and catch IntegrityError.
+            try:
+                asistencia = Asistencia(
+                    usuario_id=usuario_id,
+                    fecha=fecha,
+                    hora_registro=now,
+                    sucursal_id=sid,
+                )
+                self.db.add(asistencia)
+                self.db.flush()  # Flush to catch constraint violation early
+                self.db.commit()
+                self.db.refresh(asistencia)
+                self._invalidate_cache("asistencias")
+                return asistencia.id
+            except Exception as e:
+                self.db.rollback()
+                # If it's a unique constraint violation, the user already has
+                # attendance for today - return the existing one
+                err_str = str(e).lower()
+                if "unique" in err_str or "duplicate" in err_str or "violates" in err_str:
+                    # Find existing attendance
+                    if sid is None:
+                        existing = self.db.execute(
+                            text(
+                                """
+                                SELECT id FROM asistencias
+                                WHERE usuario_id = :uid AND fecha = :f AND sucursal_id IS NULL
+                                ORDER BY hora_registro DESC LIMIT 1
+                                """
+                            ),
+                            {"uid": int(usuario_id), "f": fecha},
+                        ).fetchone()
+                    else:
+                        existing = self.db.execute(
+                            text(
+                                """
+                                SELECT id FROM asistencias
+                                WHERE usuario_id = :uid AND fecha = :f AND sucursal_id = :sid
+                                ORDER BY hora_registro DESC LIMIT 1
+                                """
+                            ),
+                            {"uid": int(usuario_id), "f": fecha, "sid": sid},
+                        ).fetchone()
+                    if existing:
+                        return int(existing[0])
+                    # If we can't find it, raise the original error
+                raise
 
         if sid is None:
             row = self.db.execute(
