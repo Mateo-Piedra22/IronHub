@@ -23,7 +23,7 @@ DEFAULT_FEATURE_FLAGS: Dict[str, Any] = {
         "bulk_actions": False,
         "soporte": True,
         "novedades": True,
-        "accesos": False,
+        "accesos": True,
     }
     ,
     "features": {

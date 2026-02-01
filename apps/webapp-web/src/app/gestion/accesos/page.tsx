@@ -165,7 +165,10 @@ export default function AccesosPage() {
 
     const pairingBlock = useMemo(() => {
         if (!pairingInfo.device_public_id || !pairingInfo.pairing_code) return '';
-        const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+        const webUrl = typeof window !== 'undefined' ? window.location.origin : '';
+        const apiUrl =
+            (process.env.NEXT_PUBLIC_API_URL || '').trim() ||
+            `https://api.${(process.env.NEXT_PUBLIC_TENANT_DOMAIN || 'ironhub.motiona.xyz').trim()}`;
         const sid = typeof pairingInfo.sucursal_id === 'number' ? pairingInfo.sucursal_id : null;
         const sname = sid != null ? (sucursales.find((s) => Number(s.id) === Number(sid))?.nombre || '') : '';
         const sucLabel = sid != null ? `${sname ? `${sname} ` : ''}(#${sid})` : '—';
@@ -173,7 +176,8 @@ export default function AccesosPage() {
             'IRONHUB · PAIRING (copiar/pegar en el Access Agent)',
             '',
             `Tenant: ${accessTenant || '—'}`,
-            `Base URL: ${baseUrl || '—'}`,
+            `Base URL API: ${apiUrl || '—'}`,
+            `Web URL: ${webUrl || '—'}`,
             `Sucursal: ${sucLabel}`,
             `Device: ${pairingInfo.device_name || '—'}`,
             '',

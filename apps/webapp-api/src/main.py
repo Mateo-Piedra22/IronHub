@@ -330,19 +330,22 @@ async def tenant_context_middleware(request: Request, call_next):
     if request.url.path.startswith("/api/") and request.method in ("POST", "PUT", "DELETE", "PATCH"):
         pth = str(request.url.path)
         if not pth.startswith("/api/auth/"):
-            csrf_cookie = str(request.cookies.get("ironhub_csrf") or "").strip()
-            csrf_header = str(request.headers.get("x-csrf-token") or "").strip()
-            if (not csrf_cookie) or (not csrf_header) or (csrf_cookie != csrf_header):
-                resp = JSONResponse(
-                    status_code=403,
-                    content={
-                        "ok": False,
-                        "error": "CSRF",
-                        "mensaje": "CSRF token inválido o ausente",
-                    },
-                )
-                _apply_cors_headers(request, resp)
-                return resp
+            session_cookie_name = os.getenv("SESSION_COOKIE", "ironhub_tenant_session")
+            has_session_cookie = bool(str(request.cookies.get(session_cookie_name) or "").strip())
+            if has_session_cookie:
+                csrf_cookie = str(request.cookies.get("ironhub_csrf") or "").strip()
+                csrf_header = str(request.headers.get("x-csrf-token") or "").strip()
+                if (not csrf_cookie) or (not csrf_header) or (csrf_cookie != csrf_header):
+                    resp = JSONResponse(
+                        status_code=403,
+                        content={
+                            "ok": False,
+                            "error": "CSRF",
+                            "mensaje": "CSRF token inválido o ausente",
+                        },
+                    )
+                    _apply_cors_headers(request, resp)
+                    return resp
     host = request.headers.get("host", "")
     base = os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz")
     debug_tenant = os.getenv("DEBUG_TENANT", "false").lower() in ("1", "true", "yes")
