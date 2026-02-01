@@ -64,6 +64,153 @@ def _is_nonce_valid(n: str) -> bool:
 def _digits_only(s: str) -> str:
     return "".join(ch for ch in str(s or "") if ch.isdigit())
 
+
+def _iso_dt(v: Any) -> Optional[str]:
+    if v is None:
+        return None
+    try:
+        if isinstance(v, str):
+            s = v.strip()
+            return s or None
+        if hasattr(v, "isoformat"):
+            return v.isoformat()
+    except Exception:
+        return None
+    try:
+        return str(v)
+    except Exception:
+        return None
+
+
+def _compute_days_left(v: Any) -> Optional[int]:
+    if v is None:
+        return None
+    dt: Optional[datetime] = None
+    try:
+        if isinstance(v, datetime):
+            dt = v
+        elif isinstance(v, str):
+            dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
+        else:
+            dt = None
+    except Exception:
+        dt = None
+    if dt is None:
+        return None
+    try:
+        d0 = _utcnow().date()
+        d1 = dt.date()
+        return int((d1 - d0).days)
+    except Exception:
+        return None
+
+
+def _get_usuario_display(db: Session, usuario_id: int) -> Optional[Dict[str, Any]]:
+    try:
+        uid = int(usuario_id)
+    except Exception:
+        return None
+    if uid <= 0:
+        return None
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT
+                  u.id,
+                  u.nombre,
+                  u.dni,
+                  u.rol,
+                  u.activo,
+                  COALESCE(u.exento, FALSE) AS exento,
+                  COALESCE(u.cuotas_vencidas, 0) AS cuotas_vencidas,
+                  u.fecha_proximo_vencimiento,
+                  u.ultimo_pago,
+                  u.tipo_cuota_id,
+                  tc.nombre AS tipo_cuota_nombre,
+                  tc.duracion_dias AS tipo_cuota_duracion_dias
+                FROM usuarios u
+                LEFT JOIN tipo_cuotas tc ON tc.id = u.tipo_cuota_id
+                WHERE u.id = :uid
+                LIMIT 1
+                """
+            ),
+            {"uid": int(uid)},
+        ).mappings().first()
+        if not row:
+            return None
+        fpv = row.get("fecha_proximo_vencimiento")
+        dias = _compute_days_left(fpv)
+        activo = bool(row.get("activo"))
+        exento = bool(row.get("exento"))
+        status = "SIN_INFO"
+        badge = "neutral"
+        try:
+            if not activo:
+                status = "INACTIVO"
+                badge = "danger"
+            elif exento:
+                status = "EXENTO"
+                badge = "ok"
+            elif dias is None and not fpv:
+                status = "SIN_INFO"
+                badge = "neutral"
+            elif dias is not None:
+                if dias < 0:
+                    status = "VENCIDA"
+                    badge = "danger"
+                elif dias <= 3:
+                    status = "POR_VENCER"
+                    badge = "warn"
+                else:
+                    status = "AL_DIA"
+                    badge = "ok"
+            else:
+                status = "AL_DIA"
+                badge = "ok"
+        except Exception:
+            status = "SIN_INFO"
+            badge = "neutral"
+        out: Dict[str, Any] = {
+            "id": int(row.get("id") or uid),
+            "nombre": str(row.get("nombre") or "").strip() or None,
+            "dni": str(row.get("dni") or "").strip() or None,
+            "rol": str(row.get("rol") or "").strip().lower() or None,
+            "activo": activo,
+            "exento": exento,
+            "cuotas_vencidas": int(row.get("cuotas_vencidas") or 0),
+            "fecha_proximo_vencimiento": _iso_dt(fpv),
+            "dias_restantes": dias,
+            "ultimo_pago": _iso_dt(row.get("ultimo_pago")),
+            "tipo_cuota_id": int(row.get("tipo_cuota_id")) if row.get("tipo_cuota_id") is not None else None,
+            "tipo_cuota_nombre": str(row.get("tipo_cuota_nombre") or "").strip() or None,
+            "tipo_cuota_duracion_dias": int(row.get("tipo_cuota_duracion_dias")) if row.get("tipo_cuota_duracion_dias") is not None else None,
+            "cuota_status": status,
+            "cuota_badge": badge,
+        }
+        return out
+    except Exception:
+        return None
+
+
+def _build_display(
+    *,
+    db: Session,
+    device: Dict[str, Any],
+    sid: Optional[int],
+    input_kind: str,
+    input_value_masked: Optional[str],
+    subject_usuario_id: Optional[int],
+) -> Dict[str, Any]:
+    return {
+        "ts": _utcnow().isoformat(),
+        "device": {"id": int(device.get("id") or 0), "sucursal_id": sid},
+        "input": {"kind": str(input_kind or ""), "value_masked": str(input_value_masked or "")},
+        "user": _get_usuario_display(db, int(subject_usuario_id))
+        if subject_usuario_id
+        else None,
+    }
+
 def _insert_access_event(
     db: Session,
     *,
@@ -343,6 +490,8 @@ def _require_device(request: Request, db: Session) -> Dict[str, Any]:
     token = _extract_device_token(request)
     if not device_public_id or not token:
         raise HTTPException(status_code=401, detail="Device no autenticado")
+    if len(device_public_id) > 200 or len(token) > 512:
+        raise HTTPException(status_code=401, detail="Device inválido")
     row = db.execute(
         text(
             """
@@ -356,7 +505,7 @@ def _require_device(request: Request, db: Session) -> Dict[str, Any]:
     ).mappings().first()
     if not row or not row.get("enabled"):
         raise HTTPException(status_code=401, detail="Device inválido")
-    if str(row.get("token_hash") or "") != _sha256(token):
+    if not secrets.compare_digest(str(row.get("token_hash") or ""), _sha256(token)):
         raise HTTPException(status_code=401, detail="Device inválido")
     try:
         db.execute(
@@ -1115,6 +1264,14 @@ async def api_access_event(request: Request, db: Session = Depends(get_db_sessio
                 "unlock": bool(prev.get("unlock")),
                 "unlock_ms": int(prev.get("unlock_ms")) if prev.get("unlock_ms") is not None else None,
                 "idempotent": True,
+                "display": _build_display(
+                    db=db,
+                    device=device,
+                    sid=int(device.get("sucursal_id")) if device.get("sucursal_id") is not None else None,
+                    input_kind="idempotent",
+                    input_value_masked="",
+                    subject_usuario_id=None,
+                ),
             }
     payload = {}
     try:
@@ -1136,6 +1293,8 @@ async def api_access_event(request: Request, db: Session = Depends(get_db_sessio
         sid = None
 
     if sid is None:
+        input_kind = event_type
+        input_value_masked = _mask_value(value)
         decision = "deny"
         reason = "Device no asociado a una sucursal"
         unlock = False
@@ -1164,7 +1323,21 @@ async def api_access_event(request: Request, db: Session = Depends(get_db_sessio
                 db.rollback()
             except Exception:
                 pass
-        return {"ok": True, "decision": decision, "reason": reason, "unlock": unlock, "unlock_ms": unlock_ms}
+        return {
+            "ok": True,
+            "decision": decision,
+            "reason": reason,
+            "unlock": unlock,
+            "unlock_ms": unlock_ms,
+            "display": _build_display(
+                db=db,
+                device=device,
+                sid=None,
+                input_kind=input_kind,
+                input_value_masked=input_value_masked,
+                subject_usuario_id=None,
+            ),
+        }
 
     decision = "deny"
     reason = "No autorizado"
@@ -1208,7 +1381,21 @@ async def api_access_event(request: Request, db: Session = Depends(get_db_sessio
                     db.rollback()
                 except Exception:
                     pass
-            return {"ok": True, "decision": decision, "reason": reason, "unlock": unlock, "unlock_ms": unlock_ms}
+            return {
+                "ok": True,
+                "decision": decision,
+                "reason": reason,
+                "unlock": unlock,
+                "unlock_ms": unlock_ms,
+                "display": _build_display(
+                    db=db,
+                    device=device,
+                    sid=sid,
+                    input_kind=input_kind,
+                    input_value_masked=input_value_masked,
+                    subject_usuario_id=None,
+                ),
+            }
     if not _is_within_allowed_hours(dev_cfg):
         decision = "deny"
         reason = "Fuera de horario"
@@ -1238,7 +1425,21 @@ async def api_access_event(request: Request, db: Session = Depends(get_db_sessio
                 db.rollback()
             except Exception:
                 pass
-        return {"ok": True, "decision": decision, "reason": reason, "unlock": unlock, "unlock_ms": unlock_ms}
+        return {
+            "ok": True,
+            "decision": decision,
+            "reason": reason,
+            "unlock": unlock,
+            "unlock_ms": unlock_ms,
+            "display": _build_display(
+                db=db,
+                device=device,
+                sid=sid,
+                input_kind=input_kind,
+                input_value_masked=input_value_masked,
+                subject_usuario_id=None,
+            ),
+        }
     rl_reason = _deny_if_rate_limited(db, int(device["id"]), dev_cfg)
     if rl_reason:
         decision = "deny"
@@ -1269,7 +1470,21 @@ async def api_access_event(request: Request, db: Session = Depends(get_db_sessio
                 db.rollback()
             except Exception:
                 pass
-        return {"ok": True, "decision": decision, "reason": reason, "unlock": unlock, "unlock_ms": unlock_ms}
+        return {
+            "ok": True,
+            "decision": decision,
+            "reason": reason,
+            "unlock": unlock,
+            "unlock_ms": unlock_ms,
+            "display": _build_display(
+                db=db,
+                device=device,
+                sid=sid,
+                input_kind=input_kind,
+                input_value_masked=input_value_masked,
+                subject_usuario_id=None,
+            ),
+        }
     allow_manual_unlock = bool(dev_cfg.get("allow_manual_unlock", True))
     default_unlock_ms = int(dev_cfg.get("unlock_ms") or 2500)
     default_unlock_ms = max(250, min(default_unlock_ms, 15000))
@@ -1327,6 +1542,8 @@ async def api_access_event(request: Request, db: Session = Depends(get_db_sessio
         dni_raw = str((payload or {}).get("dni") or "").strip()
         pin = str((payload or {}).get("pin") or "").strip()
         dni = _digits_only(dni_raw)
+        input_kind = "dni_pin"
+        input_value_masked = _mask_value(dni)
         if not (7 <= len(dni) <= 9) or not pin:
             decision = "deny"
             reason = "Datos inválidos"
@@ -1580,6 +1797,14 @@ async def api_access_event(request: Request, db: Session = Depends(get_db_sessio
         "reason": reason,
         "unlock": bool(unlock),
         "unlock_ms": int(unlock_ms) if unlock_ms is not None else None,
+        "display": _build_display(
+            db=db,
+            device=device,
+            sid=sid,
+            input_kind=input_kind,
+            input_value_masked=input_value_masked,
+            subject_usuario_id=subject_usuario_id,
+        ),
     }
 
 

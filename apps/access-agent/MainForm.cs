@@ -23,6 +23,17 @@ public sealed class MainForm : Form
     private readonly Label _statusDetail = new();
     private readonly Label _last = new();
     private readonly Label _io = new();
+    private readonly Panel _display = new();
+    private readonly Panel _historyPanel = new();
+    private readonly ListView _history = new();
+    private readonly Label _historyTitle = new();
+    private readonly Label _dispDecision = new();
+    private readonly Label _dispUser = new();
+    private readonly Label _dispMembership = new();
+    private readonly Label _dispReason = new();
+    private readonly Label _dispAction = new();
+    private readonly Label _dispInput = new();
+    private readonly Label _dispMeta = new();
     private readonly Button _configBtn = new();
     private readonly Button _runBtn = new();
     private readonly Button _clearQueueBtn = new();
@@ -83,10 +94,16 @@ public sealed class MainForm : Form
     private readonly StringBuilder _serialBuf = new();
     private bool _pollingCommands;
     private DateTimeOffset? _blockedUntilUtc;
+    private DateTimeOffset? _apiBackoffUntilUtc;
+    private DateTimeOffset? _apiCircuitUntilUtc;
+    private int _apiFailCount;
+    private readonly Random _rng = new();
     private readonly ToolTip _tips = new();
     private bool _running = true;
     private DateTimeOffset? _lastApiOkUtc;
     private string _lastApiError = "";
+    private DateTimeOffset? _lastScanAtUtc;
+    private readonly System.Windows.Forms.Timer _displayResetTimer = new();
 
     private AgentConfig _cfg;
     private bool _configOpen;
@@ -94,8 +111,9 @@ public sealed class MainForm : Form
     public MainForm()
     {
         Text = "IronHub Access Agent";
-        Width = 820;
-        Height = 520;
+        Width = 1060;
+        Height = 600;
+        MinimumSize = new System.Drawing.Size(920, 560);
         StartPosition = FormStartPosition.CenterScreen;
         KeyPreview = true;
 
@@ -127,10 +145,95 @@ public sealed class MainForm : Form
         _io.Width = 760;
         Controls.Add(_io);
 
+        _display.Left = 16;
+        _display.Top = 110;
+        _display.Width = 610;
+        _display.Height = 380;
+        _display.BorderStyle = BorderStyle.FixedSingle;
+        _display.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Bottom | AnchorStyles.Right;
+        Controls.Add(_display);
+
+        _dispDecision.Left = 16;
+        _dispDecision.Top = 18;
+        _dispDecision.Width = 560;
+        _dispDecision.Height = 44;
+        _dispDecision.Font = new System.Drawing.Font("Segoe UI", 18, System.Drawing.FontStyle.Bold);
+        _display.Controls.Add(_dispDecision);
+
+        _dispUser.Left = 16;
+        _dispUser.Top = 74;
+        _dispUser.Width = 560;
+        _dispUser.Height = 26;
+        _dispUser.Font = new System.Drawing.Font("Segoe UI", 12, System.Drawing.FontStyle.Bold);
+        _display.Controls.Add(_dispUser);
+
+        _dispMembership.Left = 16;
+        _dispMembership.Top = 104;
+        _dispMembership.Width = 560;
+        _dispMembership.Height = 54;
+        _dispMembership.Font = new System.Drawing.Font("Segoe UI", 10);
+        _display.Controls.Add(_dispMembership);
+
+        _dispReason.Left = 16;
+        _dispReason.Top = 160;
+        _dispReason.Width = 560;
+        _dispReason.Height = 52;
+        _dispReason.Font = new System.Drawing.Font("Segoe UI", 11, System.Drawing.FontStyle.Bold);
+        _display.Controls.Add(_dispReason);
+
+        _dispAction.Left = 16;
+        _dispAction.Top = 214;
+        _dispAction.Width = 560;
+        _dispAction.Height = 40;
+        _dispAction.Font = new System.Drawing.Font("Segoe UI", 10, System.Drawing.FontStyle.Bold);
+        _display.Controls.Add(_dispAction);
+
+        _dispInput.Left = 16;
+        _dispInput.Top = 258;
+        _dispInput.Width = 560;
+        _dispInput.Height = 24;
+        _dispInput.Font = new System.Drawing.Font("Segoe UI", 10);
+        _display.Controls.Add(_dispInput);
+
+        _dispMeta.Left = 16;
+        _dispMeta.Top = 292;
+        _dispMeta.Width = 560;
+        _dispMeta.Height = 80;
+        _dispMeta.Font = new System.Drawing.Font("Segoe UI", 9);
+        _display.Controls.Add(_dispMeta);
+
+        _historyPanel.BorderStyle = BorderStyle.FixedSingle;
+        _historyPanel.Anchor = AnchorStyles.Top | AnchorStyles.Right | AnchorStyles.Bottom;
+        Controls.Add(_historyPanel);
+
+        _historyTitle.Left = 12;
+        _historyTitle.Top = 12;
+        _historyTitle.Width = 320;
+        _historyTitle.Height = 20;
+        _historyTitle.Text = "Historial (últimas lecturas)";
+        _historyTitle.Font = new System.Drawing.Font("Segoe UI", 10, System.Drawing.FontStyle.Bold);
+        _historyPanel.Controls.Add(_historyTitle);
+
+        _history.Left = 12;
+        _history.Top = 40;
+        _history.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
+        _history.View = View.Details;
+        _history.FullRowSelect = true;
+        _history.HideSelection = false;
+        _history.MultiSelect = false;
+        _history.HeaderStyle = ColumnHeaderStyle.Nonclickable;
+        _history.Columns.Add("Hora", 70);
+        _history.Columns.Add("Entrada", 90);
+        _history.Columns.Add("Usuario", 140);
+        _history.Columns.Add("Estado", 70);
+        _history.Columns.Add("Motivo", 240);
+        _historyPanel.Controls.Add(_history);
+
         _configBtn.Text = "Configuración";
         _configBtn.Top = 12;
         _configBtn.Left = 650;
         _configBtn.Width = 140;
+        _configBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         _configBtn.Click += (_, _) => ToggleConfig();
         Controls.Add(_configBtn);
 
@@ -138,6 +241,7 @@ public sealed class MainForm : Form
         _runBtn.Top = 44;
         _runBtn.Left = 650;
         _runBtn.Width = 140;
+        _runBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         _runBtn.Click += (_, _) => ToggleRun();
         Controls.Add(_runBtn);
 
@@ -145,6 +249,7 @@ public sealed class MainForm : Form
         _clearQueueBtn.Top = 76;
         _clearQueueBtn.Left = 650;
         _clearQueueBtn.Width = 140;
+        _clearQueueBtn.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         _clearQueueBtn.Click += (_, _) => ClearOfflineQueue();
         Controls.Add(_clearQueueBtn);
 
@@ -171,6 +276,13 @@ public sealed class MainForm : Form
 
         BuildConfigPanel();
         ApplyTheme();
+        ResetDisplay();
+        LayoutMain();
+        Resize += (_, _) => LayoutMain();
+
+        _displayResetTimer.Interval = 250;
+        _displayResetTimer.Tick += (_, _) => TickAutoResetDisplay();
+        _displayResetTimer.Start();
 
         Shown += (_, _) =>
         {
@@ -201,6 +313,8 @@ public sealed class MainForm : Form
 
         FormClosing += (_, _) => _cts.Cancel();
         KeyDown += MainKeyDown;
+        Activated += (_, _) => FocusCapture();
+        MouseDown += (_, _) => FocusCapture();
     }
 
     private void BuildConfigPanel()
@@ -1015,6 +1129,365 @@ public sealed class MainForm : Form
         UpdateStatus();
     }
 
+    private bool IsApiBlocked(out string reason, out int seconds)
+    {
+        reason = "";
+        seconds = 0;
+        var now = DateTimeOffset.UtcNow;
+        if (_apiCircuitUntilUtc.HasValue && now < _apiCircuitUntilUtc.Value)
+        {
+            reason = "circuit";
+            seconds = Math.Max(1, (int)Math.Ceiling((_apiCircuitUntilUtc.Value - now).TotalSeconds));
+            return true;
+        }
+        if (_apiBackoffUntilUtc.HasValue && now < _apiBackoffUntilUtc.Value)
+        {
+            reason = "backoff";
+            seconds = Math.Max(1, (int)Math.Ceiling((_apiBackoffUntilUtc.Value - now).TotalSeconds));
+            return true;
+        }
+        return false;
+    }
+
+    private int CalcBackoffSeconds(int failCount)
+    {
+        var exp = Math.Min(6, Math.Max(0, failCount));
+        var baseSec = Math.Pow(2, exp);
+        var jitter = 0.75 + (_rng.NextDouble() * 0.5);
+        var sec = baseSec * jitter;
+        return Math.Clamp((int)Math.Ceiling(sec), 1, 60);
+    }
+
+    private void RegisterApiFailure()
+    {
+        _apiFailCount = Math.Min(_apiFailCount + 1, 10);
+        var now = DateTimeOffset.UtcNow;
+        var backoff = CalcBackoffSeconds(_apiFailCount);
+        _apiBackoffUntilUtc = now.AddSeconds(backoff);
+        if (_apiFailCount >= 5)
+        {
+            _apiCircuitUntilUtc = now.AddSeconds(Math.Clamp(backoff * 2, 20, 300));
+        }
+        UpdateStatus();
+    }
+
+    private void ResetApiFailure()
+    {
+        _apiFailCount = 0;
+        _apiBackoffUntilUtc = null;
+        _apiCircuitUntilUtc = null;
+    }
+
+    private void ResetDisplay()
+    {
+        try
+        {
+            _dispDecision.Text = "ESPERANDO LECTURA…";
+            _dispDecision.ForeColor = System.Drawing.Color.FromArgb(226, 232, 240);
+            _dispUser.Text = "";
+            _dispMembership.Text = "";
+            _dispReason.Text = "Escaneá llavero/QR o tipeá DNI + Enter.";
+            _dispAction.Text = "";
+            _dispInput.Text = "";
+            _dispMeta.Text = "";
+        }
+        catch
+        {
+        }
+    }
+
+    private void UpdateDisplayFromApi(JsonElement root, string decision, string reason, bool unlock, int unlockMs)
+    {
+        var dec = (decision ?? "").Trim().ToLowerInvariant();
+        var ok = string.Equals(dec, "allow", StringComparison.OrdinalIgnoreCase);
+
+        try
+        {
+            _dispDecision.Text = ok ? "ACCESO PERMITIDO" : "ACCESO DENEGADO";
+            _dispDecision.ForeColor = ok ? System.Drawing.Color.FromArgb(34, 197, 94) : System.Drawing.Color.FromArgb(248, 113, 113);
+        }
+        catch
+        {
+        }
+
+        string inputKind = "";
+        string inputMasked = "";
+        string ts = "";
+        JsonElement user = default;
+        var hasUser = false;
+
+        if (root.TryGetProperty("display", out var disp) && disp.ValueKind == JsonValueKind.Object)
+        {
+            if (disp.TryGetProperty("ts", out var t) && t.ValueKind == JsonValueKind.String) ts = t.GetString() ?? "";
+            if (disp.TryGetProperty("input", out var inp) && inp.ValueKind == JsonValueKind.Object)
+            {
+                if (inp.TryGetProperty("kind", out var k) && k.ValueKind == JsonValueKind.String) inputKind = k.GetString() ?? "";
+                if (inp.TryGetProperty("value_masked", out var vm) && vm.ValueKind == JsonValueKind.String) inputMasked = vm.GetString() ?? "";
+            }
+            if (disp.TryGetProperty("user", out var u) && u.ValueKind == JsonValueKind.Object)
+            {
+                user = u;
+                hasUser = true;
+            }
+        }
+
+        try
+        {
+            _dispReason.Text = string.IsNullOrWhiteSpace(reason) ? (ok ? "OK" : "No autorizado") : reason;
+            _dispReason.ForeColor = ok ? System.Drawing.Color.FromArgb(226, 232, 240) : System.Drawing.Color.FromArgb(251, 146, 60);
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            var action = GetSuggestedAction(root, reason, ok, hasUser);
+            _dispAction.Text = string.IsNullOrWhiteSpace(action) ? "" : $"Acción sugerida: {action}";
+            _dispAction.ForeColor = ok ? System.Drawing.Color.FromArgb(148, 163, 184) : System.Drawing.Color.FromArgb(251, 146, 60);
+        }
+        catch
+        {
+        }
+
+        if (!string.IsNullOrWhiteSpace(inputKind) || !string.IsNullOrWhiteSpace(inputMasked))
+        {
+            try
+            {
+                var kindLabel = string.IsNullOrWhiteSpace(inputKind) ? "input" : inputKind;
+                _dispInput.Text = $"Entrada ({kindLabel}): {inputMasked}";
+            }
+            catch
+            {
+            }
+        }
+
+        if (hasUser)
+        {
+            var nombre = user.TryGetProperty("nombre", out var n) && n.ValueKind == JsonValueKind.String ? (n.GetString() ?? "") : "";
+            var dni = user.TryGetProperty("dni", out var dn) && dn.ValueKind == JsonValueKind.String ? (dn.GetString() ?? "") : "";
+            var rol = user.TryGetProperty("rol", out var rl) && rl.ValueKind == JsonValueKind.String ? (rl.GetString() ?? "") : "";
+            var activo = user.TryGetProperty("activo", out var ac) && (ac.ValueKind == JsonValueKind.True || ac.ValueKind == JsonValueKind.False) ? ac.GetBoolean() : true;
+            var exento = user.TryGetProperty("exento", out var ex) && (ex.ValueKind == JsonValueKind.True || ex.ValueKind == JsonValueKind.False) ? ex.GetBoolean() : false;
+            var cuotasV = user.TryGetProperty("cuotas_vencidas", out var cv) && cv.ValueKind == JsonValueKind.Number ? cv.GetInt32() : 0;
+            var tipo = user.TryGetProperty("tipo_cuota_nombre", out var tc) && tc.ValueKind == JsonValueKind.String ? (tc.GetString() ?? "") : "";
+            var fpv = user.TryGetProperty("fecha_proximo_vencimiento", out var fv) && fv.ValueKind == JsonValueKind.String ? (fv.GetString() ?? "") : "";
+            var dias = user.TryGetProperty("dias_restantes", out var dr) && dr.ValueKind == JsonValueKind.Number ? dr.GetInt32() : (int?)null;
+            var cuotaStatus = user.TryGetProperty("cuota_status", out var cs) && cs.ValueKind == JsonValueKind.String ? (cs.GetString() ?? "") : "";
+            var cuotaBadge = user.TryGetProperty("cuota_badge", out var cb) && cb.ValueKind == JsonValueKind.String ? (cb.GetString() ?? "") : "";
+
+            try
+            {
+                var idTxt = "";
+                if (user.TryGetProperty("id", out var uid) && uid.ValueKind == JsonValueKind.Number)
+                {
+                    idTxt = $" #{uid.GetInt32()}";
+                }
+                var rolTxt = string.IsNullOrWhiteSpace(rol) ? "" : $" · {rol}";
+                var dniTxt = string.IsNullOrWhiteSpace(dni) ? "" : $" · DNI {dni}";
+                _dispUser.Text = $"{(string.IsNullOrWhiteSpace(nombre) ? "Usuario" : nombre)}{idTxt}{dniTxt}{rolTxt}";
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                var status = string.IsNullOrWhiteSpace(cuotaStatus) ? "" : cuotaStatus;
+                if (string.IsNullOrWhiteSpace(status))
+                {
+                    if (!activo) status = "INACTIVO";
+                    else if (exento) status = "EXENTO";
+                    else if (dias.HasValue)
+                    {
+                        if (dias.Value < 0) status = "VENCIDA";
+                        else if (dias.Value <= 3) status = "POR_VENCER";
+                        else status = "AL_DIA";
+                    }
+                    else if (!string.IsNullOrWhiteSpace(fpv)) status = "AL_DIA";
+                    else status = "SIN_INFO";
+                }
+
+                var sb = new StringBuilder();
+                sb.Append("Cuota: ").Append(string.IsNullOrWhiteSpace(tipo) ? "—" : tipo).Append(" · ").Append(status);
+                if (!string.IsNullOrWhiteSpace(fpv)) sb.Append("\nVence: ").Append(fpv);
+                if (dias.HasValue) sb.Append(" · Días: ").Append(dias.Value);
+                sb.Append("\nMoras: ").Append(cuotasV).Append(" (máx 3)");
+                _dispMembership.Text = sb.ToString();
+                try
+                {
+                    var b = (cuotaBadge ?? "").Trim().ToLowerInvariant();
+                    if (b == "danger") _dispMembership.ForeColor = System.Drawing.Color.FromArgb(248, 113, 113);
+                    else if (b == "warn") _dispMembership.ForeColor = System.Drawing.Color.FromArgb(251, 146, 60);
+                    else if (b == "ok") _dispMembership.ForeColor = System.Drawing.Color.FromArgb(34, 197, 94);
+                    else _dispMembership.ForeColor = System.Drawing.Color.FromArgb(226, 232, 240);
+                }
+                catch
+                {
+                }
+            }
+            catch
+            {
+            }
+        }
+        else
+        {
+            try
+            {
+                _dispUser.Text = "";
+                _dispMembership.Text = "";
+            }
+            catch
+            {
+            }
+        }
+
+        try
+        {
+            var openTxt = unlock && ok ? $"Molinete: ABRIR ({unlockMs}ms)" : "Molinete: —";
+            var tTxt = string.IsNullOrWhiteSpace(ts) ? "" : $" · {ts}";
+            _dispMeta.Text = $"{openTxt}{tTxt}";
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            AddHistoryItem(ts, inputMasked, hasUser ? _dispUser.Text : "", ok ? "ALLOW" : "DENY", reason);
+        }
+        catch
+        {
+        }
+    }
+
+    private string GetSuggestedAction(JsonElement root, string reason, bool ok, bool hasUser)
+    {
+        if (ok) return "";
+        try
+        {
+            if (root.TryGetProperty("display", out var disp) && disp.ValueKind == JsonValueKind.Object)
+            {
+                if (disp.TryGetProperty("suggested_action", out var sa) && sa.ValueKind == JsonValueKind.String)
+                {
+                    var v = sa.GetString() ?? "";
+                    if (!string.IsNullOrWhiteSpace(v)) return v.Trim();
+                }
+            }
+        }
+        catch
+        {
+        }
+        var r = (reason ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(r)) return hasUser ? "Verificar estado del usuario" : "Verificar credencial";
+        if (r.Contains("falta de pagos") || r.Contains("cuota") || r.Contains("vencid")) return "Cuota vencida → pasar por recepción";
+        if (r.Contains("administración")) return "Derivar a administración";
+        if (r.Contains("membresía") || r.Contains("sucursal")) return "Verificar membresía/sucursal";
+        if (r.Contains("fuera de horario")) return "Verificar horarios permitidos";
+        if (r.Contains("rate limit")) return "Esperar y reintentar";
+        if (r.Contains("token expirado")) return "Reemitir QR";
+        if (r.Contains("token ya utilizado")) return "Solicitar nuevo QR";
+        if (r.Contains("token no encontrado") || r.Contains("token inválido")) return "Verificar QR";
+        if (r.Contains("dni inválido") || r.Contains("dni no encontrado")) return "Verificar DNI o registrar";
+        if (r.Contains("usuario no encontrado") || r.Contains("usuario inválido")) return "Verificar registro del usuario";
+        if (r.Contains("device no asociado")) return "Asignar sucursal al dispositivo";
+        if (r.Contains("enroll no activo")) return "Activar enroll en Gestión";
+        return hasUser ? "Verificar estado del usuario" : "Verificar credencial";
+    }
+
+    private void AddHistoryItem(string ts, string inputMasked, string user, string decision, string reason)
+    {
+        if (_history.Columns.Count >= 5)
+        {
+            var time = "";
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(ts) && DateTimeOffset.TryParse(ts, out var dt))
+                {
+                    time = dt.ToLocalTime().ToString("HH:mm:ss");
+                }
+            }
+            catch
+            {
+            }
+            if (string.IsNullOrWhiteSpace(time))
+            {
+                time = DateTimeOffset.Now.ToString("HH:mm:ss");
+            }
+            var entry = new ListViewItem(time);
+            entry.SubItems.Add((inputMasked ?? "").Trim());
+            entry.SubItems.Add((user ?? "").Trim());
+            entry.SubItems.Add((decision ?? "").Trim());
+            entry.SubItems.Add((reason ?? "").Trim());
+            try
+            {
+                if (string.Equals(decision, "ALLOW", StringComparison.OrdinalIgnoreCase))
+                    entry.ForeColor = System.Drawing.Color.FromArgb(34, 197, 94);
+                else
+                    entry.ForeColor = System.Drawing.Color.FromArgb(248, 113, 113);
+            }
+            catch
+            {
+            }
+            _history.Items.Insert(0, entry);
+            while (_history.Items.Count > 25) _history.Items.RemoveAt(_history.Items.Count - 1);
+        }
+    }
+
+    private void LayoutMain()
+    {
+        try
+        {
+            var margin = 16;
+            var gap = 12;
+            var top = 110;
+            var rightW = 360;
+            var btnW = 140;
+            var btnLeft = Math.Max(margin, ClientSize.Width - margin - btnW);
+            _configBtn.Left = btnLeft;
+            _runBtn.Left = btnLeft;
+            _clearQueueBtn.Left = btnLeft;
+
+            _historyPanel.Left = Math.Max(margin, ClientSize.Width - margin - rightW);
+            _historyPanel.Top = top;
+            _historyPanel.Width = rightW;
+            _historyPanel.Height = Math.Max(260, ClientSize.Height - top - margin);
+
+            _history.Width = Math.Max(200, _historyPanel.Width - 24);
+            _history.Height = Math.Max(180, _historyPanel.Height - 52);
+
+            _display.Left = margin;
+            _display.Top = top;
+            _display.Height = _historyPanel.Height;
+            _display.Width = Math.Max(360, _historyPanel.Left - _display.Left - gap);
+
+            var contentW = Math.Max(200, btnLeft - margin - gap);
+            _statusDetail.Width = contentW;
+            _last.Width = contentW;
+            _io.Width = contentW;
+        }
+        catch
+        {
+        }
+    }
+
+    private void TickAutoResetDisplay()
+    {
+        try
+        {
+            if (_configOpen) return;
+            if (!(_cfg.Fullscreen ?? false)) return;
+            if (!_lastScanAtUtc.HasValue) return;
+            var age = (DateTimeOffset.UtcNow - _lastScanAtUtc.Value).TotalSeconds;
+            if (age < 12) return;
+            _lastScanAtUtc = null;
+            ResetDisplay();
+        }
+        catch
+        {
+        }
+    }
+
     private void ClearOfflineQueue()
     {
         try
@@ -1203,6 +1676,20 @@ public sealed class MainForm : Form
     {
         var s = ApplyInputProtocol(raw);
         if (string.IsNullOrWhiteSpace(s)) return;
+        var shown = MaskInputForDisplay(s);
+        try
+        {
+            _lastScanAtUtc = DateTimeOffset.UtcNow;
+            _dispInput.Text = $"Entrada: {shown}";
+            _dispReason.Text = "Validando…";
+            _dispUser.Text = "";
+            _dispMembership.Text = "";
+            _dispMeta.Text = "";
+            _dispDecision.Text = "";
+        }
+        catch
+        {
+        }
         if (IsEnrollActive())
         {
             await SendEventAsync(new Dictionary<string, object?>
@@ -1235,6 +1722,23 @@ public sealed class MainForm : Form
             ["event_type"] = kind,
             ["value"] = s
         });
+    }
+
+    private static string MaskInputForDisplay(string s)
+    {
+        var t = (s ?? "").Trim();
+        if (t.Length == 0) return "";
+        var digits = true;
+        foreach (var ch in t)
+        {
+            if (!char.IsDigit(ch)) { digits = false; break; }
+        }
+        if (digits && t.Length >= 7 && t.Length <= 9)
+        {
+            return new string('•', Math.Max(0, t.Length - 4)) + t[^4..];
+        }
+        if (t.Length <= 4) return t;
+        return new string('•', Math.Max(0, t.Length - 4)) + t[^4..];
     }
 
     private bool IsEnrollActive()
@@ -1517,6 +2021,13 @@ public sealed class MainForm : Form
                     nud.BackColor = System.Drawing.Color.FromArgb(15, 23, 42);
                     nud.ForeColor = System.Drawing.Color.FromArgb(226, 232, 240);
                 }
+                else if (c is ListView lv)
+                {
+                    lv.BackColor = System.Drawing.Color.FromArgb(2, 6, 23);
+                    lv.ForeColor = System.Drawing.Color.FromArgb(226, 232, 240);
+                    lv.BorderStyle = BorderStyle.FixedSingle;
+                    lv.Font = new System.Drawing.Font("Segoe UI", 9);
+                }
             }
             catch
             {
@@ -1546,6 +2057,24 @@ public sealed class MainForm : Form
         var url = $"{baseUrl}/api/access/events";
         var payload = JsonSerializer.Serialize(payloadObj);
         var nonce = Guid.NewGuid().ToString("N");
+        if (IsApiBlocked(out var why, out var waitSec))
+        {
+            EnqueueEvent(nonce, payload);
+            _last.Text = why == "circuit" ? $"API EN PAUSA · {waitSec}s" : $"REINTENTO EN {waitSec}s";
+            _lastApiError = why;
+            try
+            {
+                _dispDecision.Text = "SIN CONEXIÓN";
+                _dispDecision.ForeColor = System.Drawing.Color.FromArgb(251, 146, 60);
+                _dispReason.Text = "API en reintento. Evento guardado.";
+                _dispMeta.Text = $"Reintento en {waitSec}s";
+            }
+            catch
+            {
+            }
+            UpdateStatus();
+            return;
+        }
         var req = new HttpRequestMessage(HttpMethod.Post, url);
         req.Content = new StringContent(payload, Encoding.UTF8, "application/json");
         req.Headers.Add("X-Tenant", tenant);
@@ -1560,7 +2089,25 @@ public sealed class MainForm : Form
             if (!res.IsSuccessStatusCode)
             {
                 var sc = (int)res.StatusCode;
-                _last.Text = $"ERROR ({sc})";
+                var ct = res.Content?.Headers?.ContentType?.MediaType ?? "";
+                var msg = "";
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(txt) && txt.TrimStart().StartsWith("{"))
+                    {
+                        using var j = JsonDocument.Parse(txt);
+                        var root = j.RootElement;
+                        if (root.TryGetProperty("mensaje", out var m) && m.ValueKind == JsonValueKind.String) msg = m.GetString() ?? "";
+                        if (string.IsNullOrWhiteSpace(msg) && root.TryGetProperty("detail", out var det) && det.ValueKind == JsonValueKind.String) msg = det.GetString() ?? "";
+                        if (string.IsNullOrWhiteSpace(msg) && root.TryGetProperty("error", out var er) && er.ValueKind == JsonValueKind.String) msg = er.GetString() ?? "";
+                    }
+                }
+                catch
+                {
+                }
+                if (string.IsNullOrWhiteSpace(msg)) msg = TruncateOneLine(txt, 140);
+                _last.Text = $"ERROR ({sc}) · {msg}";
+                _lastApiError = $"{sc}";
                 if (sc == 429)
                 {
                     var retrySeconds = 10;
@@ -1588,20 +2135,44 @@ public sealed class MainForm : Form
                     await TryUnlockAsync(false);
                     return;
                 }
+                if (sc == 401)
+                {
+                    try
+                    {
+                        _dispDecision.Text = "REQUIERE ACCIÓN";
+                        _dispDecision.ForeColor = System.Drawing.Color.FromArgb(251, 146, 60);
+                        _dispReason.Text = "Token inválido o expirado. Rehacer Pairing en Configuración.";
+                        _dispMeta.Text = $"API {sc} · {ct}";
+                    }
+                    catch
+                    {
+                    }
+                }
                 if (sc >= 500 || sc == 0)
                 {
+                    RegisterApiFailure();
                     EnqueueEvent(nonce, payload);
                     _last.Text = "OFFLINE · encolado";
                 }
                 await TryUnlockAsync(false);
                 return;
             }
+            ResetApiFailure();
             using var doc = JsonDocument.Parse(txt);
             var decision = doc.RootElement.TryGetProperty("decision", out var d) ? (d.GetString() ?? "") : "";
             var reason = doc.RootElement.TryGetProperty("reason", out var r) ? (r.GetString() ?? "") : "";
             var unlock = doc.RootElement.TryGetProperty("unlock", out var u) && u.GetBoolean();
             var unlockMs = doc.RootElement.TryGetProperty("unlock_ms", out var um) && um.ValueKind == JsonValueKind.Number ? um.GetInt32() : (_cfg.UnlockMs ?? 2500);
             _last.Text = $"{decision.ToUpperInvariant()} · {reason}";
+            _lastApiOkUtc = DateTimeOffset.UtcNow;
+            _lastApiError = "";
+            try
+            {
+                UpdateDisplayFromApi(doc.RootElement, decision, reason, unlock, unlockMs);
+            }
+            catch
+            {
+            }
             if ((_cfg.Mode ?? "validate_and_command").Trim().ToLowerInvariant() == "observe_only")
             {
                 unlock = false;
@@ -1625,7 +2196,21 @@ public sealed class MainForm : Form
         }
         catch (Exception ex)
         {
-            _last.Text = $"ERROR · {ex.Message}";
+            try
+            {
+                RegisterApiFailure();
+                EnqueueEvent(nonce, payload);
+                _last.Text = "OFFLINE · encolado";
+                _lastApiError = "offline";
+                _dispDecision.Text = "SIN CONEXIÓN";
+                _dispDecision.ForeColor = System.Drawing.Color.FromArgb(251, 146, 60);
+                _dispReason.Text = "Internet/API no disponible. Se guardó el evento para reenviar.";
+                _dispMeta.Text = TruncateOneLine(ex.Message, 180);
+            }
+            catch
+            {
+                _last.Text = $"ERROR · {ex.Message}";
+            }
         }
         finally
         {
@@ -1675,6 +2260,7 @@ public sealed class MainForm : Form
     private async Task FlushQueueAsync()
     {
         if (!(_cfg.OfflineQueueEnabled ?? true)) return;
+        if (IsApiBlocked(out _, out _)) return;
         var tenant = _cfg.Tenant ?? "";
         var baseUrl = _cfg.BaseUrl ?? "";
         var deviceId = _cfg.DeviceId ?? "";
@@ -1728,6 +2314,7 @@ public sealed class MainForm : Form
     {
         try
         {
+            if (IsApiBlocked(out _, out _)) return false;
             var url = $"{baseUrl}/api/access/events";
             var req = new HttpRequestMessage(HttpMethod.Post, url);
             req.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
@@ -1739,10 +2326,22 @@ public sealed class MainForm : Form
             cts.CancelAfter(TimeSpan.FromSeconds(4));
             var res = await _http.SendAsync(req, cts.Token);
             if ((int)res.StatusCode == 401 || (int)res.StatusCode == 403) return false;
-            return res.IsSuccessStatusCode;
+            if (!res.IsSuccessStatusCode)
+            {
+                if ((int)res.StatusCode >= 500 || (int)res.StatusCode == 0)
+                {
+                    RegisterApiFailure();
+                }
+                return false;
+            }
+            ResetApiFailure();
+            _lastApiOkUtc = DateTimeOffset.UtcNow;
+            _lastApiError = "";
+            return true;
         }
         catch
         {
+            RegisterApiFailure();
             return false;
         }
     }
