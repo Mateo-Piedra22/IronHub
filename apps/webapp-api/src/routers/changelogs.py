@@ -248,8 +248,14 @@ async def api_changelog_mark_read(request: Request, db: Session = Depends(get_ad
     tenant = str(claims.get("tenant") or "").strip().lower()
     user_id = claims.get("user_id")
     role = str(claims.get("role") or "user").strip().lower() or "user"
-    if not tenant or not user_id:
+    if not tenant:
         raise HTTPException(status_code=401, detail="No autenticado")
+    if not user_id:
+        if bool(claims.get("is_owner")):
+            user_id = 0
+            role = "owner"
+        else:
+            raise HTTPException(status_code=401, detail="No autenticado")
 
     latest = db.execute(
         text(

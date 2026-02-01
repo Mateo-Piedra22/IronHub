@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Security.Cryptography;
 using System.Reflection;
+using System.Linq;
 using System.Windows.Forms;
 using System.IO.Ports;
 
@@ -169,6 +170,7 @@ public sealed class MainForm : Form
         _tips.ShowAlways = true;
 
         BuildConfigPanel();
+        ApplyTheme();
 
         Shown += (_, _) =>
         {
@@ -176,7 +178,7 @@ public sealed class MainForm : Form
             ApplyKioskMode();
             FocusCapture();
             UpdateStatus();
-            StartInput();
+            if (_running) StartInput();
             _ = LoadRemoteDeviceConfigAsync();
             _deviceConfigTimer.Interval = 5000;
             _deviceConfigTimer.Tick += async (_, _) => await LoadRemoteDeviceConfigAsync();
@@ -212,452 +214,455 @@ public sealed class MainForm : Form
             BorderStyle = BorderStyle.FixedSingle,
             Visible = false
         };
-        panel.AutoScroll = true;
+        panel.AutoScroll = false;
+        panel.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom;
         panel.Name = "ConfigPanel";
         Controls.Add(panel);
 
-        int y = 16;
-        var h1 = new Label
+        var tabs = new TabControl
+        {
+            Left = 12,
+            Top = 12,
+            Width = panel.Width - 24,
+            Height = panel.Height - 76,
+            Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
+        };
+        panel.Controls.Add(tabs);
+
+        var tpPairing = new TabPage("Pairing") { AutoScroll = true };
+        var tpUnlock = new TabPage("Apertura") { AutoScroll = true };
+        var tpInput = new TabPage("Lecturas") { AutoScroll = true };
+        var tpTests = new TabPage("Pruebas") { AutoScroll = true };
+        tabs.TabPages.Add(tpPairing);
+        tabs.TabPages.Add(tpUnlock);
+        tabs.TabPages.Add(tpInput);
+        tabs.TabPages.Add(tpTests);
+
+        void AddTitle(Control c, string text)
+        {
+            var t = new Label
+            {
+                Left = 16,
+                Top = 16,
+                Width = 720,
+                Height = 22,
+                Text = text,
+                Font = new System.Drawing.Font("Segoe UI", 9, System.Drawing.FontStyle.Bold)
+            };
+            c.Controls.Add(t);
+        }
+
+        AddTitle(tpPairing, "Pairing (desde Gestión → Accesos → Dispositivos → Pairing)");
+
+        var pairHelp = new TextBox
         {
             Left = 16,
-            Top = y,
+            Top = 46,
             Width = 720,
-            Height = 22,
-            Text = "Paso 1 · Pairing (datos desde Gestión → Accesos → Dispositivos → Pairing)",
-            Font = new System.Drawing.Font("Segoe UI", 9, System.Drawing.FontStyle.Bold)
+            Height = 70,
+            Multiline = true,
+            ReadOnly = true,
+            TabStop = false,
+            Text = "Tip: copiá el bloque de Pairing desde Gestión y usá Pegar.\r\nBase URL debe ser la API (ej: https://api.ironhub.motiona.xyz)."
         };
-        panel.Controls.Add(h1);
-        y += 28;
-        panel.Controls.Add(MkLabel("Tenant (subdominio):", 16, y));
-        _tenant.Left = 220;
+        tpPairing.Controls.Add(pairHelp);
+
+        int y = 132;
+        tpPairing.Controls.Add(MkLabel("Tenant:", 16, y));
+        _tenant.Left = 200;
         _tenant.Top = y - 2;
         _tenant.Width = 240;
-        _tenant.PlaceholderText = "ej: testingiron";
-        panel.Controls.Add(_tenant);
-        _tips.SetToolTip(_tenant, "Tenant del gimnasio/sucursal. Debe coincidir con el tenant usado en la web.");
+        _tenant.PlaceholderText = "ej: fittests";
+        tpPairing.Controls.Add(_tenant);
+        _tips.SetToolTip(_tenant, "Tenant del gimnasio. Si entrás a fittests.ironhub.motiona.xyz, el tenant es fittests.");
 
         y += 36;
-        panel.Controls.Add(MkLabel("Base URL API:", 16, y));
-        _baseUrl.Left = 220;
+        tpPairing.Controls.Add(MkLabel("Base URL API:", 16, y));
+        _baseUrl.Left = 200;
         _baseUrl.Top = y - 2;
         _baseUrl.Width = 520;
-        _baseUrl.PlaceholderText = "https://TU_DOMINIO";
-        panel.Controls.Add(_baseUrl);
-        _tips.SetToolTip(_baseUrl, "URL base del sistema. Ej: https://app.ironhub.com");
+        _baseUrl.PlaceholderText = "https://api.ironhub.motiona.xyz";
+        tpPairing.Controls.Add(_baseUrl);
+        _tips.SetToolTip(_baseUrl, "Debe ser la API. Ej: https://api.ironhub.motiona.xyz (no la web del tenant).");
 
         y += 36;
-        panel.Controls.Add(MkLabel("Device ID:", 16, y));
-        _deviceId.Left = 220;
+        tpPairing.Controls.Add(MkLabel("Device ID:", 16, y));
+        _deviceId.Left = 200;
         _deviceId.Top = y - 2;
-        _deviceId.Width = 240;
-        _deviceId.PlaceholderText = "Device ID (string) del pairing";
-        panel.Controls.Add(_deviceId);
+        _deviceId.Width = 260;
+        _deviceId.PlaceholderText = "Device ID (string)";
+        tpPairing.Controls.Add(_deviceId);
         _tips.SetToolTip(_deviceId, "Se obtiene en Gestión al crear el device.");
 
         _pastePairBtn.Text = "Pegar";
-        _pastePairBtn.Left = 480;
+        _pastePairBtn.Left = 470;
         _pastePairBtn.Top = y - 3;
         _pastePairBtn.Width = 80;
         _pastePairBtn.Click += (_, _) => PastePairingFromClipboard();
-        panel.Controls.Add(_pastePairBtn);
-        _tips.SetToolTip(_pastePairBtn, "Pega Device ID y Código desde el portapapeles (copiado desde la web).");
+        tpPairing.Controls.Add(_pastePairBtn);
+        _tips.SetToolTip(_pastePairBtn, "Pega Tenant/Base URL/Device ID/Código si copiás el bloque desde Gestión.");
 
         y += 36;
-        panel.Controls.Add(MkLabel("Pairing code:", 16, y));
-        _pairing.Left = 220;
+        tpPairing.Controls.Add(MkLabel("Código:", 16, y));
+        _pairing.Left = 200;
         _pairing.Top = y - 2;
-        _pairing.Width = 240;
+        _pairing.Width = 260;
         _pairing.PlaceholderText = "Código de pairing";
-        panel.Controls.Add(_pairing);
-        _tips.SetToolTip(_pairing, "Código temporal. Si vence, rotarlo desde Gestión.");
+        tpPairing.Controls.Add(_pairing);
 
         _pairBtn.Text = "Pair";
-        _pairBtn.Left = 480;
+        _pairBtn.Left = 470;
         _pairBtn.Top = y - 3;
         _pairBtn.Width = 80;
         _pairBtn.Click += async (_, _) => await PairAsync();
-        panel.Controls.Add(_pairBtn);
-        _tips.SetToolTip(_pairBtn, "Hace pairing y guarda el token localmente.");
+        tpPairing.Controls.Add(_pairBtn);
 
         _validateBtn.Text = "Sync";
-        _validateBtn.Left = 570;
+        _validateBtn.Left = 560;
         _validateBtn.Top = y - 3;
         _validateBtn.Width = 80;
         _validateBtn.Click += async (_, _) => await ForceSyncAsync();
-        panel.Controls.Add(_validateBtn);
-        _tips.SetToolTip(_validateBtn, "Fuerza lectura de config remota y estado.");
+        tpPairing.Controls.Add(_validateBtn);
 
-        y += 36;
-        var h2 = new Label
-        {
-            Left = 16,
-            Top = y,
-            Width = 720,
-            Height = 22,
-            Text = "Paso 2 · Apertura (salida hacia molinete/puerta)",
-            Font = new System.Drawing.Font("Segoe UI", 9, System.Drawing.FontStyle.Bold)
-        };
-        panel.Controls.Add(h2);
-        y += 28;
-        panel.Controls.Add(MkLabel("Unlock URL:", 16, y));
-        _unlockUrl.Left = 220;
-        _unlockUrl.Top = y - 2;
-        _unlockUrl.Width = 520;
-        _unlockUrl.PlaceholderText = "http://RELAY_IP/unlock";
-        panel.Controls.Add(_unlockUrl);
-        _tips.SetToolTip(_unlockUrl, "Para HTTP GET/POST. En serial/tcp no se usa.");
-
-        y += 36;
-        panel.Controls.Add(MkLabel("Unlock method:", 16, y));
-        _unlockMethod.Left = 220;
+        AddTitle(tpUnlock, "Apertura (salida hacia molinete/puerta)");
+        y = 52;
+        tpUnlock.Controls.Add(MkLabel("Método:", 16, y));
+        _unlockMethod.Left = 200;
         _unlockMethod.Top = y - 2;
         _unlockMethod.Width = 240;
         _unlockMethod.DropDownStyle = ComboBoxStyle.DropDownList;
         _unlockMethod.Items.Clear();
         _unlockMethod.Items.AddRange(new object[] { "none", "http_get", "http_post_json", "tcp", "serial" });
-        panel.Controls.Add(_unlockMethod);
-        _tips.SetToolTip(_unlockMethod, "Cómo se dispara la apertura. En molinetes con DB25→USB suele ser 'serial'.");
+        tpUnlock.Controls.Add(_unlockMethod);
 
         y += 36;
-        panel.Controls.Add(MkLabel("TCP host:", 16, y));
-        _unlockTcpHost.Left = 220;
+        tpUnlock.Controls.Add(MkLabel("Unlock URL:", 16, y));
+        _unlockUrl.Left = 200;
+        _unlockUrl.Top = y - 2;
+        _unlockUrl.Width = 520;
+        _unlockUrl.PlaceholderText = "http://RELAY_IP/unlock";
+        tpUnlock.Controls.Add(_unlockUrl);
+
+        y += 36;
+        tpUnlock.Controls.Add(MkLabel("TCP host:", 16, y));
+        _unlockTcpHost.Left = 200;
         _unlockTcpHost.Top = y - 2;
         _unlockTcpHost.Width = 240;
         _unlockTcpHost.PlaceholderText = "192.168.1.50";
-        panel.Controls.Add(_unlockTcpHost);
-        panel.Controls.Add(MkLabel("TCP port:", 470, y));
+        tpUnlock.Controls.Add(_unlockTcpHost);
+        tpUnlock.Controls.Add(MkLabel("TCP port:", 460, y));
         _unlockTcpPort.Left = 540;
         _unlockTcpPort.Top = y - 2;
         _unlockTcpPort.Width = 120;
         _unlockTcpPort.Minimum = 1;
         _unlockTcpPort.Maximum = 65535;
         _unlockTcpPort.Value = 9100;
-        panel.Controls.Add(_unlockTcpPort);
+        tpUnlock.Controls.Add(_unlockTcpPort);
 
         y += 36;
-        panel.Controls.Add(MkLabel("TCP payload:", 16, y));
-        _unlockTcpPayload.Left = 220;
+        tpUnlock.Controls.Add(MkLabel("TCP payload:", 16, y));
+        _unlockTcpPayload.Left = 200;
         _unlockTcpPayload.Top = y - 2;
         _unlockTcpPayload.Width = 520;
         _unlockTcpPayload.PlaceholderText = "OPEN\\n o 0xA0 0x01 0x01";
-        panel.Controls.Add(_unlockTcpPayload);
-        _tips.SetToolTip(_unlockTcpPayload, "Acepta texto (ASCII/UTF-8) o bytes hex separados por espacio.");
+        tpUnlock.Controls.Add(_unlockTcpPayload);
 
         y += 36;
-        panel.Controls.Add(MkLabel("Serial port:", 16, y));
-        _unlockSerialPort.Left = 220;
+        tpUnlock.Controls.Add(MkLabel("Serial port:", 16, y));
+        _unlockSerialPort.Left = 200;
         _unlockSerialPort.Top = y - 2;
         _unlockSerialPort.Width = 160;
         _unlockSerialPort.DropDownStyle = ComboBoxStyle.DropDownList;
-        panel.Controls.Add(_unlockSerialPort);
-        panel.Controls.Add(MkLabel("Serial baud:", 390, y));
-        _unlockSerialBaud.Left = 470;
+        tpUnlock.Controls.Add(_unlockSerialPort);
+        tpUnlock.Controls.Add(MkLabel("Baud:", 370, y));
+        _unlockSerialBaud.Left = 420;
         _unlockSerialBaud.Top = y - 2;
         _unlockSerialBaud.Width = 120;
         _unlockSerialBaud.Minimum = 1200;
         _unlockSerialBaud.Maximum = 921600;
         _unlockSerialBaud.Increment = 1200;
-        panel.Controls.Add(_unlockSerialBaud);
+        tpUnlock.Controls.Add(_unlockSerialBaud);
 
         y += 36;
-        panel.Controls.Add(MkLabel("Serial payload:", 16, y));
-        _unlockSerialPayload.Left = 220;
+        tpUnlock.Controls.Add(MkLabel("Serial payload:", 16, y));
+        _unlockSerialPayload.Left = 200;
         _unlockSerialPayload.Top = y - 2;
         _unlockSerialPayload.Width = 520;
         _unlockSerialPayload.PlaceholderText = "OPEN\\n o 0xA0 0x01 0x01 o DTR_PULSE:500";
-        panel.Controls.Add(_unlockSerialPayload);
-        _tips.SetToolTip(_unlockSerialPayload, "Texto/hex o comandos: DTR_PULSE:500 | RTS_PULSE:500 | BREAK:300");
+        tpUnlock.Controls.Add(_unlockSerialPayload);
 
         y += 36;
-        panel.Controls.Add(MkLabel("Unlock ms:", 16, y));
-        _unlockMs.Left = 220;
+        tpUnlock.Controls.Add(MkLabel("Unlock ms:", 16, y));
+        _unlockMs.Left = 200;
         _unlockMs.Top = y - 2;
         _unlockMs.Width = 120;
         _unlockMs.Minimum = 250;
         _unlockMs.Maximum = 15000;
         _unlockMs.Increment = 250;
-        panel.Controls.Add(_unlockMs);
+        tpUnlock.Controls.Add(_unlockMs);
 
-        y += 36;
-        var h3 = new Label
-        {
-            Left = 16,
-            Top = y,
-            Width = 720,
-            Height = 22,
-            Text = "Paso 3 · Lecturas (entrada) y operación",
-            Font = new System.Drawing.Font("Segoe UI", 9, System.Drawing.FontStyle.Bold)
-        };
-        panel.Controls.Add(h3);
-        y += 28;
-        panel.Controls.Add(MkLabel("Mode:", 16, y));
-        _accessMode.Left = 220;
+        AddTitle(tpInput, "Lecturas (entrada) y operación");
+        y = 52;
+        tpInput.Controls.Add(MkLabel("Modo:", 16, y));
+        _accessMode.Left = 200;
         _accessMode.Top = y - 2;
-        _accessMode.Width = 240;
+        _accessMode.Width = 260;
         _accessMode.DropDownStyle = ComboBoxStyle.DropDownList;
         _accessMode.Items.Clear();
         _accessMode.Items.AddRange(new object[] { "validate_and_command", "observe_only" });
-        panel.Controls.Add(_accessMode);
-        _tips.SetToolTip(_accessMode, "validate_and_command abre el molinete cuando la API autoriza. observe_only solo registra.");
+        tpInput.Controls.Add(_accessMode);
 
         y += 36;
-        panel.Controls.Add(MkLabel("Input source:", 16, y));
-        _inputSource.Left = 220;
+        tpInput.Controls.Add(MkLabel("Input source:", 16, y));
+        _inputSource.Left = 200;
         _inputSource.Top = y - 2;
-        _inputSource.Width = 240;
+        _inputSource.Width = 260;
         _inputSource.DropDownStyle = ComboBoxStyle.DropDownList;
         _inputSource.Items.Clear();
         _inputSource.Items.AddRange(new object[] { "keyboard", "serial" });
-        panel.Controls.Add(_inputSource);
-        _tips.SetToolTip(_inputSource, "keyboard: lector USB tipo teclado. serial: lector por COM.");
+        tpInput.Controls.Add(_inputSource);
 
         y += 36;
-        panel.Controls.Add(MkLabel("Serial port:", 16, y));
-        _serialPort.Left = 220;
+        tpInput.Controls.Add(MkLabel("Serial port:", 16, y));
+        _serialPort.Left = 200;
         _serialPort.Top = y - 2;
         _serialPort.Width = 160;
         _serialPort.DropDownStyle = ComboBoxStyle.DropDownList;
-        panel.Controls.Add(_serialPort);
+        tpInput.Controls.Add(_serialPort);
 
-        _refreshPortsBtn.Left = 390;
+        _refreshPortsBtn.Left = 370;
         _refreshPortsBtn.Top = y - 3;
         _refreshPortsBtn.Width = 70;
         _refreshPortsBtn.Text = "Scan";
         _refreshPortsBtn.Click += (_, _) => RefreshSerialPorts();
-        panel.Controls.Add(_refreshPortsBtn);
+        tpInput.Controls.Add(_refreshPortsBtn);
 
-        _serialBaud.Left = 480;
+        tpInput.Controls.Add(MkLabel("Baud:", 460, y));
+        _serialBaud.Left = 520;
         _serialBaud.Top = y - 2;
         _serialBaud.Width = 120;
         _serialBaud.Minimum = 1200;
         _serialBaud.Maximum = 921600;
         _serialBaud.Increment = 1200;
-        panel.Controls.Add(_serialBaud);
+        tpInput.Controls.Add(_serialBaud);
 
         y += 36;
-        panel.Controls.Add(MkLabel("Protocol:", 16, y));
-        _inputProtocol.Left = 220;
+        tpInput.Controls.Add(MkLabel("Protocol:", 16, y));
+        _inputProtocol.Left = 200;
         _inputProtocol.Top = y - 2;
-        _inputProtocol.Width = 240;
+        _inputProtocol.Width = 260;
         _inputProtocol.DropDownStyle = ComboBoxStyle.DropDownList;
         _inputProtocol.Items.Clear();
         _inputProtocol.Items.AddRange(new object[] { "raw", "data", "drt", "str", "regex", "em4100" });
-        panel.Controls.Add(_inputProtocol);
+        tpInput.Controls.Add(_inputProtocol);
 
         y += 36;
-        panel.Controls.Add(MkLabel("Keyboard submit:", 16, y));
-        _captureSubmitKey.Left = 220;
+        tpInput.Controls.Add(MkLabel("Keyboard submit:", 16, y));
+        _captureSubmitKey.Left = 200;
         _captureSubmitKey.Top = y - 2;
         _captureSubmitKey.Width = 120;
         _captureSubmitKey.DropDownStyle = ComboBoxStyle.DropDownList;
         _captureSubmitKey.Items.Clear();
         _captureSubmitKey.Items.AddRange(new object[] { "enter", "tab" });
-        panel.Controls.Add(_captureSubmitKey);
+        tpInput.Controls.Add(_captureSubmitKey);
 
-        _captureIdleMs.Left = 350;
+        tpInput.Controls.Add(MkLabel("Idle ms:", 330, y));
+        _captureIdleMs.Left = 400;
         _captureIdleMs.Top = y - 2;
-        _captureIdleMs.Width = 160;
+        _captureIdleMs.Width = 120;
         _captureIdleMs.Minimum = 0;
         _captureIdleMs.Maximum = 5000;
         _captureIdleMs.Increment = 50;
-        panel.Controls.Add(_captureIdleMs);
-        panel.Controls.Add(MkLabel("idle ms (0=off)", 520, y));
+        tpInput.Controls.Add(_captureIdleMs);
 
         y += 36;
-        panel.Controls.Add(MkLabel("Remote commands:", 16, y));
-        _remoteCmds.Left = 220;
+        tpInput.Controls.Add(MkLabel("Remote cmds:", 16, y));
+        _remoteCmds.Left = 200;
         _remoteCmds.Top = y - 2;
         _remoteCmds.Width = 220;
         _remoteCmds.Text = "Habilitar polling";
-        panel.Controls.Add(_remoteCmds);
-        _tips.SetToolTip(_remoteCmds, "Habilita comandos remotos (unlock desde web / station auto unlock). Recomendado: ON.");
+        tpInput.Controls.Add(_remoteCmds);
 
-        _remotePollMs.Left = 450;
+        tpInput.Controls.Add(MkLabel("Poll ms:", 430, y));
+        _remotePollMs.Left = 500;
         _remotePollMs.Top = y - 2;
         _remotePollMs.Width = 120;
         _remotePollMs.Minimum = 250;
         _remotePollMs.Maximum = 10000;
         _remotePollMs.Increment = 250;
-        panel.Controls.Add(_remotePollMs);
-        panel.Controls.Add(MkLabel("poll ms", 580, y));
+        tpInput.Controls.Add(_remotePollMs);
 
         y += 36;
-        panel.Controls.Add(MkLabel("Regex (opcional):", 16, y));
-        _inputRegex.Left = 220;
+        tpInput.Controls.Add(MkLabel("Regex (opt):", 16, y));
+        _inputRegex.Left = 200;
         _inputRegex.Top = y - 2;
         _inputRegex.Width = 520;
         _inputRegex.PlaceholderText = "Ej: UID:(\\w+)";
-        panel.Controls.Add(_inputRegex);
+        tpInput.Controls.Add(_inputRegex);
 
         y += 36;
-        panel.Controls.Add(MkLabel("UID format:", 16, y));
-        _uidFormat.Left = 220;
+        tpInput.Controls.Add(MkLabel("UID:", 16, y));
+        _uidFormat.Left = 200;
         _uidFormat.Top = y - 2;
-        _uidFormat.Width = 160;
+        _uidFormat.Width = 120;
         _uidFormat.DropDownStyle = ComboBoxStyle.DropDownList;
         _uidFormat.Items.Clear();
         _uidFormat.Items.AddRange(new object[] { "auto", "hex", "dec" });
-        panel.Controls.Add(_uidFormat);
+        tpInput.Controls.Add(_uidFormat);
 
-        _uidEndian.Left = 390;
+        _uidEndian.Left = 330;
         _uidEndian.Top = y - 2;
         _uidEndian.Width = 120;
         _uidEndian.DropDownStyle = ComboBoxStyle.DropDownList;
         _uidEndian.Items.Clear();
         _uidEndian.Items.AddRange(new object[] { "auto", "be", "le" });
-        panel.Controls.Add(_uidEndian);
+        tpInput.Controls.Add(_uidEndian);
 
-        _uidBits.Left = 530;
+        _uidBits.Left = 460;
         _uidBits.Top = y - 2;
         _uidBits.Width = 120;
         _uidBits.Minimum = 16;
         _uidBits.Maximum = 128;
         _uidBits.Increment = 8;
-        panel.Controls.Add(_uidBits);
+        tpInput.Controls.Add(_uidBits);
 
         y += 36;
-        panel.Controls.Add(MkLabel("Hotkey manual:", 16, y));
-        _manualHotkey.Left = 220;
+        tpInput.Controls.Add(MkLabel("Hotkey:", 16, y));
+        _manualHotkey.Left = 200;
         _manualHotkey.Top = y - 2;
         _manualHotkey.Width = 120;
-        panel.Controls.Add(_manualHotkey);
+        tpInput.Controls.Add(_manualHotkey);
 
-        _allowManual.Left = 350;
+        _allowManual.Left = 330;
         _allowManual.Top = y - 2;
-        _allowManual.Width = 250;
-        _allowManual.Text = "Permitir apertura manual";
-        panel.Controls.Add(_allowManual);
+        _allowManual.Width = 210;
+        _allowManual.Text = "Apertura manual";
+        tpInput.Controls.Add(_allowManual);
 
-        _fullscreen.Left = 610;
+        _fullscreen.Left = 550;
         _fullscreen.Top = y - 2;
-        _fullscreen.Width = 140;
-        _fullscreen.Text = "Kiosk";
-        panel.Controls.Add(_fullscreen);
-        _tips.SetToolTip(_fullscreen, "Modo kiosco: pantalla completa y captura continua.");
+        _fullscreen.Width = 170;
+        _fullscreen.Text = "Kiosk (pantalla completa)";
+        tpInput.Controls.Add(_fullscreen);
 
-        y += 48;
-        var h4 = new Label
+        var inputHint = new Label
         {
             Left = 16,
-            Top = y,
+            Top = y + 38,
             Width = 720,
-            Height = 22,
-            Text = "Paso 4 · Pruebas (validar apertura antes de habilitar)",
-            Font = new System.Drawing.Font("Segoe UI", 9, System.Drawing.FontStyle.Bold)
+            Height = 46,
+            Text = "Uso: escaneá llavero/QR o tipeá DNI + Enter. DNI#PIN: 12345678#1234 + Enter.",
         };
-        panel.Controls.Add(h4);
-        y += 28;
-        panel.Controls.Add(MkLabel("Test GET URL:", 16, y));
-        _testGetUrl.Left = 220;
+        tpInput.Controls.Add(inputHint);
+
+        AddTitle(tpTests, "Pruebas de apertura");
+        y = 52;
+        tpTests.Controls.Add(MkLabel("Test GET URL:", 16, y));
+        _testGetUrl.Left = 200;
         _testGetUrl.Top = y - 2;
         _testGetUrl.Width = 430;
         _testGetUrl.PlaceholderText = "http://RELAY_IP/unlock";
-        panel.Controls.Add(_testGetUrl);
-        _testGetBtn.Left = 660;
+        tpTests.Controls.Add(_testGetUrl);
+        _testGetBtn.Left = 640;
         _testGetBtn.Top = y - 3;
         _testGetBtn.Width = 80;
         _testGetBtn.Text = "Test";
         _testGetBtn.Click += async (_, _) => await RunUnlockTestAsync("http_get");
-        panel.Controls.Add(_testGetBtn);
+        tpTests.Controls.Add(_testGetBtn);
 
         y += 36;
-        panel.Controls.Add(MkLabel("Test POST URL:", 16, y));
-        _testPostUrl.Left = 220;
+        tpTests.Controls.Add(MkLabel("Test POST URL:", 16, y));
+        _testPostUrl.Left = 200;
         _testPostUrl.Top = y - 2;
         _testPostUrl.Width = 430;
         _testPostUrl.PlaceholderText = "http://RELAY_IP/unlock";
-        panel.Controls.Add(_testPostUrl);
-        _testPostBtn.Left = 660;
+        tpTests.Controls.Add(_testPostUrl);
+        _testPostBtn.Left = 640;
         _testPostBtn.Top = y - 3;
         _testPostBtn.Width = 80;
         _testPostBtn.Text = "Test";
         _testPostBtn.Click += async (_, _) => await RunUnlockTestAsync("http_post_json");
-        panel.Controls.Add(_testPostBtn);
+        tpTests.Controls.Add(_testPostBtn);
 
         y += 36;
-        panel.Controls.Add(MkLabel("Test TCP:", 16, y));
-        _testTcpHost.Left = 220;
+        tpTests.Controls.Add(MkLabel("Test TCP:", 16, y));
+        _testTcpHost.Left = 200;
         _testTcpHost.Top = y - 2;
         _testTcpHost.Width = 300;
-        panel.Controls.Add(_testTcpHost);
-        _testTcpPort.Left = 530;
+        tpTests.Controls.Add(_testTcpHost);
+        _testTcpPort.Left = 510;
         _testTcpPort.Top = y - 2;
         _testTcpPort.Width = 120;
         _testTcpPort.Minimum = 1;
         _testTcpPort.Maximum = 65535;
         _testTcpPort.Value = 9100;
-        panel.Controls.Add(_testTcpPort);
-        _testTcpBtn.Left = 660;
+        tpTests.Controls.Add(_testTcpPort);
+        _testTcpBtn.Left = 640;
         _testTcpBtn.Top = y - 3;
         _testTcpBtn.Width = 80;
         _testTcpBtn.Text = "Test";
         _testTcpBtn.Click += async (_, _) => await RunUnlockTestAsync("tcp");
-        panel.Controls.Add(_testTcpBtn);
+        tpTests.Controls.Add(_testTcpBtn);
 
         y += 36;
-        panel.Controls.Add(MkLabel("TCP payload:", 16, y));
-        _testTcpPayload.Left = 220;
+        tpTests.Controls.Add(MkLabel("TCP payload:", 16, y));
+        _testTcpPayload.Left = 200;
         _testTcpPayload.Top = y - 2;
         _testTcpPayload.Width = 520;
         _testTcpPayload.PlaceholderText = "OPEN\\n o 0xA0 0x01 0x01";
-        panel.Controls.Add(_testTcpPayload);
+        tpTests.Controls.Add(_testTcpPayload);
 
         y += 36;
-        panel.Controls.Add(MkLabel("Test Serial:", 16, y));
-        _testSerialPort.Left = 220;
+        tpTests.Controls.Add(MkLabel("Test Serial:", 16, y));
+        _testSerialPort.Left = 200;
         _testSerialPort.Top = y - 2;
         _testSerialPort.Width = 160;
         _testSerialPort.DropDownStyle = ComboBoxStyle.DropDownList;
-        panel.Controls.Add(_testSerialPort);
-        _testSerialBaud.Left = 390;
+        tpTests.Controls.Add(_testSerialPort);
+        _testSerialBaud.Left = 370;
         _testSerialBaud.Top = y - 2;
         _testSerialBaud.Width = 120;
         _testSerialBaud.Minimum = 1200;
         _testSerialBaud.Maximum = 921600;
         _testSerialBaud.Increment = 1200;
         _testSerialBaud.Value = 9600;
-        panel.Controls.Add(_testSerialBaud);
-        _testSerialBtn.Left = 660;
+        tpTests.Controls.Add(_testSerialBaud);
+        _testSerialBtn.Left = 640;
         _testSerialBtn.Top = y - 3;
         _testSerialBtn.Width = 80;
         _testSerialBtn.Text = "Test";
         _testSerialBtn.Click += async (_, _) => await RunUnlockTestAsync("serial");
-        panel.Controls.Add(_testSerialBtn);
+        tpTests.Controls.Add(_testSerialBtn);
 
         y += 36;
-        panel.Controls.Add(MkLabel("Serial payload:", 16, y));
-        _testSerialPayload.Left = 220;
+        tpTests.Controls.Add(MkLabel("Serial payload:", 16, y));
+        _testSerialPayload.Left = 200;
         _testSerialPayload.Top = y - 2;
         _testSerialPayload.Width = 520;
         _testSerialPayload.PlaceholderText = "OPEN\\n o 0xA0 0x01 0x01 o DTR_PULSE:500";
-        panel.Controls.Add(_testSerialPayload);
+        tpTests.Controls.Add(_testSerialPayload);
 
-        y += 40;
-        _testAllBtn.Left = 220;
+        y += 44;
+        _testAllBtn.Left = 200;
         _testAllBtn.Top = y - 3;
-        _testAllBtn.Width = 160;
+        _testAllBtn.Width = 180;
         _testAllBtn.Text = "Probar todos";
         _testAllBtn.Click += async (_, _) => await RunUnlockAllTestsAsync();
-        panel.Controls.Add(_testAllBtn);
+        tpTests.Controls.Add(_testAllBtn);
 
-        y += 52;
-        var save = new Button { Left = 220, Top = y, Width = 120, Text = "Guardar" };
+        var save = new Button { Width = 120, Text = "Guardar" };
+        save.Left = panel.Width - 264;
+        save.Top = panel.Height - 52;
+        save.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
         save.Click += (_, _) => SaveConfig();
         panel.Controls.Add(save);
 
-        var close = new Button { Left = 350, Top = y, Width = 120, Text = "Cerrar" };
+        var close = new Button { Width = 120, Text = "Cerrar" };
+        close.Left = panel.Width - 136;
+        close.Top = panel.Height - 52;
+        close.Anchor = AnchorStyles.Right | AnchorStyles.Bottom;
         close.Click += (_, _) => ToggleConfig(false);
         panel.Controls.Add(close);
-
-        var hint = new Label
-        {
-            Left = 220,
-            Top = y + 40,
-            Width = 520,
-            Height = 80,
-            Text = "Uso: enfocá el lector y escaneá.\nDNI#PIN: 12345678#1234 + Enter.\nAtajos: Ctrl+Shift+C configuración · botón Pausar para detener lecturas.",
-        };
-        panel.Controls.Add(hint);
     }
 
     private static Label MkLabel(string t, int x, int y)
@@ -884,13 +889,13 @@ public sealed class MainForm : Form
         _testSerialPayload.Text = _cfg.TestSerialPayload ?? "";
         _allowManual.Checked = _cfg.AllowManualUnlock ?? true;
         _manualHotkey.Text = _cfg.ManualHotkey ?? "F10";
-        _fullscreen.Checked = _cfg.Fullscreen ?? true;
+        _fullscreen.Checked = _cfg.Fullscreen ?? false;
     }
 
     private void SaveConfig()
     {
         _cfg.Tenant = _tenant.Text.Trim().ToLowerInvariant();
-        _cfg.BaseUrl = _baseUrl.Text.Trim().TrimEnd('/');
+        _cfg.BaseUrl = NormalizeBaseUrl(_baseUrl.Text);
         _cfg.DeviceId = _deviceId.Text.Trim();
         _cfg.UnlockUrl = _unlockUrl.Text.Trim();
         _cfg.UnlockMethod = _unlockMethod.SelectedItem?.ToString()?.Trim().ToLowerInvariant() ?? "http_get";
@@ -937,6 +942,16 @@ public sealed class MainForm : Form
         var paired = ok && !string.IsNullOrWhiteSpace(_cfg.Token);
         var run = _running && !_configOpen;
         _status.Text = paired ? (run ? "LISTO" : "LISTO · PAUSADO") : ok ? "FALTA PAIRING" : "NO CONFIGURADO";
+        try
+        {
+            if (paired && run) _status.ForeColor = System.Drawing.Color.FromArgb(34, 197, 94);
+            else if (paired && !run) _status.ForeColor = System.Drawing.Color.FromArgb(250, 204, 21);
+            else if (ok && !paired) _status.ForeColor = System.Drawing.Color.FromArgb(251, 146, 60);
+            else _status.ForeColor = System.Drawing.Color.FromArgb(248, 113, 113);
+        }
+        catch
+        {
+        }
         var detail = new StringBuilder();
         if (!ok)
         {
@@ -1279,7 +1294,7 @@ public sealed class MainForm : Form
     private async Task PairAsync()
     {
         var tenant = _tenant.Text.Trim().ToLowerInvariant();
-        var baseUrl = _baseUrl.Text.Trim().TrimEnd('/');
+        var baseUrl = NormalizeBaseUrl(_baseUrl.Text);
         var deviceId = _deviceId.Text.Trim();
         var pairing = _pairing.Text.Trim();
         if (string.IsNullOrWhiteSpace(tenant) || string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(deviceId) || string.IsNullOrWhiteSpace(pairing))
@@ -1287,29 +1302,35 @@ public sealed class MainForm : Form
             _last.Text = "Config incompleta para pairing";
             return;
         }
-        var url = $"{baseUrl}/api/access/devices/pair";
-        var body = JsonSerializer.Serialize(new { device_id = deviceId, pairing_code = pairing });
-        var req = new HttpRequestMessage(HttpMethod.Post, url);
-        req.Content = new StringContent(body, Encoding.UTF8, "application/json");
-        req.Headers.Add("X-Tenant", tenant);
         try
         {
-            var res = await _http.SendAsync(req, _cts.Token);
-            var txt = await res.Content.ReadAsStringAsync(_cts.Token);
-            if (!res.IsSuccessStatusCode)
+            var (ok, token, err, usedBaseUrl) = await TryPairAsync(tenant, baseUrl, deviceId, pairing);
+            if (!ok && IsLikelyHtml(err))
             {
-                _last.Text = $"Pair fail: {txt}";
+                var derived = DeriveApiBaseUrlFromTenantBaseUrl(baseUrl);
+                if (!string.Equals(derived, baseUrl, StringComparison.OrdinalIgnoreCase))
+                {
+                    (ok, token, err, usedBaseUrl) = await TryPairAsync(tenant, derived, deviceId, pairing);
+                    if (ok)
+                    {
+                        _baseUrl.Text = usedBaseUrl;
+                        baseUrl = usedBaseUrl;
+                    }
+                }
+            }
+            if (!ok)
+            {
+                var hint = IsLikelyHtml(err) ? "La Base URL parece ser la web (HTML). Usá la Base URL de la API (ej: https://api.ironhub.motiona.xyz)." : err;
+                _last.Text = $"Pair error: {TruncateOneLine(hint, 220)}";
                 return;
             }
-            using var doc = JsonDocument.Parse(txt);
-            var token = doc.RootElement.GetProperty("token").GetString() ?? "";
             if (string.IsNullOrWhiteSpace(token))
             {
                 _last.Text = "Pair fail: token vacío";
                 return;
             }
             _cfg.Tenant = tenant;
-            _cfg.BaseUrl = baseUrl;
+            _cfg.BaseUrl = usedBaseUrl;
             _cfg.DeviceId = deviceId;
             _cfg.Token = token;
             _cfg.Save();
@@ -1327,6 +1348,177 @@ public sealed class MainForm : Form
         catch (Exception ex)
         {
             _last.Text = $"Pair error: {ex.Message}";
+        }
+    }
+
+    private async Task<(bool ok, string token, string error, string baseUrl)> TryPairAsync(string tenant, string baseUrl, string deviceId, string pairing)
+    {
+        var url = $"{baseUrl}/api/access/devices/pair";
+        var body = JsonSerializer.Serialize(new { device_id = deviceId, pairing_code = pairing });
+        var req = new HttpRequestMessage(HttpMethod.Post, url);
+        req.Content = new StringContent(body, Encoding.UTF8, "application/json");
+        req.Headers.Add("X-Tenant", tenant);
+        var res = await _http.SendAsync(req, _cts.Token);
+        var txt = await res.Content.ReadAsStringAsync(_cts.Token);
+        if (!res.IsSuccessStatusCode)
+        {
+            var sc = (int)res.StatusCode;
+            var ct = res.Content?.Headers?.ContentType?.MediaType ?? "";
+            var shortBody = TruncateOneLine(txt, 220);
+            var err = $"HTTP {sc} · {ct} · {shortBody}";
+            return (false, "", err, baseUrl);
+        }
+        try
+        {
+            using var doc = JsonDocument.Parse(txt);
+            var token = doc.RootElement.TryGetProperty("token", out var t) ? (t.GetString() ?? "") : "";
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                return (false, "", "Respuesta inválida: token vacío", baseUrl);
+            }
+            return (true, token, "", baseUrl);
+        }
+        catch
+        {
+            var ct = res.Content?.Headers?.ContentType?.MediaType ?? "";
+            return (false, "", $"Respuesta inválida (no es JSON) · {ct} · {TruncateOneLine(txt, 220)}", baseUrl);
+        }
+    }
+
+    private static string NormalizeBaseUrl(string raw)
+    {
+        var s = (raw ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(s)) return "";
+        if (!(s.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || s.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+        {
+            s = "https://" + s;
+        }
+        try
+        {
+            var u = new Uri(s);
+            var b = new UriBuilder(u) { Path = "", Query = "", Fragment = "" };
+            return b.Uri.ToString().TrimEnd('/');
+        }
+        catch
+        {
+            return s.TrimEnd('/');
+        }
+    }
+
+    private static string DeriveApiBaseUrlFromTenantBaseUrl(string baseUrl)
+    {
+        try
+        {
+            var u = new Uri(baseUrl);
+            var host = (u.Host ?? "").Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(host)) return baseUrl;
+            var parts = host.Split('.', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2) return baseUrl;
+            if (string.Equals(parts[0], "api", StringComparison.OrdinalIgnoreCase)) return baseUrl;
+            if (string.Equals(parts[0], "localhost", StringComparison.OrdinalIgnoreCase)) return baseUrl;
+            var baseHost = string.Join(".", parts.Skip(1));
+            var apiHost = $"api.{baseHost}";
+            var b = new UriBuilder(u) { Host = apiHost, Path = "", Query = "", Fragment = "" };
+            return b.Uri.ToString().TrimEnd('/');
+        }
+        catch
+        {
+            return baseUrl;
+        }
+    }
+
+    private static bool IsLikelyHtml(string txt)
+    {
+        var t = (txt ?? "").TrimStart();
+        if (string.IsNullOrWhiteSpace(t)) return false;
+        return t.StartsWith("<!DOCTYPE", StringComparison.OrdinalIgnoreCase) || t.StartsWith("<html", StringComparison.OrdinalIgnoreCase) || t.Contains("<script", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string TruncateOneLine(string txt, int maxLen)
+    {
+        var s = (txt ?? "").Replace("\r", " ").Replace("\n", " ").Trim();
+        if (s.Length <= maxLen) return s;
+        return s.Substring(0, Math.Max(0, maxLen - 1)).TrimEnd() + "…";
+    }
+
+    private void ApplyTheme()
+    {
+        try
+        {
+            BackColor = System.Drawing.Color.FromArgb(15, 23, 42);
+            ForeColor = System.Drawing.Color.FromArgb(226, 232, 240);
+            Font = new System.Drawing.Font("Segoe UI", 9);
+            ApplyThemeTo(Controls);
+        }
+        catch
+        {
+        }
+    }
+
+    private void ApplyThemeTo(Control.ControlCollection controls)
+    {
+        foreach (Control c in controls)
+        {
+            try
+            {
+                if (c is Panel)
+                {
+                    c.BackColor = System.Drawing.Color.FromArgb(2, 6, 23);
+                    c.ForeColor = System.Drawing.Color.FromArgb(226, 232, 240);
+                }
+                else if (c is TabControl)
+                {
+                    c.BackColor = System.Drawing.Color.FromArgb(2, 6, 23);
+                    c.ForeColor = System.Drawing.Color.FromArgb(226, 232, 240);
+                }
+                else if (c is TabPage)
+                {
+                    c.BackColor = System.Drawing.Color.FromArgb(2, 6, 23);
+                    c.ForeColor = System.Drawing.Color.FromArgb(226, 232, 240);
+                }
+                else if (c is GroupBox)
+                {
+                    c.BackColor = System.Drawing.Color.FromArgb(2, 6, 23);
+                    c.ForeColor = System.Drawing.Color.FromArgb(226, 232, 240);
+                }
+                else if (c is Label)
+                {
+                    c.BackColor = System.Drawing.Color.Transparent;
+                    c.ForeColor = System.Drawing.Color.FromArgb(226, 232, 240);
+                }
+                else if (c is Button b)
+                {
+                    b.FlatStyle = FlatStyle.Flat;
+                    b.BackColor = System.Drawing.Color.FromArgb(30, 41, 59);
+                    b.ForeColor = System.Drawing.Color.FromArgb(226, 232, 240);
+                    b.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(51, 65, 85);
+                    b.FlatAppearance.BorderSize = 1;
+                }
+                else if (c is TextBox tb)
+                {
+                    tb.BackColor = System.Drawing.Color.FromArgb(15, 23, 42);
+                    tb.ForeColor = System.Drawing.Color.FromArgb(226, 232, 240);
+                    tb.BorderStyle = BorderStyle.FixedSingle;
+                }
+                else if (c is ComboBox cb)
+                {
+                    cb.BackColor = System.Drawing.Color.FromArgb(15, 23, 42);
+                    cb.ForeColor = System.Drawing.Color.FromArgb(226, 232, 240);
+                }
+                else if (c is CheckBox ck)
+                {
+                    ck.ForeColor = System.Drawing.Color.FromArgb(226, 232, 240);
+                }
+                else if (c is NumericUpDown nud)
+                {
+                    nud.BackColor = System.Drawing.Color.FromArgb(15, 23, 42);
+                    nud.ForeColor = System.Drawing.Color.FromArgb(226, 232, 240);
+                }
+            }
+            catch
+            {
+            }
+            if (c.HasChildren) ApplyThemeTo(c.Controls);
         }
     }
 
@@ -2169,7 +2361,7 @@ public sealed class MainForm : Form
             try
             {
                 var p = ConfigPath();
-                if (!File.Exists(p)) return new AgentConfig { UnlockMethod = "http_get", UnlockMs = 2500, UnlockTcpHost = "", UnlockTcpPort = 0, UnlockTcpPayload = "", UnlockSerialPort = "", UnlockSerialBaud = 9600, UnlockSerialPayload = "", Mode = "validate_and_command", AllowManualUnlock = true, ManualHotkey = "F10", InputSource = "keyboard", SerialPort = "", SerialBaud = 9600, InputProtocol = "raw", InputRegex = "", UidFormat = "auto", UidEndian = "auto", UidBits = 40, KeyboardSubmitKey = "enter", KeyboardIdleSubmitMs = 0, RemoteCommandsEnabled = true, RemoteCommandPollMs = 1000, EnrollEnabled = false, EnrollUsuarioId = null, EnrollCredentialType = "fob", EnrollOverwrite = true, EnrollExpiresAt = null, TestHttpGetUrl = "", TestHttpPostUrl = "", TestTcpHost = "", TestTcpPort = 0, TestTcpPayload = "", TestSerialPort = "", TestSerialBaud = 9600, TestSerialPayload = "", Fullscreen = true, OfflineQueueEnabled = true, OfflineQueueMaxLines = 2000 };
+                if (!File.Exists(p)) return new AgentConfig { UnlockMethod = "http_get", UnlockMs = 2500, UnlockTcpHost = "", UnlockTcpPort = 0, UnlockTcpPayload = "", UnlockSerialPort = "", UnlockSerialBaud = 9600, UnlockSerialPayload = "", Mode = "validate_and_command", AllowManualUnlock = true, ManualHotkey = "F10", InputSource = "keyboard", SerialPort = "", SerialBaud = 9600, InputProtocol = "raw", InputRegex = "", UidFormat = "auto", UidEndian = "auto", UidBits = 40, KeyboardSubmitKey = "enter", KeyboardIdleSubmitMs = 0, RemoteCommandsEnabled = true, RemoteCommandPollMs = 1000, EnrollEnabled = false, EnrollUsuarioId = null, EnrollCredentialType = "fob", EnrollOverwrite = true, EnrollExpiresAt = null, TestHttpGetUrl = "", TestHttpPostUrl = "", TestTcpHost = "", TestTcpPort = 0, TestTcpPayload = "", TestSerialPort = "", TestSerialBaud = 9600, TestSerialPayload = "", Fullscreen = false, OfflineQueueEnabled = true, OfflineQueueMaxLines = 2000 };
                 var json = File.ReadAllText(p, Encoding.UTF8);
                 var cfg = JsonSerializer.Deserialize<AgentConfig>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new AgentConfig();
                 cfg.UnlockMethod ??= "http_get";
@@ -2206,7 +2398,7 @@ public sealed class MainForm : Form
                 cfg.TestSerialPort ??= "";
                 cfg.TestSerialBaud ??= 9600;
                 cfg.TestSerialPayload ??= "";
-                cfg.Fullscreen ??= true;
+                cfg.Fullscreen ??= false;
                 cfg.OfflineQueueEnabled ??= true;
                 cfg.OfflineQueueMaxLines ??= 2000;
                 if (string.IsNullOrWhiteSpace(cfg.Token) && !string.IsNullOrWhiteSpace(cfg.TokenProtected))
@@ -2226,7 +2418,7 @@ public sealed class MainForm : Form
             }
             catch
             {
-                return new AgentConfig { UnlockMethod = "http_get", UnlockMs = 2500, UnlockTcpHost = "", UnlockTcpPort = 0, UnlockTcpPayload = "", UnlockSerialPort = "", UnlockSerialBaud = 9600, UnlockSerialPayload = "", Mode = "validate_and_command", AllowManualUnlock = true, ManualHotkey = "F10", InputSource = "keyboard", SerialPort = "", SerialBaud = 9600, InputProtocol = "raw", InputRegex = "", UidFormat = "auto", UidEndian = "auto", UidBits = 40, KeyboardSubmitKey = "enter", KeyboardIdleSubmitMs = 0, RemoteCommandsEnabled = true, RemoteCommandPollMs = 1000, EnrollEnabled = false, EnrollUsuarioId = null, EnrollCredentialType = "fob", EnrollOverwrite = true, EnrollExpiresAt = null, TestHttpGetUrl = "", TestHttpPostUrl = "", TestTcpHost = "", TestTcpPort = 0, TestTcpPayload = "", TestSerialPort = "", TestSerialBaud = 9600, TestSerialPayload = "", Fullscreen = true, OfflineQueueEnabled = true, OfflineQueueMaxLines = 2000 };
+                return new AgentConfig { UnlockMethod = "http_get", UnlockMs = 2500, UnlockTcpHost = "", UnlockTcpPort = 0, UnlockTcpPayload = "", UnlockSerialPort = "", UnlockSerialBaud = 9600, UnlockSerialPayload = "", Mode = "validate_and_command", AllowManualUnlock = true, ManualHotkey = "F10", InputSource = "keyboard", SerialPort = "", SerialBaud = 9600, InputProtocol = "raw", InputRegex = "", UidFormat = "auto", UidEndian = "auto", UidBits = 40, KeyboardSubmitKey = "enter", KeyboardIdleSubmitMs = 0, RemoteCommandsEnabled = true, RemoteCommandPollMs = 1000, EnrollEnabled = false, EnrollUsuarioId = null, EnrollCredentialType = "fob", EnrollOverwrite = true, EnrollExpiresAt = null, TestHttpGetUrl = "", TestHttpPostUrl = "", TestTcpHost = "", TestTcpPort = 0, TestTcpPayload = "", TestSerialPort = "", TestSerialBaud = 9600, TestSerialPayload = "", Fullscreen = false, OfflineQueueEnabled = true, OfflineQueueMaxLines = 2000 };
             }
         }
 

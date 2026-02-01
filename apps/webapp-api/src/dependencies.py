@@ -1195,6 +1195,12 @@ def get_admin_db() -> Generator[Session, None, None]:
 def require_feature(feature_key: str):
     async def _dep(request: Request, session: Session = Depends(get_db_session)):
         try:
+            claims = get_claims(request)
+            if bool(claims.get("is_owner")):
+                return True
+        except Exception:
+            pass
+        try:
             if str(feature_key or "").strip().lower() == "whatsapp" and str(
                 request.url.path or ""
             ).startswith("/webhooks/whatsapp"):
