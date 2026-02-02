@@ -585,21 +585,6 @@ class Asistencia(Base):
         Index("idx_asistencias_usuario_fecha", "usuario_id", "fecha"),
         Index("idx_asistencias_usuario_fecha_desc", "usuario_id", text("fecha DESC")),
         Index("idx_asistencias_sucursal_fecha", "sucursal_id", "fecha"),
-        Index(
-            "uq_asistencias_usuario_fecha_global",
-            "usuario_id",
-            "fecha",
-            unique=True,
-            postgresql_where=text("sucursal_id IS NULL"),
-        ),
-        Index(
-            "uq_asistencias_usuario_fecha_sucursal",
-            "usuario_id",
-            "fecha",
-            "sucursal_id",
-            unique=True,
-            postgresql_where=text("sucursal_id IS NOT NULL"),
-        ),
     )
 
 

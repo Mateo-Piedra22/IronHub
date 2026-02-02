@@ -1677,15 +1677,39 @@ public sealed class MainForm : Form
         var s = ApplyInputProtocol(raw);
         if (string.IsNullOrWhiteSpace(s)) return;
         var shown = MaskInputForDisplay(s);
+        var hasDniPin = TryParseDniPin(s, out var dni, out var pin);
+        var kind = hasDniPin ? "dni_pin" : GuessKind(s);
         try
         {
             _lastScanAtUtc = DateTimeOffset.UtcNow;
-            _dispInput.Text = $"Entrada: {shown}";
-            _dispReason.Text = "Validando…";
+            var kindLabel = kind switch
+            {
+                "dni" => "dni",
+                "dni_pin" => "dni+pin",
+                "qr_token" => "qr",
+                "credential" => "credencial",
+                _ => "input"
+            };
+            _dispInput.Text = $"Entrada ({kindLabel}): {shown}";
+            _dispInput.ForeColor = kind switch
+            {
+                "dni" => System.Drawing.Color.FromArgb(34, 197, 94),
+                "dni_pin" => System.Drawing.Color.FromArgb(34, 197, 94),
+                "qr_token" => System.Drawing.Color.FromArgb(251, 146, 60),
+                _ => System.Drawing.Color.FromArgb(148, 163, 184)
+            };
+            _dispReason.Text = kind switch
+            {
+                "dni" => "Validando DNI…",
+                "dni_pin" => "Validando DNI+PIN…",
+                "qr_token" => "Validando QR…",
+                _ => "Validando…"
+            };
+            _dispDecision.Text = "VALIDANDO";
+            _dispDecision.ForeColor = System.Drawing.Color.FromArgb(226, 232, 240);
             _dispUser.Text = "";
             _dispMembership.Text = "";
             _dispMeta.Text = "";
-            _dispDecision.Text = "";
         }
         catch
         {
@@ -1706,7 +1730,7 @@ public sealed class MainForm : Form
             });
             return;
         }
-        if (TryParseDniPin(s, out var dni, out var pin))
+        if (hasDniPin)
         {
             await SendEventAsync(new Dictionary<string, object?>
             {
@@ -1716,7 +1740,6 @@ public sealed class MainForm : Form
             });
             return;
         }
-        var kind = GuessKind(s);
         await SendEventAsync(new Dictionary<string, object?>
         {
             ["event_type"] = kind,

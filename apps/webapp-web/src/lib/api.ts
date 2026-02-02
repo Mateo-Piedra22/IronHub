@@ -2206,29 +2206,47 @@ class ApiClient {
     }
 
     async createAsistencia(usuarioId: number, fecha?: string) {
-        return this.request<{ success: boolean; asistencia_id?: number; message?: string }>('/api/asistencias/registrar', {
+        const res = await this.request<{ success: boolean; asistencia_id?: number; message?: string }>('/api/asistencias/registrar', {
             method: 'POST',
             body: JSON.stringify({ usuario_id: usuarioId, fecha }),
         });
+        if (res.ok) {
+            _clearCacheByPrefix('GET:/api/asistencias');
+            _clearCacheByPrefix('GET:/api/usuario_asistencias');
+            _clearCacheByPrefix('GET:/api/asistencias_hoy_ids');
+        }
+        return res;
     }
 
     async deleteAsistencia(usuarioId: number, fecha?: string) {
-        return this.request<{ success: boolean }>('/api/asistencias/eliminar', {
+        const res = await this.request<{ success: boolean }>('/api/asistencias/eliminar', {
             method: 'DELETE',
             body: JSON.stringify({
                 usuario_id: usuarioId,
                 fecha: fecha || new Date().toISOString().split('T')[0]
             }),
         });
+        if (res.ok) {
+            _clearCacheByPrefix('GET:/api/asistencias');
+            _clearCacheByPrefix('GET:/api/usuario_asistencias');
+            _clearCacheByPrefix('GET:/api/asistencias_hoy_ids');
+        }
+        return res;
     }
 
     async deleteAsistenciaById(asistenciaId: number) {
-        return this.request<{ success: boolean }>('/api/asistencias/eliminar', {
+        const res = await this.request<{ success: boolean }>('/api/asistencias/eliminar', {
             method: 'DELETE',
             body: JSON.stringify({
                 asistencia_id: asistenciaId,
             }),
         });
+        if (res.ok) {
+            _clearCacheByPrefix('GET:/api/asistencias');
+            _clearCacheByPrefix('GET:/api/usuario_asistencias');
+            _clearCacheByPrefix('GET:/api/asistencias_hoy_ids');
+        }
+        return res;
     }
 
     async getAsistenciasHoyIds() {

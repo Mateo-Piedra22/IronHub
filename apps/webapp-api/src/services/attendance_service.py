@@ -416,7 +416,8 @@ class AttendanceService(BaseService):
                     sucursal_id=int(sid) if sid is not None else None,
                 )
             except ValueError:
-                return False, "Token ya utilizado o asistencia ya registrada hoy"
+                self.marcar_token_usado(token)
+                return True, "Asistencia ya registrada hoy"
 
             self.marcar_token_usado(token)
             if self._allow_multiple_attendances_per_day():
@@ -475,7 +476,8 @@ class AttendanceService(BaseService):
                     sucursal_id=int(sid) if sid is not None else None,
                 )
             except ValueError:
-                return False, "Token ya utilizado"
+                self.marcar_token_usado(token)
+                return True, "Asistencia ya registrada hoy"
 
             self.marcar_token_usado(token)
             return True, nombre or "Asistencia registrada"
@@ -715,20 +717,11 @@ class AttendanceService(BaseService):
         try:
             if asistencia_id is not None:
                 a = self.db.get(Asistencia, int(asistencia_id))
-                if not a:
-                    logger.warning(f"Attendance {asistencia_id} not found for deletion")
-                    return True  # Already deleted
-
-                uid = int(a.usuario_id) if a.usuario_id is not None else None
+                uid = int(a.usuario_id) if a and a.usuario_id is not None else None
                 f = a.fecha if a else None
-                
-                # Delete the specific record
-                result = self.db.execute(
+                self.db.execute(
                     delete(Asistencia).where(Asistencia.id == int(asistencia_id))
                 )
-                deleted_count = result.rowcount if hasattr(result, 'rowcount') else 1
-                logger.info(f"Deleted {deleted_count} attendance record(s) with id={asistencia_id}")
-                
                 if uid is not None and f is not None:
                     try:
                         remaining = int(
@@ -747,10 +740,8 @@ class AttendanceService(BaseService):
                                 ),
                                 {"uid": uid, "f": f},
                             )
-                            logger.info(f"Also cleaned asistencias_diarias for usuario_id={uid} fecha={f}")
-                    except Exception as e:
-                        logger.warning(f"Error cleaning asistencias_diarias: {e}")
-                
+                    except Exception:
+                        pass
                 self.db.commit()
                 return True
 
@@ -759,14 +750,11 @@ class AttendanceService(BaseService):
             if fecha is None:
                 fecha = self._today_local_date()
 
-            result = self.db.execute(
+            self.db.execute(
                 delete(Asistencia).where(
                     Asistencia.usuario_id == int(usuario_id), Asistencia.fecha == fecha
                 )
             )
-            deleted_count = result.rowcount if hasattr(result, 'rowcount') else 0
-            logger.info(f"Deleted {deleted_count} attendance record(s) for usuario_id={usuario_id} fecha={fecha}")
-            
             try:
                 self.db.execute(
                     text(
@@ -774,9 +762,8 @@ class AttendanceService(BaseService):
                     ),
                     {"uid": int(usuario_id), "f": fecha},
                 )
-            except Exception as e:
-                logger.warning(f"Error cleaning asistencias_diarias: {e}")
-            
+            except Exception:
+                pass
             self.db.commit()
             return True
         except Exception as e:

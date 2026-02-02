@@ -351,9 +351,6 @@ class Asistencia(Base):
     usuario: Mapped["Usuario"] = relationship("Usuario", back_populates="asistencias")
 
     __table_args__ = (
-        UniqueConstraint(
-            "usuario_id", "fecha", name="asistencias_usuario_id_fecha_key"
-        ),
         Index("idx_asistencias_usuario_id", "usuario_id"),
         Index("idx_asistencias_fecha", "fecha"),
         Index("idx_asistencias_usuario_fecha", "usuario_id", "fecha"),

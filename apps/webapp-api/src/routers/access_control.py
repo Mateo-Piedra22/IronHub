@@ -1529,11 +1529,17 @@ async def api_access_event(request: Request, db: Session = Depends(get_db_sessio
                                 decision = "deny"
                                 reason = str(msg or "")
                             else:
-                                attendance_service.registrar_asistencia(int(subject_usuario_id), sucursal_id=sid)
-                                decision = "allow"
-                                reason = "OK"
-                                unlock = True
-                                unlock_ms = default_unlock_ms
+                                try:
+                                    attendance_service.registrar_asistencia(int(subject_usuario_id), sucursal_id=sid)
+                                    decision = "allow"
+                                    reason = "OK"
+                                    unlock = True
+                                    unlock_ms = default_unlock_ms
+                                except ValueError:
+                                    decision = "allow"
+                                    reason = "Ya registrado hoy"
+                                    unlock = True
+                                    unlock_ms = default_unlock_ms
                 except Exception:
                     decision = "deny"
                     reason = "Error validando DNI"
