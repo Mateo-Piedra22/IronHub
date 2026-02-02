@@ -1012,25 +1012,17 @@ def get_db_session(request: Request) -> Generator[Session, None, None]:
         # Use tenant-specific session
         try:
             factory = get_tenant_session_factory(tenant)
-            if factory:
-                session = factory()
-                try:
-                    yield session
-                finally:
-                    session.close()
-                return
-            else:
-                # Factory returned None - tenant lookup failed
+            if not factory:
                 logger.error(f"Tenant session factory returned None for '{tenant}'")
                 raise HTTPException(
                     status_code=503,
                     detail=f"Database connection unavailable for tenant '{tenant}'",
                 )
+            session = factory()
         except HTTPException:
-            raise  # Re-raise HTTP exceptions
+            raise
         except Exception as e:
             logger.error(f"Failed to get tenant session for '{tenant}': {e}")
-            # Check if this looks like a production environment without proper config
             db_host = os.getenv("DB_HOST", "localhost")
             if db_host == "localhost" and not os.getenv("DEVELOPMENT_MODE"):
                 logger.critical(
@@ -1040,6 +1032,15 @@ def get_db_session(request: Request) -> Generator[Session, None, None]:
             raise HTTPException(
                 status_code=503, detail=f"Database connection error: {str(e)}"
             )
+
+        try:
+            yield session
+        finally:
+            try:
+                session.close()
+            except Exception:
+                pass
+        return
 
     # No tenant context - use global database
     # Also validate that we're not accidentally using localhost in production
@@ -1054,7 +1055,10 @@ def get_db_session(request: Request) -> Generator[Session, None, None]:
     try:
         yield session
     finally:
-        session.close()
+        try:
+            session.close()
+        except Exception:
+            pass
 
 
 def get_user_service(session: Session = Depends(get_db_session)) -> UserService:

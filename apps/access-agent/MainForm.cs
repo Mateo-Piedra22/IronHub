@@ -260,6 +260,18 @@ public sealed class MainForm : Form
         _capture.KeyDown += CaptureKeyDown;
         _capture.TextChanged += (_, _) =>
         {
+            if (!_configOpen)
+            {
+                try
+                {
+                    var t = _capture.Text ?? "";
+                    _dispInput.Text = string.IsNullOrWhiteSpace(t) ? "" : $"Entrada: {MaskInputForDisplay(t)}";
+                    _dispInput.ForeColor = System.Drawing.Color.FromArgb(148, 163, 184);
+                }
+                catch
+                {
+                }
+            }
             var ms = _cfg.KeyboardIdleSubmitMs ?? 0;
             if (ms <= 0) { _captureIdleTimer.Stop(); return; }
             if (string.IsNullOrWhiteSpace(_capture.Text)) { _captureIdleTimer.Stop(); return; }
@@ -791,7 +803,15 @@ public sealed class MainForm : Form
     {
         _configOpen = open ?? !_configOpen;
         var p = Controls["ConfigPanel"];
-        if (p != null) p.Visible = _configOpen;
+        if (p != null)
+        {
+            p.Visible = _configOpen;
+            if (_configOpen)
+            {
+                p.BringToFront();
+                LayoutMain();
+            }
+        }
         if (_configOpen) ApplyConfigToUi();
         if (_configOpen) StopInput();
         ApplyKioskMode();
@@ -819,6 +839,18 @@ public sealed class MainForm : Form
 
     private void FocusCapture()
     {
+        if (_configOpen)
+        {
+            try
+            {
+                _tenant.Focus();
+                _tenant.Select();
+            }
+            catch
+            {
+            }
+            return;
+        }
         _capture.Focus();
         _capture.Select();
     }
@@ -1465,6 +1497,16 @@ public sealed class MainForm : Form
             _statusDetail.Width = contentW;
             _last.Width = contentW;
             _io.Width = contentW;
+
+            var p = Controls["ConfigPanel"];
+            if (p != null)
+            {
+                p.Left = margin;
+                p.Top = top;
+                p.Width = Math.Max(360, ClientSize.Width - (margin * 2));
+                p.Height = Math.Max(260, ClientSize.Height - top - margin);
+                if (_configOpen) p.BringToFront();
+            }
         }
         catch
         {

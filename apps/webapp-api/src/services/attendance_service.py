@@ -118,17 +118,40 @@ class AttendanceService(BaseService):
         if request_hash:
             where += " AND request_hash = :rh"
             params["rh"] = str(request_hash)
-        row = self.db.execute(
-            text(
-                f"""
-                SELECT response_status, response_body, expires_at
-                FROM checkin_idempotency
-                WHERE {where}
-                LIMIT 1
-                """
-            ),
-            params,
-        ).fetchone()
+        try:
+            row = self.db.execute(
+                text(
+                    f"""
+                    SELECT response_status, response_body, expires_at
+                    FROM checkin_idempotency
+                    WHERE {where}
+                    LIMIT 1
+                    """
+                ),
+                params,
+            ).fetchone()
+        except Exception as e:
+            if "checkin_idempotency" in str(e).lower() and "does not exist" in str(e).lower():
+                try:
+                    self._ensure_checkin_idempotency_schema()
+                except Exception:
+                    return None
+                try:
+                    row = self.db.execute(
+                        text(
+                            f"""
+                            SELECT response_status, response_body, expires_at
+                            FROM checkin_idempotency
+                            WHERE {where}
+                            LIMIT 1
+                            """
+                        ),
+                        params,
+                    ).fetchone()
+                except Exception:
+                    return None
+            else:
+                return None
         if not row:
             return None
         status_code = row[0]
@@ -140,6 +163,35 @@ class AttendanceService(BaseService):
         except Exception:
             parsed = {"ok": False, "mensaje": "Respuesta inválida (idempotency)"}
         return {"pending": False, "status_code": int(status_code), "body": parsed}
+
+    def _ensure_checkin_idempotency_schema(self) -> None:
+        self.db.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS checkin_idempotency (
+                    key TEXT PRIMARY KEY,
+                    expires_at TIMESTAMP WITHOUT TIME ZONE NULL,
+                    usuario_id INTEGER NULL REFERENCES usuarios(id) ON DELETE SET NULL,
+                    route TEXT NOT NULL DEFAULT '',
+                    request_hash TEXT NULL,
+                    response_status INTEGER NULL,
+                    response_body JSONB NULL,
+                    created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
+                )
+                """
+            )
+        )
+        self.db.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_checkin_idempotency_expires_at ON checkin_idempotency(expires_at)"
+            )
+        )
+        self.db.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_checkin_idempotency_usuario_created_at_desc ON checkin_idempotency(usuario_id, created_at DESC)"
+            )
+        )
+        self.db.commit()
 
     def idempotency_reserve(
         self,
@@ -172,11 +224,37 @@ class AttendanceService(BaseService):
             )
             self.db.commit()
             return True
-        except Exception:
+        except Exception as e:
             try:
                 self.db.rollback()
             except Exception:
                 pass
+            if "checkin_idempotency" in str(e).lower() and "does not exist" in str(e).lower():
+                try:
+                    self._ensure_checkin_idempotency_schema()
+                    self.db.execute(
+                        text(
+                            """
+                            INSERT INTO checkin_idempotency(key, expires_at, usuario_id, route, request_hash, response_status, response_body)
+                            VALUES (:k, NOW() + (:ttl * INTERVAL '1 second'), :uid, :route, :rh, NULL, NULL)
+                            ON CONFLICT (key) DO NOTHING
+                            """
+                        ),
+                        {
+                            "k": k,
+                            "ttl": int(ttl_seconds),
+                            "uid": int(usuario_id) if usuario_id is not None else None,
+                            "route": str(route or ""),
+                            "rh": str(request_hash) if request_hash else None,
+                        },
+                    )
+                    self.db.commit()
+                    return True
+                except Exception:
+                    try:
+                        self.db.rollback()
+                    except Exception:
+                        pass
             return False
 
     def idempotency_store_response(
@@ -198,16 +276,30 @@ class AttendanceService(BaseService):
                 {"k": k, "s": int(status_code), "b": payload},
             )
             self.db.commit()
-        except Exception:
+        except Exception as e:
             try:
                 self.db.rollback()
             except Exception:
                 pass
-        except Exception:
-            try:
-                self.db.rollback()
-            except Exception:
-                pass
+            if "checkin_idempotency" in str(e).lower() and "does not exist" in str(e).lower():
+                try:
+                    self._ensure_checkin_idempotency_schema()
+                    self.db.execute(
+                        text(
+                            """
+                            UPDATE checkin_idempotency
+                            SET response_status = :s, response_body = CAST(:b AS JSONB)
+                            WHERE key = :k
+                            """
+                        ),
+                        {"k": k, "s": int(status_code), "b": payload},
+                    )
+                    self.db.commit()
+                except Exception:
+                    try:
+                        self.db.rollback()
+                    except Exception:
+                        pass
 
     def _count_asistencias_usuario_fecha(self, usuario_id: int, fecha: date) -> int:
         try:

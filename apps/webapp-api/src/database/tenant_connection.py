@@ -23,7 +23,7 @@ from contextlib import contextmanager
 from datetime import datetime
 
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker, Session, scoped_session
+from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError, OperationalError
 
@@ -74,7 +74,7 @@ VALID_TENANT_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$|^[a-z0-9]{
 # ============================================================================
 
 _tenant_engines: Dict[str, Engine] = {}
-_tenant_session_factories: Dict[str, scoped_session] = {}
+_tenant_session_factories: Dict[str, sessionmaker] = {}
 _tenant_db_info: Dict[str, Dict[str, Any]] = {}  # Cache for tenant db_name and status
 _tenant_lock = threading.RLock()
 _tenant_last_access: Dict[str, float] = {}  # For LRU eviction
@@ -424,10 +424,6 @@ def get_tenant_engine(tenant: str, verify_status: bool = True) -> Optional[Engin
                     pass
                 if tenant in _tenant_session_factories:
                     try:
-                        _tenant_session_factories[tenant].remove()
-                    except Exception:
-                        pass
-                    try:
                         del _tenant_session_factories[tenant]
                     except Exception:
                         pass
@@ -521,10 +517,6 @@ def get_tenant_engine(tenant: str, verify_status: bool = True) -> Optional[Engin
                             pass
                         del _tenant_engines[tenant]
                     if tenant in _tenant_session_factories:
-                        try:
-                            _tenant_session_factories[tenant].remove()
-                        except Exception:
-                            pass
                         del _tenant_session_factories[tenant]
             except Exception:
                 pass
@@ -532,8 +524,8 @@ def get_tenant_engine(tenant: str, verify_status: bool = True) -> Optional[Engin
         return engine
 
 
-def get_tenant_session_factory(tenant: str) -> Optional[scoped_session]:
-    """Get or create a scoped session factory for the specified tenant."""
+def get_tenant_session_factory(tenant: str) -> Optional[sessionmaker]:
+    """Get or create a session factory for the specified tenant."""
     if not tenant:
         return None
 
@@ -553,10 +545,8 @@ def get_tenant_session_factory(tenant: str) -> Optional[scoped_session]:
 
         # Create session factory
         factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-        scoped_factory = scoped_session(factory)
-
-        _tenant_session_factories[tenant] = scoped_factory
-        return scoped_factory
+        _tenant_session_factories[tenant] = factory
+        return factory
 
 
 def get_current_tenant_session() -> Optional[Session]:
@@ -621,10 +611,6 @@ def clear_tenant_cache(tenant: str = None):
         if tenant:
             tenant = tenant.strip().lower()
             if tenant in _tenant_session_factories:
-                try:
-                    _tenant_session_factories[tenant].remove()
-                except Exception:
-                    pass
                 del _tenant_session_factories[tenant]
             if tenant in _tenant_engines:
                 try:
@@ -638,11 +624,6 @@ def clear_tenant_cache(tenant: str = None):
                 del _tenant_last_access[tenant]
         else:
             # Clear all
-            for factory in _tenant_session_factories.values():
-                try:
-                    factory.remove()
-                except Exception:
-                    pass
             _tenant_session_factories.clear()
 
             for engine in _tenant_engines.values():
