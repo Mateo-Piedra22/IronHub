@@ -1,6 +1,6 @@
 from alembic import op
 
-revision = "0013_drop_asistencias_unique_indexes"
+revision = "0013_drop_asist_uq_idx"
 down_revision = "0012_access_commands"
 branch_labels = None
 depends_on = None

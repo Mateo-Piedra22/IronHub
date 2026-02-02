@@ -1,5 +1,6 @@
 import os
 import sys
+import traceback
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import quote_plus
@@ -188,9 +189,10 @@ def main() -> int:
             )
             ok += 1
             print(f"{label} migrated")
-        except Exception:
+        except Exception as e:
             failed += 1
-            print(f"{label} failed")
+            print(f"{label} failed: {type(e).__name__}: {e}")
+            traceback.print_exc()
 
     print(f"Resumen: migrated={ok} skipped={skipped} failed={failed}")
     return 0 if failed == 0 else 1
