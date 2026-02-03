@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, Set
+from typing import Any, Optional, Set
 
 from fastapi import WebSocket
 
@@ -9,27 +9,41 @@ from fastapi import WebSocket
 class CheckinWsHub:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
-        self._by_sucursal: Dict[int, Set[WebSocket]] = {}
+        self._by_room: dict[str, Set[WebSocket]] = {}
 
-    async def connect(self, sucursal_id: int, websocket: WebSocket) -> None:
+    def _room_key(self, sucursal_id: int, tenant: Optional[str]) -> str:
+        t = ""
+        if tenant is None:
+            try:
+                from src.database.tenant_connection import get_current_tenant
+
+                t = str(get_current_tenant() or "").strip().lower()
+            except Exception:
+                t = ""
+        else:
+            t = str(tenant or "").strip().lower()
+        return f"{t}|{int(sucursal_id)}"
+
+    async def connect(self, sucursal_id: int, websocket: WebSocket, tenant: Optional[str] = None) -> None:
         await websocket.accept()
+        rk = self._room_key(int(sucursal_id), tenant)
         async with self._lock:
-            self._by_sucursal.setdefault(int(sucursal_id), set()).add(websocket)
+            self._by_room.setdefault(rk, set()).add(websocket)
 
-    async def disconnect(self, sucursal_id: int, websocket: WebSocket) -> None:
-        sid = int(sucursal_id)
+    async def disconnect(self, sucursal_id: int, websocket: WebSocket, tenant: Optional[str] = None) -> None:
+        rk = self._room_key(int(sucursal_id), tenant)
         async with self._lock:
-            conns = self._by_sucursal.get(sid)
+            conns = self._by_room.get(rk)
             if not conns:
                 return
             conns.discard(websocket)
             if not conns:
-                self._by_sucursal.pop(sid, None)
+                self._by_room.pop(rk, None)
 
-    async def broadcast(self, sucursal_id: int, message: Any) -> None:
-        sid = int(sucursal_id)
+    async def broadcast(self, sucursal_id: int, message: Any, tenant: Optional[str] = None) -> None:
+        rk = self._room_key(int(sucursal_id), tenant)
         async with self._lock:
-            targets = list(self._by_sucursal.get(sid) or [])
+            targets = list(self._by_room.get(rk) or [])
 
         if not targets:
             return
@@ -39,7 +53,7 @@ class CheckinWsHub:
                 await ws.send_json(message)
             except Exception:
                 try:
-                    await self.disconnect(sid, ws)
+                    await self.disconnect(int(sucursal_id), ws, tenant=tenant)
                 finally:
                     try:
                         await ws.close()

@@ -489,10 +489,19 @@ async def api_asistencias_list(
             limit=limit,
             offset=offset,
         )
-        return {
-            "asistencias": list(out.get("items") or []),
-            "total": int(out.get("total") or 0),
-        }
+        return JSONResponse(
+            {
+                "asistencias": list(out.get("items") or []),
+                "total": int(out.get("total") or 0),
+            },
+            status_code=200,
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0, private",
+                "Pragma": "no-cache",
+                "Expires": "0",
+                "Vary": "Cookie, X-Tenant, Origin",
+            },
+        )
     except Exception as e:
         logger.error(f"Error listing asistencias: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -661,17 +670,25 @@ async def api_asistencias_eliminar(
         fecha = None
 
     try:
-        svc.eliminar_asistencia(
+        ok = svc.eliminar_asistencia(
             usuario_id=usuario_id if usuario_id else None,
             fecha=fecha,
             asistencia_id=asistencia_id,
         )
+        if not ok:
+            raise HTTPException(status_code=404, detail="Asistencia no encontrada")
         logger.info(
             f"/api/asistencias/eliminar: usuario_id={usuario_id} asistencia_id={asistencia_id} fecha={fecha} rid={rid}"
         )
         return JSONResponse(
             {"ok": True, "mensaje": "OK", "success": True, "message": "OK"},
             status_code=200,
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0, private",
+                "Pragma": "no-cache",
+                "Expires": "0",
+                "Vary": "Cookie, X-Tenant, Origin",
+            },
         )
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))

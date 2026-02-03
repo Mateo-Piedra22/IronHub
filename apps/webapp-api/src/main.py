@@ -9,6 +9,7 @@ import re
 import logging
 import json
 import hashlib
+import asyncio
 import time
 import threading
 from dotenv import load_dotenv
@@ -1046,14 +1047,55 @@ from src.checkin_ws_hub import checkin_ws_hub
 @app.websocket("/ws/checkin/station/{sucursal_id}")
 async def ws_station_checkins(websocket: WebSocket, sucursal_id: int):
     sid = int(sucursal_id)
-    await checkin_ws_hub.connect(sid, websocket)
+    tenant = None
+    try:
+        tenant_q = str(websocket.query_params.get("tenant") or "").strip().lower()
+    except Exception:
+        tenant_q = ""
+    if tenant_q:
+        try:
+            ok, _err = validate_tenant_name(tenant_q)
+        except Exception:
+            ok = False
+        if ok:
+            tenant = tenant_q
+
+    if not tenant:
+        try:
+            origin = str(websocket.headers.get("origin") or "").strip().lower()
+        except Exception:
+            origin = ""
+        if origin:
+            try:
+                base = str(os.getenv("TENANT_BASE_DOMAIN", "ironhub.motiona.xyz") or "").strip().lower().lstrip(".")
+                if base:
+                    m = re.search(rf"^https?://([a-z0-9-]+)\.{re.escape(base)}", origin)
+                    if m:
+                        cand = str(m.group(1) or "").strip().lower()
+                        if cand and cand not in ("www", "api", "admin", "admin-api"):
+                            ok2, _err2 = validate_tenant_name(cand)
+                            if ok2:
+                                tenant = cand
+            except Exception:
+                tenant = None
+
+    await checkin_ws_hub.connect(sid, websocket, tenant=tenant)
     try:
         while True:
-            await websocket.receive_text()
+            try:
+                msg = await asyncio.wait_for(websocket.receive_text(), timeout=25)
+            except asyncio.TimeoutError:
+                await websocket.send_text("ping")
+                continue
+
+            if msg == "ping":
+                await websocket.send_text("pong")
     except WebSocketDisconnect:
         pass
+    except Exception:
+        pass
     finally:
-        await checkin_ws_hub.disconnect(sid, websocket)
+        await checkin_ws_hub.disconnect(sid, websocket, tenant=tenant)
 
 
 # Import all routers

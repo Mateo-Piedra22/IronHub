@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { QrCode, Check, User, Clock, Wifi, WifiOff, Users, RefreshCw } from 'lucide-react';
 import { useParams } from 'next/navigation';
 import QRCode from 'qrcode';
+import { getCurrentTenant } from '@/lib/tenant';
 
 interface CheckinEntry {
     id: number;
@@ -57,6 +58,8 @@ export default function StationPage() {
     const tokenRefreshInFlightRef = useRef(false);
     const wsRef = useRef<WebSocket | null>(null);
     const wsReconnectRef = useRef<NodeJS.Timeout | null>(null);
+    const wsRetryMsRef = useRef<number>(2500);
+    const wsPingRef = useRef<NodeJS.Timeout | null>(null);
 
     const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
 
@@ -238,7 +241,8 @@ export default function StationPage() {
             : httpBase.startsWith('http://')
                 ? httpBase.replace('http://', 'ws://')
                 : httpBase;
-        const wsUrl = `${wsBase}/ws/checkin/station/${branchId}`;
+        const tenant = typeof window !== 'undefined' ? getCurrentTenant() : '';
+        const wsUrl = `${wsBase}/ws/checkin/station/${branchId}${tenant ? `?tenant=${encodeURIComponent(tenant)}` : ''}`;
 
         try {
             if (wsReconnectRef.current) clearTimeout(wsReconnectRef.current);
@@ -248,12 +252,19 @@ export default function StationPage() {
             if (wsRef.current) wsRef.current.close();
         } catch { }
 
+        try {
+            if (wsPingRef.current) clearInterval(wsPingRef.current);
+        } catch { }
+
         let ws: WebSocket;
         try {
             ws = new WebSocket(wsUrl);
         } catch (e) {
             setWsConnected(false);
-            setConnected(false);
+            wsReconnectRef.current = setTimeout(() => {
+                wsRetryMsRef.current = Math.min(wsRetryMsRef.current * 2, 30000);
+                setupWebSocket();
+            }, wsRetryMsRef.current);
             return;
         }
 
@@ -261,10 +272,25 @@ export default function StationPage() {
 
         ws.onopen = () => {
             setWsConnected(true);
-            setConnected(true);
+            wsRetryMsRef.current = 2500;
+            try {
+                wsPingRef.current = setInterval(() => {
+                    try {
+                        if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+                    } catch { }
+                }, 20000);
+            } catch { }
         };
 
         ws.onmessage = (event) => {
+            if (event.data === 'ping') {
+                try {
+                    ws.send('pong');
+                } catch { }
+                return;
+            }
+            if (event.data === 'pong') return;
+
             let data: any = null;
             try {
                 data = JSON.parse(event.data);
@@ -318,20 +344,22 @@ export default function StationPage() {
 
         ws.onclose = () => {
             setWsConnected(false);
-            setConnected(false);
+            try {
+                if (wsPingRef.current) clearInterval(wsPingRef.current);
+            } catch { }
             wsReconnectRef.current = setTimeout(() => {
+                wsRetryMsRef.current = Math.min(wsRetryMsRef.current * 2, 30000);
                 setupWebSocket();
-            }, 2500);
+            }, wsRetryMsRef.current);
         };
 
         ws.onerror = () => {
             setWsConnected(false);
-            setConnected(false);
             try {
                 ws.close();
             } catch { }
         };
-    }, [API_BASE, stationInfo?.branch_id, loadToken, playSuccessSound, stationInfo]);
+    }, [API_BASE, stationInfo?.branch_id, loadToken, playSuccessSound]);
 
     // Countdown timer
     useEffect(() => {
@@ -386,6 +414,9 @@ export default function StationPage() {
         return () => {
             try {
                 if (wsReconnectRef.current) clearTimeout(wsReconnectRef.current);
+            } catch { }
+            try {
+                if (wsPingRef.current) clearInterval(wsPingRef.current);
             } catch { }
             try {
                 if (wsRef.current) wsRef.current.close();

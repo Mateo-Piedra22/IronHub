@@ -964,12 +964,29 @@ class AttendanceService(BaseService):
         """Delete attendance for a user on a specific date."""
         try:
             if asistencia_id is not None:
-                a = self.db.get(Asistencia, int(asistencia_id))
-                uid = int(a.usuario_id) if a and a.usuario_id is not None else None
-                f = a.fecha if a else None
-                self.db.execute(
-                    delete(Asistencia).where(Asistencia.id == int(asistencia_id))
+                row = self.db.execute(
+                    text(
+                        "SELECT usuario_id, fecha FROM asistencias WHERE id = :id LIMIT 1"
+                    ),
+                    {"id": int(asistencia_id)},
+                ).fetchone()
+                if not row:
+                    return False
+
+                uid = int(row[0]) if row[0] is not None else None
+                f = row[1]
+
+                deleted = self.db.execute(
+                    text("DELETE FROM asistencias WHERE id = :id"),
+                    {"id": int(asistencia_id)},
                 )
+                if not deleted.rowcount:
+                    try:
+                        self.db.rollback()
+                    except Exception:
+                        pass
+                    return False
+
                 if uid is not None and f is not None:
                     try:
                         remaining = int(
@@ -990,7 +1007,29 @@ class AttendanceService(BaseService):
                             )
                     except Exception:
                         pass
+
                 self.db.commit()
+                try:
+                    still = self.db.execute(
+                        text("SELECT 1 FROM asistencias WHERE id = :id LIMIT 1"),
+                        {"id": int(asistencia_id)},
+                    ).fetchone()
+                    if still:
+                        self.db.execute(
+                            delete(Asistencia).where(Asistencia.id == int(asistencia_id))
+                        )
+                        self.db.commit()
+                        still2 = self.db.execute(
+                            text("SELECT 1 FROM asistencias WHERE id = :id LIMIT 1"),
+                            {"id": int(asistencia_id)},
+                        ).fetchone()
+                        if still2:
+                            return False
+                except Exception:
+                    try:
+                        self.db.rollback()
+                    except Exception:
+                        pass
                 return True
 
             if usuario_id is None:
