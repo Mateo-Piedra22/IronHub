@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from src.checkin_ws_hub import checkin_ws_hub
 from src.dependencies import (
     require_gestion_access,
     require_owner,
@@ -69,9 +70,14 @@ async def api_checkin_validate(
             )
 
         # Validate token and register attendance
-        ok, msg = svc.validar_token_y_registrar(
-            token, int(socio_id), int(sucursal_id)
+        ok, msg, asistencia_id, created = svc.validar_token_y_registrar(
+            token, int(socio_id), int(sucursal_id), tipo="qr_gestion"
         )
+        if ok and created and asistencia_id is not None:
+            entry = svc.construir_checkin_entry_por_asistencia_id(int(asistencia_id))
+            sid = entry.get("sucursal_id") if isinstance(entry, dict) else None
+            if sid:
+                await checkin_ws_hub.broadcast(int(sid), entry)
 
         logger.info(f"/api/checkin/validate: resultado ok={ok} msg='{msg}' rid={rid}")
         return JSONResponse(
@@ -131,8 +137,8 @@ async def api_checkin(
                 status_code=403,
             )
 
-        ok, msg = svc.validar_token_y_registrar(
-            token, int(socio_id), int(sucursal_id)
+        ok, msg, asistencia_id, created = svc.validar_token_y_registrar(
+            token, int(socio_id), int(sucursal_id), tipo="qr_gestion"
         )
         if ok:
             try:
@@ -143,6 +149,11 @@ async def api_checkin(
                     svc.db.rollback()
                 except Exception:
                     pass
+        if ok and created and asistencia_id is not None:
+            entry = svc.construir_checkin_entry_por_asistencia_id(int(asistencia_id))
+            sid = entry.get("sucursal_id") if isinstance(entry, dict) else None
+            if sid:
+                await checkin_ws_hub.broadcast(int(sid), entry)
 
         sucursal_nombre = None
         try:
@@ -284,19 +295,26 @@ async def api_checkin_by_dni(
 
         # Check-in with or without PIN verification
         if require_pin:
-            ok, msg = svc.registrar_asistencia_por_dni_y_pin(
-                dni, pin, request.session.get("sucursal_id")
+            ok, msg, asistencia_id, created = svc.registrar_asistencia_por_dni_y_pin(
+                dni, pin, request.session.get("sucursal_id"), tipo="dni_pin"
             )
         else:
-            ok, msg = svc.registrar_asistencia_por_dni(
-                dni, request.session.get("sucursal_id")
+            ok, msg, asistencia_id, created = svc.registrar_asistencia_por_dni(
+                dni, request.session.get("sucursal_id"), tipo="dni_pin"
             )
+        entry = (
+            svc.construir_checkin_entry_por_asistencia_id(int(asistencia_id))
+            if ok and asistencia_id is not None
+            else None
+        )
         if ok:
             sid = request.session.get("sucursal_id")
             try:
                 sid = int(sid) if sid is not None else None
             except Exception:
                 sid = None
+            if sid is None and isinstance(entry, dict):
+                sid = entry.get("sucursal_id")
             if sid:
                 try:
                     _enqueue_auto_unlock_for_sucursal(svc.db, int(sid), request_id=f"dni:{dni}", source="dni_checkin")
@@ -306,6 +324,10 @@ async def api_checkin_by_dni(
                         svc.db.rollback()
                     except Exception:
                         pass
+        if ok and created and asistencia_id is not None and isinstance(entry, dict):
+            sid = entry.get("sucursal_id")
+            if sid:
+                await checkin_ws_hub.broadcast(int(sid), entry)
 
         payload = {
             "ok": ok,
@@ -559,12 +581,17 @@ async def api_asistencias_registrar(
             pass
 
     try:
-        asistencia_id = svc.registrar_asistencia(
-            usuario_id, fecha, int(sucursal_id)
+        asistencia_id, created = svc.registrar_asistencia_con_resultado(
+            usuario_id, fecha, int(sucursal_id), tipo="manual_gestion"
         )
         logger.info(
             f"/api/asistencias/registrar: usuario_id={usuario_id} fecha={fecha} rid={rid}"
         )
+        if created and asistencia_id is not None:
+            entry = svc.construir_checkin_entry_por_asistencia_id(int(asistencia_id))
+            sid = entry.get("sucursal_id") if isinstance(entry, dict) else None
+            if sid:
+                await checkin_ws_hub.broadcast(int(sid), entry)
         return JSONResponse(
             {
                 "ok": True,
@@ -851,6 +878,35 @@ async def api_station_recent(
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@router.get("/api/checkin/station/updates/{station_key}")
+async def api_station_updates(
+    station_key: str,
+    svc: AttendanceService = Depends(get_attendance_service),
+    since_id: int = 0,
+    limit: int = 20,
+):
+    try:
+        sucursal_id = svc.validar_station_key(station_key)
+        if not sucursal_id:
+            return JSONResponse({"error": "Station key inválida"}, status_code=404)
+
+        items = svc.obtener_station_checkins_desde(
+            int(sucursal_id), since_id=int(since_id or 0), limit=int(limit or 20)
+        )
+        last_id = int(since_id or 0)
+        for it in items:
+            try:
+                last_id = max(last_id, int(it.get("id") or 0))
+            except Exception:
+                pass
+
+        stats = svc.obtener_station_stats(int(sucursal_id))
+        return {"checkins": items, "last_id": last_id, "stats": stats}
+    except Exception as e:
+        logger.error(f"Error getting station updates: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 def _enqueue_auto_unlock_for_sucursal(db: Session, sucursal_id: int, *, request_id: str, source: str) -> None:
     rid = str(request_id or "").strip()[:80]
     if not rid:
@@ -957,6 +1013,13 @@ async def api_station_scan(
         # Validate and register
         ok, msg, user_data = svc.validar_station_scan(token, int(usuario_id))
         if ok and isinstance(user_data, dict):
+            asistencia_id = user_data.get("asistencia_id")
+            created = bool(user_data.get("created"))
+            if created and asistencia_id is not None:
+                entry = svc.construir_checkin_entry_por_asistencia_id(int(asistencia_id))
+                sid = entry.get("sucursal_id") if isinstance(entry, dict) else None
+                if sid:
+                    await checkin_ws_hub.broadcast(int(sid), entry)
             sid = user_data.get("branch_id") or user_data.get("sucursal_id")
             try:
                 sid = int(sid) if sid is not None else None

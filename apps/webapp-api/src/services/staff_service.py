@@ -33,7 +33,6 @@ class StaffService(BaseService):
         show_all: bool = False,
     ) -> List[Dict[str, Any]]:
         term = str(search or "").strip().lower()
-        owner_like_roles = ["owner", "dueño", "dueno"]
         staff_like_roles = [
             "profesor",
             "empleado",

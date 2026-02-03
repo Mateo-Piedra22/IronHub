@@ -71,13 +71,19 @@ class AttendanceService(BaseService):
             return dt.replace(tzinfo=None)
 
     def _registrar_asistencia_si_no_existe(
-        self, usuario_id: int, fecha: date, sucursal_id: Optional[int] = None
+        self,
+        usuario_id: int,
+        fecha: date,
+        sucursal_id: Optional[int] = None,
+        *,
+        tipo: str = "unknown",
     ) -> Optional[int]:
         return self.repo.registrar_asistencia_comun(
             usuario_id,
             fecha,
             allow_multiple=self._allow_multiple_attendances_per_day(),
             sucursal_id=int(sucursal_id) if sucursal_id is not None else None,
+            tipo=tipo,
         )
 
     def _get_default_sucursal_id(self) -> Optional[int]:
@@ -469,8 +475,13 @@ class AttendanceService(BaseService):
             return False
 
     def validar_token_y_registrar(
-        self, token: str, usuario_id: int, sucursal_id: Optional[int] = None
-    ) -> Tuple[bool, str]:
+        self,
+        token: str,
+        usuario_id: int,
+        sucursal_id: Optional[int] = None,
+        *,
+        tipo: str = "qr_gestion",
+    ) -> Tuple[bool, str, Optional[int], bool]:
         """Validate token and register attendance."""
         try:
             status = self.obtener_estado_token(token)
@@ -499,32 +510,37 @@ class AttendanceService(BaseService):
                 int(usuario_id), sid
             )
             if not is_active:
-                return False, reason or "Usuario inactivo"
+                return False, reason or "Usuario inactivo", None, False
             try:
-                self.repo.registrar_asistencia(
+                asistencia_id = self.repo.registrar_asistencia(
                     int(usuario_id),
                     self._today_local_date(),
                     allow_multiple=self._allow_multiple_attendances_per_day(),
                     sucursal_id=int(sid) if sid is not None else None,
+                    tipo=tipo,
                 )
             except ValueError:
                 self.marcar_token_usado(token)
-                return True, "Asistencia ya registrada hoy"
+                return True, "Asistencia ya registrada hoy", None, False
 
             self.marcar_token_usado(token)
             if self._allow_multiple_attendances_per_day():
                 n = self._count_asistencias_usuario_fecha(
                     int(usuario_id), self._today_local_date()
                 )
-                return True, f"Asistencia registrada ({n} hoy)"
-            return True, "Asistencia registrada correctamente"
+                return True, f"Asistencia registrada ({n} hoy)", int(asistencia_id), True
+            return True, "Asistencia registrada correctamente", int(asistencia_id), True
         except Exception as e:
             logger.error(f"Error validating token: {e}")
-            return False, str(e)
+            return False, str(e), None, False
 
     def validar_token_y_registrar_sin_sesion(
-        self, token: str, sucursal_id: Optional[int] = None
-    ) -> Tuple[bool, str]:
+        self,
+        token: str,
+        sucursal_id: Optional[int] = None,
+        *,
+        tipo: str = "qr_gestion",
+    ) -> Tuple[bool, str, Optional[int], bool]:
         """Validate token and register attendance without requiring session user_id.
         Gets user_id from the token itself."""
         try:
@@ -559,34 +575,35 @@ class AttendanceService(BaseService):
                 int(usuario_id), sid
             )
             if not is_active:
-                return False, reason or "Usuario inactivo"
+                return False, reason or "Usuario inactivo", None, False
             try:
-                self.repo.registrar_asistencia(
+                asistencia_id = self.repo.registrar_asistencia(
                     int(usuario_id),
                     self._today_local_date(),
                     allow_multiple=self._allow_multiple_attendances_per_day(),
                     sucursal_id=int(sid) if sid is not None else None,
+                    tipo=tipo,
                 )
             except ValueError:
                 self.marcar_token_usado(token)
-                return True, "Asistencia ya registrada hoy"
+                return True, "Asistencia ya registrada hoy", None, False
 
             self.marcar_token_usado(token)
-            return True, nombre or "Asistencia registrada"
+            return True, (nombre or "Asistencia registrada"), int(asistencia_id), True
         except Exception as e:
             logger.error(f"Error validating token without session: {e}")
-            return False, str(e)
+            return False, str(e), None, False
 
     def registrar_asistencia_por_dni(
-        self, dni: str, sucursal_id: Optional[int] = None
-    ) -> Tuple[bool, str]:
+        self, dni: str, sucursal_id: Optional[int] = None, *, tipo: str = "dni_pin"
+    ) -> Tuple[bool, str, Optional[int], bool]:
         """Register attendance for a user by DNI lookup."""
         try:
             user = self.db.scalar(
                 select(Usuario).where(Usuario.dni == str(dni)).limit(1)
             )
             if not user:
-                return False, "DNI no encontrado"
+                return False, "DNI no encontrado", None, False
 
             usuario_id = int(user.id)
             nombre = user.nombre or ""
@@ -599,7 +616,7 @@ class AttendanceService(BaseService):
             )
             is_active, reason = self.verificar_acceso_usuario_sucursal(usuario_id, sid)
             if not is_active:
-                return False, reason or "Usuario inactivo"
+                return False, reason or "Usuario inactivo", None, False
             allow_multiple = self._allow_multiple_attendances_per_day()
             if allow_multiple:
                 try:
@@ -611,7 +628,7 @@ class AttendanceService(BaseService):
                 if threshold > 0:
                     last = self.db.execute(
                         text(
-                            "SELECT hora_registro FROM asistencias WHERE usuario_id = :id AND fecha = :fecha AND sucursal_id = :sid ORDER BY hora_registro DESC LIMIT 1"
+                            "SELECT id, hora_registro FROM asistencias WHERE usuario_id = :id AND fecha = :fecha AND sucursal_id = :sid ORDER BY hora_registro DESC LIMIT 1"
                         ),
                         {
                             "id": usuario_id,
@@ -619,62 +636,66 @@ class AttendanceService(BaseService):
                             "sid": int(sid) if sid is not None else None,
                         },
                     ).fetchone()
-                    if last and last[0]:
-                        dt = self._as_utc_naive(last[0])
+                    if last and last[0] is not None and last[1]:
+                        dt = self._as_utc_naive(last[1])
                         if dt and (self._now_utc_naive() - dt).total_seconds() < float(
                             threshold
                         ):
                             n = self._count_asistencias_usuario_fecha(
                                 int(usuario_id), hoy
                             )
-                            return True, f"{nombre} - Registrado ({n} hoy)"
+                            return True, f"{nombre} - Registrado ({n} hoy)", int(last[0]), False
 
             if not allow_multiple:
-                if (
-                    self.db.scalar(
-                        select(Asistencia.id)
-                        .where(
-                            Asistencia.usuario_id == usuario_id,
-                            Asistencia.fecha == hoy,
-                            Asistencia.sucursal_id
-                            == (int(sid) if sid is not None else None),
-                        )
-                        .limit(1)
+                existing_id = self.db.scalar(
+                    select(Asistencia.id)
+                    .where(
+                        Asistencia.usuario_id == usuario_id,
+                        Asistencia.fecha == hoy,
+                        Asistencia.sucursal_id == (int(sid) if sid is not None else None),
                     )
-                    is not None
-                ):
-                    return True, f"{nombre} - Ya registrado hoy"
-            self.repo.registrar_asistencia(
+                    .limit(1)
+                )
+                if existing_id is not None:
+                    return True, f"{nombre} - Ya registrado hoy", int(existing_id), False
+            asistencia_id = self.repo.registrar_asistencia(
                 usuario_id,
                 hoy,
                 allow_multiple=allow_multiple,
                 sucursal_id=int(sid) if sid is not None else None,
+                tipo=tipo,
             )
             if allow_multiple:
                 n = self._count_asistencias_usuario_fecha(int(usuario_id), hoy)
-                return True, f"{nombre} - Registrado ({n} hoy)"
-            return True, nombre
+                return True, f"{nombre} - Registrado ({n} hoy)", int(asistencia_id), True
+            return True, nombre, int(asistencia_id), True
         except Exception as e:
             logger.error(f"Error registering attendance by DNI: {e}")
-            return False, str(e)
+            return False, str(e), None, False
 
     def registrar_asistencia_por_dni_y_pin(
-        self, dni: str, pin: str, sucursal_id: Optional[int] = None
-    ) -> Tuple[bool, str]:
+        self,
+        dni: str,
+        pin: str,
+        sucursal_id: Optional[int] = None,
+        *,
+        commit: bool = True,
+        tipo: str = "dni_pin",
+    ) -> Tuple[bool, str, Optional[int], bool]:
         """Register attendance for a user by DNI + PIN verification (more secure)."""
         try:
             user = self.db.scalar(
                 select(Usuario).where(Usuario.dni == str(dni)).limit(1)
             )
             if not user:
-                return False, "DNI no encontrado"
+                return False, "DNI no encontrado", None, False
 
             usuario_id = int(user.id)
             nombre = user.nombre or ""
 
             stored_pin = str(getattr(user, "pin", "") or "").strip()
             if not stored_pin:
-                return False, "Usuario sin PIN configurado"
+                return False, "Usuario sin PIN configurado", None, False
 
             pin_ok = False
             try:
@@ -692,7 +713,7 @@ class AttendanceService(BaseService):
                 pin_ok = False
 
             if not pin_ok:
-                return False, "PIN incorrecto"
+                return False, "PIN incorrecto", None, False
 
             hoy = self._today_local_date()
             sid = (
@@ -702,7 +723,7 @@ class AttendanceService(BaseService):
             )
             is_active, reason = self.verificar_acceso_usuario_sucursal(usuario_id, sid)
             if not is_active:
-                return False, reason or "Usuario inactivo"
+                return False, reason or "Usuario inactivo", None, False
             allow_multiple = self._allow_multiple_attendances_per_day()
             if allow_multiple:
                 try:
@@ -714,7 +735,7 @@ class AttendanceService(BaseService):
                 if threshold > 0:
                     last = self.db.execute(
                         text(
-                            "SELECT hora_registro FROM asistencias WHERE usuario_id = :id AND fecha = :fecha AND sucursal_id = :sid ORDER BY hora_registro DESC LIMIT 1"
+                            "SELECT id, hora_registro FROM asistencias WHERE usuario_id = :id AND fecha = :fecha AND sucursal_id = :sid ORDER BY hora_registro DESC LIMIT 1"
                         ),
                         {
                             "id": usuario_id,
@@ -722,44 +743,43 @@ class AttendanceService(BaseService):
                             "sid": int(sid) if sid is not None else None,
                         },
                     ).fetchone()
-                    if last and last[0]:
-                        dt = self._as_utc_naive(last[0])
+                    if last and last[0] is not None and last[1]:
+                        dt = self._as_utc_naive(last[1])
                         if dt and (self._now_utc_naive() - dt).total_seconds() < float(
                             threshold
                         ):
                             n = self._count_asistencias_usuario_fecha(
                                 int(usuario_id), hoy
                             )
-                            return True, f"{nombre} - Registrado ({n} hoy)"
+                            return True, f"{nombre} - Registrado ({n} hoy)", int(last[0]), False
 
             if not allow_multiple:
-                if (
-                    self.db.scalar(
-                        select(Asistencia.id)
-                        .where(
-                            Asistencia.usuario_id == usuario_id,
-                            Asistencia.fecha == hoy,
-                            Asistencia.sucursal_id
-                            == (int(sid) if sid is not None else None),
-                        )
-                        .limit(1)
+                existing_id = self.db.scalar(
+                    select(Asistencia.id)
+                    .where(
+                        Asistencia.usuario_id == usuario_id,
+                        Asistencia.fecha == hoy,
+                        Asistencia.sucursal_id == (int(sid) if sid is not None else None),
                     )
-                    is not None
-                ):
-                    return True, f"{nombre} - Ya registrado hoy"
-            self.repo.registrar_asistencia(
+                    .limit(1)
+                )
+                if existing_id is not None:
+                    return True, f"{nombre} - Ya registrado hoy", int(existing_id), False
+            asistencia_id = self.repo.registrar_asistencia(
                 usuario_id,
                 hoy,
                 allow_multiple=allow_multiple,
                 sucursal_id=int(sid) if sid is not None else None,
+                tipo=tipo,
+                commit=commit,
             )
             if allow_multiple:
                 n = self._count_asistencias_usuario_fecha(int(usuario_id), hoy)
-                return True, f"{nombre} - Registrado ({n} hoy)"
-            return True, nombre
+                return True, f"{nombre} - Registrado ({n} hoy)", int(asistencia_id), True
+            return True, nombre, int(asistencia_id), True
         except Exception as e:
             logger.error(f"Error registering attendance by DNI+PIN: {e}")
-            return False, str(e)
+            return False, str(e), None, False
 
     # ========== Attendance Registration ==========
 
@@ -768,6 +788,9 @@ class AttendanceService(BaseService):
         usuario_id: int,
         fecha: Optional[date] = None,
         sucursal_id: Optional[int] = None,
+        *,
+        tipo: str = "unknown",
+        commit: bool = True,
     ) -> Optional[int]:
         """Register attendance for a user."""
         try:
@@ -789,15 +812,148 @@ class AttendanceService(BaseService):
                 )
                 if allowed is False:
                     raise PermissionError(access_reason or "Sucursal no habilitada")
+            allow_multiple = self._allow_multiple_attendances_per_day()
+            if allow_multiple:
+                try:
+                    threshold = int(
+                        os.getenv("CHECKIN_IDEMPOTENCY_WINDOW_SECONDS", "12") or 12
+                    )
+                except Exception:
+                    threshold = 12
+                if threshold > 0:
+                    last = self.db.execute(
+                        text(
+                            """
+                            SELECT id, hora_registro
+                            FROM asistencias
+                            WHERE usuario_id = :id AND fecha = :fecha
+                              AND ((:sid IS NULL AND sucursal_id IS NULL) OR sucursal_id = :sid)
+                            ORDER BY hora_registro DESC
+                            LIMIT 1
+                            """
+                        ),
+                        {"id": int(usuario_id), "fecha": fecha, "sid": int(sid) if sid is not None else None},
+                    ).fetchone()
+                    if last and last[0] is not None and last[1]:
+                        dt = self._as_utc_naive(last[1])
+                        if dt and (self._now_utc_naive() - dt).total_seconds() < float(
+                            threshold
+                        ):
+                            return int(last[0])
+
             return self.repo.registrar_asistencia(
                 int(usuario_id),
                 fecha,
-                allow_multiple=self._allow_multiple_attendances_per_day(),
+                allow_multiple=allow_multiple,
                 sucursal_id=int(sid) if sid is not None else None,
+                tipo=tipo,
+                commit=commit,
             )
         except Exception as e:
             logger.error(f"Error registering attendance: {e}")
             raise
+
+    def registrar_asistencia_con_resultado(
+        self,
+        usuario_id: int,
+        fecha: Optional[date] = None,
+        sucursal_id: Optional[int] = None,
+        *,
+        tipo: str = "unknown",
+        commit: bool = True,
+    ) -> Tuple[Optional[int], bool]:
+        if fecha is None:
+            fecha = self._today_local_date()
+
+        sid = (
+            int(sucursal_id) if sucursal_id is not None else self._get_default_sucursal_id()
+        )
+        allow_multiple = self._allow_multiple_attendances_per_day()
+
+        if allow_multiple:
+            try:
+                threshold = int(os.getenv("CHECKIN_IDEMPOTENCY_WINDOW_SECONDS", "12") or 12)
+            except Exception:
+                threshold = 12
+            if threshold > 0:
+                last = self.db.execute(
+                    text(
+                        """
+                        SELECT id, hora_registro
+                        FROM asistencias
+                        WHERE usuario_id = :id AND fecha = :fecha
+                          AND ((:sid IS NULL AND sucursal_id IS NULL) OR sucursal_id = :sid)
+                        ORDER BY hora_registro DESC
+                        LIMIT 1
+                        """
+                    ),
+                    {"id": int(usuario_id), "fecha": fecha, "sid": int(sid) if sid is not None else None},
+                ).fetchone()
+                if last and last[0] is not None and last[1]:
+                    dt = self._as_utc_naive(last[1])
+                    if dt and (self._now_utc_naive() - dt).total_seconds() < float(threshold):
+                        return int(last[0]), False
+
+        try:
+            asistencia_id = self.repo.registrar_asistencia(
+                int(usuario_id),
+                fecha,
+                allow_multiple=allow_multiple,
+                sucursal_id=int(sid) if sid is not None else None,
+                tipo=tipo,
+                commit=commit,
+            )
+            return int(asistencia_id), True
+        except ValueError:
+            existing_id = self.db.scalar(
+                select(Asistencia.id)
+                .where(
+                    Asistencia.usuario_id == int(usuario_id),
+                    Asistencia.fecha == fecha,
+                    Asistencia.sucursal_id == (int(sid) if sid is not None else None),
+                )
+                .limit(1)
+            )
+            return (int(existing_id) if existing_id is not None else None), False
+
+    def construir_checkin_entry_por_asistencia_id(
+        self, asistencia_id: int
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            tz = self._get_app_timezone()
+            row = self.db.execute(
+                text(
+                    """
+                    SELECT a.id, a.sucursal_id, u.nombre, u.dni, a.hora_registro, a.tipo
+                    FROM asistencias a
+                    JOIN usuarios u ON u.id = a.usuario_id
+                    WHERE a.id = :id
+                    LIMIT 1
+                    """
+                ),
+                {"id": int(asistencia_id)},
+            ).fetchone()
+            if not row:
+                return None
+            hora = ""
+            if row[4]:
+                hora = (
+                    self._as_utc_naive(row[4])
+                    .replace(tzinfo=timezone.utc)
+                    .astimezone(tz)
+                    .time()
+                    .isoformat(timespec="seconds")
+                )
+            return {
+                "id": int(row[0]) if row[0] is not None else 0,
+                "sucursal_id": int(row[1]) if row[1] is not None else None,
+                "nombre": row[2] or "",
+                "dni": row[3] or "",
+                "hora": hora,
+                "tipo": str(row[5] or "unknown"),
+            }
+        except Exception:
+            return None
 
     def eliminar_asistencia(
         self,
@@ -1454,7 +1610,7 @@ class AttendanceService(BaseService):
             if not allow_multiple:
                 check = self.db.execute(
                     text("""
-                        SELECT 1 FROM asistencias 
+                        SELECT id FROM asistencias 
                         WHERE usuario_id = :id AND fecha = :fecha AND sucursal_id = :sid LIMIT 1
                     """),
                     {
@@ -1463,7 +1619,8 @@ class AttendanceService(BaseService):
                         "sid": int(sucursal_id) if sucursal_id is not None else None,
                     },
                 )
-                if check.fetchone():
+                existing = check.fetchone()
+                if existing and existing[0] is not None:
                     return (
                         True,
                         f"{nombre} - Ya registrado hoy",
@@ -1471,6 +1628,8 @@ class AttendanceService(BaseService):
                             "nombre": nombre,
                             "dni": dni,
                             "already_checked": True,
+                            "asistencia_id": int(existing[0]),
+                            "created": False,
                             **branch_info,
                         },
                     )
@@ -1509,14 +1668,20 @@ class AttendanceService(BaseService):
                         pass
                 return False, "Código QR ya utilizado", None
 
+            asistencia_id = None
+            created = False
             try:
-                self._registrar_asistencia_si_no_existe(
+                asistencia_id = self._registrar_asistencia_si_no_existe(
                     int(usuario_id),
                     hoy,
                     sucursal_id=int(sucursal_id) if sucursal_id is not None else None,
+                    tipo="station_qr",
                 )
+                if asistencia_id is not None:
+                    created = True
             except ValueError:
-                pass
+                asistencia_id = None
+                created = False
 
             self.db.commit()
             hora_local = self._now_local().time().isoformat(timespec="seconds")
@@ -1531,6 +1696,8 @@ class AttendanceService(BaseService):
                         "dni": dni,
                         "hora": hora_local,
                         "already_checked": False,
+                        "asistencia_id": int(asistencia_id) if asistencia_id is not None else None,
+                        "created": bool(created),
                         **branch_info,
                     },
                 )
@@ -1542,6 +1709,8 @@ class AttendanceService(BaseService):
                     "dni": dni,
                     "hora": hora_local,
                     "already_checked": False,
+                    "asistencia_id": int(asistencia_id) if asistencia_id is not None else None,
+                    "created": bool(created),
                     **branch_info,
                 },
             )
@@ -1559,7 +1728,7 @@ class AttendanceService(BaseService):
             tz = self._get_app_timezone()
             result = self.db.execute(
                 text("""
-                    SELECT u.nombre, u.dni, a.hora_registro
+                    SELECT a.id, u.nombre, u.dni, a.hora_registro, a.tipo
                     FROM asistencias a
                     JOIN usuarios u ON u.id = a.usuario_id
                     WHERE a.fecha = :fecha AND a.sucursal_id = :sid
@@ -1570,22 +1739,74 @@ class AttendanceService(BaseService):
             )
             return [
                 {
-                    "nombre": row[0] or "",
-                    "dni": row[1] or "",
+                    "id": int(row[0]) if row[0] is not None else 0,
+                    "nombre": row[1] or "",
+                    "dni": row[2] or "",
                     "hora": (
-                        self._as_utc_naive(row[2])
+                        self._as_utc_naive(row[3])
                         .replace(tzinfo=timezone.utc)
                         .astimezone(tz)
                         .time()
                         .isoformat(timespec="seconds")
-                        if row[2]
+                        if row[3]
                         else ""
                     ),
+                    "tipo": str(row[4] or "unknown"),
                 }
                 for row in result.fetchall()
             ]
         except Exception as e:
             logger.error(f"Error getting recent station check-ins: {e}")
+            return []
+
+    def obtener_station_checkins_desde(
+        self,
+        gym_id: int,
+        *,
+        since_id: int = 0,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        try:
+            hoy = self._today_local_date()
+            tz = self._get_app_timezone()
+            lim = max(1, min(int(limit or 20), 50))
+            sid = int(since_id or 0)
+            result = self.db.execute(
+                text(
+                    """
+                    SELECT a.id, u.nombre, u.dni, a.hora_registro, a.tipo
+                    FROM asistencias a
+                    JOIN usuarios u ON u.id = a.usuario_id
+                    WHERE a.fecha = :fecha AND a.sucursal_id = :sid AND a.id > :since_id
+                    ORDER BY a.id ASC
+                    LIMIT :limit
+                    """
+                ),
+                {"limit": lim, "fecha": hoy, "sid": int(gym_id), "since_id": sid},
+            )
+            rows = result.fetchall()
+            out: List[Dict[str, Any]] = []
+            for row in rows:
+                out.append(
+                    {
+                        "id": int(row[0]) if row[0] is not None else 0,
+                        "nombre": row[1] or "",
+                        "dni": row[2] or "",
+                        "hora": (
+                            self._as_utc_naive(row[3])
+                            .replace(tzinfo=timezone.utc)
+                            .astimezone(tz)
+                            .time()
+                            .isoformat(timespec="seconds")
+                            if row[3]
+                            else ""
+                        ),
+                        "tipo": str(row[4] or "unknown"),
+                    }
+                )
+            return out
+        except Exception as e:
+            logger.error(f"Error getting station check-ins since id: {e}")
             return []
 
     def obtener_station_stats(self, gym_id: int) -> Dict[str, int]:

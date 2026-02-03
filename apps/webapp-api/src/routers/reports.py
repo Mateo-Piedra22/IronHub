@@ -5,23 +5,18 @@ import csv
 import io
 from datetime import date
 
-from fastapi import APIRouter, Request, Depends, Query
-from typing import Optional
+from fastapi import APIRouter, Request, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.dependencies import (
     require_gestion_access,
     require_owner,
     get_reports_service,
-    get_whatsapp_settings_service,
-    get_whatsapp_service,
     require_feature,
     require_sucursal_selected,
     require_scope_gestion,
 )
 from src.services.reports_service import ReportsService
-from src.services.whatsapp_settings_service import WhatsAppSettingsService
-from src.services.whatsapp_service import WhatsAppService
 
 router = APIRouter(
     dependencies=[

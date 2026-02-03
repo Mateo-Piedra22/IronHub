@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -23,11 +23,7 @@ from src.dependencies import (
 )
 from src.models.orm_models import (
     Asistencia,
-    Clase,
-    ClaseHorario,
     Pago,
-    Profesor,
-    ProfesorClaseAsignacion,
     Sucursal,
     Usuario,
 )

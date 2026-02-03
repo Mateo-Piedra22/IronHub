@@ -7,9 +7,12 @@ import { useParams } from 'next/navigation';
 import QRCode from 'qrcode';
 
 interface CheckinEntry {
+    id: number;
     nombre: string;
     dni: string;
     hora: string;
+    tipo?: string;
+    sucursal_id?: number | null;
 }
 
 interface StationInfo {
@@ -41,6 +44,7 @@ export default function StationPage() {
     const [recentCheckins, setRecentCheckins] = useState<CheckinEntry[]>([]);
     const [totalHoy, setTotalHoy] = useState(0);
     const [connected, setConnected] = useState(true);
+    const [wsConnected, setWsConnected] = useState(false);
     const [lastCheckin, setLastCheckin] = useState<CheckinEntry | null>(null);
     const [showCelebration, setShowCelebration] = useState(false);
     const [timeLeft, setTimeLeft] = useState(0);
@@ -48,6 +52,11 @@ export default function StationPage() {
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const pollRef = useRef<NodeJS.Timeout | null>(null);
     const countdownRef = useRef<NodeJS.Timeout | null>(null);
+    const celebrationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const lastSeenIdRef = useRef<number>(0);
+    const tokenRefreshInFlightRef = useRef(false);
+    const wsRef = useRef<WebSocket | null>(null);
+    const wsReconnectRef = useRef<NodeJS.Timeout | null>(null);
 
     const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
 
@@ -117,6 +126,8 @@ export default function StationPage() {
 
     // Load token
     const loadToken = useCallback(async () => {
+        if (tokenRefreshInFlightRef.current) return;
+        tokenRefreshInFlightRef.current = true;
         try {
             const res = await fetch(`${API_BASE}/api/checkin/station/token/${stationKey}`);
             if (res.ok) {
@@ -130,6 +141,8 @@ export default function StationPage() {
             }
         } catch (e) {
             setConnected(false);
+        } finally {
+            tokenRefreshInFlightRef.current = false;
         }
     }, [stationKey, generateQRImage, API_BASE]);
 
@@ -140,25 +153,9 @@ export default function StationPage() {
             if (res.ok) {
                 const data = await res.json();
                 const newCheckins = data.checkins || [];
-
-                // Check for new check-in
-                if (recentCheckins.length > 0 && newCheckins.length > 0) {
-                    const newest = newCheckins[0];
-                    const wasNewest = recentCheckins[0];
-                    if (newest.hora !== wasNewest.hora || newest.dni !== wasNewest.dni) {
-                        // New check-in detected!
-                        setLastCheckin(newest);
-                        setShowCelebration(true);
-                        playSuccessSound();
-
-                        await loadToken();
-
-                        // Hide celebration after 3 seconds
-                        setTimeout(() => {
-                            setShowCelebration(false);
-                            setLastCheckin(null);
-                        }, 3000);
-                    }
+                const newest = newCheckins[0];
+                if (newest && typeof newest.id === 'number') {
+                    lastSeenIdRef.current = Math.max(lastSeenIdRef.current, newest.id);
                 }
 
                 setRecentCheckins(newCheckins);
@@ -168,7 +165,173 @@ export default function StationPage() {
         } catch (e) {
             // Ignore polling errors
         }
-    }, [stationKey, recentCheckins, playSuccessSound, loadToken, API_BASE]);
+    }, [stationKey, API_BASE]);
+
+    const loadUpdates = useCallback(async () => {
+        try {
+            const sinceId = lastSeenIdRef.current || 0;
+            const res = await fetch(`${API_BASE}/api/checkin/station/updates/${stationKey}?since_id=${encodeURIComponent(String(sinceId))}&limit=10`);
+            if (!res.ok) {
+                setConnected(false);
+                return;
+            }
+            const data = await res.json();
+            const updates: CheckinEntry[] = Array.isArray(data.checkins) ? data.checkins : [];
+            if (typeof data?.stats?.total_hoy === 'number') setTotalHoy(data.stats.total_hoy);
+
+            if (updates.length === 0) {
+                setConnected(true);
+                return;
+            }
+
+            let maxId = sinceId;
+            for (const u of updates) {
+                if (typeof u?.id === 'number') maxId = Math.max(maxId, u.id);
+            }
+            lastSeenIdRef.current = maxId;
+
+            const newest = updates[updates.length - 1];
+            if (newest) {
+                setLastCheckin(newest);
+                setShowCelebration(true);
+                playSuccessSound();
+
+                if (celebrationTimeoutRef.current) clearTimeout(celebrationTimeoutRef.current);
+                celebrationTimeoutRef.current = setTimeout(() => {
+                    setShowCelebration(false);
+                    setLastCheckin(null);
+                }, 3000);
+
+                if (String(newest.tipo || '') === 'station_qr') {
+                    void loadToken();
+                }
+            }
+
+            setRecentCheckins((prev) => {
+                const merged = [...updates.slice().reverse(), ...prev];
+                const seen = new Set<number>();
+                const deduped: CheckinEntry[] = [];
+                for (const c of merged) {
+                    if (typeof c?.id !== 'number') continue;
+                    if (seen.has(c.id)) continue;
+                    seen.add(c.id);
+                    deduped.push(c);
+                    if (deduped.length >= 5) break;
+                }
+                return deduped;
+            });
+            setConnected(true);
+        } catch (e) {
+            setConnected(false);
+        }
+    }, [API_BASE, stationKey, loadToken, playSuccessSound]);
+
+    const setupWebSocket = useCallback(() => {
+        const branchId = stationInfo?.branch_id;
+        if (!branchId) return;
+
+        const httpBase = API_BASE || (typeof window !== 'undefined' ? window.location.origin : '');
+        if (!httpBase) return;
+
+        const wsBase = httpBase.startsWith('https://')
+            ? httpBase.replace('https://', 'wss://')
+            : httpBase.startsWith('http://')
+                ? httpBase.replace('http://', 'ws://')
+                : httpBase;
+        const wsUrl = `${wsBase}/ws/checkin/station/${branchId}`;
+
+        try {
+            if (wsReconnectRef.current) clearTimeout(wsReconnectRef.current);
+        } catch { }
+
+        try {
+            if (wsRef.current) wsRef.current.close();
+        } catch { }
+
+        let ws: WebSocket;
+        try {
+            ws = new WebSocket(wsUrl);
+        } catch (e) {
+            setWsConnected(false);
+            setConnected(false);
+            return;
+        }
+
+        wsRef.current = ws;
+
+        ws.onopen = () => {
+            setWsConnected(true);
+            setConnected(true);
+        };
+
+        ws.onmessage = (event) => {
+            let data: any = null;
+            try {
+                data = JSON.parse(event.data);
+            } catch (e) {
+                return;
+            }
+
+            const incomingId = typeof data?.id === 'number' ? data.id : 0;
+            if (!incomingId) return;
+            if (incomingId <= lastSeenIdRef.current) return;
+            lastSeenIdRef.current = Math.max(lastSeenIdRef.current, incomingId);
+
+            const entry: CheckinEntry = {
+                id: incomingId,
+                nombre: String(data?.nombre || ''),
+                dni: String(data?.dni || ''),
+                hora: String(data?.hora || ''),
+                tipo: data?.tipo ? String(data.tipo) : undefined,
+                sucursal_id: data?.sucursal_id ?? undefined,
+            };
+
+            setTotalHoy((prev) => prev + 1);
+            setLastCheckin(entry);
+            setShowCelebration(true);
+            playSuccessSound();
+
+            if (celebrationTimeoutRef.current) clearTimeout(celebrationTimeoutRef.current);
+            celebrationTimeoutRef.current = setTimeout(() => {
+                setShowCelebration(false);
+                setLastCheckin(null);
+            }, 3000);
+
+            if (String(entry.tipo || '') === 'station_qr') {
+                void loadToken();
+            }
+
+            setRecentCheckins((prev) => {
+                const merged = [entry, ...prev];
+                const seen = new Set<number>();
+                const deduped: CheckinEntry[] = [];
+                for (const c of merged) {
+                    if (typeof c?.id !== 'number') continue;
+                    if (seen.has(c.id)) continue;
+                    seen.add(c.id);
+                    deduped.push(c);
+                    if (deduped.length >= 5) break;
+                }
+                return deduped;
+            });
+        };
+
+        ws.onclose = () => {
+            setWsConnected(false);
+            setConnected(false);
+            wsReconnectRef.current = setTimeout(() => {
+                setupWebSocket();
+            }, 2500);
+        };
+
+        ws.onerror = () => {
+            setWsConnected(false);
+            setConnected(false);
+            try {
+                ws.close();
+            } catch { }
+        };
+    }, [API_BASE, stationInfo?.branch_id, loadToken, playSuccessSound, stationInfo]);
 
     // Countdown timer
     useEffect(() => {
@@ -203,18 +366,38 @@ export default function StationPage() {
         init();
     }, [loadStationInfo, loadToken, loadRecent]);
 
-    // Polling for updates (every 3 seconds)
+    // Polling for updates
     useEffect(() => {
-        if (loading || error) return;
+        if (loading || error || wsConnected) return;
 
         pollRef.current = setInterval(() => {
-            loadRecent();
-        }, 3000);
+            loadUpdates();
+        }, 1500);
 
         return () => {
             if (pollRef.current) clearInterval(pollRef.current);
         };
-    }, [loading, error, loadRecent]);
+    }, [loading, error, loadUpdates, wsConnected]);
+
+    useEffect(() => {
+        if (loading || error) return;
+        if (!stationInfo?.branch_id) return;
+        setupWebSocket();
+        return () => {
+            try {
+                if (wsReconnectRef.current) clearTimeout(wsReconnectRef.current);
+            } catch { }
+            try {
+                if (wsRef.current) wsRef.current.close();
+            } catch { }
+        };
+    }, [loading, error, stationInfo?.branch_id, setupWebSocket]);
+
+    useEffect(() => {
+        return () => {
+            if (celebrationTimeoutRef.current) clearTimeout(celebrationTimeoutRef.current);
+        };
+    }, []);
 
     // Format time
     const formatTime = (seconds: number) => {
@@ -276,8 +459,8 @@ export default function StationPage() {
                 <div className="flex items-center gap-4">
                     {/* Connection indicator */}
                     <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${connected ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
-                        {connected ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
-                        <span className="text-sm font-medium">{connected ? 'Conectado' : 'Sin conexión'}</span>
+                        {(connected || wsConnected) ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
+                        <span className="text-sm font-medium">{(connected || wsConnected) ? 'Conectado' : 'Sin conexión'}</span>
                     </div>
 
                     {/* Today stats */}
@@ -374,7 +557,7 @@ export default function StationPage() {
                                 ) : (
                                     recentCheckins.map((checkin, index) => (
                                         <motion.div
-                                            key={`${checkin.dni}-${checkin.hora}`}
+                                            key={String(checkin.id)}
                                             initial={{ opacity: 0, x: -20 }}
                                             animate={{ opacity: 1, x: 0 }}
                                             exit={{ opacity: 0, x: 20 }}
@@ -399,6 +582,9 @@ export default function StationPage() {
                                                 <p className="text-sm text-slate-400">DNI: {checkin.dni}</p>
                                             </div>
                                             <div className="text-right">
+                                                <p className="text-xs text-slate-400">
+                                                    {checkin.tipo ? String(checkin.tipo) : 'unknown'}
+                                                </p>
                                                 <p className="text-lg font-mono text-white">{checkin.hora}</p>
                                             </div>
                                         </motion.div>

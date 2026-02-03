@@ -116,7 +116,6 @@ def write_csv(
     migrations = parse_migrations(alembic_versions_dir)
 
     tables = sorted(set(orm_tables.keys()) | set(migrations.keys()))
-    orm_needles = [f'__tablename__ = "{t}"' for t in tables]
     sql_needles = tables
     model_needles = [orm_tables[t].orm_class for t in tables if t in orm_tables]
 

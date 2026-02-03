@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, Request, HTTPException, Form, Depends
+from fastapi import FastAPI, Request, HTTPException, Form, Depends, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -1035,6 +1035,26 @@ async def get_gym_info(request: Request, tenant: str = Depends(require_tenant)):
 # =====================================================
 # Include Routers
 # =====================================================
+
+# =====================================================
+# WebSockets (Public)
+# =====================================================
+
+from src.checkin_ws_hub import checkin_ws_hub
+
+
+@app.websocket("/ws/checkin/station/{sucursal_id}")
+async def ws_station_checkins(websocket: WebSocket, sucursal_id: int):
+    sid = int(sucursal_id)
+    await checkin_ws_hub.connect(sid, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await checkin_ws_hub.disconnect(sid, websocket)
+
 
 # Import all routers
 from src.routers import users, gym, payments, whatsapp, attendance, exercises, auth

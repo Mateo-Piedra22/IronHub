@@ -49,6 +49,8 @@ class AttendanceRepository(BaseRepository):
         *,
         allow_multiple: bool = False,
         sucursal_id: Optional[int] = None,
+        tipo: str = "unknown",
+        commit: bool = True,
     ) -> int:
         user = self.db.get(Usuario, usuario_id)
         if not user:
@@ -75,10 +77,14 @@ class AttendanceRepository(BaseRepository):
                 fecha=fecha,
                 hora_registro=now,
                 sucursal_id=sid,
+                tipo=str(tipo or "unknown")[:50],
             )
             self.db.add(asistencia)
-            self.db.commit()
-            self.db.refresh(asistencia)
+            if commit:
+                self.db.commit()
+                self.db.refresh(asistencia)
+            else:
+                self.db.flush()
             self._invalidate_cache("asistencias")
             return asistencia.id
 
@@ -86,8 +92,8 @@ class AttendanceRepository(BaseRepository):
             row = self.db.execute(
                 text(
                     """
-                    INSERT INTO asistencias (usuario_id, sucursal_id, fecha, hora_registro)
-                    SELECT :uid, NULL, :f, :hr
+                    INSERT INTO asistencias (usuario_id, sucursal_id, fecha, hora_registro, tipo)
+                    SELECT :uid, NULL, :f, :hr, :tipo
                     WHERE NOT EXISTS (
                         SELECT 1 FROM asistencias
                         WHERE usuario_id = :uid AND fecha = :f AND sucursal_id IS NULL
@@ -95,14 +101,14 @@ class AttendanceRepository(BaseRepository):
                     RETURNING id
                     """
                 ),
-                {"uid": int(usuario_id), "f": fecha, "hr": now},
+                {"uid": int(usuario_id), "f": fecha, "hr": now, "tipo": str(tipo or "unknown")[:50]},
             ).fetchone()
         else:
             row = self.db.execute(
                 text(
                     """
-                    INSERT INTO asistencias (usuario_id, sucursal_id, fecha, hora_registro)
-                    SELECT :uid, :sid, :f, :hr
+                    INSERT INTO asistencias (usuario_id, sucursal_id, fecha, hora_registro, tipo)
+                    SELECT :uid, :sid, :f, :hr, :tipo
                     WHERE NOT EXISTS (
                         SELECT 1 FROM asistencias
                         WHERE usuario_id = :uid AND fecha = :f AND sucursal_id = :sid
@@ -110,14 +116,15 @@ class AttendanceRepository(BaseRepository):
                     RETURNING id
                     """
                 ),
-                {"uid": int(usuario_id), "sid": sid, "f": fecha, "hr": now},
+                {"uid": int(usuario_id), "sid": sid, "f": fecha, "hr": now, "tipo": str(tipo or "unknown")[:50]},
             ).fetchone()
 
         if not row:
             raise ValueError(
                 f"Ya existe una asistencia registrada para este usuario en la fecha {fecha}"
             )
-        self.db.commit()
+        if commit:
+            self.db.commit()
         self._invalidate_cache("asistencias")
         return int(row[0])
 
@@ -160,11 +167,18 @@ class AttendanceRepository(BaseRepository):
         *,
         allow_multiple: bool = False,
         sucursal_id: Optional[int] = None,
+        tipo: str = "unknown",
+        commit: bool = True,
     ) -> int:
         if fecha is None:
             fecha = self._today_local_date()
         return self.registrar_asistencia_comun(
-            usuario_id, fecha, allow_multiple=allow_multiple, sucursal_id=sucursal_id
+            usuario_id,
+            fecha,
+            allow_multiple=allow_multiple,
+            sucursal_id=sucursal_id,
+            tipo=tipo,
+            commit=commit,
         )
 
     def registrar_asistencias_batch(
@@ -219,7 +233,8 @@ class AttendanceRepository(BaseRepository):
                             )
                             continue
 
-                new_a = Asistencia(usuario_id=uid, fecha=f, hora_registro=now)
+                tipo = str(item.get("tipo") or "unknown")[:50]
+                new_a = Asistencia(usuario_id=uid, fecha=f, hora_registro=now, tipo=tipo)
                 self.db.add(new_a)
                 self.db.flush()
                 result["insertados"].append(new_a.id)

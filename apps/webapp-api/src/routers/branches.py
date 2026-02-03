@@ -1,7 +1,7 @@
 import logging
 import re
 import secrets
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse

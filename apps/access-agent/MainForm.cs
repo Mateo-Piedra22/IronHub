@@ -104,6 +104,9 @@ public sealed class MainForm : Form
     private string _lastApiError = "";
     private DateTimeOffset? _lastScanAtUtc;
     private readonly System.Windows.Forms.Timer _displayResetTimer = new();
+    private readonly object _submitLock = new();
+    private DateTimeOffset? _lastSubmitAtUtc;
+    private string _lastSubmitKey = "";
 
     private AgentConfig _cfg;
     private bool _configOpen;
@@ -265,7 +268,7 @@ public sealed class MainForm : Form
                 try
                 {
                     var t = _capture.Text ?? "";
-                    _dispInput.Text = string.IsNullOrWhiteSpace(t) ? "" : $"Entrada: {MaskInputForDisplay(t)}";
+                    _dispInput.Text = string.IsNullOrWhiteSpace(t) ? "" : $"Entrada: {FormatInputForDisplay(t)}";
                     _dispInput.ForeColor = System.Drawing.Color.FromArgb(148, 163, 184);
                 }
                 catch
@@ -1518,15 +1521,30 @@ public sealed class MainForm : Form
         try
         {
             if (_configOpen) return;
-            if (!(_cfg.Fullscreen ?? false)) return;
             if (!_lastScanAtUtc.HasValue) return;
             var age = (DateTimeOffset.UtcNow - _lastScanAtUtc.Value).TotalSeconds;
-            if (age < 12) return;
+            var threshold = (_cfg.Fullscreen ?? false) ? 12 : 5;
+            if (age < threshold) return;
             _lastScanAtUtc = null;
             ResetDisplay();
         }
         catch
         {
+        }
+    }
+
+    private bool IsDuplicateSubmission(string key, DateTimeOffset nowUtc)
+    {
+        lock (_submitLock)
+        {
+            if (!string.IsNullOrWhiteSpace(_lastSubmitKey) && string.Equals(_lastSubmitKey, key, StringComparison.Ordinal) && _lastSubmitAtUtc.HasValue)
+            {
+                var age = (nowUtc - _lastSubmitAtUtc.Value).TotalSeconds;
+                if (age >= 0 && age < 10) return true;
+            }
+            _lastSubmitKey = key;
+            _lastSubmitAtUtc = nowUtc;
+            return false;
         }
     }
 
@@ -1718,12 +1736,18 @@ public sealed class MainForm : Form
     {
         var s = ApplyInputProtocol(raw);
         if (string.IsNullOrWhiteSpace(s)) return;
-        var shown = MaskInputForDisplay(s);
+        var shown = FormatInputForDisplay(s);
         var hasDniPin = TryParseDniPin(s, out var dni, out var pin);
         var kind = hasDniPin ? "dni_pin" : GuessKind(s);
+        var nowUtc = DateTimeOffset.UtcNow;
+        var submitKey = $"{kind}:{s}";
+        if (IsDuplicateSubmission(submitKey, nowUtc))
+        {
+            return;
+        }
         try
         {
-            _lastScanAtUtc = DateTimeOffset.UtcNow;
+            _lastScanAtUtc = nowUtc;
             var kindLabel = kind switch
             {
                 "dni" => "dni",
@@ -1804,6 +1828,18 @@ public sealed class MainForm : Form
         }
         if (t.Length <= 4) return t;
         return new string('•', Math.Max(0, t.Length - 4)) + t[^4..];
+    }
+
+    private static string FormatInputForDisplay(string s)
+    {
+        var t = (s ?? "").Trim();
+        if (t.Length == 0) return "";
+        if (TryParseDniPin(t, out var dni, out var pin))
+        {
+            var dniShown = dni.Length <= 3 ? dni : new string('•', Math.Max(0, dni.Length - 3)) + dni[^3..];
+            return $"{dniShown}#{pin}";
+        }
+        return MaskInputForDisplay(t);
     }
 
     private bool IsEnrollActive()

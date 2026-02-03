@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from src.checkin_ws_hub import checkin_ws_hub
 from src.dependencies import (
     get_claims,
     get_db_session,
@@ -1490,6 +1491,8 @@ async def api_access_event(request: Request, db: Session = Depends(get_db_sessio
     default_unlock_ms = max(250, min(default_unlock_ms, 15000))
 
     attendance_service = AttendanceService(db)
+    created_asistencia_id: Optional[int] = None
+    created_asistencia = False
 
     if event_type == "manual_unlock":
         if allow_manual_unlock:
@@ -1530,16 +1533,21 @@ async def api_access_event(request: Request, db: Session = Depends(get_db_sessio
                                 reason = str(msg or "")
                             else:
                                 try:
-                                    attendance_service.registrar_asistencia(int(subject_usuario_id), sucursal_id=sid)
+                                    aid, created = attendance_service.registrar_asistencia_con_resultado(
+                                        int(subject_usuario_id),
+                                        sucursal_id=sid,
+                                        tipo="access_agent",
+                                        commit=False,
+                                    )
+                                    created_asistencia = bool(created)
+                                    created_asistencia_id = int(aid) if (created and aid is not None) else None
                                     decision = "allow"
-                                    reason = "OK"
+                                    reason = "OK" if bool(created) else "Ya registrado hoy"
                                     unlock = True
                                     unlock_ms = default_unlock_ms
-                                except ValueError:
-                                    decision = "allow"
-                                    reason = "Ya registrado hoy"
-                                    unlock = True
-                                    unlock_ms = default_unlock_ms
+                                except Exception:
+                                    decision = "deny"
+                                    reason = "Error registrando asistencia"
                 except Exception:
                     decision = "deny"
                     reason = "Error validando DNI"
@@ -1570,11 +1578,20 @@ async def api_access_event(request: Request, db: Session = Depends(get_db_sessio
                         decision = "deny"
                         reason = apb_reason
                     else:
-                        ok, msg = attendance_service.registrar_asistencia_por_dni_y_pin(dni, pin, sid)
+                        ok, msg, asistencia_id, created = attendance_service.registrar_asistencia_por_dni_y_pin(
+                            dni, pin, sid, commit=False, tipo="access_agent"
+                        )
                         decision = "allow" if ok else "deny"
                         reason = str(msg or "")
                         unlock = bool(ok)
                         unlock_ms = default_unlock_ms if ok else None
+                        if ok:
+                            created_asistencia = bool(created)
+                            created_asistencia_id = (
+                                int(asistencia_id)
+                                if (created and asistencia_id is not None)
+                                else None
+                            )
             except Exception:
                 decision = "deny"
                 reason = "Error validando DNI"
@@ -1709,7 +1726,14 @@ async def api_access_event(request: Request, db: Session = Depends(get_db_sessio
                         reason = str(msg or "")
                         if ok:
                             try:
-                                attendance_service.registrar_asistencia(int(subject_usuario_id), sucursal_id=sid)
+                                aid, created = attendance_service.registrar_asistencia_con_resultado(
+                                    int(subject_usuario_id),
+                                    sucursal_id=sid,
+                                    tipo="access_agent",
+                                    commit=False,
+                                )
+                                created_asistencia = bool(created)
+                                created_asistencia_id = int(aid) if (created and aid is not None) else None
                             except Exception:
                                 pass
                             unlock = True
@@ -1747,11 +1771,20 @@ async def api_access_event(request: Request, db: Session = Depends(get_db_sessio
                             decision = "deny"
                             reason = apb_reason
                         else:
-                            ok, msg = attendance_service.validar_token_y_registrar_sin_sesion(token, sid)
+                            ok, msg, asistencia_id, created = attendance_service.validar_token_y_registrar_sin_sesion(
+                                token, sid, tipo="access_agent"
+                            )
                             decision = "allow" if ok else "deny"
                             reason = str(msg or "")
                             unlock = bool(ok)
                             unlock_ms = default_unlock_ms if ok else None
+                            if ok:
+                                created_asistencia = bool(created)
+                                created_asistencia_id = (
+                                    int(asistencia_id)
+                                    if (created and asistencia_id is not None)
+                                    else None
+                                )
             except Exception:
                 decision = "deny"
                 reason = "Error validando QR"
@@ -1791,6 +1824,13 @@ async def api_access_event(request: Request, db: Session = Depends(get_db_sessio
             },
         )
         db.commit()
+        if created_asistencia and created_asistencia_id is not None and sid is not None:
+            entry = attendance_service.construir_checkin_entry_por_asistencia_id(int(created_asistencia_id))
+            if isinstance(entry, dict):
+                try:
+                    await checkin_ws_hub.broadcast(int(sid), entry)
+                except Exception:
+                    pass
     except Exception:
         try:
             db.rollback()

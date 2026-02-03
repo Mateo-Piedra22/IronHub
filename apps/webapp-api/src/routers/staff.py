@@ -4,6 +4,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 from src.dependencies import (
     get_staff_service,

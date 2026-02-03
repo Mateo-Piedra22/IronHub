@@ -363,8 +363,8 @@ function PagoFormModal({
                 {/* User Selection */}
                 <Select
                     label="Usuario"
-                    value={usuarioId?.toString() || ''}
-                    onChange={(e) => setUsuarioId(Number(e.target.value))}
+                    value={usuarioId ? usuarioId.toString() : ''}
+                    onChange={(e) => setUsuarioId(e.target.value ? Number(e.target.value) : 0)}
                     placeholder="Seleccionar usuario"
                     options={usuarios.map((u) => ({
                         value: u.id.toString(),

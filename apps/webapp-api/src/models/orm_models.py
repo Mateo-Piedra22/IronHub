@@ -19,7 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import JSONB, INET, ARRAY
+from sqlalchemy.dialects.postgresql import JSONB, INET
 
 
 class Base(DeclarativeBase):
@@ -576,6 +576,7 @@ class Asistencia(Base):
         DateTime, server_default=func.current_timestamp()
     )
     hora_entrada: Mapped[Optional[time]] = mapped_column(Time)
+    tipo: Mapped[str] = mapped_column(String(50), nullable=False, server_default="unknown")
 
     usuario: Mapped["Usuario"] = relationship("Usuario", back_populates="asistencias")
 

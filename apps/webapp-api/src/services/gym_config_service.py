@@ -8,7 +8,7 @@ Replaces legacy GymService configuration methods.
 import json
 import logging
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
