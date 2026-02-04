@@ -849,8 +849,6 @@ async def api_access_device_clear_enrollment_gestion(device_id: int, request: Re
             """
             INSERT INTO access_commands(device_id, command_type, payload, status, request_id, actor_usuario_id, expires_at, created_at)
             VALUES (:did, 'enroll_clear', CAST(:p AS JSONB), 'pending', :rid, :actor, NOW() + INTERVAL '30 seconds', NOW())
-            ON CONFLICT (device_id, request_id) DO UPDATE
-            SET created_at = access_commands.created_at
             """
         ),
         {
