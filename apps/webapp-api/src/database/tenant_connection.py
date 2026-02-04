@@ -50,16 +50,22 @@ except Exception:
     _IS_SERVERLESS = False
 try:
     POOL_SIZE_PER_TENANT = int(
-        os.getenv("TENANT_DB_POOL_SIZE", "1" if _IS_SERVERLESS else "5")
+        os.getenv("TENANT_DB_POOL_SIZE", "3" if _IS_SERVERLESS else "5")
     )
 except Exception:
-    POOL_SIZE_PER_TENANT = 1 if _IS_SERVERLESS else 5
+    POOL_SIZE_PER_TENANT = 3 if _IS_SERVERLESS else 5
 try:
     MAX_OVERFLOW_PER_TENANT = int(
-        os.getenv("TENANT_DB_MAX_OVERFLOW", "0" if _IS_SERVERLESS else "10")
+        os.getenv("TENANT_DB_MAX_OVERFLOW", "2" if _IS_SERVERLESS else "10")
     )
 except Exception:
-    MAX_OVERFLOW_PER_TENANT = 0 if _IS_SERVERLESS else 10
+    MAX_OVERFLOW_PER_TENANT = 2 if _IS_SERVERLESS else 10
+try:
+    POOL_TIMEOUT_SECONDS = int(
+        os.getenv("TENANT_DB_POOL_TIMEOUT", "10" if _IS_SERVERLESS else "30")
+    )
+except Exception:
+    POOL_TIMEOUT_SECONDS = 10 if _IS_SERVERLESS else 30
 POOL_RECYCLE_SECONDS = 1800
 
 # Connection retry settings
@@ -450,6 +456,7 @@ def get_tenant_engine(tenant: str, verify_status: bool = True) -> Optional[Engin
                         pool_pre_ping=True,
                         pool_size=POOL_SIZE_PER_TENANT,
                         max_overflow=MAX_OVERFLOW_PER_TENANT,
+                        pool_timeout=POOL_TIMEOUT_SECONDS,
                         pool_recycle=POOL_RECYCLE_SECONDS,
                         connect_args={
                             "options": "-c timezone=America/Argentina/Buenos_Aires",

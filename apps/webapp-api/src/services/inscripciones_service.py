@@ -30,6 +30,16 @@ class InscripcionesService(BaseService):
     def __init__(self, db: Session):
         super().__init__(db)
 
+    def _table_exists(self, table_name: str) -> bool:
+        t = str(table_name or "").strip()
+        if not t:
+            return False
+        try:
+            v = self.db.execute(text("SELECT to_regclass(:t)"), {"t": t}).scalar()
+            return bool(v)
+        except Exception:
+            return False
+
     def _get_app_timezone(self):
         tz_name = (
             os.getenv("APP_TIMEZONE")
@@ -81,9 +91,19 @@ class InscripcionesService(BaseService):
             return False
 
     def _get_horario_profesor_id(self, horario_id: int) -> Optional[int]:
+        if not self._table_exists("profesor_clase_asignaciones"):
+            return None
         try:
             row = self.db.execute(
-                text("SELECT profesor_id FROM clase_horarios WHERE id = :id LIMIT 1"),
+                text(
+                    """
+                    SELECT profesor_id
+                    FROM profesor_clase_asignaciones
+                    WHERE clase_horario_id = :id AND activa = TRUE
+                    ORDER BY profesor_id ASC
+                    LIMIT 1
+                    """
+                ),
                 {"id": int(horario_id)},
             ).fetchone()
             if row and row[0] is not None:
@@ -93,9 +113,11 @@ class InscripcionesService(BaseService):
         return None
 
     def _horario_exists(self, horario_id: int) -> bool:
+        if not self._table_exists("clases_horarios"):
+            return False
         try:
             row = self.db.execute(
-                text("SELECT 1 FROM clase_horarios WHERE id = :id LIMIT 1"),
+                text("SELECT 1 FROM clases_horarios WHERE id = :id LIMIT 1"),
                 {"id": int(horario_id)},
             ).fetchone()
             return bool(row)
@@ -103,10 +125,12 @@ class InscripcionesService(BaseService):
             return False
 
     def _horario_belongs_to_clase(self, horario_id: int, clase_id: int) -> bool:
+        if not self._table_exists("clases_horarios"):
+            return False
         try:
             row = self.db.execute(
                 text(
-                    "SELECT 1 FROM clase_horarios WHERE id = :id AND clase_id = :clase_id LIMIT 1"
+                    "SELECT 1 FROM clases_horarios WHERE id = :id AND clase_id = :clase_id LIMIT 1"
                 ),
                 {"id": int(horario_id), "clase_id": int(clase_id)},
             ).fetchone()
@@ -115,13 +139,15 @@ class InscripcionesService(BaseService):
             return False
 
     def obtener_horario_info(self, horario_id: int) -> Optional[Dict[str, Any]]:
+        if not self._table_exists("clases_horarios"):
+            return None
         try:
             row = self.db.execute(
                 text("""
-                    SELECT ch.dia,
+                    SELECT ch.dia_semana,
                            TO_CHAR(ch.hora_inicio, 'HH24:MI') as hora_inicio,
                            COALESCE(c.nombre,'') as clase_nombre
-                    FROM clase_horarios ch
+                    FROM clases_horarios ch
                     JOIN clases c ON c.id = ch.clase_id
                     WHERE ch.id = :id
                     LIMIT 1
@@ -137,12 +163,24 @@ class InscripcionesService(BaseService):
 
 
     def obtener_agenda(self, profesor_id: Optional[int] = None, sucursal_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        if not self._table_exists("clases_horarios"):
+            return []
         try:
             params: Dict[str, Any] = {}
             clauses: List[str] = []
             if profesor_id is not None:
                 params["pid"] = int(profesor_id)
-                clauses.append("ch.profesor_id = :pid")
+                clauses.append(
+                    """
+                    EXISTS (
+                        SELECT 1
+                        FROM profesor_clase_asignaciones a2
+                        WHERE a2.clase_horario_id = ch.id
+                          AND a2.profesor_id = :pid
+                          AND a2.activa = TRUE
+                    )
+                    """
+                )
             try:
                 sid = int(sucursal_id) if sucursal_id is not None else None
             except Exception:
@@ -158,24 +196,25 @@ class InscripcionesService(BaseService):
                     ch.clase_id,
                     COALESCE(c.nombre,'') as clase_nombre,
                     COALESCE(c.descripcion,'') as clase_descripcion,
-                    ch.dia,
+                    ch.dia_semana,
                     TO_CHAR(ch.hora_inicio, 'HH24:MI') as hora_inicio,
                     TO_CHAR(ch.hora_fin, 'HH24:MI') as hora_fin,
-                    ch.profesor_id,
-                    ch.cupo,
+                    MIN(a.profesor_id) as profesor_id,
+                    COALESCE(ch.cupo_maximo, 20) as cupo,
                     COALESCE(u.nombre,'') as profesor_nombre,
-                    COUNT(i.id) as inscriptos_count
-                FROM clase_horarios ch
+                    COUNT(DISTINCT cu.id) as inscriptos_count
+                FROM clases_horarios ch
                 JOIN clases c ON c.id = ch.clase_id
-                LEFT JOIN profesores p ON ch.profesor_id = p.id
+                LEFT JOIN profesor_clase_asignaciones a ON a.clase_horario_id = ch.id AND a.activa = TRUE
+                LEFT JOIN profesores p ON a.profesor_id = p.id
                 LEFT JOIN usuarios u ON u.id = p.usuario_id
-                LEFT JOIN inscripciones i ON i.horario_id = ch.id
+                LEFT JOIN clase_usuarios cu ON cu.clase_horario_id = ch.id
                 {where}
                 GROUP BY
-                    ch.id, ch.clase_id, c.nombre, c.descripcion, ch.dia, ch.hora_inicio, ch.hora_fin,
-                    ch.profesor_id, ch.cupo, u.nombre
+                    ch.id, ch.clase_id, c.nombre, c.descripcion, ch.dia_semana, ch.hora_inicio, ch.hora_fin,
+                    ch.cupo_maximo, u.nombre
                 ORDER BY 
-                    CASE ch.dia 
+                    CASE ch.dia_semana 
                         WHEN 'lunes' THEN 1 WHEN 'martes' THEN 2 WHEN 'miércoles' THEN 3 
                         WHEN 'miercoles' THEN 3 WHEN 'jueves' THEN 4 WHEN 'viernes' THEN 5 
                         WHEN 'sábado' THEN 6 WHEN 'sabado' THEN 6 WHEN 'domingo' THEN 7 
@@ -310,23 +349,28 @@ class InscripcionesService(BaseService):
 
     def obtener_horarios(self, clase_id: int, sucursal_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """Get schedules for a class."""
+        if not self._table_exists("clases_horarios"):
+            return []
         try:
             if not self._clase_accessible(int(clase_id), sucursal_id):
                 return []
             result = self.db.execute(
                 text("""
-                    SELECT ch.id, ch.clase_id, ch.dia,
+                    SELECT ch.id, ch.clase_id, ch.dia_semana,
                            TO_CHAR(ch.hora_inicio, 'HH24:MI') as hora_inicio,
                            TO_CHAR(ch.hora_fin, 'HH24:MI') as hora_fin,
-                           ch.profesor_id, ch.cupo,
+                           MIN(a.profesor_id) as profesor_id,
+                           COALESCE(ch.cupo_maximo, 20) as cupo,
                            COALESCE(u.nombre,'') as profesor_nombre,
-                           (SELECT COUNT(*) FROM inscripciones i WHERE i.horario_id = ch.id) as inscriptos_count
-                    FROM clase_horarios ch
-                    LEFT JOIN profesores p ON ch.profesor_id = p.id
+                           (SELECT COUNT(*) FROM clase_usuarios cu WHERE cu.clase_horario_id = ch.id) as inscriptos_count
+                    FROM clases_horarios ch
+                    LEFT JOIN profesor_clase_asignaciones a ON a.clase_horario_id = ch.id AND a.activa = TRUE
+                    LEFT JOIN profesores p ON a.profesor_id = p.id
                     LEFT JOIN usuarios u ON u.id = p.usuario_id
                     WHERE ch.clase_id = :clase_id
+                    GROUP BY ch.id, ch.clase_id, ch.dia_semana, ch.hora_inicio, ch.hora_fin, ch.cupo_maximo, u.nombre
                     ORDER BY 
-                        CASE ch.dia 
+                        CASE ch.dia_semana 
                             WHEN 'lunes' THEN 1 WHEN 'martes' THEN 2 WHEN 'miércoles' THEN 3 
                             WHEN 'jueves' THEN 4 WHEN 'viernes' THEN 5 WHEN 'sábado' THEN 6 WHEN 'domingo' THEN 7 
                         END, ch.hora_inicio
@@ -362,6 +406,8 @@ class InscripcionesService(BaseService):
         sucursal_id: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """Create a class schedule."""
+        if not self._table_exists("clases_horarios"):
+            return None
         try:
             if not self._clase_accessible(int(clase_id), sucursal_id):
                 return None
@@ -369,21 +415,43 @@ class InscripcionesService(BaseService):
                 return None
             result = self.db.execute(
                 text("""
-                    INSERT INTO clase_horarios (clase_id, dia, hora_inicio, hora_fin, profesor_id, cupo)
-                    VALUES (:clase_id, :dia, :hora_inicio, :hora_fin, :profesor_id, :cupo)
-                    RETURNING id, clase_id, dia, TO_CHAR(hora_inicio, 'HH24:MI') as hora_inicio,
-                              TO_CHAR(hora_fin, 'HH24:MI') as hora_fin, profesor_id, cupo
+                    INSERT INTO clases_horarios (clase_id, dia_semana, hora_inicio, hora_fin, cupo_maximo, activo)
+                    VALUES (:clase_id, :dia, :hora_inicio, :hora_fin, :cupo, TRUE)
+                    RETURNING id, clase_id, dia_semana, TO_CHAR(hora_inicio, 'HH24:MI') as hora_inicio,
+                              TO_CHAR(hora_fin, 'HH24:MI') as hora_fin, cupo_maximo
                 """),
                 {
                     "clase_id": clase_id,
                     "dia": dia.lower(),
                     "hora_inicio": hora_inicio,
                     "hora_fin": hora_fin,
-                    "profesor_id": profesor_id,
                     "cupo": cupo,
                 },
             )
             row = result.fetchone()
+            if row and profesor_id is not None and self._table_exists("profesor_clase_asignaciones"):
+                try:
+                    hid = int(row[0])
+                    pid = int(profesor_id)
+                    self.db.execute(
+                        text(
+                            "UPDATE profesor_clase_asignaciones SET activa = FALSE WHERE clase_horario_id = :hid AND profesor_id <> :pid"
+                        ),
+                        {"hid": hid, "pid": pid},
+                    )
+                    self.db.execute(
+                        text(
+                            """
+                            INSERT INTO profesor_clase_asignaciones(clase_horario_id, profesor_id, activa)
+                            VALUES (:hid, :pid, TRUE)
+                            ON CONFLICT (clase_horario_id, profesor_id)
+                            DO UPDATE SET activa = TRUE
+                            """
+                        ),
+                        {"hid": hid, "pid": pid},
+                    )
+                except Exception:
+                    pass
             self.db.commit()
             return (
                 {
@@ -392,8 +460,8 @@ class InscripcionesService(BaseService):
                     "dia": row[2],
                     "hora_inicio": row[3],
                     "hora_fin": row[4],
-                    "profesor_id": row[5],
-                    "cupo": row[6],
+                    "profesor_id": int(profesor_id) if profesor_id is not None else None,
+                    "cupo": row[5],
                 }
                 if row
                 else None
@@ -407,6 +475,8 @@ class InscripcionesService(BaseService):
         self, horario_id: int, clase_id: int, updates: Dict[str, Any], sucursal_id: Optional[int] = None
     ) -> Optional[Dict[str, Any]]:
         """Update a class schedule."""
+        if not self._table_exists("clases_horarios"):
+            return None
         try:
             if not self._clase_accessible(int(clase_id), sucursal_id):
                 return None
@@ -417,7 +487,7 @@ class InscripcionesService(BaseService):
             sets = []
             params = {"id": horario_id, "clase_id": clase_id}
             if "dia" in updates:
-                sets.append("dia = :dia")
+                sets.append("dia_semana = :dia")
                 params["dia"] = (updates["dia"] or "").lower()
             if "hora_inicio" in updates:
                 sets.append("hora_inicio = :hora_inicio")
@@ -425,11 +495,8 @@ class InscripcionesService(BaseService):
             if "hora_fin" in updates:
                 sets.append("hora_fin = :hora_fin")
                 params["hora_fin"] = updates["hora_fin"]
-            if "profesor_id" in updates:
-                sets.append("profesor_id = :profesor_id")
-                params["profesor_id"] = updates["profesor_id"]
             if "cupo" in updates:
-                sets.append("cupo = :cupo")
+                sets.append("cupo_maximo = :cupo")
                 params["cupo"] = int(updates["cupo"]) if updates["cupo"] else 20
 
             if not sets:
@@ -438,14 +505,37 @@ class InscripcionesService(BaseService):
 
             result = self.db.execute(
                 text(f"""
-                    UPDATE clase_horarios SET {", ".join(sets)}
+                    UPDATE clases_horarios SET {", ".join(sets)}
                     WHERE id = :id AND clase_id = :clase_id
-                    RETURNING id, clase_id, dia, TO_CHAR(hora_inicio, 'HH24:MI') as hora_inicio,
-                              TO_CHAR(hora_fin, 'HH24:MI') as hora_fin, profesor_id, cupo
+                    RETURNING id, clase_id, dia_semana, TO_CHAR(hora_inicio, 'HH24:MI') as hora_inicio,
+                              TO_CHAR(hora_fin, 'HH24:MI') as hora_fin, cupo_maximo
                 """),
                 params,
             )
             row = result.fetchone()
+            if row and "profesor_id" in updates and updates.get("profesor_id") is not None and self._table_exists("profesor_clase_asignaciones"):
+                try:
+                    hid = int(row[0])
+                    pid = int(updates.get("profesor_id"))
+                    self.db.execute(
+                        text(
+                            "UPDATE profesor_clase_asignaciones SET activa = FALSE WHERE clase_horario_id = :hid AND profesor_id <> :pid"
+                        ),
+                        {"hid": hid, "pid": pid},
+                    )
+                    self.db.execute(
+                        text(
+                            """
+                            INSERT INTO profesor_clase_asignaciones(clase_horario_id, profesor_id, activa)
+                            VALUES (:hid, :pid, TRUE)
+                            ON CONFLICT (clase_horario_id, profesor_id)
+                            DO UPDATE SET activa = TRUE
+                            """
+                        ),
+                        {"hid": hid, "pid": pid},
+                    )
+                except Exception:
+                    pass
             self.db.commit()
             if not row:
                 return None
@@ -455,8 +545,8 @@ class InscripcionesService(BaseService):
                 "dia": row[2],
                 "hora_inicio": row[3],
                 "hora_fin": row[4],
-                "profesor_id": row[5],
-                "cupo": row[6],
+                "profesor_id": int(updates.get("profesor_id")) if "profesor_id" in updates and updates.get("profesor_id") is not None else None,
+                "cupo": row[5],
             }
         except Exception as e:
             logger.error(f"Error updating schedule: {e}")
@@ -465,23 +555,32 @@ class InscripcionesService(BaseService):
 
     def eliminar_horario(self, horario_id: int, clase_id: int, sucursal_id: Optional[int] = None) -> bool:
         """Delete a class schedule and its enrollments."""
+        if not self._table_exists("clases_horarios"):
+            return False
         try:
             if not self._clase_accessible(int(clase_id), sucursal_id):
                 return False
             if not self._horario_belongs_to_clase(int(horario_id), int(clase_id)):
                 return False
 
-            self.db.execute(
-                text("DELETE FROM inscripciones WHERE horario_id = :id"),
-                {"id": int(horario_id)},
-            )
-            self.db.execute(
-                text("DELETE FROM lista_espera WHERE horario_id = :id"),
-                {"id": int(horario_id)},
-            )
+            if self._table_exists("clase_usuarios"):
+                self.db.execute(
+                    text("DELETE FROM clase_usuarios WHERE clase_horario_id = :id"),
+                    {"id": int(horario_id)},
+                )
+            if self._table_exists("clase_lista_espera"):
+                self.db.execute(
+                    text("DELETE FROM clase_lista_espera WHERE clase_horario_id = :id"),
+                    {"id": int(horario_id)},
+                )
+            if self._table_exists("profesor_clase_asignaciones"):
+                self.db.execute(
+                    text("DELETE FROM profesor_clase_asignaciones WHERE clase_horario_id = :id"),
+                    {"id": int(horario_id)},
+                )
             res = self.db.execute(
                 text(
-                    "DELETE FROM clase_horarios WHERE id = :id AND clase_id = :clase_id"
+                    "DELETE FROM clases_horarios WHERE id = :id AND clase_id = :clase_id"
                 ),
                 {"id": int(horario_id), "clase_id": int(clase_id)},
             )
@@ -499,14 +598,16 @@ class InscripcionesService(BaseService):
 
     def obtener_inscripciones(self, horario_id: int) -> List[Dict[str, Any]]:
         """Get enrollments for a schedule."""
+        if not self._table_exists("clase_usuarios"):
+            return []
         try:
             result = self.db.execute(
                 text("""
-                    SELECT i.id, i.horario_id, i.usuario_id, i.fecha_inscripcion,
+                    SELECT cu.id, cu.clase_horario_id, cu.usuario_id, cu.fecha_inscripcion,
                            u.nombre as usuario_nombre, u.telefono as usuario_telefono
-                    FROM inscripciones i
-                    JOIN usuarios u ON i.usuario_id = u.id
-                    WHERE i.horario_id = :horario_id ORDER BY i.fecha_inscripcion
+                    FROM clase_usuarios cu
+                    JOIN usuarios u ON cu.usuario_id = u.id
+                    WHERE cu.clase_horario_id = :horario_id ORDER BY cu.fecha_inscripcion
                 """),
                 {"horario_id": horario_id},
             )
@@ -527,6 +628,8 @@ class InscripcionesService(BaseService):
 
     def crear_inscripcion(self, horario_id: int, usuario_id: int) -> Dict[str, Any]:
         """Enroll a user in a schedule."""
+        if not self._table_exists("clases_horarios"):
+            return {"error": "Horario no encontrado"}
         try:
             fecha_inscripcion = self._now_utc_naive()
             ctx = (
@@ -534,7 +637,7 @@ class InscripcionesService(BaseService):
                     text(
                         """
                         SELECT ch.clase_id, c.sucursal_id, c.tipo_clase_id
-                        FROM clase_horarios ch
+                        FROM clases_horarios ch
                         JOIN clases c ON c.id = ch.clase_id
                         WHERE ch.id = :id
                         LIMIT 1
@@ -575,8 +678,9 @@ class InscripcionesService(BaseService):
                 return {"error": reason2 or "Clase no habilitada", "forbidden": True}
             # Check capacity
             cap = self.db.execute(
-                text("""SELECT cupo, (SELECT COUNT(*) FROM inscripciones WHERE horario_id = :id) as inscriptos
-                        FROM clase_horarios WHERE id = :id"""),
+                text("""SELECT COALESCE(cupo_maximo, 20) as cupo,
+                               (SELECT COUNT(*) FROM clase_usuarios WHERE clase_horario_id = :id) as inscriptos
+                        FROM clases_horarios WHERE id = :id"""),
                 {"id": horario_id},
             ).fetchone()
 
@@ -590,8 +694,10 @@ class InscripcionesService(BaseService):
                     return {"error": "Cupo lleno", "full": True}
 
             result = self.db.execute(
-                text("""INSERT INTO inscripciones (horario_id, usuario_id, fecha_inscripcion) VALUES (:horario_id, :usuario_id, :fecha_inscripcion)
-                        ON CONFLICT (horario_id, usuario_id) DO NOTHING RETURNING id, horario_id, usuario_id, fecha_inscripcion"""),
+                text("""INSERT INTO clase_usuarios (clase_horario_id, usuario_id, fecha_inscripcion)
+                        VALUES (:horario_id, :usuario_id, :fecha_inscripcion)
+                        ON CONFLICT (clase_horario_id, usuario_id) DO NOTHING
+                        RETURNING id, clase_horario_id, usuario_id, fecha_inscripcion"""),
                 {
                     "horario_id": horario_id,
                     "usuario_id": usuario_id,
@@ -616,10 +722,12 @@ class InscripcionesService(BaseService):
 
     def eliminar_inscripcion(self, horario_id: int, usuario_id: int) -> bool:
         """Remove enrollment."""
+        if not self._table_exists("clase_usuarios"):
+            return False
         try:
             self.db.execute(
                 text(
-                    "DELETE FROM inscripciones WHERE horario_id = :hid AND usuario_id = :uid"
+                    "DELETE FROM clase_usuarios WHERE clase_horario_id = :hid AND usuario_id = :uid"
                 ),
                 {"hid": horario_id, "uid": usuario_id},
             )
@@ -634,13 +742,15 @@ class InscripcionesService(BaseService):
 
     def obtener_lista_espera(self, horario_id: int) -> List[Dict[str, Any]]:
         """Get waitlist for a schedule."""
+        if not self._table_exists("clase_lista_espera"):
+            return []
         try:
             result = self.db.execute(
                 text("""
-                    SELECT le.id, le.horario_id, le.usuario_id, le.posicion, le.fecha_registro,
+                    SELECT le.id, le.clase_horario_id, le.usuario_id, le.posicion, le.fecha_creacion,
                            u.nombre as usuario_nombre
-                    FROM lista_espera le JOIN usuarios u ON le.usuario_id = u.id
-                    WHERE le.horario_id = :horario_id ORDER BY le.posicion
+                    FROM clase_lista_espera le JOIN usuarios u ON le.usuario_id = u.id
+                    WHERE le.clase_horario_id = :horario_id ORDER BY le.posicion
                 """),
                 {"horario_id": horario_id},
             )
@@ -661,6 +771,8 @@ class InscripcionesService(BaseService):
 
     def agregar_lista_espera(self, horario_id: int, usuario_id: int) -> Dict[str, Any]:
         """Add user to waitlist."""
+        if not self._table_exists("clase_lista_espera"):
+            return {"error": "Lista de espera no disponible"}
         try:
             if not self._horario_exists(int(horario_id)):
                 return {"error": "Horario no encontrado"}
@@ -669,7 +781,7 @@ class InscripcionesService(BaseService):
                     text(
                         """
                         SELECT ch.clase_id, c.sucursal_id, c.tipo_clase_id
-                        FROM clase_horarios ch
+                        FROM clases_horarios ch
                         JOIN clases c ON c.id = ch.clase_id
                         WHERE ch.id = :id
                         LIMIT 1
@@ -711,16 +823,17 @@ class InscripcionesService(BaseService):
             fecha_registro = self._now_utc_naive()
             pos = self.db.execute(
                 text(
-                    "SELECT COALESCE(MAX(posicion), 0) + 1 FROM lista_espera WHERE horario_id = :id"
+                    "SELECT COALESCE(MAX(posicion), 0) + 1 FROM clase_lista_espera WHERE clase_horario_id = :id"
                 ),
                 {"id": horario_id},
             ).fetchone()
             next_pos = pos[0] if pos else 1
 
             result = self.db.execute(
-                text("""INSERT INTO lista_espera (horario_id, usuario_id, posicion, fecha_registro) VALUES (:hid, :uid, :pos, :fecha_registro)
-                        ON CONFLICT (horario_id, usuario_id) DO NOTHING 
-                        RETURNING id, horario_id, usuario_id, posicion, fecha_registro"""),
+                text("""INSERT INTO clase_lista_espera (clase_horario_id, usuario_id, posicion, activo, fecha_creacion)
+                        VALUES (:hid, :uid, :pos, TRUE, :fecha_registro)
+                        ON CONFLICT (clase_horario_id, usuario_id) DO NOTHING 
+                        RETURNING id, clase_horario_id, usuario_id, posicion, fecha_creacion"""),
                 {
                     "hid": horario_id,
                     "uid": usuario_id,
@@ -747,10 +860,12 @@ class InscripcionesService(BaseService):
 
     def eliminar_lista_espera(self, horario_id: int, usuario_id: int) -> bool:
         """Remove from waitlist."""
+        if not self._table_exists("clase_lista_espera"):
+            return False
         try:
             self.db.execute(
                 text(
-                    "DELETE FROM lista_espera WHERE horario_id = :hid AND usuario_id = :uid"
+                    "DELETE FROM clase_lista_espera WHERE clase_horario_id = :hid AND usuario_id = :uid"
                 ),
                 {"hid": horario_id, "uid": usuario_id},
             )
@@ -763,10 +878,14 @@ class InscripcionesService(BaseService):
 
     def obtener_primero_lista_espera(self, horario_id: int) -> Optional[Dict[str, Any]]:
         """Get first person in waitlist."""
+        if not self._table_exists("clase_lista_espera"):
+            return None
         try:
             result = self.db.execute(
-                text("""SELECT le.usuario_id, u.nombre, u.telefono FROM lista_espera le
-                        JOIN usuarios u ON le.usuario_id = u.id WHERE le.horario_id = :id ORDER BY le.posicion LIMIT 1"""),
+                text("""SELECT le.usuario_id, u.nombre, u.telefono FROM clase_lista_espera le
+                        JOIN usuarios u ON le.usuario_id = u.id
+                        WHERE le.clase_horario_id = :id AND le.activo = TRUE
+                        ORDER BY le.posicion LIMIT 1"""),
                 {"id": horario_id},
             )
             row = result.fetchone()

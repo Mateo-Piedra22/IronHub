@@ -41,40 +41,58 @@ export function Modal({
     className,
 }: ModalProps) {
     const modalRef = useRef<HTMLDivElement>(null);
+    const wasOpenRef = useRef(false);
+    const onCloseRef = useRef(onClose);
+    const closeOnEscapeRef = useRef(closeOnEscape);
+    const closeOnBackdropRef = useRef(closeOnBackdrop);
+
+    useEffect(() => {
+        onCloseRef.current = onClose;
+    }, [onClose]);
+    useEffect(() => {
+        closeOnEscapeRef.current = closeOnEscape;
+    }, [closeOnEscape]);
+    useEffect(() => {
+        closeOnBackdropRef.current = closeOnBackdrop;
+    }, [closeOnBackdrop]);
 
     // Handle escape key
-    const handleEscape = useCallback(
-        (e: KeyboardEvent) => {
-            if (e.key === 'Escape' && closeOnEscape) {
-                onClose();
-            }
-        },
-        [onClose, closeOnEscape]
-    );
+    const handleEscape = useCallback((e: KeyboardEvent) => {
+        if (e.key !== 'Escape') return;
+        if (!closeOnEscapeRef.current) return;
+        onCloseRef.current();
+    }, []);
 
     // Handle backdrop click
     const handleBackdropClick = useCallback(
         (e: React.MouseEvent) => {
-            if (e.target === e.currentTarget && closeOnBackdrop) {
-                onClose();
-            }
+            if (e.target !== e.currentTarget) return;
+            if (!closeOnBackdropRef.current) return;
+            onCloseRef.current();
         },
-        [onClose, closeOnBackdrop]
+        []
     );
 
     // Focus trap and escape listener
     useEffect(() => {
         if (isOpen) {
-            document.addEventListener('keydown', handleEscape);
             document.body.style.overflow = 'hidden';
-
-            // Focus the modal
-            setTimeout(() => modalRef.current?.focus(), 50);
+            if (!wasOpenRef.current) {
+                setTimeout(() => modalRef.current?.focus(), 50);
+            }
         }
+        wasOpenRef.current = isOpen;
 
         return () => {
-            document.removeEventListener('keydown', handleEscape);
             document.body.style.overflow = '';
+        };
+    }, [isOpen]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        document.addEventListener('keydown', handleEscape);
+        return () => {
+            document.removeEventListener('keydown', handleEscape);
         };
     }, [isOpen, handleEscape]);
 

@@ -65,18 +65,23 @@ try:
     except Exception:
         is_serverless = False
     try:
-        pool_size = int(os.getenv("DB_POOL_SIZE", "1" if is_serverless else "10"))
+        pool_size = int(os.getenv("DB_POOL_SIZE", "3" if is_serverless else "10"))
     except Exception:
-        pool_size = 1 if is_serverless else 10
+        pool_size = 3 if is_serverless else 10
     try:
-        max_overflow = int(os.getenv("DB_MAX_OVERFLOW", "0" if is_serverless else "20"))
+        max_overflow = int(os.getenv("DB_MAX_OVERFLOW", "2" if is_serverless else "20"))
     except Exception:
-        max_overflow = 0 if is_serverless else 20
+        max_overflow = 2 if is_serverless else 20
+    try:
+        pool_timeout = int(os.getenv("DB_POOL_TIMEOUT", "10" if is_serverless else "30"))
+    except Exception:
+        pool_timeout = 10 if is_serverless else 30
     engine = create_engine(
         DATABASE_URL,
         pool_pre_ping=True,  # Verifica la conexión antes de usarla
         pool_size=pool_size,  # Tamaño del pool (serverless: bajo)
         max_overflow=max_overflow,  # Conexiones extra permitidas
+        pool_timeout=pool_timeout,
         pool_recycle=1800,  # Reciclar conexiones cada 30 mins
         connect_args={"options": "-c timezone=America/Argentina/Buenos_Aires"},
     )
@@ -136,21 +141,28 @@ try:
         is_serverless = False
     try:
         admin_pool_size = int(
-            os.getenv("ADMIN_DB_POOL_SIZE", "1" if is_serverless else "5")
+            os.getenv("ADMIN_DB_POOL_SIZE", "3" if is_serverless else "5")
         )
     except Exception:
-        admin_pool_size = 1 if is_serverless else 5
+        admin_pool_size = 3 if is_serverless else 5
     try:
         admin_max_overflow = int(
-            os.getenv("ADMIN_DB_MAX_OVERFLOW", "0" if is_serverless else "10")
+            os.getenv("ADMIN_DB_MAX_OVERFLOW", "2" if is_serverless else "10")
         )
     except Exception:
-        admin_max_overflow = 0 if is_serverless else 10
+        admin_max_overflow = 2 if is_serverless else 10
+    try:
+        admin_pool_timeout = int(
+            os.getenv("ADMIN_DB_POOL_TIMEOUT", "10" if is_serverless else "30")
+        )
+    except Exception:
+        admin_pool_timeout = 10 if is_serverless else 30
     admin_engine = create_engine(
         ADMIN_DATABASE_URL,
         pool_pre_ping=True,
         pool_size=admin_pool_size,
         max_overflow=admin_max_overflow,
+        pool_timeout=admin_pool_timeout,
         pool_recycle=1800,
         connect_args={"options": "-c timezone=America/Argentina/Buenos_Aires"},
     )

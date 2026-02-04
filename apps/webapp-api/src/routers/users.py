@@ -29,6 +29,7 @@ from src.services.whatsapp_dispatch_service import WhatsAppDispatchService
 from src.services.audit_service import AuditService
 from src.services.membership_service import MembershipService
 from src.services.entitlements_payload_service import EntitlementsPayloadService
+from src.security.session_claims import OWNER_ROLES
 
 # Fallback for UsuarioEstado if not imported correctly or available
 try:
@@ -252,7 +253,7 @@ async def api_usuario_pin_set(
     try:
         is_owner = bool(request.session.get("logged_in")) and str(
             request.session.get("role") or ""
-        ).strip().lower() in ("dueño", "dueno", "owner")
+        ).strip().lower() in OWNER_ROLES
 
         reset = bool(payload.get("reset"))
         new_pin = payload.get("pin") or payload.get("new_pin")
@@ -485,7 +486,7 @@ async def api_usuario_create(
     try:
         is_owner = bool(request.session.get("logged_in")) and str(
             request.session.get("role") or ""
-        ).strip().lower() in ("dueño", "dueno", "owner")
+        ).strip().lower() in OWNER_ROLES
 
         # Prepare data
         data = {
@@ -577,7 +578,7 @@ async def api_usuario_update(
     try:
         is_owner = bool(request.session.get("logged_in")) and str(
             request.session.get("role") or ""
-        ).strip().lower() in ("dueño", "dueno", "owner")
+        ).strip().lower() in OWNER_ROLES
 
         # Clean payload
         data = payload.copy()
@@ -690,7 +691,7 @@ async def api_usuario_toggle_activo(
 
         is_owner = bool(request.session.get("logged_in")) and str(
             request.session.get("role") or ""
-        ).strip().lower() in ("dueño", "dueno", "owner")
+        ).strip().lower() in OWNER_ROLES
         result = user_service.toggle_activo(usuario_id, is_owner=is_owner)
         if result.get("error") == "not_found":
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
