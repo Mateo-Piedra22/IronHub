@@ -824,7 +824,14 @@ async def api_access_device_start_enrollment(device_id: int, request: Request, d
     "/api/access/devices/{device_id}/enrollment/clear",
     dependencies=[Depends(require_gestion_access), Depends(require_feature("accesos")), Depends(require_scope_gestion("accesos:write"))],
 )
-async def api_access_device_clear_enrollment_gestion(device_id: int, db: Session = Depends(get_db_session)):
+async def api_access_device_clear_enrollment_gestion(device_id: int, request: Request, db: Session = Depends(get_db_session)):
+    claims = get_claims(request)
+    row = db.execute(
+        text("SELECT id, enabled FROM access_devices WHERE id = :id LIMIT 1"),
+        {"id": int(device_id)},
+    ).mappings().first()
+    if not row or not row.get("enabled"):
+        raise HTTPException(status_code=404, detail="Device no encontrado")
     db.execute(
         text(
             """
@@ -834,6 +841,24 @@ async def api_access_device_clear_enrollment_gestion(device_id: int, db: Session
             """
         ),
         {"id": int(device_id), "rt": json.dumps({"updated_at": datetime.now(timezone.utc).isoformat(), "enroll_ready": False})},
+    )
+    request_id = secrets.token_urlsafe(18)[:40]
+    actor = int(claims.get("user_id") or 0) if claims.get("user_id") else None
+    db.execute(
+        text(
+            """
+            INSERT INTO access_commands(device_id, command_type, payload, status, request_id, actor_usuario_id, expires_at, created_at)
+            VALUES (:did, 'enroll_clear', CAST(:p AS JSONB), 'pending', :rid, :actor, NOW() + INTERVAL '30 seconds', NOW())
+            ON CONFLICT (device_id, request_id) DO UPDATE
+            SET created_at = access_commands.created_at
+            """
+        ),
+        {
+            "did": int(device_id),
+            "p": json.dumps({"source": "gestion"}, ensure_ascii=False),
+            "rid": str(request_id),
+            "actor": actor,
+        },
     )
     db.commit()
     return {"ok": True}

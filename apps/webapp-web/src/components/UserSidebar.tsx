@@ -109,31 +109,25 @@ export default function UserSidebar({
         try {
             const res = await api.listAccessDevices();
             if (res.ok && res.data?.ok) {
-                setEnrollDevices(res.data.items || []);
-                if (!enrollDeviceId && (res.data.items || []).length > 0) {
-                    setEnrollDeviceId(String((res.data.items || [])[0]?.id || ''));
-                }
+                const items = res.data.items || [];
+                setEnrollDevices(items);
+                setEnrollDeviceId((prev) => {
+                    if (prev) return prev;
+                    const first = items[0]?.id;
+                    return typeof first === 'number' ? String(first) : '';
+                });
             } else {
                 setEnrollDevices([]);
             }
         } finally {
             setEnrollDevicesLoading(false);
         }
-    }, [enrollDeviceId]);
+    }, []);
 
     useEffect(() => {
         if (!isOpen) return;
         if (activeTab !== 'credenciales') return;
         void loadEnrollDevices();
-    }, [isOpen, activeTab, loadEnrollDevices]);
-
-    useEffect(() => {
-        if (!isOpen) return;
-        if (activeTab !== 'credenciales') return;
-        const t = setInterval(() => {
-            void loadEnrollDevices();
-        }, 2000);
-        return () => clearInterval(t);
     }, [isOpen, activeTab, loadEnrollDevices]);
 
     const startEnrollment = useCallback(async () => {
@@ -152,12 +146,13 @@ export default function UserSidebar({
             });
             if (!res.ok || !res.data?.ok) throw new Error(res.error || 'No se pudo iniciar');
             success('Portal de enrolamiento iniciado');
+            void loadEnrollDevices();
         } catch (e) {
             error(e instanceof Error ? e.message : 'Error');
         } finally {
             setEnrollSaving(false);
         }
-    }, [usuario?.id, enrollDeviceId, enrollType, enrollOverwrite, enrollExpiresSeconds, success, error]);
+    }, [usuario?.id, enrollDeviceId, enrollType, enrollOverwrite, enrollExpiresSeconds, success, error, loadEnrollDevices]);
 
     const clearEnrollment = useCallback(async () => {
         const did = Number(enrollDeviceId);
@@ -167,12 +162,13 @@ export default function UserSidebar({
             const res = await api.clearAccessDeviceEnrollment(did);
             if (!res.ok || !res.data?.ok) throw new Error(res.error || 'No se pudo cancelar');
             success('Portal cancelado');
+            void loadEnrollDevices();
         } catch (e) {
             error(e instanceof Error ? e.message : 'Error');
         } finally {
             setEnrollSaving(false);
         }
-    }, [enrollDeviceId, success, error]);
+    }, [enrollDeviceId, success, error, loadEnrollDevices]);
 
     const loadAccessCreds = useCallback(async () => {
         if (!usuario?.id) return;

@@ -3135,6 +3135,20 @@ public sealed class MainForm : Form
                 await TryUnlockAsync(true, ms);
                 detail = $"unlock {(ms ?? (_cfg.UnlockMs ?? 2500))}ms";
             }
+            else if (t == "enroll_clear")
+            {
+                _cfg.EnrollEnabled = false;
+                _cfg.EnrollUsuarioId = null;
+                _cfg.EnrollCredentialType = "fob";
+                _cfg.EnrollOverwrite = true;
+                _cfg.EnrollExpiresAt = null;
+                _cfg.Save();
+                _deviceConfigTimer.Interval = 5000;
+                _last.Text = "ENROLL cancelado";
+                await PostDeviceStatusAsync();
+                UpdateStatus();
+                detail = "enroll_clear";
+            }
             else
             {
                 ok = false;
