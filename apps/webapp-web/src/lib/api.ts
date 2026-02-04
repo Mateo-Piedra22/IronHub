@@ -835,6 +835,8 @@ export type AccessCommand = {
 export type AccessCredential = {
     id: number;
     usuario_id: number;
+    usuario_nombre?: string | null;
+    usuario_dni?: string | null;
     credential_type: string;
     label?: string | null;
     active: boolean;
@@ -1325,8 +1327,14 @@ class ApiClient {
         return this.request<{ ok: boolean; items: AccessEvent[]; page: number; limit: number }>(`/api/access/events${q}`);
     }
 
-    async listAccessCredentials(params?: { usuario_id?: number }) {
-        const q = params?.usuario_id ? `?usuario_id=${encodeURIComponent(String(params.usuario_id))}` : '';
+    async listAccessCredentials(params?: { usuario_id?: number; q?: string; credential_type?: string; active?: boolean; limit?: number }) {
+        const qp = new URLSearchParams();
+        if (params?.usuario_id != null) qp.set('usuario_id', String(params.usuario_id));
+        if (params?.q) qp.set('q', params.q);
+        if (params?.credential_type) qp.set('credential_type', params.credential_type);
+        if (params?.active != null) qp.set('active', String(params.active));
+        if (params?.limit != null) qp.set('limit', String(params.limit));
+        const q = qp.toString() ? `?${qp.toString()}` : '';
         return this.request<{ ok: boolean; items: AccessCredential[] }>(`/api/access/credentials${q}`);
     }
 
@@ -1339,6 +1347,13 @@ class ApiClient {
 
     async deleteAccessCredential(credentialId: number) {
         return this.request<{ ok: boolean }>(`/api/access/credentials/${credentialId}`, { method: 'DELETE' });
+    }
+
+    async updateAccessCredential(credentialId: number, payload: { usuario_id?: number; label?: string | null; active?: boolean }) {
+        return this.request<{ ok: boolean; item: AccessCredential }>(`/api/access/credentials/${credentialId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(payload),
+        });
     }
 
     async getUsuarioAccessCredentials() {

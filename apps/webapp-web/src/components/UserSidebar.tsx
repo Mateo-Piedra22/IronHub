@@ -1001,6 +1001,27 @@ export default function UserSidebar({
                             </div>
                         </div>
 
+                        <div>
+                            <div className="text-[11px] font-medium text-slate-500 uppercase tracking-wide mb-2">Acceso</div>
+                            <div className="text-xs text-slate-500 mb-2">
+                                Llavero:{' '}
+                                <span className="text-slate-300 font-medium">
+                                    {accessCreds.filter((c) => c.active && c.credential_type === 'fob').length}
+                                </span>
+                                {' · '}
+                                Tarjeta:{' '}
+                                <span className="text-slate-300 font-medium">
+                                    {accessCreds.filter((c) => c.active && c.credential_type === 'card').length}
+                                </span>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                <Button size="sm" variant="secondary" onClick={() => setActiveTab('credenciales')}>
+                                    <KeyRound className="w-3 h-3 mr-1" />
+                                    Llavero/Tarjeta
+                                </Button>
+                            </div>
+                        </div>
+
                         {(onOpenPagoModal || onCreateRutina || rutinaActiva) && (
                             <div>
                                 <div className="text-[11px] font-medium text-slate-500 uppercase tracking-wide mb-2">Acciones</div>
@@ -1211,7 +1232,7 @@ export default function UserSidebar({
                         { id: 'resumen', label: 'Resumen', icon: History },
                         { id: 'membresia', label: 'Membresía', icon: CreditCard },
                         { id: 'accesos', label: 'Accesos', icon: UserCheck },
-                        { id: 'credenciales', label: 'Credenciales', icon: KeyRound },
+                        { id: 'credenciales', label: 'Llavero/Tarjeta', icon: KeyRound },
                         { id: 'notas', label: 'Notas', icon: FileText },
                         { id: 'etiquetas', label: 'Etiquetas', icon: Tag },
                         { id: 'estados', label: 'Estados', icon: Flag },
@@ -1544,9 +1565,9 @@ export default function UserSidebar({
                         <div className="space-y-4">
                             <div className="rounded-lg bg-slate-800 border border-slate-700 p-3 space-y-3">
                                 <div>
-                                    <div className="text-xs font-medium text-slate-500">Portal temporal (en agente)</div>
+                                    <div className="text-xs font-medium text-slate-500">Registrar (Access Agent)</div>
                                     <div className="text-xs text-slate-500 mt-1">
-                                        Seleccioná un device con sucursal y el agente esperará la lectura del llavero/tarjeta.
+                                        Seleccioná un device con sucursal y habilitá el modo enrolamiento. Luego, en el Access Agent de ese device, escaneá la credencial una sola vez.
                                     </div>
                                 </div>
                                 {enrollDevicesLoading ? (
@@ -1638,7 +1659,7 @@ export default function UserSidebar({
                                             </div>
                                         ) : (
                                             <div className="text-xs text-slate-500">
-                                                En el Access Agent del device seleccionado, escaneá la credencial una sola vez.
+                                                Si el device no está online, el portal no va a quedar listo.
                                             </div>
                                         )}
                                     </>
@@ -1647,8 +1668,8 @@ export default function UserSidebar({
 
                             <div className="rounded-lg bg-slate-800 border border-slate-700 p-3 space-y-3">
                                 <div>
-                                    <div className="text-xs font-medium text-slate-500">Credenciales de acceso</div>
-                                    <div className="text-xs text-slate-500 mt-1">Llavero / tarjeta habilitados para molinete/puerta.</div>
+                                    <div className="text-xs font-medium text-slate-500">Carga manual</div>
+                                    <div className="text-xs text-slate-500 mt-1">Pegá/escaneá el valor para registrar una credencial directo.</div>
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                     <select

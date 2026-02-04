@@ -47,6 +47,8 @@ public sealed class MainForm : Form
     private readonly TextBox _unlockUrl = new();
     private readonly NumericUpDown _unlockMs = new();
     private readonly ComboBox _unlockMethod = new();
+    private readonly ComboBox _unlockPreset = new();
+    private readonly Button _unlockPresetApplyBtn = new();
     private readonly TextBox _unlockTcpHost = new();
     private readonly NumericUpDown _unlockTcpPort = new();
     private readonly TextBox _unlockTcpPayload = new();
@@ -82,14 +84,18 @@ public sealed class MainForm : Form
     private readonly Button _testTcpBtn = new();
     private readonly Button _testSerialBtn = new();
     private readonly Button _testAllBtn = new();
+    private readonly Button _testApiBtn = new();
+    private readonly Button _testModeActionBtn = new();
     private readonly CheckBox _fullscreen = new();
     private readonly CancellationTokenSource _cts = new();
     private readonly System.Windows.Forms.Timer _deviceConfigTimer = new();
     private readonly System.Windows.Forms.Timer _flushQueueTimer = new();
     private readonly System.Windows.Forms.Timer _captureIdleTimer = new();
     private readonly System.Windows.Forms.Timer _commandPollTimer = new();
-    private readonly object _queueLock = new();
+    private readonly System.Windows.Forms.Timer _portsRefreshTimer = new();
     private readonly string _queuePath;
+    private readonly OfflineEventQueue _offlineQueue;
+    private readonly RollingFileLog _log;
     private SerialPort? _serial;
     private readonly StringBuilder _serialBuf = new();
     private bool _pollingCommands;
@@ -122,11 +128,14 @@ public sealed class MainForm : Form
 
         _cfg = AgentConfig.Load();
         _queuePath = Path.Combine(AgentConfig.ConfigDir(), "events.ndjson");
+        _offlineQueue = new OfflineEventQueue(_queuePath, new OfflineEventQueue.DpapiLineProtector());
+        _log = new RollingFileLog(Path.Combine(AgentConfig.ConfigDir(), "agent.log"));
+        _log.Append("agent_start");
 
         _status.AutoSize = true;
         _status.Top = 16;
         _status.Left = 16;
-        _status.Font = new System.Drawing.Font("Segoe UI", 11, System.Drawing.FontStyle.Bold);
+        _status.Font = new System.Drawing.Font("Segoe UI", 12, System.Drawing.FontStyle.Bold);
         Controls.Add(_status);
 
         _statusDetail.AutoSize = true;
@@ -167,42 +176,42 @@ public sealed class MainForm : Form
         _dispUser.Top = 74;
         _dispUser.Width = 560;
         _dispUser.Height = 26;
-        _dispUser.Font = new System.Drawing.Font("Segoe UI", 12, System.Drawing.FontStyle.Bold);
+        _dispUser.Font = new System.Drawing.Font("Segoe UI", 13, System.Drawing.FontStyle.Bold);
         _display.Controls.Add(_dispUser);
 
         _dispMembership.Left = 16;
         _dispMembership.Top = 104;
         _dispMembership.Width = 560;
         _dispMembership.Height = 54;
-        _dispMembership.Font = new System.Drawing.Font("Segoe UI", 10);
+        _dispMembership.Font = new System.Drawing.Font("Segoe UI", 11);
         _display.Controls.Add(_dispMembership);
 
         _dispReason.Left = 16;
         _dispReason.Top = 160;
         _dispReason.Width = 560;
         _dispReason.Height = 52;
-        _dispReason.Font = new System.Drawing.Font("Segoe UI", 11, System.Drawing.FontStyle.Bold);
+        _dispReason.Font = new System.Drawing.Font("Segoe UI", 12, System.Drawing.FontStyle.Bold);
         _display.Controls.Add(_dispReason);
 
         _dispAction.Left = 16;
         _dispAction.Top = 214;
         _dispAction.Width = 560;
         _dispAction.Height = 40;
-        _dispAction.Font = new System.Drawing.Font("Segoe UI", 10, System.Drawing.FontStyle.Bold);
+        _dispAction.Font = new System.Drawing.Font("Segoe UI", 11, System.Drawing.FontStyle.Bold);
         _display.Controls.Add(_dispAction);
 
         _dispInput.Left = 16;
         _dispInput.Top = 258;
         _dispInput.Width = 560;
         _dispInput.Height = 24;
-        _dispInput.Font = new System.Drawing.Font("Segoe UI", 10);
+        _dispInput.Font = new System.Drawing.Font("Segoe UI", 11);
         _display.Controls.Add(_dispInput);
 
         _dispMeta.Left = 16;
         _dispMeta.Top = 292;
         _dispMeta.Width = 560;
         _dispMeta.Height = 80;
-        _dispMeta.Font = new System.Drawing.Font("Segoe UI", 9);
+        _dispMeta.Font = new System.Drawing.Font("Segoe UI", 10);
         _display.Controls.Add(_dispMeta);
 
         _historyPanel.BorderStyle = BorderStyle.FixedSingle;
@@ -214,7 +223,7 @@ public sealed class MainForm : Form
         _historyTitle.Width = 320;
         _historyTitle.Height = 20;
         _historyTitle.Text = "Historial (últimas lecturas)";
-        _historyTitle.Font = new System.Drawing.Font("Segoe UI", 10, System.Drawing.FontStyle.Bold);
+        _historyTitle.Font = new System.Drawing.Font("Segoe UI", 11, System.Drawing.FontStyle.Bold);
         _historyPanel.Controls.Add(_historyTitle);
 
         _history.Left = 12;
@@ -326,6 +335,13 @@ public sealed class MainForm : Form
             _commandPollTimer.Start();
         };
 
+        _portsRefreshTimer.Interval = 1500;
+        _portsRefreshTimer.Tick += (_, _) =>
+        {
+            if (!_configOpen) return;
+            RefreshSerialPorts();
+        };
+
         FormClosing += (_, _) => _cts.Cancel();
         KeyDown += MainKeyDown;
         Activated += (_, _) => FocusCapture();
@@ -367,17 +383,20 @@ public sealed class MainForm : Form
         tabs.TabPages.Add(tpInput);
         tabs.TabPages.Add(tpTests);
 
+        var wide = 480;
+
         int AddTitle(Control c, string text)
         {
             var t = new Label
             {
                 Left = 16,
                 Top = 16,
-                Width = 720,
+                Width = 680,
                 Height = 22,
                 Text = text,
-                Font = new System.Drawing.Font("Segoe UI", 9, System.Drawing.FontStyle.Bold)
+                Font = new System.Drawing.Font("Segoe UI", 10.5f, System.Drawing.FontStyle.Bold)
             };
+            t.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
             c.Controls.Add(t);
             return t.Bottom;
         }
@@ -388,7 +407,7 @@ public sealed class MainForm : Form
         {
             Left = 16,
             Top = pairTitleBottom + 8,
-            Width = 720,
+            Width = 680,
             Height = 70,
             Multiline = true,
             ReadOnly = true,
@@ -396,6 +415,7 @@ public sealed class MainForm : Form
             BorderStyle = BorderStyle.FixedSingle,
             Text = "Tip: copiá el bloque de Pairing desde Gestión y usá Pegar.\r\nBase URL debe ser la API (ej: https://api.ironhub.motiona.xyz)."
         };
+        pairHelp.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         tpPairing.Controls.Add(pairHelp);
         _tips.SetToolTip(pairHelp, "Si ves HTML/<!DOCTYPE> al hacer Pair, la Base URL no es la API.");
 
@@ -412,7 +432,8 @@ public sealed class MainForm : Form
         tpPairing.Controls.Add(MkLabel("Base URL API:", 16, y));
         _baseUrl.Left = 200;
         _baseUrl.Top = y - 2;
-        _baseUrl.Width = 520;
+        _baseUrl.Width = wide;
+        _baseUrl.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _baseUrl.PlaceholderText = "https://api.ironhub.motiona.xyz";
         tpPairing.Controls.Add(_baseUrl);
         _tips.SetToolTip(_baseUrl, "Debe ser la API. Ej: https://api.ironhub.motiona.xyz (no la web del tenant).");
@@ -468,10 +489,39 @@ public sealed class MainForm : Form
         tpUnlock.Controls.Add(_unlockMethod);
 
         y += 36;
+        tpUnlock.Controls.Add(MkLabel("Preset:", 16, y));
+        _unlockPreset.Left = 200;
+        _unlockPreset.Top = y - 2;
+        _unlockPreset.Width = 360;
+        _unlockPreset.DropDownStyle = ComboBoxStyle.DropDownList;
+        _unlockPreset.Items.Clear();
+        _unlockPreset.Items.AddRange(
+            new object[]
+            {
+                "HTTP GET · /unlock",
+                "HTTP POST JSON · /unlock",
+                "TCP · OPEN\\n (9100)",
+                "TCP · 0xA0 0x01 0x01 (9100)",
+                "Serial · DTR_PULSE:500 (9600)",
+                "Serial · 0xA0 0x01 0x01 (9600)"
+            }
+        );
+        if (_unlockPreset.Items.Count > 0) _unlockPreset.SelectedIndex = 0;
+        tpUnlock.Controls.Add(_unlockPreset);
+
+        _unlockPresetApplyBtn.Left = 570;
+        _unlockPresetApplyBtn.Top = y - 3;
+        _unlockPresetApplyBtn.Width = 120;
+        _unlockPresetApplyBtn.Text = "Aplicar";
+        _unlockPresetApplyBtn.Click += (_, _) => ApplyUnlockPresetFromUi();
+        tpUnlock.Controls.Add(_unlockPresetApplyBtn);
+
+        y += 36;
         tpUnlock.Controls.Add(MkLabel("Unlock URL:", 16, y));
         _unlockUrl.Left = 200;
         _unlockUrl.Top = y - 2;
-        _unlockUrl.Width = 520;
+        _unlockUrl.Width = wide;
+        _unlockUrl.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _unlockUrl.PlaceholderText = "http://RELAY_IP/unlock";
         tpUnlock.Controls.Add(_unlockUrl);
 
@@ -495,7 +545,8 @@ public sealed class MainForm : Form
         tpUnlock.Controls.Add(MkLabel("TCP payload:", 16, y));
         _unlockTcpPayload.Left = 200;
         _unlockTcpPayload.Top = y - 2;
-        _unlockTcpPayload.Width = 520;
+        _unlockTcpPayload.Width = wide;
+        _unlockTcpPayload.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _unlockTcpPayload.PlaceholderText = "OPEN\\n o 0xA0 0x01 0x01";
         tpUnlock.Controls.Add(_unlockTcpPayload);
 
@@ -519,7 +570,8 @@ public sealed class MainForm : Form
         tpUnlock.Controls.Add(MkLabel("Serial payload:", 16, y));
         _unlockSerialPayload.Left = 200;
         _unlockSerialPayload.Top = y - 2;
-        _unlockSerialPayload.Width = 520;
+        _unlockSerialPayload.Width = wide;
+        _unlockSerialPayload.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _unlockSerialPayload.PlaceholderText = "OPEN\\n o 0xA0 0x01 0x01 o DTR_PULSE:500";
         tpUnlock.Controls.Add(_unlockSerialPayload);
 
@@ -628,7 +680,8 @@ public sealed class MainForm : Form
         tpInput.Controls.Add(MkLabel("Regex (opt):", 16, y));
         _inputRegex.Left = 200;
         _inputRegex.Top = y - 2;
-        _inputRegex.Width = 520;
+        _inputRegex.Width = wide;
+        _inputRegex.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _inputRegex.PlaceholderText = "Ej: UID:(\\w+)";
         tpInput.Controls.Add(_inputRegex);
 
@@ -681,18 +734,58 @@ public sealed class MainForm : Form
         {
             Left = 16,
             Top = y + 38,
-            Width = 720,
+            Width = 680,
             Height = 46,
             Text = "Uso: escaneá llavero/QR o tipeá DNI + Enter. DNI#PIN: 12345678#1234 + Enter.",
         };
+        inputHint.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         tpInput.Controls.Add(inputHint);
 
-        var testsTitleBottom = AddTitle(tpTests, "Pruebas de apertura");
+        var testsTitleBottom = AddTitle(tpTests, "Pruebas");
         y = testsTitleBottom + 14;
+        var connSection = new Label
+        {
+            Left = 16,
+            Top = y,
+            Width = 680,
+            Height = 22,
+            Text = "Conectividad",
+            Font = new System.Drawing.Font("Segoe UI", 10.0f, System.Drawing.FontStyle.Bold)
+        };
+        connSection.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        tpTests.Controls.Add(connSection);
+        y = connSection.Bottom + 12;
+        _testApiBtn.Left = 200;
+        _testApiBtn.Top = y - 3;
+        _testApiBtn.Width = 180;
+        _testApiBtn.Text = "Test API";
+        _testApiBtn.Click += async (_, _) => await RunApiConnectivityTestAsync();
+        tpTests.Controls.Add(_testApiBtn);
+
+        _testModeActionBtn.Left = 390;
+        _testModeActionBtn.Top = y - 3;
+        _testModeActionBtn.Width = 240;
+        _testModeActionBtn.Text = "Test acción según modo";
+        _testModeActionBtn.Click += async (_, _) => await RunUnlockByModeTestAsync();
+        tpTests.Controls.Add(_testModeActionBtn);
+
+        y += 44;
+        var unlockSection = new Label
+        {
+            Left = 16,
+            Top = y,
+            Width = 680,
+            Height = 22,
+            Text = "Apertura",
+            Font = new System.Drawing.Font("Segoe UI", 10.0f, System.Drawing.FontStyle.Bold)
+        };
+        unlockSection.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+        tpTests.Controls.Add(unlockSection);
+        y = unlockSection.Bottom + 12;
         tpTests.Controls.Add(MkLabel("Test GET URL:", 16, y));
         _testGetUrl.Left = 200;
         _testGetUrl.Top = y - 2;
-        _testGetUrl.Width = 430;
+        _testGetUrl.Anchor = AnchorStyles.Top | AnchorStyles.Left;
         _testGetUrl.PlaceholderText = "http://RELAY_IP/unlock";
         tpTests.Controls.Add(_testGetUrl);
         _testGetBtn.Left = 640;
@@ -701,12 +794,13 @@ public sealed class MainForm : Form
         _testGetBtn.Text = "Test";
         _testGetBtn.Click += async (_, _) => await RunUnlockTestAsync("http_get");
         tpTests.Controls.Add(_testGetBtn);
+        _testGetUrl.Width = Math.Max(180, _testGetBtn.Left - _testGetUrl.Left - 12);
 
         y += 36;
         tpTests.Controls.Add(MkLabel("Test POST URL:", 16, y));
         _testPostUrl.Left = 200;
         _testPostUrl.Top = y - 2;
-        _testPostUrl.Width = 430;
+        _testPostUrl.Anchor = AnchorStyles.Top | AnchorStyles.Left;
         _testPostUrl.PlaceholderText = "http://RELAY_IP/unlock";
         tpTests.Controls.Add(_testPostUrl);
         _testPostBtn.Left = 640;
@@ -715,6 +809,7 @@ public sealed class MainForm : Form
         _testPostBtn.Text = "Test";
         _testPostBtn.Click += async (_, _) => await RunUnlockTestAsync("http_post_json");
         tpTests.Controls.Add(_testPostBtn);
+        _testPostUrl.Width = Math.Max(180, _testPostBtn.Left - _testPostUrl.Left - 12);
 
         y += 36;
         tpTests.Controls.Add(MkLabel("Test TCP:", 16, y));
@@ -740,7 +835,8 @@ public sealed class MainForm : Form
         tpTests.Controls.Add(MkLabel("TCP payload:", 16, y));
         _testTcpPayload.Left = 200;
         _testTcpPayload.Top = y - 2;
-        _testTcpPayload.Width = 520;
+        _testTcpPayload.Width = wide;
+        _testTcpPayload.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _testTcpPayload.PlaceholderText = "OPEN\\n o 0xA0 0x01 0x01";
         tpTests.Controls.Add(_testTcpPayload);
 
@@ -770,7 +866,8 @@ public sealed class MainForm : Form
         tpTests.Controls.Add(MkLabel("Serial payload:", 16, y));
         _testSerialPayload.Left = 200;
         _testSerialPayload.Top = y - 2;
-        _testSerialPayload.Width = 520;
+        _testSerialPayload.Width = wide;
+        _testSerialPayload.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
         _testSerialPayload.PlaceholderText = "OPEN\\n o 0xA0 0x01 0x01 o DTR_PULSE:500";
         tpTests.Controls.Add(_testSerialPayload);
 
@@ -781,6 +878,13 @@ public sealed class MainForm : Form
         _testAllBtn.Text = "Probar todos";
         _testAllBtn.Click += async (_, _) => await RunUnlockAllTestsAsync();
         tpTests.Controls.Add(_testAllBtn);
+
+        var diag = new Button { Width = 180, Text = "Copiar diagnóstico" };
+        diag.Left = 12;
+        diag.Top = panel.Height - 52;
+        diag.Anchor = AnchorStyles.Left | AnchorStyles.Bottom;
+        diag.Click += (_, _) => CopyDiagnosticsToClipboard();
+        panel.Controls.Add(diag);
 
         var save = new Button { Width = 120, Text = "Guardar" };
         save.Left = panel.Width - 264;
@@ -799,7 +903,7 @@ public sealed class MainForm : Form
 
     private static Label MkLabel(string t, int x, int y)
     {
-        return new Label { Left = x, Top = y, Width = 170, Text = t };
+        return new Label { Left = x, Top = y, AutoSize = true, Text = t };
     }
 
     private void ToggleConfig(bool? open = null)
@@ -815,11 +919,16 @@ public sealed class MainForm : Form
                 LayoutMain();
             }
         }
+        if (_configOpen) RefreshSerialPorts();
+        if (_configOpen) _portsRefreshTimer.Start();
+        if (!_configOpen) _portsRefreshTimer.Stop();
         if (_configOpen) ApplyConfigToUi();
         if (_configOpen) StopInput();
+        if (_configOpen) _commandPollTimer.Stop();
         ApplyKioskMode();
         FocusCapture();
         if (!_configOpen && _running) StartInput();
+        if (!_configOpen && _running) _commandPollTimer.Start();
         UpdateStatus();
     }
 
@@ -864,27 +973,47 @@ public sealed class MainForm : Form
         {
             var ports = SerialPort.GetPortNames();
             Array.Sort(ports, StringComparer.OrdinalIgnoreCase);
-            var prev = _serialPort.SelectedItem?.ToString();
-            var prev2 = _testSerialPort.SelectedItem?.ToString();
-            var prev3 = _unlockSerialPort.SelectedItem?.ToString();
-            _serialPort.Items.Clear();
-            _testSerialPort.Items.Clear();
-            _unlockSerialPort.Items.Clear();
-            foreach (var p in ports) _serialPort.Items.Add(p);
-            foreach (var p in ports) _testSerialPort.Items.Add(p);
-            foreach (var p in ports) _unlockSerialPort.Items.Add(p);
-            if (!string.IsNullOrWhiteSpace(prev) && _serialPort.Items.Contains(prev)) _serialPort.SelectedItem = prev;
-            if (_serialPort.SelectedItem == null && _serialPort.Items.Count > 0) _serialPort.SelectedIndex = 0;
-            if (!string.IsNullOrWhiteSpace(prev2) && _testSerialPort.Items.Contains(prev2)) _testSerialPort.SelectedItem = prev2;
-            if (_testSerialPort.SelectedItem == null && _testSerialPort.Items.Count > 0) _testSerialPort.SelectedIndex = 0;
-            if (!string.IsNullOrWhiteSpace(prev3) && _unlockSerialPort.Items.Contains(prev3)) _unlockSerialPort.SelectedItem = prev3;
-            if (_unlockSerialPort.SelectedItem == null && _unlockSerialPort.Items.Count > 0) _unlockSerialPort.SelectedIndex = 0;
+            UpdatePortCombo(_serialPort, ports, (_cfg.SerialPort ?? "").Trim());
+            UpdatePortCombo(_testSerialPort, ports, (_cfg.TestSerialPort ?? "").Trim());
+            UpdatePortCombo(_unlockSerialPort, ports, (_cfg.UnlockSerialPort ?? "").Trim());
         }
         catch
         {
             _serialPort.Items.Clear();
             _testSerialPort.Items.Clear();
             _unlockSerialPort.Items.Clear();
+        }
+    }
+
+    private static void UpdatePortCombo(ComboBox cb, string[] ports, string preferred)
+    {
+        if (cb == null) return;
+        var prev = (cb.SelectedItem?.ToString() ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(prev)) prev = (preferred ?? "").Trim();
+        cb.BeginUpdate();
+        try
+        {
+            cb.Items.Clear();
+            if (!string.IsNullOrWhiteSpace(prev) && !ports.Contains(prev, StringComparer.OrdinalIgnoreCase))
+            {
+                cb.Items.Add(prev);
+            }
+            foreach (var p in ports)
+            {
+                cb.Items.Add(p);
+            }
+            if (!string.IsNullOrWhiteSpace(prev) && cb.Items.Contains(prev))
+            {
+                cb.SelectedItem = prev;
+            }
+            if (cb.SelectedItem == null && cb.Items.Count > 0)
+            {
+                cb.SelectedIndex = 0;
+            }
+        }
+        finally
+        {
+            cb.EndUpdate();
         }
     }
 
@@ -930,9 +1059,15 @@ public sealed class MainForm : Form
                     if (_serial == null) return;
                     var s = _serial.ReadExisting();
                     if (string.IsNullOrEmpty(s)) return;
+                    var overflow = false;
                     lock (_serialBuf)
                     {
                         _serialBuf.Append(s);
+                        if (_serialBuf.Length > 32768)
+                        {
+                            _serialBuf.Clear();
+                            overflow = true;
+                        }
                         var txt = _serialBuf.ToString();
                         var idx = txt.IndexOf('\n');
                         while (idx >= 0)
@@ -947,6 +1082,14 @@ public sealed class MainForm : Form
                         }
                         _serialBuf.Clear();
                         _serialBuf.Append(txt);
+                    }
+                    if (overflow)
+                    {
+                        BeginInvoke(new Action(() =>
+                        {
+                            _last.Text = "Serial: buffer overflow (sin \\n)";
+                        }));
+                        _log.Append("serial_buffer_overflow");
                     }
                 }
                 catch
@@ -1044,8 +1187,55 @@ public sealed class MainForm : Form
         _fullscreen.Checked = _cfg.Fullscreen ?? false;
     }
 
+    private void ApplyUnlockPresetFromUi()
+    {
+        var p = _unlockPreset.SelectedItem?.ToString() ?? "";
+        if (p.StartsWith("HTTP GET", StringComparison.Ordinal))
+        {
+            _unlockMethod.SelectedItem = "http_get";
+            if (string.IsNullOrWhiteSpace(_unlockUrl.Text)) _unlockUrl.Text = "http://RELAY_IP/unlock";
+            return;
+        }
+        if (p.StartsWith("HTTP POST JSON", StringComparison.Ordinal))
+        {
+            _unlockMethod.SelectedItem = "http_post_json";
+            if (string.IsNullOrWhiteSpace(_unlockUrl.Text)) _unlockUrl.Text = "http://RELAY_IP/unlock";
+            return;
+        }
+        if (p.StartsWith("TCP · OPEN", StringComparison.Ordinal))
+        {
+            _unlockMethod.SelectedItem = "tcp";
+            if (string.IsNullOrWhiteSpace(_unlockTcpHost.Text)) _unlockTcpHost.Text = "192.168.1.50";
+            _unlockTcpPort.Value = Math.Clamp(9100, (int)_unlockTcpPort.Minimum, (int)_unlockTcpPort.Maximum);
+            _unlockTcpPayload.Text = "OPEN\n";
+            return;
+        }
+        if (p.StartsWith("TCP · 0xA0", StringComparison.Ordinal))
+        {
+            _unlockMethod.SelectedItem = "tcp";
+            if (string.IsNullOrWhiteSpace(_unlockTcpHost.Text)) _unlockTcpHost.Text = "192.168.1.50";
+            _unlockTcpPort.Value = Math.Clamp(9100, (int)_unlockTcpPort.Minimum, (int)_unlockTcpPort.Maximum);
+            _unlockTcpPayload.Text = "0xA0 0x01 0x01";
+            return;
+        }
+        if (p.StartsWith("Serial · DTR_PULSE", StringComparison.Ordinal))
+        {
+            _unlockMethod.SelectedItem = "serial";
+            _unlockSerialBaud.Value = Math.Clamp(9600, (int)_unlockSerialBaud.Minimum, (int)_unlockSerialBaud.Maximum);
+            _unlockSerialPayload.Text = "DTR_PULSE:500";
+            return;
+        }
+        if (p.StartsWith("Serial · 0xA0", StringComparison.Ordinal))
+        {
+            _unlockMethod.SelectedItem = "serial";
+            _unlockSerialBaud.Value = Math.Clamp(9600, (int)_unlockSerialBaud.Minimum, (int)_unlockSerialBaud.Maximum);
+            _unlockSerialPayload.Text = "0xA0 0x01 0x01";
+        }
+    }
+
     private void SaveConfig()
     {
+        if (!EnsureBasicConfigValid()) return;
         _cfg.Tenant = _tenant.Text.Trim().ToLowerInvariant();
         _cfg.BaseUrl = NormalizeBaseUrl(_baseUrl.Text);
         _cfg.DeviceId = _deviceId.Text.Trim();
@@ -1088,6 +1278,79 @@ public sealed class MainForm : Form
         ToggleConfig(false);
     }
 
+    private bool EnsureBasicConfigValid()
+    {
+        try
+        {
+            var tenant = _tenant.Text.Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(tenant))
+            {
+                MessageBox.Show("Falta Tenant.", "Configuración", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _tenant.Focus();
+                return false;
+            }
+            foreach (var ch in tenant)
+            {
+                var ok = (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '-';
+                if (!ok)
+                {
+                    MessageBox.Show("Tenant inválido. Usar solo a-z, 0-9 y '-'.", "Configuración", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    _tenant.Focus();
+                    return false;
+                }
+            }
+
+            var rawBaseUrl = _baseUrl.Text;
+            var baseUrl = NormalizeBaseUrl(rawBaseUrl);
+            if (string.IsNullOrWhiteSpace(baseUrl))
+            {
+                MessageBox.Show("Falta Base URL de la API.", "Configuración", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _baseUrl.Focus();
+                return false;
+            }
+            if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var u) || !(u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps))
+            {
+                MessageBox.Show("Base URL inválida. Debe ser http/https.", "Configuración", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _baseUrl.Focus();
+                return false;
+            }
+
+            var derived = DeriveApiBaseUrlFromTenantBaseUrl(baseUrl);
+            if (!string.Equals(derived, baseUrl, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(derived))
+            {
+                try
+                {
+                    var r = MessageBox.Show(
+                        $"La Base URL parece ser la web (no la API).\n\nSugerida: {derived}\n\n¿Usar la sugerida?",
+                        "Configuración",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question
+                    );
+                    if (r == DialogResult.Yes)
+                    {
+                        _baseUrl.Text = derived;
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            var deviceId = _deviceId.Text.Trim();
+            if (string.IsNullOrWhiteSpace(deviceId))
+            {
+                MessageBox.Show("Falta Device ID.", "Configuración", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                _deviceId.Focus();
+                return false;
+            }
+            return true;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
     private void UpdateStatus()
     {
         var ok = !string.IsNullOrWhiteSpace(_cfg.BaseUrl) && !string.IsNullOrWhiteSpace(_cfg.Tenant) && !string.IsNullOrWhiteSpace(_cfg.DeviceId);
@@ -1127,10 +1390,20 @@ public sealed class MainForm : Form
                 detail.Append(" · Sucursal #").Append(_cfg.DeviceSucursalId.Value);
             }
         }
+        if (_blockedUntilUtc.HasValue && DateTimeOffset.UtcNow < _blockedUntilUtc.Value)
+        {
+            var sec = Math.Max(1, (int)Math.Ceiling((_blockedUntilUtc.Value - DateTimeOffset.UtcNow).TotalSeconds));
+            detail.Append(" · Rate limit ").Append(sec).Append("s");
+        }
+        if (paired && IsApiBlocked(out var why, out var waitSec))
+        {
+            detail.Append(" · API ").Append(why).Append(' ').Append(waitSec).Append("s");
+        }
         var q = GetOfflineQueueStats();
         if (q.HasValue)
         {
             detail.Append(" · Cola ").Append(q.Value.lines).Append(" líneas");
+            if (q.Value.bytes > 0) detail.Append(" · ").Append(Math.Max(0, q.Value.bytes / 1024)).Append("KB");
         }
         if (_lastApiOkUtc.HasValue)
         {
@@ -1559,20 +1832,105 @@ public sealed class MainForm : Form
                 MessageBoxIcon.Warning
             );
             if (r != DialogResult.Yes) return;
-            lock (_queueLock)
-            {
-                if (File.Exists(_queuePath))
-                {
-                    File.Delete(_queuePath);
-                }
-            }
+            _offlineQueue.RewriteLines(Array.Empty<string>());
             _last.Text = "Cola offline borrada";
+            _log.Append("offline_queue_cleared");
         }
         catch (Exception ex)
         {
             _last.Text = $"No se pudo limpiar cola: {ex.Message}";
         }
         UpdateStatus();
+    }
+
+    private void CopyDiagnosticsToClipboard()
+    {
+        try
+        {
+            var logPath = Path.Combine(AgentConfig.ConfigDir(), "agent.log");
+            var diag = new System.Collections.Generic.Dictionary<string, object?>
+            {
+                ["captured_at"] = DateTimeOffset.Now.ToString("O"),
+                ["agent_version"] = GetAgentVersion(),
+                ["dotnet"] = Environment.Version.ToString(),
+                ["os"] = Environment.OSVersion.ToString(),
+                ["machine"] = Environment.MachineName,
+                ["config_open"] = _configOpen,
+                ["running"] = _running,
+                ["kiosk"] = !_configOpen && (_cfg.Fullscreen ?? false),
+                ["config"] = new
+                {
+                    tenant = _cfg.Tenant ?? "",
+                    base_url = _cfg.BaseUrl ?? "",
+                    device_id = _cfg.DeviceId ?? "",
+                    token_present = !string.IsNullOrWhiteSpace(_cfg.Token),
+                    token_protected_present = !string.IsNullOrWhiteSpace(_cfg.TokenProtected),
+                    device_sucursal_id = _cfg.DeviceSucursalId,
+                    mode = _cfg.Mode ?? "",
+                    unlock_method = _cfg.UnlockMethod ?? "",
+                    unlock_url = _cfg.UnlockUrl ?? "",
+                    unlock_ms = _cfg.UnlockMs,
+                    unlock_tcp_host = _cfg.UnlockTcpHost ?? "",
+                    unlock_tcp_port = _cfg.UnlockTcpPort,
+                    unlock_serial_port = _cfg.UnlockSerialPort ?? "",
+                    unlock_serial_baud = _cfg.UnlockSerialBaud,
+                    input_source = _cfg.InputSource ?? "",
+                    input_protocol = _cfg.InputProtocol ?? "",
+                    serial_port = _cfg.SerialPort ?? "",
+                    serial_baud = _cfg.SerialBaud,
+                    keyboard_submit_key = _cfg.KeyboardSubmitKey ?? "",
+                    keyboard_idle_submit_ms = _cfg.KeyboardIdleSubmitMs,
+                    remote_commands_enabled = _cfg.RemoteCommandsEnabled,
+                    remote_command_poll_ms = _cfg.RemoteCommandPollMs,
+                    allow_manual_unlock = _cfg.AllowManualUnlock,
+                    manual_hotkey = _cfg.ManualHotkey ?? "",
+                    offline_queue_enabled = _cfg.OfflineQueueEnabled,
+                    offline_queue_max_lines = _cfg.OfflineQueueMaxLines
+                },
+                ["runtime"] = new
+                {
+                    last_scan_utc = _lastScanAtUtc?.ToString("O") ?? "",
+                    last_api_ok_utc = _lastApiOkUtc?.ToString("O") ?? "",
+                    last_api_error = _lastApiError ?? "",
+                    api_fail_count = _apiFailCount,
+                    api_backoff_until_utc = _apiBackoffUntilUtc?.ToString("O") ?? "",
+                    api_circuit_until_utc = _apiCircuitUntilUtc?.ToString("O") ?? "",
+                    blocked_until_utc = _blockedUntilUtc?.ToString("O") ?? ""
+                },
+                ["paths"] = new
+                {
+                    config_dir = AgentConfig.ConfigDir(),
+                    config_json = Path.Combine(AgentConfig.ConfigDir(), "config.json"),
+                    queue_path = _queuePath,
+                    log_path = logPath
+                }
+            };
+
+            var q = GetOfflineQueueStats();
+            if (q.HasValue)
+            {
+                diag["offline_queue"] = new { lines = q.Value.lines, bytes = q.Value.bytes, truncated = q.Value.truncated };
+            }
+
+            try
+            {
+                if (File.Exists(logPath))
+                {
+                    diag["log_tail"] = _log.Tail(120);
+                }
+            }
+            catch
+            {
+            }
+
+            var txt = JsonSerializer.Serialize(diag, new JsonSerializerOptions { WriteIndented = true });
+            Clipboard.SetText(txt);
+            _last.Text = "Diagnóstico copiado al portapapeles";
+        }
+        catch (Exception ex)
+        {
+            _last.Text = $"No se pudo copiar diagnóstico: {ex.Message}";
+        }
     }
 
     private void PastePairingFromClipboard()
@@ -1908,6 +2266,16 @@ public sealed class MainForm : Form
         if (string.IsNullOrWhiteSpace(tenant) || string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(deviceId) || string.IsNullOrWhiteSpace(pairing))
         {
             _last.Text = "Config incompleta para pairing";
+            try
+            {
+                if (string.IsNullOrWhiteSpace(_tenant.Text)) _tenant.Focus();
+                else if (string.IsNullOrWhiteSpace(_baseUrl.Text)) _baseUrl.Focus();
+                else if (string.IsNullOrWhiteSpace(_deviceId.Text)) _deviceId.Focus();
+                else _pairing.Focus();
+            }
+            catch
+            {
+            }
             return;
         }
         try
@@ -1966,8 +2334,10 @@ public sealed class MainForm : Form
         var req = new HttpRequestMessage(HttpMethod.Post, url);
         req.Content = new StringContent(body, Encoding.UTF8, "application/json");
         req.Headers.Add("X-Tenant", tenant);
-        var res = await _http.SendAsync(req, _cts.Token);
-        var txt = await res.Content.ReadAsStringAsync(_cts.Token);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+        cts.CancelAfter(TimeSpan.FromSeconds(4));
+        var res = await _http.SendAsync(req, cts.Token);
+        var txt = await res.Content.ReadAsStringAsync(cts.Token);
         if (!res.IsSuccessStatusCode)
         {
             var sc = (int)res.StatusCode;
@@ -1984,6 +2354,7 @@ public sealed class MainForm : Form
             {
                 return (false, "", "Respuesta inválida: token vacío", baseUrl);
             }
+            _log.Append("pair_ok");
             return (true, token, "", baseUrl);
         }
         catch
@@ -2055,8 +2426,38 @@ public sealed class MainForm : Form
         {
             BackColor = System.Drawing.Color.FromArgb(15, 23, 42);
             ForeColor = System.Drawing.Color.FromArgb(226, 232, 240);
-            Font = new System.Drawing.Font("Segoe UI", 9);
+            Font = new System.Drawing.Font("Segoe UI", 10.5f);
             ApplyThemeTo(Controls);
+        }
+        catch
+        {
+        }
+    }
+
+    private void DarkComboBox_DrawItem(object? sender, DrawItemEventArgs e)
+    {
+        if (sender is not ComboBox cb) return;
+        try
+        {
+            var bg = e.State.HasFlag(DrawItemState.Selected)
+                ? System.Drawing.Color.FromArgb(51, 65, 85)
+                : System.Drawing.Color.FromArgb(15, 23, 42);
+            var fg = System.Drawing.Color.FromArgb(226, 232, 240);
+            using var brush = new System.Drawing.SolidBrush(bg);
+            e.Graphics.FillRectangle(brush, e.Bounds);
+            if (e.Index >= 0)
+            {
+                var text = cb.GetItemText(cb.Items[e.Index]);
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    text,
+                    cb.Font,
+                    e.Bounds,
+                    fg,
+                    TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis
+                );
+            }
+            e.DrawFocusRectangle();
         }
         catch
         {
@@ -2101,6 +2502,10 @@ public sealed class MainForm : Form
                     b.ForeColor = System.Drawing.Color.FromArgb(226, 232, 240);
                     b.FlatAppearance.BorderColor = System.Drawing.Color.FromArgb(51, 65, 85);
                     b.FlatAppearance.BorderSize = 1;
+                    b.AutoSize = false;
+                    b.Height = Math.Max(b.Height, Font.Height + 16);
+                    b.Padding = new Padding(10, 2, 10, 2);
+                    b.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
                 }
                 else if (c is TextBox tb)
                 {
@@ -2112,6 +2517,12 @@ public sealed class MainForm : Form
                 {
                     cb.BackColor = System.Drawing.Color.FromArgb(15, 23, 42);
                     cb.ForeColor = System.Drawing.Color.FromArgb(226, 232, 240);
+                    cb.FlatStyle = FlatStyle.Flat;
+                    cb.DrawMode = DrawMode.OwnerDrawFixed;
+                    cb.IntegralHeight = false;
+                    cb.ItemHeight = Math.Max(cb.ItemHeight, cb.Font.Height + 8);
+                    cb.DrawItem -= DarkComboBox_DrawItem;
+                    cb.DrawItem += DarkComboBox_DrawItem;
                 }
                 else if (c is CheckBox ck)
                 {
@@ -2127,7 +2538,7 @@ public sealed class MainForm : Form
                     lv.BackColor = System.Drawing.Color.FromArgb(2, 6, 23);
                     lv.ForeColor = System.Drawing.Color.FromArgb(226, 232, 240);
                     lv.BorderStyle = BorderStyle.FixedSingle;
-                    lv.Font = new System.Drawing.Font("Segoe UI", 9);
+                    lv.Font = Font;
                 }
             }
             catch
@@ -2323,35 +2734,9 @@ public sealed class MainForm : Form
     {
         try
         {
-            var line = JsonSerializer.Serialize(new QueuedEvent
-            {
-                nonce = nonce,
-                body = bodyJson,
-                created_at = DateTime.UtcNow.ToString("O")
-            });
-            lock (_queueLock)
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(_queuePath)!);
-                File.AppendAllText(_queuePath, line + Environment.NewLine, Encoding.UTF8);
-                TrimQueueIfNeeded();
-            }
-        }
-        catch
-        {
-        }
-    }
-
-    private void TrimQueueIfNeeded()
-    {
-        try
-        {
             var max = _cfg.OfflineQueueMaxLines ?? 2000;
-            max = Math.Max(100, Math.Min(max, 20000));
-            if (!File.Exists(_queuePath)) return;
-            var lines = File.ReadAllLines(_queuePath, Encoding.UTF8);
-            if (lines.Length <= max) return;
-            var keep = lines[^max..];
-            File.WriteAllLines(_queuePath, keep, Encoding.UTF8);
+            _offlineQueue.Enqueue(nonce, bodyJson, DateTimeOffset.UtcNow, max);
+            _log.Append("offline_queue_enqueue");
         }
         catch
         {
@@ -2370,45 +2755,27 @@ public sealed class MainForm : Form
         {
             return;
         }
-        string[] lines;
-        lock (_queueLock)
-        {
-            if (!File.Exists(_queuePath)) return;
-            lines = File.ReadAllLines(_queuePath, Encoding.UTF8);
-        }
+        var lines = _offlineQueue.ReadAllLines();
         if (lines.Length == 0) return;
         var remaining = new System.Collections.Generic.List<string>();
-        foreach (var ln in lines)
+        for (var i = 0; i < lines.Length; i++)
         {
+            var ln = lines[i];
             if (string.IsNullOrWhiteSpace(ln)) continue;
-            QueuedEvent? ev = null;
-            try
-            {
-                ev = JsonSerializer.Deserialize<QueuedEvent>(ln);
-            }
-            catch
-            {
-                continue;
-            }
-            if (ev == null || string.IsNullOrWhiteSpace(ev.body) || string.IsNullOrWhiteSpace(ev.nonce)) continue;
-            var ok = await TrySendQueuedEventAsync(tenant, baseUrl, deviceId, token, ev.nonce, ev.body);
+            if (!_offlineQueue.TryDecodeLine(ln, out var nonce, out var bodyJson)) continue;
+            var ok = await TrySendQueuedEventAsync(tenant, baseUrl, deviceId, token, nonce, bodyJson);
             if (!ok)
             {
-                remaining.Add(ln);
+                for (var j = i; j < lines.Length; j++)
+                {
+                    var keepLn = lines[j];
+                    if (!string.IsNullOrWhiteSpace(keepLn)) remaining.Add(keepLn);
+                }
+                _log.Append("offline_queue_flush_stop");
                 break;
             }
         }
-        lock (_queueLock)
-        {
-            if (remaining.Count == 0)
-            {
-                try { File.Delete(_queuePath); } catch { }
-            }
-            else
-            {
-                File.WriteAllLines(_queuePath, remaining, Encoding.UTF8);
-            }
-        }
+        _offlineQueue.RewriteLines(remaining);
     }
 
     private async Task<bool> TrySendQueuedEventAsync(string tenant, string baseUrl, string deviceId, string token, string nonce, string bodyJson)
@@ -2681,28 +3048,7 @@ public sealed class MainForm : Form
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(_queuePath)) return null;
-            if (!File.Exists(_queuePath)) return null;
-            long bytes = 0;
-            try
-            {
-                bytes = new FileInfo(_queuePath).Length;
-            }
-            catch
-            {
-                bytes = 0;
-            }
-            var lines = 0;
-            var truncated = false;
-            using var fs = new FileStream(_queuePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            using var sr = new StreamReader(fs, Encoding.UTF8);
-            while (!sr.EndOfStream && lines < 5000)
-            {
-                sr.ReadLine();
-                lines++;
-            }
-            if (!sr.EndOfStream) truncated = true;
-            return (lines, bytes, truncated);
+            return _offlineQueue.GetStats(5000);
         }
         catch
         {
@@ -2757,6 +3103,16 @@ public sealed class MainForm : Form
 
     private async Task ExecuteCommandAsync(int commandId, string type, JsonElement payload)
     {
+        if (_configOpen)
+        {
+            await AckCommandAsync(commandId, false, "config_open");
+            return;
+        }
+        if (!_running)
+        {
+            await AckCommandAsync(commandId, false, "paused");
+            return;
+        }
         var t = (type ?? "").Trim().ToLowerInvariant();
         var ok = true;
         var detail = "ok";
@@ -2828,42 +3184,134 @@ public sealed class MainForm : Form
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
             cts.CancelAfter(TimeSpan.FromSeconds(4));
-            var method = (_cfg.UnlockMethod ?? "http_get").Trim().ToLowerInvariant();
-            if (method == "none") return;
-            if (method == "tcp")
-            {
-                var host = (_cfg.UnlockTcpHost ?? "").Trim();
-                var port = _cfg.UnlockTcpPort ?? 0;
-                var payload = _cfg.UnlockTcpPayload ?? "";
-                if (string.IsNullOrWhiteSpace(host) || port <= 0) return;
-                var bytes = OutputAdapters.ParsePayloadBytes(payload);
-                await OutputAdapters.TcpSendAsync(host, port, bytes, cts.Token);
-            }
-            else if (method == "serial")
-            {
-                var port = (_cfg.UnlockSerialPort ?? "").Trim();
-                var baud = _cfg.UnlockSerialBaud ?? 9600;
-                var payload = _cfg.UnlockSerialPayload ?? "";
-                if (string.IsNullOrWhiteSpace(port)) return;
-                OutputAdapters.SerialSend(port, baud, payload);
-            }
-            else if (method == "http_post_json")
-            {
-                var url = (_cfg.UnlockUrl ?? "").Trim();
-                if (string.IsNullOrWhiteSpace(url)) return;
-                var ms = unlockMs ?? (_cfg.UnlockMs ?? 2500);
-                var body = JsonSerializer.Serialize(new { action = "unlock", ms });
-                await _http.PostAsync(url, new StringContent(body, Encoding.UTF8, "application/json"), cts.Token);
-            }
-            else
-            {
-                var url = (_cfg.UnlockUrl ?? "").Trim();
-                if (string.IsNullOrWhiteSpace(url)) return;
-                await _http.GetAsync(url, cts.Token);
-            }
+            await UnlockNowAsync(unlockMs, cts.Token);
         }
         catch
         {
+        }
+    }
+
+    private async Task<(bool ok, string detail)> UnlockNowAsync(int? unlockMs, CancellationToken ct)
+    {
+        var method = (_cfg.UnlockMethod ?? "http_get").Trim().ToLowerInvariant();
+        if (method == "none") return (false, "unlock_method=none");
+        if (method == "tcp")
+        {
+            var host = (_cfg.UnlockTcpHost ?? "").Trim();
+            var port = _cfg.UnlockTcpPort ?? 0;
+            var payload = _cfg.UnlockTcpPayload ?? "";
+            if (string.IsNullOrWhiteSpace(host) || port <= 0) return (false, "tcp host/port inválido");
+            var bytes = OutputAdapters.ParsePayloadBytes(payload);
+            await OutputAdapters.TcpSendAsync(host, port, bytes, ct);
+            return (true, $"tcp {host}:{port}");
+        }
+        if (method == "serial")
+        {
+            var port = (_cfg.UnlockSerialPort ?? "").Trim();
+            var baud = _cfg.UnlockSerialBaud ?? 9600;
+            var payload = _cfg.UnlockSerialPayload ?? "";
+            if (string.IsNullOrWhiteSpace(port)) return (false, "serial port vacío");
+            OutputAdapters.SerialSend(port, baud, payload);
+            return (true, $"serial {port}@{baud}");
+        }
+        if (method == "http_post_json")
+        {
+            var url = (_cfg.UnlockUrl ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(url)) return (false, "http_post_json url vacío");
+            var ms = unlockMs ?? (_cfg.UnlockMs ?? 2500);
+            var sc = await OutputAdapters.HttpPostJsonAsync(_http, url, new { action = "unlock", ms }, ct);
+            return (sc >= 200 && sc < 300, $"http_post_json status={sc}");
+        }
+        {
+            var url = (_cfg.UnlockUrl ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(url)) return (false, "http_get url vacío");
+            var sc = await OutputAdapters.HttpGetAsync(_http, url, ct);
+            return (sc >= 200 && sc < 300, $"http_get status={sc}");
+        }
+    }
+
+    private async Task RunApiConnectivityTestAsync()
+    {
+        var tenant = _cfg.Tenant ?? "";
+        var baseUrl = _cfg.BaseUrl ?? "";
+        var deviceId = _cfg.DeviceId ?? "";
+        var token = _cfg.Token ?? "";
+        if (string.IsNullOrWhiteSpace(tenant) || string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(deviceId) || string.IsNullOrWhiteSpace(token))
+        {
+            _last.Text = "Test API: faltan Tenant/BaseUrl/DeviceId/Token";
+            return;
+        }
+        try
+        {
+            var url = $"{baseUrl}/api/access/device/config";
+            var req = new HttpRequestMessage(HttpMethod.Get, url);
+            req.Headers.Add("X-Tenant", tenant);
+            req.Headers.Add("X-Device-Id", deviceId);
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+            cts.CancelAfter(TimeSpan.FromSeconds(4));
+            var res = await _http.SendAsync(req, cts.Token);
+            var sc = (int)res.StatusCode;
+            if (!res.IsSuccessStatusCode)
+            {
+                _last.Text = $"Test API: {sc}";
+                await PostDeviceStatusAsync(new { kind = "api", ok = false, detail = $"status={sc}" });
+                return;
+            }
+            var txt = await res.Content.ReadAsStringAsync(cts.Token);
+            var detail = $"status={sc}";
+            try
+            {
+                using var doc = JsonDocument.Parse(txt);
+                if (doc.RootElement.TryGetProperty("config", out var cfg) && cfg.ValueKind == JsonValueKind.Object)
+                {
+                    if (cfg.TryGetProperty("config_version", out var cv) && cv.ValueKind == JsonValueKind.Number)
+                    {
+                        detail = $"status={sc} config_version={cv.GetInt32()}";
+                    }
+                }
+            }
+            catch
+            {
+            }
+            _last.Text = $"Test API: OK · {detail}";
+            await PostDeviceStatusAsync(new { kind = "api", ok = true, detail });
+        }
+        catch (Exception ex)
+        {
+            _last.Text = $"Test API error: {ex.Message}";
+            await PostDeviceStatusAsync(new { kind = "api", ok = false, detail = ex.Message });
+        }
+    }
+
+    private async Task RunUnlockByModeTestAsync()
+    {
+        var mode = (_cfg.Mode ?? "validate_and_command").Trim().ToLowerInvariant();
+        if (mode == "observe_only")
+        {
+            _last.Text = "Test acción: observe_only (no ejecuta unlock)";
+            await PostDeviceStatusAsync(new { kind = "unlock_by_mode", ok = true, detail = "observe_only_skip" });
+            return;
+        }
+        var r = MessageBox.Show(
+            "Esto ejecuta la apertura usando la configuración actual (Unlock).\n\n¿Continuar?",
+            "Confirmar test",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Warning
+        );
+        if (r != DialogResult.Yes) return;
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+            cts.CancelAfter(TimeSpan.FromSeconds(4));
+            var (ok, detail) = await UnlockNowAsync(_cfg.UnlockMs, cts.Token);
+            _last.Text = ok ? $"Test acción: OK · {detail}" : $"Test acción: FAIL · {detail}";
+            await PostDeviceStatusAsync(new { kind = "unlock_by_mode", ok, detail });
+        }
+        catch (Exception ex)
+        {
+            _last.Text = $"Test acción error: {ex.Message}";
+            await PostDeviceStatusAsync(new { kind = "unlock_by_mode", ok = false, detail = ex.Message });
         }
     }
 
@@ -2987,15 +3435,6 @@ public sealed class MainForm : Form
             return;
         }
         _last.Text = "Test: tipo inválido";
-    }
-
-    private static byte[] ParsePayloadBytes(string payload) => OutputAdapters.ParsePayloadBytes(payload);
-
-    private sealed class QueuedEvent
-    {
-        public string nonce { get; set; } = "";
-        public string body { get; set; } = "";
-        public string created_at { get; set; } = "";
     }
 
     private sealed class AgentConfig

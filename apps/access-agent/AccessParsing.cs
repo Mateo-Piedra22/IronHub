@@ -32,7 +32,9 @@ public static class AccessParsing
             if (string.IsNullOrWhiteSpace(pat)) return s;
             try
             {
-                var m = Regex.Match(s, pat);
+                var input = s.Length <= 4096 ? s : s.Substring(0, 4096);
+                var re = new Regex(pat, RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(150));
+                var m = re.Match(input);
                 if (!m.Success) return "";
                 if (m.Groups.Count >= 2) return m.Groups[1].Value.Trim();
                 return m.Value.Trim();

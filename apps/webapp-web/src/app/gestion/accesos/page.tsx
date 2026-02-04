@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { KeyRound, Loader2, Plus, RefreshCw, RotateCcw, ShieldAlert, Trash2 } from 'lucide-react';
+import { KeyRound, Loader2, Pencil, Plus, RefreshCw, RotateCcw, ShieldAlert, Trash2 } from 'lucide-react';
 import { Button, ConfirmModal, Input, Modal, Select, useToast } from '@/components/ui';
 import { api, type AccessCredential, type AccessDevice, type AccessEvent, type Usuario, type Sucursal } from '@/lib/api';
 
@@ -152,6 +152,24 @@ export default function AccesosPage() {
     const [creatingCred, setCreatingCred] = useState(false);
     const [deleteCredState, setDeleteCredState] = useState<{ open: boolean; id?: number }>({ open: false });
     const [deletingCred, setDeletingCred] = useState(false);
+    const [credListQuery, setCredListQuery] = useState('');
+    const [credListType, setCredListType] = useState<string>('');
+    const [credListActiveOnly, setCredListActiveOnly] = useState(true);
+    const [credListAllUsers, setCredListAllUsers] = useState(false);
+    const [credListLoading, setCredListLoading] = useState(false);
+    const [enrollPortalOpen, setEnrollPortalOpen] = useState(false);
+    const [enrollDeviceId, setEnrollDeviceId] = useState<string>('');
+    const [enrollType, setEnrollType] = useState<'fob' | 'card'>('fob');
+    const [enrollOverwrite, setEnrollOverwrite] = useState(true);
+    const [enrollExpiresSeconds, setEnrollExpiresSeconds] = useState('90');
+    const [enrolling, setEnrolling] = useState(false);
+    const [editCredState, setEditCredState] = useState<{ open: boolean; cred?: AccessCredential }>({ open: false });
+    const [editCredLabel, setEditCredLabel] = useState('');
+    const [editCredActive, setEditCredActive] = useState(true);
+    const [editCredUserSearch, setEditCredUserSearch] = useState('');
+    const [editCredUserResults, setEditCredUserResults] = useState<Usuario[]>([]);
+    const [editCredSelectedUser, setEditCredSelectedUser] = useState<Usuario | null>(null);
+    const [savingCredEdit, setSavingCredEdit] = useState(false);
     const [remoteUnlockState, setRemoteUnlockState] = useState<{ open: boolean; device?: AccessDevice }>({ open: false });
     const [remoteUnlocking, setRemoteUnlocking] = useState(false);
     const [deviceCommandsState, setDeviceCommandsState] = useState<{ open: boolean; device?: AccessDevice }>({ open: false });
@@ -205,9 +223,8 @@ export default function AccesosPage() {
     const loadAll = useCallback(async () => {
         setLoading(true);
         try {
-            const [d, c, s] = await Promise.all([api.listAccessDevices(), api.listAccessCredentials(), api.getSucursales()]);
+            const [d, s] = await Promise.all([api.listAccessDevices(), api.getSucursales()]);
             if (d.ok && d.data?.ok) setDevices(d.data.items || []);
-            if (c.ok && c.data?.ok) setCredentials(c.data.items || []);
             if (s.ok && s.data?.ok && Array.isArray(s.data.items)) setSucursales(s.data.items || []);
             try {
                 const b = await api.accessBootstrap();
@@ -242,6 +259,17 @@ export default function AccesosPage() {
             loadEvents(eventsPage).catch(() => {});
         }
     }, [tab, eventsPage, loadEvents]);
+
+    useEffect(() => {
+        if (!enrollPortalOpen) return;
+        if (!enrollDeviceId) {
+            const eligible = (devices || []).find((d) => d.enabled && d.sucursal_id != null);
+            if (eligible) setEnrollDeviceId(String(eligible.id));
+        }
+        if (credType === 'fob' || credType === 'card') {
+            setEnrollType(credType);
+        }
+    }, [enrollPortalOpen, enrollDeviceId, devices, credType]);
 
     const createDevice = async () => {
         const name = newDeviceName.trim();
@@ -627,6 +655,54 @@ export default function AccesosPage() {
         return () => clearTimeout(t);
     }, [credUserSearch]);
 
+    useEffect(() => {
+        const t = setTimeout(async () => {
+            const q = editCredUserSearch.trim();
+            if (q.length < 2) {
+                setEditCredUserResults([]);
+                return;
+            }
+            const res = await api.getUsuarios({ search: q, limit: 10 });
+            if (res.ok && res.data?.usuarios) setEditCredUserResults(res.data.usuarios || []);
+        }, 250);
+        return () => clearTimeout(t);
+    }, [editCredUserSearch]);
+
+    const loadCredentialList = useCallback(async () => {
+        setCredListLoading(true);
+        try {
+            const q = credListQuery.trim();
+            if (!credListAllUsers && !credSelectedUser && !q) {
+                setCredentials([]);
+                return;
+            }
+            const params: any = {
+                ...(q ? { q } : {}),
+                ...(credListType.trim() ? { credential_type: credListType.trim() } : {}),
+                ...(credListActiveOnly ? { active: true } : {}),
+            };
+            if (!credListAllUsers && credSelectedUser) {
+                params.usuario_id = credSelectedUser.id;
+            } else if (credListAllUsers) {
+                params.limit = 200;
+            }
+            const c = await api.listAccessCredentials(params);
+            if (c.ok && c.data?.ok) setCredentials(c.data.items || []);
+        } catch {
+            error('No se pudieron cargar credenciales');
+        } finally {
+            setCredListLoading(false);
+        }
+    }, [credListActiveOnly, credListAllUsers, credListQuery, credListType, credSelectedUser, error]);
+
+    useEffect(() => {
+        if (tab !== 'credentials') return;
+        const t = setTimeout(() => {
+            loadCredentialList().catch(() => {});
+        }, 250);
+        return () => clearTimeout(t);
+    }, [tab, credListQuery, credListType, credListActiveOnly, credListAllUsers, credSelectedUser, loadCredentialList]);
+
     const createCredential = async () => {
         if (!credSelectedUser) return;
         const value = credValue.trim();
@@ -643,8 +719,7 @@ export default function AccesosPage() {
             success('Credencial creada');
             setCredValue('');
             setCredLabel('');
-            const c = await api.listAccessCredentials();
-            if (c.ok && c.data?.ok) setCredentials(c.data.items || []);
+            await loadCredentialList();
         } catch (e) {
             error(e instanceof Error ? e.message : 'Error');
         } finally {
@@ -660,12 +735,88 @@ export default function AccesosPage() {
             if (!res.ok || !res.data?.ok) throw new Error(res.error || 'No se pudo eliminar');
             success('Credencial eliminada');
             setDeleteCredState({ open: false });
-            const c = await api.listAccessCredentials();
-            if (c.ok && c.data?.ok) setCredentials(c.data.items || []);
+            await loadCredentialList();
         } catch (e) {
             error(e instanceof Error ? e.message : 'Error');
         } finally {
             setDeletingCred(false);
+        }
+    };
+
+    const startEnroll = async () => {
+        if (!credSelectedUser) {
+            error('Seleccioná un usuario');
+            return;
+        }
+        const did = Number(enrollDeviceId);
+        if (!Number.isFinite(did) || did <= 0) {
+            error('Seleccioná un device');
+            return;
+        }
+        let expiresSeconds = 90;
+        try {
+            expiresSeconds = Number(enrollExpiresSeconds.trim() || '90');
+        } catch {
+            expiresSeconds = 90;
+        }
+        expiresSeconds = Math.max(15, Math.min(expiresSeconds, 10 * 60));
+        setEnrolling(true);
+        try {
+            const res = await api.startAccessDeviceEnrollment(did, {
+                usuario_id: credSelectedUser.id,
+                credential_type: enrollType,
+                overwrite: enrollOverwrite,
+                expires_seconds: expiresSeconds,
+            });
+            if (!res.ok || !res.data?.ok) throw new Error(res.error || 'No se pudo habilitar enroll');
+            success('Enroll habilitado');
+            await loadAll();
+        } catch (e) {
+            error(e instanceof Error ? e.message : 'Error');
+        } finally {
+            setEnrolling(false);
+        }
+    };
+
+    const openEditCredential = (c: AccessCredential) => {
+        setEditCredState({ open: true, cred: c });
+        setEditCredLabel(String(c.label || ''));
+        setEditCredActive(Boolean(c.active));
+        setEditCredSelectedUser(null);
+        setEditCredUserSearch('');
+        setEditCredUserResults([]);
+    };
+
+    const saveCredentialEdit = async () => {
+        const cred = editCredState.cred;
+        if (!cred) return;
+        setSavingCredEdit(true);
+        try {
+            const payload: any = {
+                label: editCredLabel.trim() ? editCredLabel.trim() : null,
+                active: Boolean(editCredActive),
+                ...(editCredSelectedUser ? { usuario_id: editCredSelectedUser.id } : {}),
+            };
+            const res = await api.updateAccessCredential(cred.id, payload);
+            if (!res.ok || !res.data?.ok) throw new Error(res.error || 'No se pudo guardar');
+            success('Credencial actualizada');
+            setEditCredState({ open: false });
+            await loadCredentialList();
+        } catch (e) {
+            error(e instanceof Error ? e.message : 'Error');
+        } finally {
+            setSavingCredEdit(false);
+        }
+    };
+
+    const reactivateCredential = async (credentialId: number) => {
+        try {
+            const res = await api.updateAccessCredential(credentialId, { active: true });
+            if (!res.ok || !res.data?.ok) throw new Error(res.error || 'No se pudo reactivar');
+            success('Credencial reactivada');
+            await loadCredentialList();
+        } catch (e) {
+            error(e instanceof Error ? e.message : 'Error');
         }
     };
 
@@ -813,8 +964,30 @@ export default function AccesosPage() {
             {!loading && tab === 'credentials' ? (
                 <div className="space-y-3">
                     <div className="card p-4">
-                        <div className="text-sm text-slate-300 font-semibold">Nueva credencial</div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                                <div className="text-sm text-slate-300 font-semibold">Usuario</div>
+                                <div className="text-xs text-slate-500 mt-1">
+                                    Seleccioná el usuario y luego elegí: portal (recomendado) o carga manual.
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Button variant="secondary" onClick={() => setEnrollPortalOpen(true)} disabled={!credSelectedUser}>
+                                    Abrir portal
+                                </Button>
+                                <Button
+                                    variant="secondary"
+                                    onClick={() => {
+                                        setCredSelectedUser(null);
+                                        setCredUserSearch('');
+                                        setCredUserResults([]);
+                                    }}
+                                >
+                                    Limpiar
+                                </Button>
+                            </div>
+                        </div>
+                        <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
                             <div>
                                 <div className="text-xs text-slate-500">Buscar usuario</div>
                                 <Input value={credUserSearch} onChange={(e) => setCredUserSearch(e.target.value)} placeholder="Nombre o DNI…" />
@@ -828,6 +1001,7 @@ export default function AccesosPage() {
                                                     setCredSelectedUser(u);
                                                     setCredUserResults([]);
                                                     setCredUserSearch(`${u.nombre} (#${u.id})`);
+                                                    setCredListAllUsers(false);
                                                 }}
                                             >
                                                 <div className="text-sm text-white">{u.nombre}</div>
@@ -837,46 +1011,162 @@ export default function AccesosPage() {
                                     </div>
                                 ) : null}
                             </div>
-                            <div>
-                                <div className="text-xs text-slate-500">Tipo</div>
-                                <Select value={credType} onChange={(e) => setCredType(e.target.value)} options={credentialTypeOptions} />
+                            <div className="rounded-xl border border-slate-800/60 bg-slate-900/40 px-3 py-2">
+                                <div className="text-xs text-slate-500">Seleccionado</div>
+                                {credSelectedUser ? (
+                                    <div className="mt-1">
+                                        <div className="text-sm text-white">{credSelectedUser.nombre}</div>
+                                        <div className="text-xs text-slate-500">#{credSelectedUser.id} • DNI {credSelectedUser.dni}</div>
+                                    </div>
+                                ) : (
+                                    <div className="text-sm text-slate-500 mt-1">—</div>
+                                )}
                             </div>
-                            <div>
-                                <div className="text-xs text-slate-500">Valor (UID / código)</div>
-                                <Input value={credValue} onChange={(e) => setCredValue(e.target.value)} placeholder="Ej: 04A1B2C3D4" />
-                            </div>
-                            <div>
-                                <div className="text-xs text-slate-500">Label (opcional)</div>
-                                <Input value={credLabel} onChange={(e) => setCredLabel(e.target.value)} placeholder="Ej: Llavero azul" />
-                            </div>
-                        </div>
-                        <div className="mt-3 flex justify-end">
-                            <Button onClick={createCredential} disabled={!credSelectedUser || !credValue.trim() || creatingCred} leftIcon={creatingCred ? <Loader2 className="w-4 h-4 animate-spin" /> : undefined}>
-                                Crear
-                            </Button>
                         </div>
                     </div>
-                    <div className="card p-4">
-                        <div className="text-sm text-slate-300 font-semibold">Credenciales ({credentials.length})</div>
-                        <div className="mt-3 space-y-2">
-                            {credentials.map((c) => (
-                                <div key={c.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-800/60 bg-slate-900/40 px-3 py-2">
-                                    <div className="min-w-0">
-                                        <div className="text-sm text-white">
-                                            #{c.id} • user #{c.usuario_id} • {c.credential_type}
-                                        </div>
-                                        <div className="text-xs text-slate-500">{c.label || '—'}</div>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                        <div className="card p-4">
+                            <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                    <div className="text-sm text-slate-300 font-semibold">Portal de enrolamiento (recomendado)</div>
+                                    <div className="text-xs text-slate-500 mt-1">
+                                        Habilita el modo enroll en un device. Luego escaneás una sola vez en el Access Agent.
                                     </div>
-                                    <Button
-                                        variant="secondary"
-                                        onClick={() => setDeleteCredState({ open: true, id: c.id })}
-                                        leftIcon={<Trash2 className="w-4 h-4" />}
-                                    >
-                                        Eliminar
-                                    </Button>
                                 </div>
-                            ))}
-                            {credentials.length === 0 ? <div className="text-sm text-slate-500">No hay credenciales.</div> : null}
+                                <Button variant="secondary" onClick={() => setEnrollPortalOpen(true)} disabled={!credSelectedUser}>
+                                    Abrir
+                                </Button>
+                            </div>
+                            <div className="mt-3 text-xs text-slate-500">
+                                {credSelectedUser ? (
+                                    <>
+                                        Usuario: <span className="text-slate-200">{credSelectedUser.nombre}</span> • DNI{' '}
+                                        <span className="text-slate-200">{credSelectedUser.dni}</span>
+                                    </>
+                                ) : (
+                                    <>Seleccioná un usuario para usar el portal.</>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="card p-4">
+                            <div className="text-sm text-slate-300 font-semibold">Carga manual</div>
+                            <div className="text-xs text-slate-500 mt-1">Para cuando ya tenés el UID/código y querés cargarlo directo.</div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                                <div>
+                                    <div className="text-xs text-slate-500">Tipo</div>
+                                    <Select value={credType} onChange={(e) => setCredType(e.target.value)} options={credentialTypeOptions} />
+                                </div>
+                                <div>
+                                    <div className="text-xs text-slate-500">Label (opcional)</div>
+                                    <Input value={credLabel} onChange={(e) => setCredLabel(e.target.value)} placeholder="Ej: Llavero azul" />
+                                </div>
+                                <div className="md:col-span-2">
+                                    <div className="text-xs text-slate-500">Valor (UID / código)</div>
+                                    <Input value={credValue} onChange={(e) => setCredValue(e.target.value)} placeholder="Ej: 04A1B2C3D4" />
+                                </div>
+                            </div>
+                            <div className="mt-3 flex justify-end">
+                                <Button
+                                    onClick={createCredential}
+                                    disabled={!credSelectedUser || !credValue.trim() || creatingCred}
+                                    leftIcon={creatingCred ? <Loader2 className="w-4 h-4 animate-spin" /> : undefined}
+                                >
+                                    Vincular
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="card p-4">
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                                <div className="text-sm text-slate-300 font-semibold">Credenciales</div>
+                                <div className="text-xs text-slate-500 mt-1">
+                                    {credListAllUsers ? 'Mostrando hasta 200 resultados.' : credSelectedUser ? 'Filtrado por usuario.' : 'Seleccioná un usuario o buscá.'}
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <Button variant="secondary" onClick={loadCredentialList} disabled={credListLoading}>
+                                    {credListLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Refrescar'}
+                                </Button>
+                            </div>
+                        </div>
+
+                        <div className="mt-3 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                            <div className="lg:col-span-2">
+                                <div className="text-xs text-slate-500">Buscar</div>
+                                <Input value={credListQuery} onChange={(e) => setCredListQuery(e.target.value)} placeholder="Usuario, DNI o label…" />
+                            </div>
+                            <div>
+                                <div className="text-xs text-slate-500">Tipo</div>
+                                <Select
+                                    value={credListType}
+                                    onChange={(e) => setCredListType(e.target.value)}
+                                    options={[{ value: '', label: 'Todos' }, ...credentialTypeOptions]}
+                                />
+                            </div>
+                            <div className="flex items-end gap-3">
+                                <label className="flex items-center gap-2 text-xs text-slate-400 select-none">
+                                    <input type="checkbox" checked={credListActiveOnly} onChange={(e) => setCredListActiveOnly(e.target.checked)} />
+                                    Solo activas
+                                </label>
+                                <label className="flex items-center gap-2 text-xs text-slate-400 select-none">
+                                    <input type="checkbox" checked={credListAllUsers} onChange={(e) => setCredListAllUsers(e.target.checked)} />
+                                    Ver todos
+                                </label>
+                            </div>
+                        </div>
+
+                        <div className="mt-3 space-y-2">
+                            {credListLoading ? (
+                                <div className="p-6 text-sm text-slate-400 flex items-center gap-2">
+                                    <Loader2 className="w-4 h-4 animate-spin" /> Cargando…
+                                </div>
+                            ) : (
+                                <>
+                                    {credentials.map((c) => (
+                                        <div
+                                            key={c.id}
+                                            className="flex items-center justify-between gap-3 rounded-xl border border-slate-800/60 bg-slate-900/40 px-3 py-2"
+                                        >
+                                            <div className="min-w-0">
+                                                <div className="text-sm text-white flex items-center gap-2">
+                                                    <span>#{c.id}</span>
+                                                    <span className="text-slate-500">•</span>
+                                                    <span className="truncate">
+                                                        {c.usuario_nombre ? c.usuario_nombre : `user #${c.usuario_id}`}
+                                                        {c.usuario_dni ? ` (DNI ${c.usuario_dni})` : ''}
+                                                    </span>
+                                                    <span className="text-slate-500">•</span>
+                                                    <span>{c.credential_type}</span>
+                                                    {!c.active ? <span className="badge badge-danger">inactiva</span> : <span className="badge badge-success">activa</span>}
+                                                </div>
+                                                <div className="text-xs text-slate-500">{c.label || '—'}</div>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <Button variant="secondary" onClick={() => openEditCredential(c)} leftIcon={<Pencil className="w-4 h-4" />}>
+                                                    Editar
+                                                </Button>
+                                                {c.active ? (
+                                                    <Button
+                                                        variant="secondary"
+                                                        onClick={() => setDeleteCredState({ open: true, id: c.id })}
+                                                        leftIcon={<Trash2 className="w-4 h-4" />}
+                                                    >
+                                                        Quitar
+                                                    </Button>
+                                                ) : (
+                                                    <Button variant="secondary" onClick={() => reactivateCredential(c.id)}>
+                                                        Reactivar
+                                                    </Button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {credentials.length === 0 ? <div className="text-sm text-slate-500">No hay credenciales.</div> : null}
+                                </>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -920,12 +1210,206 @@ export default function AccesosPage() {
                 </div>
             ) : null}
 
+            <Modal
+                isOpen={enrollPortalOpen}
+                onClose={() => setEnrollPortalOpen(false)}
+                title="Portal de enrolamiento"
+                description="Habilita enroll en un device y luego escaneá 1 vez en el Access Agent."
+                size="md"
+                footer={
+                    <div className="flex items-center gap-2">
+                        <button className="btn-secondary" onClick={() => setEnrollPortalOpen(false)} disabled={enrolling}>
+                            Cerrar
+                        </button>
+                        {(() => {
+                            const d = (devices || []).find((x) => String(x.id) === String(enrollDeviceId));
+                            const enroll = d ? getEnrollMode(d) : null;
+                            return d && enroll ? (
+                                <button className="btn-secondary" onClick={() => cancelEnroll(d.id)} disabled={enrolling}>
+                                    Cancelar enroll
+                                </button>
+                            ) : null;
+                        })()}
+                        <button className="btn-primary" onClick={startEnroll} disabled={enrolling || !credSelectedUser || !enrollDeviceId}>
+                            {enrolling ? 'Habilitando…' : 'Habilitar enroll'}
+                        </button>
+                    </div>
+                }
+            >
+                <div className="space-y-3">
+                    <div className="rounded-xl border border-slate-800/60 bg-slate-900/40 p-3">
+                        <div className="text-xs text-slate-500">Usuario</div>
+                        {credSelectedUser ? (
+                            <div className="mt-1">
+                                <div className="text-sm text-white">{credSelectedUser.nombre}</div>
+                                <div className="text-xs text-slate-500">
+                                    #{credSelectedUser.id} • DNI {credSelectedUser.dni}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="text-sm text-slate-500 mt-1">Seleccioná un usuario.</div>
+                        )}
+                    </div>
+
+                    <div>
+                        <div className="text-xs text-slate-500">Device</div>
+                        <Select
+                            value={enrollDeviceId}
+                            onChange={(e) => setEnrollDeviceId(e.target.value)}
+                            options={[
+                                { value: '', label: 'Seleccionar…' },
+                                ...(devices || [])
+                                    .filter((d) => d.enabled && d.sucursal_id != null)
+                                    .map((d) => {
+                                        const online = isDeviceOnline(d);
+                                        const enroll = getEnrollMode(d);
+                                        const badge = enroll ? ` • ENROLL #${enroll.usuario_id} ${String(enroll.credential_type || '').toUpperCase()}` : '';
+                                        return { value: String(d.id), label: `${d.name} (#${d.id})${online ? ' • online' : ' • offline'}${badge}` };
+                                    }),
+                            ]}
+                        />
+                        {(() => {
+                            const d = (devices || []).find((x) => String(x.id) === String(enrollDeviceId));
+                            if (!d) return null;
+                            const enroll = getEnrollMode(d);
+                            const cfg: any = (d as any).config && typeof (d as any).config === 'object' ? (d as any).config : {};
+                            const rt = cfg?.runtime_status && typeof cfg.runtime_status === 'object' ? cfg.runtime_status : null;
+                            const rtAt = rt?.updated_at ? Date.parse(String(rt.updated_at)) : NaN;
+                            const rtFresh = Number.isFinite(rtAt) ? Date.now() - rtAt < 20_000 : false;
+                            const enrollReady = Boolean(rt?.enroll_ready) && rtFresh;
+                            return (
+                                <div className="text-xs text-slate-500 mt-2">
+                                    Estado: {isDeviceOnline(d) ? 'online' : 'offline'}
+                                    {enrollReady ? ' • ready' : ''}
+                                    {enroll ? ` • ENROLL #${enroll.usuario_id} ${String(enroll.credential_type || '').toUpperCase()}` : ''}
+                                </div>
+                            );
+                        })()}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <div className="text-xs text-slate-500">Tipo</div>
+                            <Select
+                                value={enrollType}
+                                onChange={(e) => {
+                                    const v = String(e.target.value || '');
+                                    if (v === 'fob' || v === 'card') setEnrollType(v);
+                                }}
+                                options={credentialTypeOptions}
+                            />
+                        </div>
+                        <div>
+                            <div className="text-xs text-slate-500">Vence (segundos)</div>
+                            <Input value={enrollExpiresSeconds} onChange={(e) => setEnrollExpiresSeconds(e.target.value)} placeholder="90" />
+                        </div>
+                    </div>
+
+                    <label className="flex items-center gap-2 text-sm text-slate-300">
+                        <input type="checkbox" checked={enrollOverwrite} onChange={(e) => setEnrollOverwrite(e.target.checked)} />
+                        Reemplazar credencial previa de ese tipo
+                    </label>
+
+                    <div className="text-xs text-slate-500">
+                        Pasos: 1) habilitar enroll 2) en el Access Agent escanear 1 vez 3) verificar que aparezca en la lista.
+                    </div>
+                </div>
+            </Modal>
+
+            <Modal
+                isOpen={editCredState.open}
+                onClose={() => setEditCredState({ open: false })}
+                title="Editar credencial"
+                description={editCredState.cred ? `#${editCredState.cred.id} • ${editCredState.cred.credential_type}` : ''}
+                size="md"
+                footer={
+                    <div className="flex items-center gap-2">
+                        <button className="btn-secondary" onClick={() => setEditCredState({ open: false })} disabled={savingCredEdit}>
+                            Cancelar
+                        </button>
+                        <button className="btn-primary" onClick={saveCredentialEdit} disabled={savingCredEdit || !editCredState.cred}>
+                            {savingCredEdit ? 'Guardando…' : 'Guardar'}
+                        </button>
+                    </div>
+                }
+            >
+                {editCredState.cred ? (
+                    <div className="space-y-3">
+                        <div className="rounded-xl border border-slate-800/60 bg-slate-900/40 p-3">
+                            <div className="text-xs text-slate-500">Usuario actual</div>
+                            <div className="text-sm text-white mt-1">
+                                {editCredState.cred.usuario_nombre ? editCredState.cred.usuario_nombre : `user #${editCredState.cred.usuario_id}`}
+                                {editCredState.cred.usuario_dni ? ` (DNI ${editCredState.cred.usuario_dni})` : ''}
+                            </div>
+                        </div>
+
+                        <div>
+                            <div className="text-xs text-slate-500">Label</div>
+                            <Input value={editCredLabel} onChange={(e) => setEditCredLabel(e.target.value)} placeholder="Ej: Llavero azul" />
+                        </div>
+
+                        <label className="flex items-center gap-2 text-sm text-slate-300">
+                            <input type="checkbox" checked={editCredActive} onChange={(e) => setEditCredActive(e.target.checked)} />
+                            Activa
+                        </label>
+
+                        <div className="rounded-xl border border-slate-800/60 bg-slate-900/40 p-3">
+                            <div className="text-sm text-slate-300 font-semibold">Reasignar usuario (opcional)</div>
+                            <div className="text-xs text-slate-500 mt-1">Esto mueve la credencial a otro usuario.</div>
+                            <div className="mt-3">
+                                <div className="text-xs text-slate-500">Buscar usuario</div>
+                                <Input value={editCredUserSearch} onChange={(e) => setEditCredUserSearch(e.target.value)} placeholder="Nombre o DNI…" />
+                                {editCredUserResults.length > 0 ? (
+                                    <div className="mt-2 rounded-xl border border-slate-800/60 bg-slate-900/40 overflow-hidden">
+                                        {editCredUserResults.map((u) => (
+                                            <button
+                                                key={u.id}
+                                                className="w-full text-left px-3 py-2 hover:bg-slate-900/60"
+                                                onClick={() => {
+                                                    setEditCredSelectedUser(u);
+                                                    setEditCredUserResults([]);
+                                                    setEditCredUserSearch(`${u.nombre} (#${u.id})`);
+                                                }}
+                                            >
+                                                <div className="text-sm text-white">{u.nombre}</div>
+                                                <div className="text-xs text-slate-500">#{u.id} • DNI {u.dni}</div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                ) : null}
+                            </div>
+                            <div className="mt-3 flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                    <div className="text-xs text-slate-500">Nuevo usuario</div>
+                                    <div className="text-sm text-white mt-1 truncate">
+                                        {editCredSelectedUser ? `${editCredSelectedUser.nombre} (#${editCredSelectedUser.id})` : '—'}
+                                    </div>
+                                </div>
+                                <button
+                                    className="btn-secondary"
+                                    onClick={() => {
+                                        setEditCredSelectedUser(null);
+                                        setEditCredUserSearch('');
+                                        setEditCredUserResults([]);
+                                    }}
+                                    disabled={savingCredEdit}
+                                >
+                                    Limpiar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="p-6 text-sm text-slate-500">—</div>
+                )}
+            </Modal>
+
             <ConfirmModal
                 isOpen={deleteCredState.open}
                 onClose={() => setDeleteCredState({ open: false })}
                 title="Eliminar credencial"
-                message="Esta acción no se puede deshacer."
-                confirmText="Eliminar"
+                message="Esto desactiva la credencial. Luego se puede reactivar."
+                confirmText="Quitar"
                 cancelText="Cancelar"
                 variant="danger"
                 isLoading={deletingCred}

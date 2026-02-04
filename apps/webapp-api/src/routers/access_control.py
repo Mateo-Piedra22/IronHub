@@ -1142,19 +1142,59 @@ async def api_access_pair_device(request: Request, db: Session = Depends(get_db_
     "/api/access/credentials",
     dependencies=[Depends(require_gestion_access), Depends(require_feature("accesos")), Depends(require_scope_gestion("accesos:read"))],
 )
-async def api_access_list_credentials(db: Session = Depends(get_db_session), usuario_id: Optional[int] = None):
-    where = ""
+async def api_access_list_credentials(
+    db: Session = Depends(get_db_session),
+    usuario_id: Optional[int] = None,
+    q: Optional[str] = None,
+    credential_type: Optional[str] = None,
+    active: Optional[bool] = None,
+    limit: Optional[int] = None,
+):
+    where_clauses: List[str] = []
     params: Dict[str, Any] = {}
     if usuario_id is not None:
-        where = "WHERE usuario_id = :uid"
+        where_clauses.append("c.usuario_id = :uid")
         params["uid"] = int(usuario_id)
+    if credential_type is not None:
+        ct = str(credential_type or "").strip().lower()[:30]
+        if ct:
+            where_clauses.append("c.credential_type = :ct")
+            params["ct"] = ct
+    if active is not None:
+        where_clauses.append("c.active = :active")
+        params["active"] = bool(active)
+    if q is not None:
+        qs = str(q or "").strip()
+        if qs:
+            where_clauses.append("(c.label ILIKE :q OR u.nombre ILIKE :q OR COALESCE(u.dni, '') ILIKE :q)")
+            params["q"] = f"%{qs}%"
+    where = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+    lim = ""
+    try:
+        if limit is not None:
+            lim_n = int(limit)
+            lim_n = max(1, min(lim_n, 1000))
+            lim = "LIMIT :lim"
+            params["lim"] = lim_n
+    except Exception:
+        lim = ""
     rows = db.execute(
         text(
             f"""
-            SELECT id, usuario_id, credential_type, label, active, created_at, updated_at
-            FROM access_credentials
+            SELECT c.id,
+                   c.usuario_id,
+                   c.credential_type,
+                   c.label,
+                   c.active,
+                   c.created_at,
+                   c.updated_at,
+                   u.nombre AS usuario_nombre,
+                   u.dni AS usuario_dni
+            FROM access_credentials c
+            LEFT JOIN usuarios u ON u.id = c.usuario_id
             {where}
-            ORDER BY id DESC
+            ORDER BY c.id DESC
+            {lim}
             """
         ),
         params,
@@ -1235,6 +1275,74 @@ async def api_access_delete_credential(credential_id: int, db: Session = Depends
     db.execute(text("UPDATE access_credentials SET active = FALSE, updated_at = NOW() WHERE id = :id"), {"id": int(credential_id)})
     db.commit()
     return {"ok": True}
+
+
+@router.patch(
+    "/api/access/credentials/{credential_id}",
+    dependencies=[Depends(require_gestion_access), Depends(require_feature("accesos")), Depends(require_scope_gestion("accesos:write"))],
+)
+async def api_access_update_credential(credential_id: int, request: Request, db: Session = Depends(get_db_session)):
+    payload = {}
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    updates: Dict[str, Any] = {}
+    params: Dict[str, Any] = {"id": int(credential_id)}
+
+    if "label" in (payload or {}):
+        label = str((payload or {}).get("label") or "").strip()[:120] or None
+        updates["label"] = ":label"
+        params["label"] = label
+
+    if "active" in (payload or {}):
+        updates["active"] = ":active"
+        params["active"] = bool((payload or {}).get("active"))
+
+    if "usuario_id" in (payload or {}):
+        try:
+            uid = int((payload or {}).get("usuario_id") or 0)
+        except Exception:
+            uid = 0
+        if uid <= 0:
+            raise HTTPException(status_code=400, detail="usuario_id inválido")
+        urow = db.execute(text("SELECT id FROM usuarios WHERE id = :uid LIMIT 1"), {"uid": int(uid)}).fetchone()
+        if not urow:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        updates["usuario_id"] = ":uid"
+        params["uid"] = int(uid)
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="Sin cambios")
+
+    set_sql = ", ".join([f"{k} = {v}" for k, v in updates.items()])
+    db.execute(text(f"UPDATE access_credentials SET {set_sql}, updated_at = NOW() WHERE id = :id"), params)
+    db.commit()
+
+    row = db.execute(
+        text(
+            """
+            SELECT c.id,
+                   c.usuario_id,
+                   c.credential_type,
+                   c.label,
+                   c.active,
+                   c.created_at,
+                   c.updated_at,
+                   u.nombre AS usuario_nombre,
+                   u.dni AS usuario_dni
+            FROM access_credentials c
+            LEFT JOIN usuarios u ON u.id = c.usuario_id
+            WHERE c.id = :id
+            LIMIT 1
+            """
+        ),
+        {"id": int(credential_id)},
+    ).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Credencial no encontrada")
+    return {"ok": True, "item": dict(row)}
 
 
 @router.post("/api/access/events", dependencies=[Depends(require_feature("accesos"))])
