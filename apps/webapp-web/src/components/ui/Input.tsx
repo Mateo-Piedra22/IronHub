@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, InputHTMLAttributes, TextareaHTMLAttributes, SelectHTMLAttributes } from 'react';
+import { forwardRef, InputHTMLAttributes, TextareaHTMLAttributes, SelectHTMLAttributes, useId } from 'react';
 import { cn } from '@/lib/utils';
 import { Search, Eye, EyeOff } from 'lucide-react';
 import { useState } from 'react';
@@ -16,7 +16,8 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
     ({ className, label, error, hint, leftIcon, rightIcon, id, ...props }, ref) => {
-        const inputId = id || `input-${Math.random().toString(36).substr(2, 9)}`;
+        const reactId = useId();
+        const inputId = id || `input-${reactId.replace(/:/g, '')}`;
 
         return (
             <div className="space-y-1.5">
@@ -128,7 +129,8 @@ export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElemen
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
     ({ className, label, error, hint, id, ...props }, ref) => {
-        const inputId = id || `textarea-${Math.random().toString(36).substr(2, 9)}`;
+        const reactId = useId();
+        const inputId = id || `textarea-${reactId.replace(/:/g, '')}`;
 
         return (
             <div className="space-y-1.5">
@@ -175,7 +177,8 @@ export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(
     ({ className, label, error, options, placeholder, id, ...props }, ref) => {
-        const inputId = id || `select-${Math.random().toString(36).substr(2, 9)}`;
+        const reactId = useId();
+        const inputId = id || `select-${reactId.replace(/:/g, '')}`;
 
         return (
             <div className="space-y-1.5">

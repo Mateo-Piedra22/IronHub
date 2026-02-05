@@ -309,18 +309,13 @@ export default function EquipoPage() {
                                                 </button>
                                             ) : (
                                                 <button
-                                                    onClick={async () => {
-                                                        const r = await api.promoteTeamMember({ usuario_id: m.id, kind: 'staff', rol: 'empleado' });
-                                                        if (r.ok && r.data?.ok) {
-                                                            toast({ title: 'Actualizado', description: 'Ahora es staff', variant: 'success' });
-                                                            load();
-                                                        } else {
-                                                            toast({ title: 'Error', description: r.error || 'No se pudo promover', variant: 'error' });
-                                                        }
+                                                    onClick={() => {
+                                                        setStaffEditMember(m);
+                                                        setStaffEditOpen(true);
                                                     }}
                                                     className="text-xs text-primary-200 hover:text-primary-100"
                                                 >
-                                                    Hacer staff
+                                                    Configurar staff
                                                 </button>
                                             )}
                                         </div>

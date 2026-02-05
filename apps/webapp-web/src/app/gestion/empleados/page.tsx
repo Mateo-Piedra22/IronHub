@@ -170,6 +170,15 @@ export default function EmpleadosPage() {
                 }
                 const res = await api.createUsuario({ nombre, dni, telefono, rol } as any);
                 if (!res.ok || !res.data?.id) throw new Error(res.error || 'No se pudo crear');
+                const res2 = await api.updateStaff(res.data.id, {
+                    rol,
+                    activo: true,
+                    sucursales: defaultBranches,
+                    scopes: [],
+                    tipo: rol,
+                    estado: 'activo',
+                } as any);
+                if (!res2.ok) throw new Error(res2.error || 'No se pudo configurar el staff');
             }
             toast({ title: 'Creado', description: 'Staff creado correctamente', variant: 'success' });
             setCreateOpen(false);

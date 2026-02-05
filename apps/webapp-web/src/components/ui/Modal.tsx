@@ -75,15 +75,23 @@ export function Modal({
 
     // Focus trap and escape listener
     useEffect(() => {
+        let t: ReturnType<typeof setTimeout> | undefined;
         if (isOpen) {
             document.body.style.overflow = 'hidden';
             if (!wasOpenRef.current) {
-                setTimeout(() => modalRef.current?.focus(), 50);
+                t = setTimeout(() => {
+                    const modalEl = modalRef.current;
+                    if (!modalEl) return;
+                    const active = document.activeElement as HTMLElement | null;
+                    if (active && modalEl.contains(active)) return;
+                    modalEl.focus();
+                }, 50);
             }
         }
         wasOpenRef.current = isOpen;
 
         return () => {
+            if (t) clearTimeout(t);
             document.body.style.overflow = '';
         };
     }, [isOpen]);

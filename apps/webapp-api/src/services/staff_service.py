@@ -209,7 +209,10 @@ class StaffService(BaseService):
         if tipo is not None:
             prof.tipo = str(tipo or "").strip().lower() or "empleado"
         if estado is not None:
-            prof.estado = str(estado or "").strip().lower() or "activo"
+            estado_norm = str(estado or "").strip().lower() or "activo"
+            if estado_norm not in ("activo", "inactivo", "vacaciones"):
+                estado_norm = "activo"
+            prof.estado = estado_norm
         try:
             prof.fecha_actualizacion = datetime.utcnow()
         except Exception:
@@ -240,7 +243,9 @@ class StaffService(BaseService):
         self.db.execute(text("DELETE FROM usuario_sucursales WHERE usuario_id = :uid"), {"uid": uid})
         for sid in clean:
             self.db.execute(
-                text("INSERT INTO usuario_sucursales(usuario_id, sucursal_id) VALUES (:uid, :sid)"),
+                text(
+                    "INSERT INTO usuario_sucursales(usuario_id, sucursal_id, created_at) VALUES (:uid, :sid, NOW()) ON CONFLICT DO NOTHING"
+                ),
                 {"uid": uid, "sid": sid},
             )
 
@@ -255,7 +260,7 @@ class StaffService(BaseService):
             text(
                 """
                 INSERT INTO staff_permissions(usuario_id, scopes, updated_at)
-                VALUES (:uid, :scopes::jsonb, NOW())
+                VALUES (:uid, CAST(:scopes AS jsonb), NOW())
                 ON CONFLICT (usuario_id)
                 DO UPDATE SET scopes = EXCLUDED.scopes, updated_at = NOW()
                 """
