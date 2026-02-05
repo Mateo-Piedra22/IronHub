@@ -50,6 +50,7 @@ export default function EquipoPage() {
     const [confirmText, setConfirmText] = useState('Confirmar');
     const [confirmVariant, setConfirmVariant] = useState<'danger' | 'warning' | 'info'>('warning');
     const [pendingConvert, setPendingConvert] = useState<null | { usuario_id: number; target: 'staff' | 'profesor' | 'usuario'; rol?: string; force?: boolean }>(null);
+    const [pendingDeleteProfile, setPendingDeleteProfile] = useState<null | { usuario_id: number; kind: 'staff' | 'profesor'; force?: boolean }>(null);
 
     const tabs = useMemo(
         () => [
@@ -155,6 +156,14 @@ export default function EquipoPage() {
         }
     };
 
+    const deleteProfile = async (data: { usuario_id: number; kind: 'staff' | 'profesor'; force?: boolean }) => {
+        const res = await api.deleteTeamProfile(data);
+        if (!res.ok || !res.data?.ok) {
+            const msg = res.error || res.data?.error || 'No se pudo eliminar el perfil';
+            throw new Error(msg);
+        }
+    };
+
     const openConvertConfirm = async (member: TeamMember, data: { target: 'staff' | 'profesor' | 'usuario'; rol?: string }) => {
         try {
             const impactRes = await api.getTeamImpact(member.id);
@@ -166,6 +175,17 @@ export default function EquipoPage() {
                     toast({
                         title: 'No se puede convertir',
                         description: `Tiene ${sesiones} sesión activa. Cerrala antes de continuar.`,
+                        variant: 'error',
+                    });
+                    return;
+                }
+            }
+            if (data.target !== 'staff') {
+                const sesionesStaff = Number(impact?.staff?.sesiones_activas || 0);
+                if (sesionesStaff > 0) {
+                    toast({
+                        title: 'No se puede convertir',
+                        description: `Tiene ${sesionesStaff} sesión de staff activa. Cerrala antes de continuar.`,
                         variant: 'error',
                     });
                     return;
@@ -187,6 +207,19 @@ export default function EquipoPage() {
                 if (clases > 0) {
                     force = true;
                     message = `${message}\nTiene ${clases} clase(s) asignada(s). Se desactivarán esas asignaciones.`;
+                }
+            } else if (data.target === 'profesor') {
+                title = 'Convertir a profesor';
+                message = `Convertir a "${member.nombre}" a profesor.`;
+                confirmTextLocal = 'Convertir';
+                variant = 'warning';
+                const scopes = Number(impact?.staff?.scopes_count || 0);
+                const sucursales = Number(impact?.staff?.sucursales_count || 0);
+                const parts: string[] = [];
+                if (scopes > 0) parts.push(`${scopes} permiso(s)`);
+                if (sucursales > 0) parts.push(`${sucursales} sucursal(es)`);
+                if (parts.length) {
+                    message = `${message}\nSe va a desactivar staff y limpiar: ${parts.join(', ')}.`;
                 }
             } else if (data.target === 'usuario') {
                 title = 'Quitar del equipo';
@@ -211,6 +244,65 @@ export default function EquipoPage() {
             setConfirmVariant(variant);
             setConfirmText(confirmTextLocal);
             setPendingConvert({ usuario_id: member.id, target: data.target, rol: data.rol, force });
+            setPendingDeleteProfile(null);
+            setConfirmOpen(true);
+        } catch {
+            toast({ title: 'Error', description: 'No se pudo evaluar el impacto', variant: 'error' });
+        }
+    };
+
+    const openDeleteProfileConfirm = async (member: TeamMember, kind: 'staff' | 'profesor') => {
+        try {
+            const impactRes = await api.getTeamImpact(member.id);
+            const impact: TeamImpact | null = impactRes.ok && impactRes.data?.ok ? (impactRes.data as TeamImpact) : null;
+
+            if (kind === 'profesor') {
+                const sesiones = Number(impact?.profesor?.sesiones_activas || 0);
+                if (sesiones > 0) {
+                    toast({
+                        title: 'No se puede eliminar',
+                        description: `Tiene ${sesiones} sesión activa. Cerrala antes de continuar.`,
+                        variant: 'error',
+                    });
+                    return;
+                }
+            } else {
+                const sesionesStaff = Number(impact?.staff?.sesiones_activas || 0);
+                if (sesionesStaff > 0) {
+                    toast({
+                        title: 'No se puede eliminar',
+                        description: `Tiene ${sesionesStaff} sesión de staff activa. Cerrala antes de continuar.`,
+                        variant: 'error',
+                    });
+                    return;
+                }
+            }
+
+            let force = false;
+            let message = `Eliminar el perfil de ${kind} de "${member.nombre}".`;
+            if (kind === 'profesor') {
+                const clases = Number(impact?.profesor?.clases_asignadas_activas || 0);
+                if (clases > 0) {
+                    force = true;
+                    message = `${message}\nTiene ${clases} clase(s) asignada(s). Se desactivarán esas asignaciones.`;
+                }
+                message = `${message}\nEsta acción puede borrar datos asociados (horarios/sesiones).`;
+            } else {
+                const scopes = Number(impact?.staff?.scopes_count || 0);
+                const sucursales = Number(impact?.staff?.sucursales_count || 0);
+                const parts: string[] = [];
+                if (scopes > 0) parts.push(`${scopes} permiso(s)`);
+                if (sucursales > 0) parts.push(`${sucursales} sucursal(es)`);
+                if (parts.length) message = `${message}\nSe van a eliminar: ${parts.join(', ')}.`;
+                message = `${message}\nEsta acción puede borrar datos asociados (sesiones).`;
+            }
+
+            setConfirmTitle(`Eliminar perfil ${kind}`);
+            setConfirmMessage(message);
+            setConfirmVariant('danger');
+            setConfirmText('Eliminar');
+            setPendingDeleteProfile({ usuario_id: member.id, kind, force });
+            setPendingConvert(null);
             setConfirmOpen(true);
         } catch {
             toast({ title: 'Error', description: 'No se pudo evaluar el impacto', variant: 'error' });
@@ -218,13 +310,19 @@ export default function EquipoPage() {
     };
 
     const runConfirm = async () => {
-        if (!pendingConvert) return;
+        if (!pendingConvert && !pendingDeleteProfile) return;
         setConfirmLoading(true);
         try {
-            await convertMember(pendingConvert);
-            toast({ title: 'Actualizado', description: 'Cambios aplicados', variant: 'success' });
+            if (pendingConvert) {
+                await convertMember(pendingConvert);
+                toast({ title: 'Actualizado', description: 'Cambios aplicados', variant: 'success' });
+            } else if (pendingDeleteProfile) {
+                await deleteProfile(pendingDeleteProfile);
+                toast({ title: 'Actualizado', description: 'Perfil eliminado', variant: 'success' });
+            }
             setConfirmOpen(false);
             setPendingConvert(null);
+            setPendingDeleteProfile(null);
             await load();
         } catch (e) {
             toast({
@@ -234,6 +332,7 @@ export default function EquipoPage() {
             });
             setConfirmOpen(false);
             setPendingConvert(null);
+            setPendingDeleteProfile(null);
         } finally {
             setConfirmLoading(false);
         }
@@ -431,42 +530,54 @@ export default function EquipoPage() {
                                                         >
                                                             Convertir a staff
                                                         </button>
+                                                        <button
+                                                            onClick={() => void openDeleteProfileConfirm(m, 'profesor')}
+                                                            className="text-xs text-danger-300 hover:text-danger-200"
+                                                        >
+                                                            Eliminar perfil profesor
+                                                        </button>
                                                     </>
                                             ) : (
                                                 <button
-                                                    onClick={async () => {
-                                                        const r = await api.convertTeamMember({ usuario_id: m.id, target: 'profesor' });
-                                                        if (r.ok && r.data?.ok) {
-                                                            toast({ title: 'Actualizado', description: 'Ahora es profesor', variant: 'success' });
-                                                            load();
-                                                        } else toast({ title: 'Error', description: r.error || 'No se pudo promover', variant: 'error' });
-                                                    }}
+                                                    onClick={() => void openConvertConfirm(m, { target: 'profesor' })}
                                                     className="text-xs text-primary-200 hover:text-primary-100"
                                                 >
                                                     Hacer profesor
                                                 </button>
                                             )}
-                                            {m.staff ? (
-                                                <button
-                                                    onClick={() => {
-                                                        setStaffEditMember(m);
-                                                        setStaffEditOpen(true);
-                                                    }}
-                                                    className="text-xs text-slate-300 hover:text-white"
-                                                >
-                                                    Editar staff
-                                                </button>
-                                            ) : (
-                                                <button
-                                                    onClick={() => {
-                                                        setStaffEditMember(m);
-                                                        setStaffEditOpen(true);
-                                                    }}
-                                                    className="text-xs text-primary-200 hover:text-primary-100"
-                                                >
-                                                    Configurar staff
-                                                </button>
-                                            )}
+                                            {!m.profesor ? (
+                                                <>
+                                                    {m.staff ? (
+                                                        <>
+                                                            <button
+                                                                onClick={() => {
+                                                                    setStaffEditMember(m);
+                                                                    setStaffEditOpen(true);
+                                                                }}
+                                                                className="text-xs text-slate-300 hover:text-white"
+                                                            >
+                                                                Editar staff
+                                                            </button>
+                                                            <button
+                                                                onClick={() => void openDeleteProfileConfirm(m, 'staff')}
+                                                                className="text-xs text-danger-300 hover:text-danger-200"
+                                                            >
+                                                                Eliminar perfil staff
+                                                            </button>
+                                                        </>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => {
+                                                                setStaffEditMember(m);
+                                                                setStaffEditOpen(true);
+                                                            }}
+                                                            className="text-xs text-primary-200 hover:text-primary-100"
+                                                        >
+                                                            Configurar staff
+                                                        </button>
+                                                    )}
+                                                </>
+                                            ) : null}
                                             <button
                                                 onClick={() => openUserEdit(m)}
                                                 className="text-xs text-slate-300 hover:text-white"

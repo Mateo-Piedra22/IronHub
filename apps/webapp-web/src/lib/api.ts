@@ -503,6 +503,7 @@ export type TeamImpact = {
         staff_tipo?: string | null;
         has_permissions: boolean;
         scopes_count: number;
+        sesiones_activas?: number;
         sucursales_count: number;
     };
 };
@@ -2114,6 +2115,13 @@ class ApiClient {
 
     async convertTeamMember(data: { usuario_id: number; target: 'staff' | 'profesor' | 'usuario'; rol?: string; force?: boolean }) {
         return this.request<{ ok: boolean; usuario_id: number; target: string; error?: string }>(`/api/team/convert`, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    }
+
+    async deleteTeamProfile(data: { usuario_id: number; kind: 'staff' | 'profesor'; force?: boolean }) {
+        return this.request<{ ok: boolean; usuario_id: number; kind: string; deleted?: boolean; error?: string }>(`/api/team/delete_profile`, {
             method: 'POST',
             body: JSON.stringify(data),
         });

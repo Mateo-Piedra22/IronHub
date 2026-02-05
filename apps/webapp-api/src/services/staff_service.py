@@ -14,12 +14,14 @@ class StaffService(BaseService):
     def __init__(self, db: Session):
         super().__init__(db)
 
-    def _ensure_staff_profile(self, usuario_id: int) -> StaffProfile:
+    def _ensure_staff_profile(self, usuario_id: int, *, create_if_missing: bool = True) -> Optional[StaffProfile]:
         uid = int(usuario_id)
         prof = self.db.scalars(
             select(StaffProfile).where(StaffProfile.usuario_id == uid)
         ).first()
         if prof is None:
+            if not create_if_missing:
+                return None
             prof = StaffProfile(usuario_id=uid)
             self.db.add(prof)
             self.db.flush()
@@ -270,13 +272,9 @@ class StaffService(BaseService):
 
     def start_session(self, usuario_id: int, sucursal_id: Optional[int]) -> int:
         uid = int(usuario_id)
-        prof = self.db.scalars(
-            select(StaffProfile).where(StaffProfile.usuario_id == uid)
-        ).first()
-        if prof is None:
-            prof = StaffProfile(usuario_id=uid)
-            self.db.add(prof)
-            self.db.flush()
+        prof = self._ensure_staff_profile(uid, create_if_missing=False)
+        if prof is None or str(getattr(prof, "estado", "") or "").strip().lower() == "inactivo":
+            raise ValueError("staff_not_found")
         now = datetime.utcnow()
         today = date.today()
         existing = self.db.scalars(
@@ -477,7 +475,9 @@ class StaffService(BaseService):
         hora_fin: Optional[datetime],
         notas: Optional[str] = None,
     ) -> int:
-        prof = self._ensure_staff_profile(int(usuario_id))
+        prof = self._ensure_staff_profile(int(usuario_id), create_if_missing=False)
+        if prof is None or str(getattr(prof, "estado", "") or "").strip().lower() == "inactivo":
+            raise ValueError("staff_not_found")
         sess = StaffSession(
             staff_id=int(prof.id),
             sucursal_id=int(sucursal_id) if sucursal_id else None,

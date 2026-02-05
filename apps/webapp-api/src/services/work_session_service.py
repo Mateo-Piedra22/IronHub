@@ -69,15 +69,16 @@ class WorkSessionService:
         except Exception:
             return None
 
-    def _resolve_staff_profile(self, user_id: int) -> StaffProfile:
+    def _resolve_staff_profile(self, user_id: int) -> Optional[StaffProfile]:
         uid = int(user_id)
         prof = self.db.scalars(
             select(StaffProfile).where(StaffProfile.usuario_id == uid)
         ).first()
         if prof is None:
-            prof = StaffProfile(usuario_id=uid)
-            self.db.add(prof)
-            self.db.flush()
+            return None
+        estado = str(getattr(prof, "estado", "") or "").strip().lower()
+        if estado == "inactivo":
+            return None
         return prof
 
     def _get_active_profesor_session(
@@ -189,6 +190,8 @@ class WorkSessionService:
             }
 
         prof = self._resolve_staff_profile(int(user_id))
+        if not prof:
+            return {"ok": True, "allowed": False, "kind": "staff"}
         sess = self._get_active_staff_session(int(prof.id))
         if not sess:
             return {"ok": True, "allowed": True, "kind": "staff", "active": None}
@@ -276,6 +279,8 @@ class WorkSessionService:
             }
 
         prof = self._resolve_staff_profile(int(user_id))
+        if not prof:
+            return {"ok": False, "error": "Staff no encontrado"}
         existing = self._get_active_staff_session(int(prof.id))
         if existing is not None:
             return {
@@ -420,4 +425,3 @@ class WorkSessionService:
         except Exception as e:
             self.db.rollback()
             return {"ok": False, "error": str(e)}
-
