@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Search, UsersRound } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { api, type Profesor, type TeamMember } from '@/lib/api';
-import { Button, Input, Modal, useToast } from '@/components/ui';
+import { api, type Profesor, type TeamImpact, type TeamMember } from '@/lib/api';
+import { Button, ConfirmModal, Input, Modal, useToast } from '@/components/ui';
 import ProfesorDetailModal from '@/components/ProfesorDetailModal';
 import TeamStaffModal from '@/components/TeamStaffModal';
 
@@ -36,6 +36,21 @@ export default function EquipoPage() {
     const [profesorEditOpen, setProfesorEditOpen] = useState(false);
     const [profesorEditProfesor, setProfesorEditProfesor] = useState<Profesor | null>(null);
 
+    const [userEditOpen, setUserEditOpen] = useState(false);
+    const [userEditSaving, setUserEditSaving] = useState(false);
+    const [userEditMember, setUserEditMember] = useState<TeamMember | null>(null);
+    const [userEditNombre, setUserEditNombre] = useState('');
+    const [userEditDni, setUserEditDni] = useState('');
+    const [userEditTelefono, setUserEditTelefono] = useState('');
+
+    const [confirmOpen, setConfirmOpen] = useState(false);
+    const [confirmLoading, setConfirmLoading] = useState(false);
+    const [confirmTitle, setConfirmTitle] = useState('');
+    const [confirmMessage, setConfirmMessage] = useState('');
+    const [confirmText, setConfirmText] = useState('Confirmar');
+    const [confirmVariant, setConfirmVariant] = useState<'danger' | 'warning' | 'info'>('warning');
+    const [pendingConvert, setPendingConvert] = useState<null | { usuario_id: number; target: 'staff' | 'profesor' | 'usuario'; rol?: string; force?: boolean }>(null);
+
     const tabs = useMemo(
         () => [
             { key: 'todos' as const, label: 'Todos' },
@@ -50,7 +65,7 @@ export default function EquipoPage() {
         try {
             const r = await api.getSucursales();
             if (r.ok && r.data?.ok) {
-                setSucursalActualId((r.data.sucursal_actual_id ?? null) as any);
+                setSucursalActualId(r.data.sucursal_actual_id ?? null);
             } else {
                 setSucursalActualId(null);
             }
@@ -87,15 +102,142 @@ export default function EquipoPage() {
 
     useEffect(() => {
         const handler = () => loadSucursalActual();
-        window.addEventListener('ironhub:sucursal-changed', handler as any);
-        return () => window.removeEventListener('ironhub:sucursal-changed', handler as any);
+        const eventName = 'ironhub:sucursal-changed' as unknown as keyof WindowEventMap;
+        window.addEventListener(eventName, handler);
+        return () => window.removeEventListener(eventName, handler);
     }, [loadSucursalActual]);
 
     const filtered = useMemo(() => {
         if (tab === 'todos') return items;
-        if (tab === 'profesores') return items.filter((i) => i.profesor != null || i.kind === 'profesor');
+        if (tab === 'profesores') return items.filter((i) => i.profesor != null);
         return items.filter((i) => i.staff != null || i.kind === 'staff');
     }, [items, tab]);
+
+    const openUserEdit = (m: TeamMember) => {
+        setUserEditMember(m);
+        setUserEditNombre(m.nombre || '');
+        setUserEditDni(m.dni || '');
+        setUserEditTelefono(m.telefono || '');
+        setUserEditOpen(true);
+    };
+
+    const saveUserEdit = async () => {
+        if (!userEditMember) return;
+        setUserEditSaving(true);
+        try {
+            const payload = {
+                nombre: String(userEditNombre || '').trim(),
+                dni: String(userEditDni || '').trim(),
+                telefono: String(userEditTelefono || '').trim(),
+            };
+            const res = await api.updateUsuario(userEditMember.id, payload);
+            if (!res.ok) throw new Error(res.error || 'No se pudo guardar');
+            toast({ title: 'Guardado', description: 'Datos actualizados', variant: 'success' });
+            setUserEditOpen(false);
+            setUserEditMember(null);
+            await load();
+        } catch (e) {
+            toast({
+                title: 'No se pudo guardar',
+                description: e instanceof Error ? e.message : 'Error inesperado',
+                variant: 'error',
+            });
+        } finally {
+            setUserEditSaving(false);
+        }
+    };
+
+    const convertMember = async (data: { usuario_id: number; target: 'staff' | 'profesor' | 'usuario'; rol?: string; force?: boolean }) => {
+        const res = await api.convertTeamMember(data);
+        if (!res.ok || !res.data?.ok) {
+            const msg = res.error || res.data?.error || 'No se pudo actualizar';
+            throw new Error(msg);
+        }
+    };
+
+    const openConvertConfirm = async (member: TeamMember, data: { target: 'staff' | 'profesor' | 'usuario'; rol?: string }) => {
+        try {
+            const impactRes = await api.getTeamImpact(member.id);
+            const impact: TeamImpact | null = impactRes.ok && impactRes.data?.ok ? (impactRes.data as TeamImpact) : null;
+
+            if (impact?.profesor?.exists && data.target !== 'profesor') {
+                const sesiones = Number(impact.profesor.sesiones_activas || 0);
+                if (sesiones > 0) {
+                    toast({
+                        title: 'No se puede convertir',
+                        description: `Tiene ${sesiones} sesión activa. Cerrala antes de continuar.`,
+                        variant: 'error',
+                    });
+                    return;
+                }
+            }
+
+            let title = 'Confirmar';
+            let message = '¿Confirmás la acción?';
+            let variant: 'danger' | 'warning' | 'info' = 'warning';
+            let confirmTextLocal = 'Confirmar';
+            let force = false;
+
+            if (data.target === 'staff') {
+                title = 'Convertir a staff';
+                message = `Convertir a "${member.nombre}" a staff (rol: ${data.rol || 'empleado'}).`;
+                confirmTextLocal = 'Convertir';
+                variant = 'warning';
+                const clases = Number(impact?.profesor?.clases_asignadas_activas || 0);
+                if (clases > 0) {
+                    force = true;
+                    message = `${message}\nTiene ${clases} clase(s) asignada(s). Se desactivarán esas asignaciones.`;
+                }
+            } else if (data.target === 'usuario') {
+                title = 'Quitar del equipo';
+                message = `Quitar a "${member.nombre}" del equipo (vuelve a usuario normal).`;
+                confirmTextLocal = 'Quitar';
+                variant = 'danger';
+                const clases = Number(impact?.profesor?.clases_asignadas_activas || 0);
+                const scopes = Number(impact?.staff?.scopes_count || 0);
+                const sucursales = Number(impact?.staff?.sucursales_count || 0);
+                const parts: string[] = [];
+                if (clases > 0) parts.push(`${clases} clase(s) asignada(s)`);
+                if (scopes > 0) parts.push(`${scopes} permiso(s)`);
+                if (sucursales > 0) parts.push(`${sucursales} sucursal(es)`);
+                if (parts.length) {
+                    force = clases > 0;
+                    message = `${message}\nSe van a limpiar: ${parts.join(', ')}.`;
+                }
+            }
+
+            setConfirmTitle(title);
+            setConfirmMessage(message);
+            setConfirmVariant(variant);
+            setConfirmText(confirmTextLocal);
+            setPendingConvert({ usuario_id: member.id, target: data.target, rol: data.rol, force });
+            setConfirmOpen(true);
+        } catch {
+            toast({ title: 'Error', description: 'No se pudo evaluar el impacto', variant: 'error' });
+        }
+    };
+
+    const runConfirm = async () => {
+        if (!pendingConvert) return;
+        setConfirmLoading(true);
+        try {
+            await convertMember(pendingConvert);
+            toast({ title: 'Actualizado', description: 'Cambios aplicados', variant: 'success' });
+            setConfirmOpen(false);
+            setPendingConvert(null);
+            await load();
+        } catch (e) {
+            toast({
+                title: 'Error',
+                description: e instanceof Error ? e.message : 'No se pudo actualizar',
+                variant: 'error',
+            });
+            setConfirmOpen(false);
+            setPendingConvert(null);
+        } finally {
+            setConfirmLoading(false);
+        }
+    };
 
     const searchUsuariosExistentes = async () => {
         const term = String(existingSearch || '').trim();
@@ -110,8 +252,8 @@ export default function EquipoPage() {
                 const mapped = (res.data.usuarios || []).map((u) => ({
                     id: u.id,
                     nombre: u.nombre,
-                    dni: (u as any).dni,
-                    email: (u as any).email,
+                    dni: u.dni,
+                    email: u.email,
                 }));
                 setExistingUsers(mapped);
             } else {
@@ -129,9 +271,9 @@ export default function EquipoPage() {
         try {
             if (createMode === 'existente') {
                 if (!existingUserId) throw new Error('Seleccioná un usuario existente');
-                const res = await api.promoteTeamMember({
+                const res = await api.convertTeamMember({
                     usuario_id: existingUserId,
-                    kind: createKind,
+                    target: createKind,
                     rol: createKind === 'staff' ? createRol : undefined,
                 });
                 if (!res.ok || !res.data?.ok) throw new Error(res.error || 'No se pudo asociar');
@@ -141,11 +283,11 @@ export default function EquipoPage() {
                     const dni = createDni.trim();
                     const telefono = createTelefono.trim();
                     if (!nombre || !dni) throw new Error('Nombre y DNI son obligatorios');
-                    const r = await api.createUsuario({ nombre, dni, telefono, rol: createRol } as any);
+                    const r = await api.createUsuario({ nombre, dni, telefono, rol: createRol });
                     if (!r.ok || !r.data?.id) throw new Error(r.error || 'No se pudo crear el usuario');
-                    const res = await api.promoteTeamMember({
+                    const res = await api.convertTeamMember({
                         usuario_id: r.data.id,
-                        kind: 'staff',
+                        target: 'staff',
                         rol: createRol,
                     });
                     if (!res.ok || !res.data?.ok) throw new Error(res.error || 'No se pudo asociar');
@@ -153,7 +295,7 @@ export default function EquipoPage() {
                     const nombre = createNombre.trim();
                     const telefono = createTelefono.trim();
                     if (!nombre) throw new Error('Nombre es obligatorio');
-                    const res = await api.createProfesor({ nombre, telefono } as any);
+                    const res = await api.createProfesor({ nombre, telefono });
                     if (!res.ok) throw new Error(res.error || 'No se pudo crear el profesor');
                 }
             }
@@ -262,35 +404,42 @@ export default function EquipoPage() {
                                     <td className="py-2 text-right">
                                         <div className="flex items-center justify-end gap-2">
                                             {m.profesor ? (
-                                                <button
-                                                    onClick={() => {
-                                                        setProfesorEditProfesor({
-                                                            id: m.profesor?.id as number,
-                                                            usuario_id: m.id,
-                                                            nombre: m.nombre,
-                                                            telefono: m.telefono,
-                                                            activo: m.activo,
-                                                            tipo: m.profesor?.tipo || null,
-                                                            estado: m.profesor?.estado || null,
-                                                            scopes: m.scopes || [],
-                                                            sucursales: (m.sucursales || []).map((id) => ({ id, nombre: '' })),
-                                                        } as any);
-                                                        setProfesorEditOpen(true);
-                                                    }}
-                                                    className="text-xs text-slate-300 hover:text-white"
-                                                >
-                                                    Editar profesor
-                                                </button>
+                                                    <>
+                                                        <button
+                                                            onClick={() => {
+                                                                const prof: Profesor = {
+                                                                    id: m.profesor?.id as number,
+                                                                    usuario_id: m.id,
+                                                                    nombre: m.nombre,
+                                                                    telefono: m.telefono,
+                                                                    activo: m.activo,
+                                                                    tipo: m.profesor?.tipo || null,
+                                                                    estado: m.profesor?.estado || null,
+                                                                    scopes: m.scopes || [],
+                                                                    sucursales: (m.sucursales || []).map((id) => ({ id, nombre: '' })),
+                                                                };
+                                                                setProfesorEditProfesor(prof);
+                                                                setProfesorEditOpen(true);
+                                                            }}
+                                                            className="text-xs text-slate-300 hover:text-white"
+                                                        >
+                                                            Editar profesor
+                                                        </button>
+                                                        <button
+                                                            onClick={() => void openConvertConfirm(m, { target: 'staff', rol: 'empleado' })}
+                                                            className="text-xs text-warning-200 hover:text-warning-100"
+                                                        >
+                                                            Convertir a staff
+                                                        </button>
+                                                    </>
                                             ) : (
                                                 <button
                                                     onClick={async () => {
-                                                        const r = await api.promoteTeamMember({ usuario_id: m.id, kind: 'profesor' });
+                                                        const r = await api.convertTeamMember({ usuario_id: m.id, target: 'profesor' });
                                                         if (r.ok && r.data?.ok) {
                                                             toast({ title: 'Actualizado', description: 'Ahora es profesor', variant: 'success' });
                                                             load();
-                                                        } else {
-                                                            toast({ title: 'Error', description: r.error || 'No se pudo promover', variant: 'error' });
-                                                        }
+                                                        } else toast({ title: 'Error', description: r.error || 'No se pudo promover', variant: 'error' });
                                                     }}
                                                     className="text-xs text-primary-200 hover:text-primary-100"
                                                 >
@@ -318,6 +467,18 @@ export default function EquipoPage() {
                                                     Configurar staff
                                                 </button>
                                             )}
+                                            <button
+                                                onClick={() => openUserEdit(m)}
+                                                className="text-xs text-slate-300 hover:text-white"
+                                            >
+                                                Editar datos
+                                            </button>
+                                            <button
+                                                onClick={() => void openConvertConfirm(m, { target: 'usuario' })}
+                                                className="text-xs text-danger-300 hover:text-danger-200"
+                                            >
+                                                Quitar del equipo
+                                            </button>
                                         </div>
                                     </td>
                                 </tr>
@@ -472,7 +633,12 @@ export default function EquipoPage() {
                             <select
                                 className="w-full h-10 rounded-xl bg-slate-950/40 border border-slate-800/60 text-slate-200 px-3 outline-none focus:ring-2 focus:ring-primary-500/40"
                                 value={createRol}
-                                onChange={(e) => setCreateRol(e.target.value as any)}
+                                onChange={(e) => {
+                                    const v = e.target.value;
+                                    if (v === 'empleado' || v === 'recepcionista' || v === 'staff' || v === 'profesor') {
+                                        setCreateRol(v);
+                                    }
+                                }}
                             >
                                 <option value="empleado">Empleado</option>
                                 <option value="recepcionista">Recepcionista</option>
@@ -496,6 +662,55 @@ export default function EquipoPage() {
                 onClose={() => setProfesorEditOpen(false)}
                 profesor={profesorEditProfesor}
                 onRefresh={() => void load()}
+            />
+
+            <Modal
+                isOpen={userEditOpen}
+                onClose={() => {
+                    setUserEditOpen(false);
+                    setUserEditMember(null);
+                }}
+                title={userEditMember ? `Editar: ${userEditMember.nombre}` : 'Editar'}
+                size="sm"
+                footer={
+                    <div className="flex justify-end gap-2">
+                        <Button variant="secondary" onClick={() => setUserEditOpen(false)} disabled={userEditSaving}>
+                            Cancelar
+                        </Button>
+                        <Button onClick={() => void saveUserEdit()} isLoading={userEditSaving}>
+                            Guardar
+                        </Button>
+                    </div>
+                }
+            >
+                <div className="p-6 space-y-3">
+                    <div className="space-y-2">
+                        <div className="text-sm font-medium text-slate-200">Nombre</div>
+                        <Input value={userEditNombre} onChange={(e) => setUserEditNombre(e.target.value)} placeholder="Nombre y apellido" />
+                    </div>
+                    <div className="space-y-2">
+                        <div className="text-sm font-medium text-slate-200">DNI</div>
+                        <Input value={userEditDni} onChange={(e) => setUserEditDni(e.target.value)} placeholder="DNI" />
+                    </div>
+                    <div className="space-y-2">
+                        <div className="text-sm font-medium text-slate-200">Teléfono</div>
+                        <Input value={userEditTelefono} onChange={(e) => setUserEditTelefono(e.target.value)} placeholder="Teléfono" />
+                    </div>
+                </div>
+            </Modal>
+
+            <ConfirmModal
+                isOpen={confirmOpen}
+                onClose={() => {
+                    setConfirmOpen(false);
+                    setPendingConvert(null);
+                }}
+                onConfirm={() => void runConfirm()}
+                title={confirmTitle}
+                message={confirmMessage}
+                confirmText={confirmText}
+                variant={confirmVariant}
+                isLoading={confirmLoading}
             />
         </div>
     );

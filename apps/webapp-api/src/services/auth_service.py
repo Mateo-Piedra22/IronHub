@@ -242,7 +242,7 @@ class AuthService(BaseService):
                     SELECT p.id, u.id as usuario_id, u.nombre, u.activo
                     FROM profesores p
                     JOIN usuarios u ON p.usuario_id = u.id
-                    WHERE u.activo = true
+                    WHERE u.activo = true AND LOWER(COALESCE(p.estado,'activo')) = 'activo'
                     ORDER BY u.nombre
                 """)
             )
@@ -265,7 +265,7 @@ class AuthService(BaseService):
                     SELECT p.id, p.usuario_id, u.nombre, u.pin, u.activo
                     FROM profesores p
                     JOIN usuarios u ON p.usuario_id = u.id
-                    WHERE p.id = :prof_id
+                    WHERE p.id = :prof_id AND LOWER(COALESCE(p.estado,'activo')) = 'activo'
                 """),
                 {"prof_id": profesor_id},
             )

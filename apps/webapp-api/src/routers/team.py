@@ -13,6 +13,7 @@ from src.dependencies import (
     require_owner,
     require_sucursal_selected,
 )
+from src.database.clase_profesor_schema import ensure_clase_profesor_schema
 from src.models.orm_models import Profesor, StaffPermission, StaffProfile, Usuario
 from src.services.profesor_service import ProfesorService
 from src.services.staff_service import StaffService
@@ -139,14 +140,16 @@ async def api_team_list(
                 }
                 if st is not None
                 else None,
-                "profesor": {
-                    "id": int(prof.id),
-                    "tipo": (prof.tipo or "").strip() or None,
-                    "estado": (prof.estado or "").strip().lower() or None,
-                }
-                if prof is not None
-                else None,
+                "profesor": None,
             }
+            if prof is not None:
+                prof_estado = str(getattr(prof, "estado", "") or "").strip().lower() or "activo"
+                if prof_estado != "inactivo":
+                    item["profesor"] = {
+                        "id": int(prof.id),
+                        "tipo": (prof.tipo or "").strip() or None,
+                        "estado": prof_estado,
+                    }
             if item["profesor"] is not None:
                 item["kind"] = "profesor"
             elif item["staff"] is not None:
@@ -158,6 +161,291 @@ async def api_team_list(
         return {"ok": True, "items": out}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/api/team/impact")
+async def api_team_impact(
+    usuario_id: int,
+    request: Request,
+    _=Depends(require_owner),
+    svc_staff: StaffService = Depends(get_staff_service),
+):
+    try:
+        uid = int(usuario_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="usuario_id inválido")
+    if uid <= 0:
+        raise HTTPException(status_code=400, detail="usuario_id inválido")
+
+    try:
+        current = svc_staff.db.execute(
+            text("SELECT rol FROM usuarios WHERE id = :id LIMIT 1"),
+            {"id": int(uid)},
+        ).fetchone()
+        rol_actual = str(current[0] or "").strip().lower() if current else ""
+    except Exception:
+        rol_actual = ""
+    if rol_actual in ("dueño", "dueno", "owner"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    prof = (
+        svc_staff.db.scalars(
+            select(Profesor).where(Profesor.usuario_id == int(uid)).limit(1)
+        ).first()
+    )
+    st = (
+        svc_staff.db.scalars(
+            select(StaffProfile).where(StaffProfile.usuario_id == int(uid)).limit(1)
+        ).first()
+    )
+    perm = (
+        svc_staff.db.scalars(
+            select(StaffPermission).where(StaffPermission.usuario_id == int(uid)).limit(1)
+        ).first()
+    )
+
+    ensure_clase_profesor_schema(svc_staff.db)
+
+    profesor_impact: Dict[str, Any] = {"exists": False}
+    if prof is not None:
+        pid = int(getattr(prof, "id", 0) or 0)
+        profesor_impact = {
+            "exists": True,
+            "profesor_id": pid,
+            "estado": str(getattr(prof, "estado", "") or "").strip().lower() or "activo",
+            "tipo": str(getattr(prof, "tipo", "") or "").strip() or None,
+            "clases_asignadas_activas": int(
+                svc_staff.db.execute(
+                    text(
+                        "SELECT COUNT(*) FROM profesor_clase_asignaciones WHERE profesor_id = :pid AND activa = TRUE"
+                    ),
+                    {"pid": int(pid)},
+                ).scalar()
+                or 0
+            ),
+            "sesiones_activas": int(
+                svc_staff.db.execute(
+                    text(
+                        "SELECT COUNT(*) FROM profesor_horas_trabajadas WHERE profesor_id = :pid AND hora_fin IS NULL"
+                    ),
+                    {"pid": int(pid)},
+                ).scalar()
+                or 0
+            ),
+            "horarios_count": int(
+                svc_staff.db.execute(
+                    text(
+                        "SELECT COUNT(*) FROM horarios_profesores WHERE profesor_id = :pid"
+                    ),
+                    {"pid": int(pid)},
+                ).scalar()
+                or 0
+            ),
+        }
+
+    staff_impact = {
+        "has_staff_profile": st is not None,
+        "staff_estado": (str(getattr(st, "estado", "") or "").strip().lower() or None)
+        if st is not None
+        else None,
+        "staff_tipo": (str(getattr(st, "tipo", "") or "").strip().lower() or None)
+        if st is not None
+        else None,
+        "has_permissions": perm is not None,
+        "scopes_count": len(list(perm.scopes or [])) if perm is not None else 0,
+        "sucursales_count": int(
+            svc_staff.db.execute(
+                text("SELECT COUNT(*) FROM usuario_sucursales WHERE usuario_id = :uid"),
+                {"uid": int(uid)},
+            ).scalar()
+            or 0
+        ),
+    }
+
+    return {"ok": True, "usuario_id": int(uid), "profesor": profesor_impact, "staff": staff_impact}
+
+
+@router.post("/api/team/convert")
+async def api_team_convert(
+    request: Request,
+    sucursal_id: int = Depends(require_sucursal_selected),
+    _=Depends(require_owner),
+    svc_prof: ProfesorService = Depends(get_profesor_service),
+    svc_staff: StaffService = Depends(get_staff_service),
+):
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+
+    try:
+        usuario_id = int((payload or {}).get("usuario_id"))
+    except Exception:
+        usuario_id = 0
+    target = str((payload or {}).get("target") or "").strip().lower()
+    force = bool((payload or {}).get("force"))
+    rol_staff = str((payload or {}).get("rol") or "").strip().lower()
+
+    if not usuario_id:
+        raise HTTPException(status_code=400, detail="usuario_id requerido")
+    if target not in ("staff", "profesor", "usuario"):
+        raise HTTPException(status_code=400, detail="target inválido")
+
+    try:
+        current = svc_staff.db.execute(
+            text("SELECT rol FROM usuarios WHERE id = :id LIMIT 1"),
+            {"id": int(usuario_id)},
+        ).fetchone()
+        rol_actual = str(current[0] or "").strip().lower() if current else ""
+    except Exception:
+        rol_actual = ""
+    if rol_actual in ("dueño", "dueno", "owner"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    ensure_clase_profesor_schema(svc_staff.db)
+
+    prof = (
+        svc_staff.db.scalars(
+            select(Profesor).where(Profesor.usuario_id == int(usuario_id)).limit(1)
+        ).first()
+    )
+    pid = int(getattr(prof, "id", 0) or 0) if prof is not None else 0
+    active_assignments = 0
+    active_prof_sessions = 0
+    if pid:
+        active_assignments = int(
+            svc_staff.db.execute(
+                text(
+                    "SELECT COUNT(*) FROM profesor_clase_asignaciones WHERE profesor_id = :pid AND activa = TRUE"
+                ),
+                {"pid": int(pid)},
+            ).scalar()
+            or 0
+        )
+        active_prof_sessions = int(
+            svc_staff.db.execute(
+                text(
+                    "SELECT COUNT(*) FROM profesor_horas_trabajadas WHERE profesor_id = :pid AND hora_fin IS NULL"
+                ),
+                {"pid": int(pid)},
+            ).scalar()
+            or 0
+        )
+
+    def block_if_profesor_has_load(kind_error: str) -> None:
+        if not pid:
+            return
+        if active_prof_sessions > 0:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "ok": False,
+                    "error": kind_error,
+                    "reason": "sesion_profesor_activa",
+                    "profesor_id": int(pid),
+                    "sesiones_activas": int(active_prof_sessions),
+                },
+            )
+        if active_assignments > 0:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "ok": False,
+                    "error": kind_error,
+                    "reason": "clases_asignadas_activas",
+                    "profesor_id": int(pid),
+                    "clases_asignadas_activas": int(active_assignments),
+                },
+            )
+
+    try:
+        sid = int(sucursal_id)
+    except Exception:
+        sid = 0
+
+    if target == "profesor":
+        if prof is None:
+            svc_prof.crear_perfil_profesor(int(usuario_id), payload or {}, sucursal_id=int(sid) if sid > 0 else None)
+        else:
+            try:
+                svc_staff.db.execute(
+                    text("UPDATE profesores SET estado = 'activo' WHERE id = :pid"),
+                    {"pid": int(pid)},
+                )
+            except Exception:
+                pass
+        svc_staff.set_user_role(int(usuario_id), "profesor")
+        if sid > 0:
+            svc_staff.set_user_branches(int(usuario_id), [sid])
+        svc_staff.upsert_staff_profile(int(usuario_id), estado="activo")
+        existing_perm = svc_staff.db.scalars(
+            select(StaffPermission).where(StaffPermission.usuario_id == int(usuario_id))
+        ).first()
+        if existing_perm is None:
+            svc_staff.set_scopes(int(usuario_id), [])
+        svc_staff.db.commit()
+        return {"ok": True, "usuario_id": int(usuario_id), "target": "profesor"}
+
+    if target == "staff":
+        if not rol_staff or rol_staff in ("dueño", "dueno", "owner", "profesor"):
+            rol_staff = "empleado"
+
+        if pid and not force:
+            block_if_profesor_has_load("no_se_puede_quitar_profesor")
+
+        svc_staff.set_user_role(int(usuario_id), rol_staff)
+        svc_staff.upsert_staff_profile(int(usuario_id), tipo=rol_staff, estado="activo")
+        if sid > 0:
+            svc_staff.set_user_branches(int(usuario_id), [sid])
+        existing_perm = svc_staff.db.scalars(
+            select(StaffPermission).where(StaffPermission.usuario_id == int(usuario_id))
+        ).first()
+        if existing_perm is None:
+            svc_staff.set_scopes(int(usuario_id), [])
+
+        if pid:
+            if force and active_assignments > 0:
+                svc_staff.db.execute(
+                    text(
+                        "UPDATE profesor_clase_asignaciones SET activa = FALSE WHERE profesor_id = :pid AND activa = TRUE"
+                    ),
+                    {"pid": int(pid)},
+                )
+            svc_staff.db.execute(
+                text("UPDATE profesores SET estado = 'inactivo' WHERE id = :pid"),
+                {"pid": int(pid)},
+            )
+
+        svc_staff.db.commit()
+        return {"ok": True, "usuario_id": int(usuario_id), "target": "staff"}
+
+    if pid and not force:
+        block_if_profesor_has_load("no_se_puede_quitar_del_equipo")
+
+    svc_staff.set_user_role(int(usuario_id), "socio")
+    svc_staff.upsert_staff_profile(int(usuario_id), estado="inactivo")
+    try:
+        svc_staff.set_user_branches(int(usuario_id), [])
+    except Exception:
+        pass
+    try:
+        svc_staff.set_scopes(int(usuario_id), [])
+    except Exception:
+        pass
+    if pid:
+        if force and active_assignments > 0:
+            svc_staff.db.execute(
+                text(
+                    "UPDATE profesor_clase_asignaciones SET activa = FALSE WHERE profesor_id = :pid AND activa = TRUE"
+                ),
+                {"pid": int(pid)},
+            )
+        svc_staff.db.execute(
+            text("UPDATE profesores SET estado = 'inactivo' WHERE id = :pid"),
+            {"pid": int(pid)},
+        )
+    svc_staff.db.commit()
+    return {"ok": True, "usuario_id": int(usuario_id), "target": "usuario"}
 
 
 @router.post("/api/team/promote")

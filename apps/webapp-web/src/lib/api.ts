@@ -43,12 +43,12 @@ type CacheEntry<T> = {
     etag?: string;
 };
 
-const _inMemoryCache: Record<string, CacheEntry<any> | undefined> = {};
-const _inFlight: Record<string, Promise<any> | undefined> = {};
+const _inMemoryCache: Record<string, CacheEntry<unknown> | undefined> = {};
+const _inFlight: Record<string, Promise<ApiResponse<unknown>> | undefined> = {};
 const _MAX_CACHE_ENTRIES = 250;
 
 function _setCache<T>(key: string, entry: CacheEntry<T>) {
-    _inMemoryCache[key] = entry;
+    _inMemoryCache[key] = entry as CacheEntry<unknown>;
     try {
         const keys = Object.keys(_inMemoryCache);
         if (keys.length > _MAX_CACHE_ENTRIES) {
@@ -432,12 +432,12 @@ export interface BootstrapPayload {
     sucursales?: Sucursal[];
     sucursal_actual_id?: number | null;
     branch_required?: boolean;
-    flags?: Record<string, any>;
+    flags?: Record<string, boolean | string | number | null>;
 }
 
 export interface FeatureFlags {
     modules?: Record<string, boolean>;
-    features?: Record<string, any>;
+    features?: Record<string, boolean | string | number | null>;
 }
 
 export interface SessionUser {
@@ -484,6 +484,28 @@ export interface TeamMember {
     staff: null | { tipo: string | null; estado: string | null };
     profesor: null | { id: number; tipo: string | null; estado: string | null };
 }
+
+export type TeamImpact = {
+    ok: boolean;
+    usuario_id: number;
+    profesor: {
+        exists: boolean;
+        profesor_id?: number;
+        estado?: string | null;
+        tipo?: string | null;
+        clases_asignadas_activas?: number;
+        sesiones_activas?: number;
+        horarios_count?: number;
+    };
+    staff: {
+        has_staff_profile: boolean;
+        staff_estado?: string | null;
+        staff_tipo?: string | null;
+        has_permissions: boolean;
+        scopes_count: number;
+        sucursales_count: number;
+    };
+};
 
 export interface Membership {
     id: number;
@@ -643,6 +665,7 @@ export interface WhatsAppMensajesTotals {
 export interface WhatsAppMensajesResponse {
     mensajes: WhatsAppMensaje[];
     totals?: WhatsAppMensajesTotals;
+    total?: number;
 }
 
 export interface WhatsAppStatus {
@@ -692,7 +715,7 @@ export interface WhatsAppTrigger {
 
 export interface WhatsAppOnboardingStatus {
     connected: boolean;
-    health: any;
+    health: unknown;
     actions: { enabled_keys: number; template_keys: number };
 }
 
@@ -749,12 +772,12 @@ export type BulkJob = {
 
 export type BulkPreviewRow = {
     row_index: number;
-    data: Record<string, any>;
+    data: Record<string, unknown>;
     errors?: string[];
     warnings?: string[];
     is_valid?: boolean;
     applied?: boolean;
-    result?: any;
+    result?: unknown;
 };
 
 export type SupportTicket = {
@@ -777,7 +800,7 @@ export type SupportMessage = {
     ticket_id: number;
     sender_type: 'client' | 'admin';
     content: string;
-    attachments?: any;
+    attachments?: unknown;
     created_at?: string;
 };
 
@@ -797,7 +820,7 @@ export type AccessDevice = {
     name: string;
     enabled: boolean;
     device_public_id: string;
-    config?: any;
+    config?: unknown;
     last_seen_at?: string | null;
     created_at?: string;
     updated_at?: string;
@@ -824,8 +847,8 @@ export type AccessCommand = {
     status: string;
     request_id?: string | null;
     actor_usuario_id?: number | null;
-    payload?: any;
-    result?: any;
+    payload?: unknown;
+    result?: unknown;
     created_at?: string | null;
     claimed_at?: string | null;
     acked_at?: string | null;
@@ -888,8 +911,17 @@ class ApiClient {
                 if (!((options.body instanceof FormData) || (options.body instanceof URLSearchParams))) {
                     headers['Content-Type'] = 'application/json';
                 }
-                for (const [k, v] of Object.entries((options.headers as any) || {})) {
-                    headers[k] = String(v);
+                if (options.headers) {
+                    const h = options.headers;
+                    if (h instanceof Headers) {
+                        h.forEach((value, key) => {
+                            headers[key] = value;
+                        });
+                    } else if (Array.isArray(h)) {
+                        for (const [k, v] of h) headers[k] = String(v);
+                    } else {
+                        for (const [k, v] of Object.entries(h)) headers[k] = String(v);
+                    }
                 }
                 if (isGet && cached?.etag && !headers['If-None-Match']) {
                     headers['If-None-Match'] = cached.etag;
@@ -911,9 +943,22 @@ class ApiClient {
                 const data = await response.json().catch(() => ({}));
 
                 if (!response.ok) {
+                    const msg = (() => {
+                        if (!data || typeof data !== 'object') return 'Error de servidor';
+                        const o = data as Record<string, unknown>;
+                        const detail = o.detail;
+                        const message = o.message;
+                        const error = o.error;
+                        return (
+                            (typeof detail === 'string' && detail) ||
+                            (typeof message === 'string' && message) ||
+                            (typeof error === 'string' && error) ||
+                            'Error de servidor'
+                        );
+                    })();
                     return {
                         ok: false,
-                        error: (data as any).detail || (data as any).message || (data as any).error || 'Error de servidor',
+                        error: msg,
                     };
                 }
 
@@ -1139,7 +1184,7 @@ class ApiClient {
             if (res.ok && res.data?.session) {
                 _setCache(`GET:/api/auth/session:${ctx}`, {
                     ts: now,
-                    data: { ok: true, data: { authenticated: !!res.data.session.authenticated, user: (res.data.session.user as any) || undefined } }
+                    data: { ok: true, data: { authenticated: !!res.data.session.authenticated, user: res.data.session.user || undefined } }
                 });
             }
         } catch {
@@ -1268,14 +1313,14 @@ class ApiClient {
         });
     }
 
-    async createAccessDevice(payload: { name: string; sucursal_id?: number | null; config?: any }) {
-        return this.request<{ ok: boolean; device: any; pairing_code: string; pairing_expires_at: string }>('/api/access/devices', {
+    async createAccessDevice(payload: { name: string; sucursal_id?: number | null; config?: unknown }) {
+        return this.request<{ ok: boolean; device: AccessDevice; pairing_code: string; pairing_expires_at: string }>('/api/access/devices', {
             method: 'POST',
             body: JSON.stringify(payload),
         });
     }
 
-    async updateAccessDevice(deviceId: number, payload: Partial<{ name: string; enabled: boolean; sucursal_id: number | null; config: any }>) {
+    async updateAccessDevice(deviceId: number, payload: Partial<{ name: string; enabled: boolean; sucursal_id: number | null; config: unknown }>) {
         return this.request<{ ok: boolean }>(`/api/access/devices/${deviceId}`, {
             method: 'PATCH',
             body: JSON.stringify(payload),
@@ -1304,7 +1349,7 @@ class ApiClient {
     }
 
     async startAccessDeviceEnrollment(deviceId: number, payload: { usuario_id: number; credential_type: 'fob' | 'card'; overwrite?: boolean; expires_seconds?: number }) {
-        return this.request<{ ok: boolean; enroll_mode: any }>(`/api/access/devices/${deviceId}/enrollment`, {
+        return this.request<{ ok: boolean; enroll_mode: unknown }>(`/api/access/devices/${deviceId}/enrollment`, {
             method: 'POST',
             body: JSON.stringify(payload),
         });
@@ -1522,7 +1567,7 @@ class ApiClient {
         });
     }
 
-    async previewReceipt(data: any): Promise<ApiResponse<{ blob: Blob }>> {
+    async previewReceipt(data: unknown): Promise<ApiResponse<{ blob: Blob }>> {
         const url = `${this.baseUrl}/api/pagos/preview`;
         try {
             const headers: Record<string, string> = {
@@ -1661,7 +1706,7 @@ class ApiClient {
         });
     }
 
-    async duplicateRutina(id: number): Promise<ApiResponse<any>> {
+    async duplicateRutina(id: number): Promise<ApiResponse<Rutina>> {
         try {
             const res = await this.getRutina(id);
             if (!res.ok || !res.data) return { ok: false, error: 'Rutina no encontrada' };
@@ -1767,14 +1812,14 @@ class ApiClient {
         return this.request<{ url: string }>(`/api/rutinas/${id}/export/pdf_view_url${query ? `?${query}` : ''}`);
     }
 
-    async getRutinaDraftExcelViewUrl(data: any) {
+    async getRutinaDraftExcelViewUrl(data: unknown) {
         return this.request<{ url: string }>('/api/rutinas/export/draft_url', {
             method: 'POST',
             body: JSON.stringify(data)
         });
     }
 
-    async getRutinaDraftPdfViewUrl(data: any) {
+    async getRutinaDraftPdfViewUrl(data: unknown) {
         return this.request<{ url: string }>('/api/rutinas/export/draft_pdf_url', {
             method: 'POST',
             body: JSON.stringify(data)
@@ -1913,7 +1958,7 @@ class ApiClient {
 
     // === KPIs / Statistics ===
     async getOwnerDashboardOverview() {
-        return this.request<any>('/api/owner_dashboard/overview');
+        return this.request<{ ok: boolean } & Record<string, unknown>>('/api/owner_dashboard/overview');
     }
 
     async getOwnerDashboardUsuarios(params?: { search?: string; activo?: boolean; page?: number; limit?: number }) {
@@ -1951,14 +1996,14 @@ class ApiClient {
         const qp = new URLSearchParams();
         if (params?.search) qp.set('search', params.search);
         const q = qp.toString() ? `?${qp.toString()}` : '';
-        return this.request<any>(`/api/owner_dashboard/staff${q}`);
+        return this.request<unknown>(`/api/owner_dashboard/staff${q}`);
     }
 
     async getOwnerDashboardProfesores(params?: { search?: string }) {
         const qp = new URLSearchParams();
         if (params?.search) qp.set('search', params.search);
         const q = qp.toString() ? `?${qp.toString()}` : '';
-        return this.request<any>(`/api/owner_dashboard/profesores${q}`);
+        return this.request<unknown>(`/api/owner_dashboard/profesores${q}`);
     }
 
     async getOwnerAttendanceAudit(params?: { dias?: number; desde?: string; hasta?: string; umbral_multiples?: number; umbral_repeticion_minutos?: number }) {
@@ -1969,22 +2014,22 @@ class ApiClient {
         if (params?.umbral_multiples !== undefined) searchParams.set('umbral_multiples', String(params.umbral_multiples));
         if (params?.umbral_repeticion_minutos !== undefined) searchParams.set('umbral_repeticion_minutos', String(params.umbral_repeticion_minutos));
         const q = searchParams.toString();
-        return this.request<any>(`/api/owner_dashboard/attendance_audit${q ? `?${q}` : ''}`);
+        return this.request<{ ok: boolean } & Record<string, unknown>>(`/api/owner_dashboard/attendance_audit${q ? `?${q}` : ''}`);
     }
 
     async getOwnerGymSettings() {
-        return this.request<{ ok: boolean; settings: Record<string, any> }>('/api/owner/gym/settings');
+        return this.request<{ ok: boolean; settings: Record<string, unknown> }>('/api/owner/gym/settings');
     }
 
-    async updateOwnerGymSettings(updates: Record<string, any>) {
-        return this.request<{ ok: boolean; settings?: Record<string, any>; error?: string }>('/api/owner/gym/settings', {
+    async updateOwnerGymSettings(updates: Record<string, unknown>) {
+        return this.request<{ ok: boolean; settings?: Record<string, unknown>; error?: string }>('/api/owner/gym/settings', {
             method: 'POST',
             body: JSON.stringify(updates),
         });
     }
 
     async getOwnerGymBilling() {
-        return this.request<any>('/api/owner/gym/billing');
+        return this.request<{ ok: boolean } & Record<string, unknown>>('/api/owner/gym/billing');
     }
 
     async getKPIs() {
@@ -2014,7 +2059,7 @@ class ApiClient {
     }
 
     async getCohortRetencionHeatmap() {
-        return this.request<{ cohorts: any[] }>('/api/cohort_retencion_heatmap');
+        return this.request<{ cohorts: unknown[] }>('/api/cohort_retencion_heatmap');
     }
 
     async getARPAByTipoCuota() {
@@ -2022,19 +2067,19 @@ class ApiClient {
     }
 
     async getPaymentStatusDist() {
-        return this.request<any>('/api/payment_status_dist');
+        return this.request<unknown>('/api/payment_status_dist');
     }
 
     async getWaitlistEvents() {
-        return this.request<{ events: any[] }>('/api/waitlist_events');
+        return this.request<{ events: unknown[] }>('/api/waitlist_events');
     }
 
     async getGymSubscription() {
-        return this.request<any>('/api/gym/subscription');
+        return this.request<unknown>('/api/gym/subscription');
     }
 
     async getWhatsAppStats() {
-        return this.request<any>('/api/whatsapp/stats');
+        return this.request<unknown>('/api/whatsapp/stats');
     }
 
     async getWhatsAppPendientes(params?: { dias?: number; limit?: number }) {
@@ -2042,7 +2087,7 @@ class ApiClient {
         if (params?.dias) searchParams.set('dias', String(params.dias));
         if (params?.limit) searchParams.set('limit', String(params.limit));
         const query = searchParams.toString();
-        return this.request<{ mensajes: any[] }>(`/api/whatsapp/pendientes${query ? `?${query}` : ''}`);
+        return this.request<{ mensajes: unknown[] }>(`/api/whatsapp/pendientes${query ? `?${query}` : ''}`);
     }
 
     async getTeam(params?: { search?: string; all?: boolean; sucursal_id?: number }) {
@@ -2056,6 +2101,19 @@ class ApiClient {
 
     async promoteTeamMember(data: { usuario_id: number; kind: 'staff' | 'profesor'; rol?: string }) {
         return this.request<{ ok: boolean; usuario_id: number; kind: string; profesor_id?: number }>('/api/team/promote', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    }
+
+    async getTeamImpact(usuarioId: number) {
+        const params = new URLSearchParams();
+        params.set('usuario_id', String(usuarioId));
+        return this.request<TeamImpact>(`/api/team/impact?${params.toString()}`);
+    }
+
+    async convertTeamMember(data: { usuario_id: number; target: 'staff' | 'profesor' | 'usuario'; rol?: string; force?: boolean }) {
+        return this.request<{ ok: boolean; usuario_id: number; target: string; error?: string }>(`/api/team/convert`, {
             method: 'POST',
             body: JSON.stringify(data),
         });
@@ -2589,7 +2647,7 @@ class ApiClient {
         if (params.limit != null) q.set('limit', String(params.limit));
         if (params.scope) q.set('scope', String(params.scope));
         const qs = q.toString();
-        return this.request<any>(`/api/whatsapp/mensajes${qs ? `?${qs}` : ''}`);
+        return this.request<WhatsAppMensajesResponse>(`/api/whatsapp/mensajes${qs ? `?${qs}` : ''}`);
     }
 
     async getWhatsAppEmbeddedSignupConfig() {
@@ -2601,7 +2659,7 @@ class ApiClient {
     }
 
     async completeWhatsAppEmbeddedSignup(data: { code: string; waba_id: string; phone_number_id: string }) {
-        return this.request<{ ok: boolean; provision?: any }>(`/api/whatsapp/embedded-signup/complete`, {
+        return this.request<{ ok: boolean; provision?: unknown }>(`/api/whatsapp/embedded-signup/complete`, {
             method: 'POST',
             body: JSON.stringify(data),
         });
@@ -2644,19 +2702,19 @@ class ApiClient {
     }
 
     async getMyWorkSession() {
-        return this.request<any>('/api/my/work-session');
+        return this.request<unknown>('/api/my/work-session');
     }
     async startMyWorkSession() {
-        return this.request<any>('/api/my/work-session/start', { method: 'POST', body: JSON.stringify({}) });
+        return this.request<unknown>('/api/my/work-session/start', { method: 'POST', body: JSON.stringify({}) });
     }
     async pauseMyWorkSession() {
-        return this.request<any>('/api/my/work-session/pause', { method: 'POST', body: JSON.stringify({}) });
+        return this.request<unknown>('/api/my/work-session/pause', { method: 'POST', body: JSON.stringify({}) });
     }
     async resumeMyWorkSession() {
-        return this.request<any>('/api/my/work-session/resume', { method: 'POST', body: JSON.stringify({}) });
+        return this.request<unknown>('/api/my/work-session/resume', { method: 'POST', body: JSON.stringify({}) });
     }
     async endMyWorkSession() {
-        return this.request<any>('/api/my/work-session/end', { method: 'POST', body: JSON.stringify({}) });
+        return this.request<unknown>('/api/my/work-session/end', { method: 'POST', body: JSON.stringify({}) });
     }
 
     async runWhatsAppAutomation(data: { trigger_keys?: string[]; dry_run?: boolean }) {
@@ -2784,7 +2842,7 @@ class ApiClient {
                 return { ok: false, error: 'Error al exportar' };
             }
             return { ok: true, data: await response.blob() };
-        } catch (error) {
+        } catch {
             return { ok: false, error: 'Error de conexión' };
         }
     }
@@ -2834,8 +2892,8 @@ class ApiClient {
         return this.request<{ ok: boolean; job: BulkJob; rows: BulkPreviewRow[] }>(`/api/bulk/jobs/${jobId}`);
     }
 
-    async bulkUpdateRow(jobId: number, rowIndex: number, data: Record<string, any>) {
-        return this.request<{ ok: boolean; job: BulkJob; row_index: number; data: any; errors: string[]; warnings: string[] }>(`/api/bulk/jobs/${jobId}/rows/${rowIndex}`, {
+    async bulkUpdateRow(jobId: number, rowIndex: number, data: Record<string, unknown>) {
+        return this.request<{ ok: boolean; job: BulkJob; row_index: number; data: unknown; errors: string[]; warnings: string[] }>(`/api/bulk/jobs/${jobId}/rows/${rowIndex}`, {
             method: 'PUT',
             body: JSON.stringify({ data }),
         });
@@ -2879,13 +2937,13 @@ class ApiClient {
                 const j = await response.json().catch(() => null);
                 return { ok: false, error: j?.detail || 'Error al subir adjunto' };
             }
-            return { ok: true, data: await response.json() as { ok: boolean; attachment: any } };
+            return { ok: true, data: await response.json() as { ok: boolean; attachment: unknown } };
         } catch {
             return { ok: false, error: 'Error de conexión' };
         }
     }
 
-    async createSupportTicket(payload: { subject: string; category?: string; priority?: string; message: string; attachments?: any[]; origin_url?: string }) {
+    async createSupportTicket(payload: { subject: string; category?: string; priority?: string; message: string; attachments?: unknown[]; origin_url?: string }) {
         return this.request<{ ok: boolean; ticket_id: number }>(`/api/support/tickets`, {
             method: 'POST',
             body: JSON.stringify(payload),
@@ -2898,14 +2956,14 @@ class ApiClient {
         if (params?.page) sp.set('page', String(params.page));
         if (params?.limit) sp.set('limit', String(params.limit));
         const q = sp.toString();
-        return this.request<{ ok: boolean; items: SupportTicket[]; total: number; limit: number; offset: number; viewer: any }>(`/api/support/tickets${q ? `?${q}` : ''}`);
+        return this.request<{ ok: boolean; items: SupportTicket[]; total: number; limit: number; offset: number; viewer: unknown }>(`/api/support/tickets${q ? `?${q}` : ''}`);
     }
 
     async getSupportTicket(ticketId: number) {
         return this.request<{ ok: boolean; ticket: SupportTicket; messages: SupportMessage[] }>(`/api/support/tickets/${ticketId}`);
     }
 
-    async replySupportTicket(ticketId: number, payload: { message: string; attachments?: any[] }) {
+    async replySupportTicket(ticketId: number, payload: { message: string; attachments?: unknown[] }) {
         return this.request<{ ok: boolean }>(`/api/support/tickets/${ticketId}/reply`, {
             method: 'POST',
             body: JSON.stringify(payload),
@@ -2913,7 +2971,7 @@ class ApiClient {
     }
 
     async getChangelogStatus() {
-        return this.request<{ ok: boolean; has_unread: boolean; latest: any }>(`/api/changelogs/status`);
+        return this.request<{ ok: boolean; has_unread: boolean; latest: unknown }>(`/api/changelogs/status`);
     }
 
     async listChangelogs(params?: { page?: number; limit?: number }) {

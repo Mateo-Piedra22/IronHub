@@ -29,23 +29,28 @@ export default function HomePage() {
                 const res = await api.getBootstrap('auto');
                 if (res.ok && res.data) {
                     const flags = res.data.flags || {};
+                    const suspended = Boolean(flags.suspended);
+                    const reason = typeof flags.reason === 'string' ? flags.reason : '';
+                    const until = typeof flags.until === 'string' ? flags.until : '';
+                    const maintenance = Boolean(flags.maintenance);
+                    const maintenanceMessage = typeof flags.maintenance_message === 'string' ? flags.maintenance_message : '';
                     setGymData({
                         gym_name: res.data.gym?.gym_name,
                         logo_url: res.data.gym?.logo_url,
-                        suspended: !!flags.suspended,
-                        reason: flags.reason || '',
-                        until: flags.until || '',
-                        maintenance: !!flags.maintenance,
-                        maintenance_message: flags.maintenance_message || '',
+                        suspended,
+                        reason,
+                        until,
+                        maintenance,
+                        maintenance_message: maintenanceMessage,
                     });
-                    if (flags.maintenance) {
-                        setMaintenanceMsg(flags.maintenance_message || 'Mantenimiento en curso');
+                    if (maintenance) {
+                        setMaintenanceMsg(maintenanceMessage || 'Mantenimiento en curso');
                         setShowMaintenance(true);
                     }
-                    if (flags.suspended) {
+                    if (suspended) {
                         setSuspensionData({
-                            reason: flags.reason || 'Servicio suspendido',
-                            until: flags.until || '',
+                            reason: reason || 'Servicio suspendido',
+                            until,
                         });
                         setShowSuspension(true);
                     }
