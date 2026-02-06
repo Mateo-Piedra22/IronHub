@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
@@ -21,6 +22,25 @@ const navigation = [
     { key: 'gestion', name: 'Gestión', href: '/gestion/usuarios', icon: Users, description: 'Panel operativo' },
 ];
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    return value as Record<string, unknown>;
+}
+
+function parseModuleFlags(value: unknown): Record<string, boolean> | null {
+    const root = asRecord(value);
+    const flags = asRecord(root?.flags);
+    const modulesRaw = flags?.modules;
+    const modules = asRecord(modulesRaw);
+    if (!modules) return null;
+
+    const out: Record<string, boolean> = {};
+    for (const [k, v] of Object.entries(modules)) {
+        if (typeof v === 'boolean') out[k] = v;
+    }
+    return Object.keys(out).length ? out : null;
+}
+
 export default function OwnerLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const router = useRouter();
@@ -41,19 +61,15 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
                 const res = await api.getBootstrap('auto');
                 const logo = res.ok ? (res.data?.gym?.logo_url || '') : '';
                 if (logo) setGymLogoUrl(logo);
-                const items = (res.ok ? (res.data?.sucursales || []) : []) as Array<{ id: number; nombre: string }>;
-                setSucursales(items);
+                const items = res.ok ? (res.data?.sucursales || []) : [];
+                setSucursales(items.map((s) => ({ id: s.id, nombre: s.nombre })));
                 const currentId = res.ok ? (res.data?.sucursal_actual_id ?? null) : null;
                 setSucursalActualId(typeof currentId === 'number' ? currentId : null);
-                if (res.ok && (res.data as any)?.flags?.modules) {
-                    setModuleFlags(((res.data as any).flags.modules || null) as any);
-                } else {
-                    setModuleFlags(null);
-                }
+                setModuleFlags(res.ok ? parseModuleFlags(res.data) : null);
                 try {
                     const st = await api.getChangelogStatus();
                     if (st.ok && st.data?.ok) {
-                        setHasUnreadChangelog(!!(st.data as any).has_unread);
+                        setHasUnreadChangelog(!!st.data.has_unread);
                     } else {
                         setHasUnreadChangelog(false);
                     }
@@ -75,9 +91,9 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
         const loadSession = async () => {
             try {
                 const r = await api.getSession('auto');
-                if (r.ok && (r.data as any)?.user) {
-                    setUserRole(String((r.data as any).user.rol || ''));
-                    setUserScopes((((r.data as any).user.scopes || []) as any[]).map((s) => String(s)));
+                if (r.ok && r.data?.user) {
+                    setUserRole(String(r.data.user.rol || ''));
+                    setUserScopes((r.data.user.scopes || []).map((s) => String(s)));
                 } else {
                     setUserRole('');
                     setUserScopes([]);
@@ -178,10 +194,13 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
                                 )}
                             >
                                 {gymLogoUrl ? (
-                                    <img
+                                    <Image
                                         src={gymLogoUrl}
                                         alt="Logo"
+                                        width={36}
+                                        height={36}
                                         className="w-full h-full object-contain"
+                                        unoptimized
                                         onError={() => setGymLogoUrl('')}
                                     />
                                 ) : (
@@ -281,7 +300,15 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
                                             )}
                                         >
                                             {gymLogoUrl ? (
-                                                <img src={gymLogoUrl} alt="Logo" className="w-full h-full object-contain" />
+                                                <Image
+                                                    src={gymLogoUrl}
+                                                    alt="Logo"
+                                                    width={36}
+                                                    height={36}
+                                                    className="w-full h-full object-contain"
+                                                    unoptimized
+                                                    onError={() => setGymLogoUrl('')}
+                                                />
                                             ) : (
                                                 <BarChart3 className="w-4 h-4 text-white" />
                                             )}

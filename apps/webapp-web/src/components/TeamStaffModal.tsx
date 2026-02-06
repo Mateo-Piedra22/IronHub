@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Copy, KeyRound } from 'lucide-react';
 import { Button, Input, Modal, useToast } from '@/components/ui';
 import { api, type Sucursal, type TeamMember } from '@/lib/api';
@@ -45,6 +45,11 @@ export default function TeamStaffModal({
     const [editTipo, setEditTipo] = useState<string>('empleado');
     const [editEstado, setEditEstado] = useState<string>('activo');
 
+    const asRecord = (v: unknown): Record<string, unknown> | null => {
+        if (!v || typeof v !== 'object') return null;
+        return v as Record<string, unknown>;
+    };
+
     useEffect(() => {
         if (!isOpen) return;
         (async () => {
@@ -54,8 +59,10 @@ export default function TeamStaffModal({
             ]);
             if (sucRes.ok && sucRes.data?.ok) setSucursales((sucRes.data.items || []).filter((s) => !!s.activa));
             else setSucursales([]);
-            if (bootRes.ok && (bootRes.data as any)?.flags?.modules) setModuleFlags(((bootRes.data as any).flags.modules || null) as any);
-            else setModuleFlags(null);
+            const flagsObj = asRecord(bootRes.ok ? (bootRes.data?.flags as unknown) : null);
+            const modulesCandidate = flagsObj ? flagsObj['modules'] : null;
+            const modulesObj = asRecord(modulesCandidate);
+            setModuleFlags(modulesObj ? (modulesObj as Record<string, boolean>) : null);
         })();
     }, [isOpen]);
 
@@ -69,13 +76,13 @@ export default function TeamStaffModal({
         setEditEstado(member.staff?.estado || 'activo');
         setPinDraft('');
         setPinLast('');
-    }, [isOpen, member?.id]);
+    }, [isOpen, member]);
 
-    const isModuleEnabled = (key: string) => {
+    const isModuleEnabled = useCallback((key: string) => {
         if (!moduleFlags) return true;
         if (Object.prototype.hasOwnProperty.call(moduleFlags, key)) return moduleFlags[key] !== false;
         return true;
-    };
+    }, [moduleFlags]);
 
     const toggleScope = (scope: string, enabled: boolean) => {
         const s = String(scope || '').trim();
@@ -120,11 +127,12 @@ export default function TeamStaffModal({
             if (!isModuleEnabled(m.key)) {
                 disabled.add(m.read);
                 if (m.write) disabled.add(m.write);
-                for (const ex of (m as any).extra || []) disabled.add(String(ex));
+                const extra = 'extra' in m ? m.extra : undefined;
+                for (const ex of extra || []) disabled.add(String(ex));
             }
         }
         return disabled;
-    }, [moduleFlags]);
+    }, [isModuleEnabled]);
 
     const save = async () => {
         if (!member) return;
@@ -138,7 +146,7 @@ export default function TeamStaffModal({
                 scopes: scopesSanitized,
                 tipo: editTipo,
                 estado: editEstado,
-            } as any);
+            });
             if (!res.ok) throw new Error(res.error || 'No se pudo guardar');
             toast({ title: 'Guardado', description: 'Cambios aplicados', variant: 'success' });
             onClose();
@@ -305,6 +313,7 @@ export default function TeamStaffModal({
                             const readOn = editScopes.includes(m.read);
                             const writeOn = m.write ? editScopes.includes(m.write) : false;
                             const enabled = isModuleEnabled(m.key);
+                            const extra = 'extra' in m ? m.extra : undefined;
                             return (
                                 <div key={m.key} className="flex items-center justify-between rounded-xl border border-slate-800/60 bg-slate-950/30 p-3">
                                     <div className={cn('text-sm font-medium', enabled ? 'text-slate-200' : 'text-slate-500')}>{m.label}</div>
@@ -314,7 +323,7 @@ export default function TeamStaffModal({
                                                 type="checkbox"
                                                 checked={readOn}
                                                 disabled={!enabled}
-                                                onChange={(e) => setModuleRead(m.key, m.read, m.write, (m as any).extra, e.target.checked)}
+                                                onChange={(e) => setModuleRead(m.key, m.read, m.write, extra, e.target.checked)}
                                             />
                                             Ver
                                         </label>

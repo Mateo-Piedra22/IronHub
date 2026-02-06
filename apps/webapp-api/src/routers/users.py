@@ -231,6 +231,135 @@ async def api_usuarios_list(
         )
 
 
+@router.get(
+    "/api/usuarios/directorio",
+    dependencies=[Depends(require_feature("usuarios")), Depends(require_scope("usuarios:read"))],
+)
+async def api_usuarios_directorio_list(
+    request: Request,
+    q: Optional[str] = None,
+    search: Optional[str] = None,
+    activo: Optional[bool] = None,
+    include_all: Optional[bool] = None,
+    page: Optional[int] = None,
+    limit: int = 50,
+    offset: int = 0,
+    user_service: UserService = Depends(get_user_service),
+    sucursal_id: int = Depends(require_sucursal_selected),
+    _=Depends(require_gestion_access),
+):
+    try:
+        q_effective = (
+            search if (search is not None and str(search).strip() != "") else q
+        )
+        limit_effective = max(1, min(int(limit or 50), 500))
+        offset_effective = int(offset or 0)
+        if offset_effective <= 0 and page is not None:
+            try:
+                page_int = int(page)
+                if page_int > 0:
+                    offset_effective = (page_int - 1) * limit_effective
+            except Exception:
+                pass
+        offset_effective = max(0, offset_effective)
+
+        try:
+            role = str(request.session.get("role") or "").strip().lower()
+        except Exception:
+            role = ""
+        allow_all = bool(include_all) and role in OWNER_ROLES
+        sid = None if allow_all else int(sucursal_id)
+
+        out = user_service.list_users_directory_paged(
+            q_effective,
+            activo=activo,
+            limit=limit_effective,
+            offset=offset_effective,
+            sucursal_id=sid,
+        )
+        return {
+            "usuarios": out.get("items", []),
+            "total": int(out.get("total") or 0),
+            "limit": int(limit_effective),
+            "offset": int(offset_effective),
+        }
+    except Exception as e:
+        msg = str(e)
+        return JSONResponse(
+            {
+                "ok": False,
+                "mensaje": msg,
+                "error": msg,
+                "success": False,
+                "message": msg,
+            },
+            status_code=500,
+        )
+
+
+@router.post(
+    "/api/usuarios/{usuario_id}/purge",
+    dependencies=[Depends(require_feature("usuarios")), Depends(require_feature("usuarios:delete"))],
+)
+async def api_usuario_purge(
+    usuario_id: int,
+    request: Request,
+    user_service: UserService = Depends(get_user_service),
+    audit_service: AuditService = Depends(get_audit_service),
+    _=Depends(require_owner),
+):
+    try:
+        impact = user_service.get_delete_impact(int(usuario_id)) or {}
+        if not bool(impact.get("allow_purge")):
+            raise HTTPException(
+                status_code=409,
+                detail="No se puede purgar: el usuario tiene dependencias",
+            )
+
+        user_before = user_service.get_user(usuario_id)
+        old_values = None
+        if user_before:
+            old_values = {
+                "id": user_before.id,
+                "nombre": user_before.nombre,
+                "dni": user_before.dni,
+                "activo": user_before.activo,
+                "rol": getattr(user_before, "rol", None),
+            }
+
+        ok = user_service.purge_user(int(usuario_id))
+        if not ok:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+
+        audit_service.log_from_request(
+            request=request,
+            action=AuditService.ACTION_DELETE,
+            table_name="usuarios",
+            record_id=usuario_id,
+            old_values=old_values,
+            new_values={"purged": True},
+            extra_details={"impact": impact.get("refs")},
+        )
+
+        return {"ok": True}
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        msg = str(e)
+        return JSONResponse(
+            {
+                "ok": False,
+                "mensaje": msg,
+                "error": msg,
+                "success": False,
+                "message": msg,
+            },
+            status_code=500,
+        )
+
+
 @router.put(
     "/api/usuarios/{usuario_id}/pin",
     dependencies=[
@@ -622,6 +751,32 @@ async def api_usuario_update(
         )
 
 
+@router.get(
+    "/api/usuarios/{usuario_id}/delete-impact",
+    dependencies=[Depends(require_feature("usuarios")), Depends(require_feature("usuarios:delete"))],
+)
+async def api_usuario_delete_impact(
+    usuario_id: int,
+    user_service: UserService = Depends(get_user_service),
+    _=Depends(require_gestion_access),
+):
+    try:
+        impact = user_service.get_delete_impact(int(usuario_id))
+        return {"ok": True, **(impact or {})}
+    except Exception as e:
+        msg = str(e)
+        return JSONResponse(
+            {
+                "ok": False,
+                "mensaje": msg,
+                "error": msg,
+                "success": False,
+                "message": msg,
+            },
+            status_code=500,
+        )
+
+
 @router.delete(
     "/api/usuarios/{usuario_id}",
     dependencies=[Depends(require_feature("usuarios")), Depends(require_feature("usuarios:delete"))],
@@ -634,7 +789,7 @@ async def api_usuario_delete(
     _=Depends(require_gestion_access),
 ):
     try:
-        # Get user info before deletion for audit log
+        # Get user info before action for audit log
         user_before = user_service.get_user(usuario_id)
         old_values = None
         if user_before:
@@ -645,20 +800,26 @@ async def api_usuario_delete(
                 "activo": user_before.activo,
             }
 
-        user_service.delete_user(usuario_id)
+        ok = user_service.archive_user(usuario_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
 
-        # Log the deletion
         audit_service.log_from_request(
             request=request,
-            action=AuditService.ACTION_DELETE,
+            action=AuditService.ACTION_USER_DEACTIVATE,
             table_name="usuarios",
             record_id=usuario_id,
             old_values=old_values,
+            new_values={"activo": False, "archived": True},
         )
 
         return {"ok": True}
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         msg = str(e)
         return JSONResponse(

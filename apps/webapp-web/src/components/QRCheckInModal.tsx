@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
-import { QrCode, Clock, Check, X, RefreshCw } from "lucide-react";
+import Image from "next/image";
+import { Clock, Check, X, RefreshCw } from "lucide-react";
 import { Modal, Button, useToast } from "@/components/ui";
 import QRCodeLib from "qrcode";
 import { getCurrentTenant, getCsrfTokenFromCookie } from "@/lib/tenant";
@@ -166,13 +167,7 @@ export function QRCheckInModal({ isOpen, onClose, userId, userName }: QRCheckInM
                 {/* QR Code */}
                 <div className="relative p-4 bg-white rounded-xl shadow-lg">
                     {qrDataUrl ? (
-                        <img
-                            src={qrDataUrl}
-                            alt="QR Code"
-                            width={200}
-                            height={200}
-                            className="rounded-lg"
-                        />
+                        <Image src={qrDataUrl} alt="QR Code" width={200} height={200} className="rounded-lg" unoptimized />
                     ) : (
                         <div className="w-[200px] h-[200px] flex items-center justify-center bg-slate-100 rounded-lg">
                             <RefreshCw className="w-8 h-8 text-slate-400 animate-spin" />

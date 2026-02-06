@@ -1,6 +1,6 @@
 'use client';
 
-import { X, PlayCircle, Dumbbell, AlertCircle } from 'lucide-react';
+import { PlayCircle, Dumbbell, AlertCircle } from 'lucide-react';
 import { Modal } from '@/components/ui';
 import { type EjercicioRutina } from '@/lib/api';
 

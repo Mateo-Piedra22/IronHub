@@ -31,6 +31,7 @@ import {
 } from '@/components/ui';
 import UserSidebar from '@/components/UserSidebar';
 import { api, type Usuario, type UsuarioCreateInput, type TipoCuota } from '@/lib/api';
+import { useAuth } from '@/lib/auth';
 import { formatDate, formatDateRelative, getInitials, getWhatsAppLink, cn } from '@/lib/utils';
 
 // Usuario form modal
@@ -208,6 +209,7 @@ function UsuarioFormModal({ isOpen, onClose, usuario, tiposCuota, onSuccess }: U
 
 export default function UsuariosPage() {
     const router = useRouter();
+    const { user: sessionUser } = useAuth();
     const { success, error } = useToast();
 
     // State
@@ -225,6 +227,14 @@ export default function UsuariosPage() {
     const [selectedUsuario, setSelectedUsuario] = useState<Usuario | null>(null);
     const [deleteModalOpen, setDeleteModalOpen] = useState(false);
     const [usuarioToDelete, setUsuarioToDelete] = useState<Usuario | null>(null);
+    const [deleteImpactLoading, setDeleteImpactLoading] = useState(false);
+    const [deleteImpact, setDeleteImpact] = useState<{
+        refs: Record<string, number>;
+        allow_purge: boolean;
+        blockers: string[];
+    } | null>(null);
+    const [purgeConfirmOpen, setPurgeConfirmOpen] = useState(false);
+    const [deleteBusy, setDeleteBusy] = useState(false);
     const [toggleModalOpen, setToggleModalOpen] = useState(false);
     const [usuarioToToggle, setUsuarioToToggle] = useState<Usuario | null>(null);
 
@@ -286,13 +296,50 @@ export default function UsuariosPage() {
         return () => window.removeEventListener('ironhub:sucursal-changed', handler as any);
     }, [loadUsuarios]);
 
-    // Handle delete
-    const handleDelete = async () => {
+    const isOwner = (() => {
+        const r = String(sessionUser?.rol || '').trim().toLowerCase();
+        return r === 'owner' || r === 'dueño' || r === 'dueno';
+    })();
+
+    useEffect(() => {
+        if (!deleteModalOpen || !usuarioToDelete) {
+            setDeleteImpact(null);
+            setDeleteImpactLoading(false);
+            return;
+        }
+        let cancelled = false;
+        (async () => {
+            setDeleteImpactLoading(true);
+            try {
+                const res = await api.getUsuarioDeleteImpact(usuarioToDelete.id);
+                if (cancelled) return;
+                if (res.ok && res.data?.ok) {
+                    setDeleteImpact({
+                        refs: (res.data.refs || {}) as Record<string, number>,
+                        allow_purge: Boolean(res.data.allow_purge),
+                        blockers: Array.isArray(res.data.blockers) ? (res.data.blockers as string[]) : [],
+                    });
+                } else {
+                    setDeleteImpact(null);
+                }
+            } catch {
+                if (!cancelled) setDeleteImpact(null);
+            } finally {
+                if (!cancelled) setDeleteImpactLoading(false);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [deleteModalOpen, usuarioToDelete]);
+
+    const handleArchive = async () => {
         if (!usuarioToDelete) return;
+        setDeleteBusy(true);
         try {
             const res = await api.deleteUsuario(usuarioToDelete.id);
             if (res.ok) {
-                success('Usuario eliminado');
+                success('Usuario archivado');
                 loadUsuarios();
             } else {
                 error(res.error || 'Error al eliminar');
@@ -300,8 +347,30 @@ export default function UsuariosPage() {
         } catch {
             error('Error de conexión');
         } finally {
+            setDeleteBusy(false);
             setDeleteModalOpen(false);
             setUsuarioToDelete(null);
+        }
+    };
+
+    const handlePurge = async () => {
+        if (!usuarioToDelete) return;
+        setDeleteBusy(true);
+        try {
+            const res = await api.purgeUsuario(usuarioToDelete.id);
+            if (res.ok) {
+                success('Usuario purgado');
+                loadUsuarios();
+                setPurgeConfirmOpen(false);
+                setDeleteModalOpen(false);
+                setUsuarioToDelete(null);
+            } else {
+                error(res.error || 'Error al purgar');
+            }
+        } catch {
+            error('Error de conexión');
+        } finally {
+            setDeleteBusy(false);
         }
     };
 
@@ -483,7 +552,7 @@ export default function UsuariosPage() {
                             setDeleteModalOpen(true);
                         }}
                         className="p-2 rounded-lg text-slate-400 hover:text-danger-400 hover:bg-danger-500/10 transition-colors"
-                        title="Eliminar"
+                        title="Archivar"
                     >
                         <Trash2 className="w-4 h-4" />
                     </button>
@@ -600,18 +669,118 @@ export default function UsuariosPage() {
                 onSuccess={loadUsuarios}
             />
 
-            {/* Delete Confirm Modal */}
-            <ConfirmModal
+            <Modal
                 isOpen={deleteModalOpen}
                 onClose={() => {
+                    if (deleteBusy) return;
                     setDeleteModalOpen(false);
                     setUsuarioToDelete(null);
                 }}
-                onConfirm={handleDelete}
-                title="Eliminar Usuario"
-                message={`¿Estás seguro de eliminar a "${usuarioToDelete?.nombre}"? Esta acción no se puede deshacer.`}
-                confirmText="Eliminar"
+                title="Archivar Usuario"
+                size="sm"
+                footer={
+                    <>
+                        <button
+                            onClick={() => {
+                                if (deleteBusy) return;
+                                setDeleteModalOpen(false);
+                                setUsuarioToDelete(null);
+                            }}
+                            className="btn-secondary"
+                            disabled={deleteBusy}
+                        >
+                            Cancelar
+                        </button>
+                        {isOwner && deleteImpact?.allow_purge && (
+                            <button
+                                onClick={() => setPurgeConfirmOpen(true)}
+                                disabled={deleteBusy}
+                                className={cn(
+                                    'px-6 py-3 rounded-xl font-semibold transition-all duration-200',
+                                    'bg-danger-700 hover:bg-danger-600 text-white',
+                                    deleteBusy && 'opacity-50 cursor-not-allowed'
+                                )}
+                            >
+                                Purgar definitivamente
+                            </button>
+                        )}
+                        <button
+                            onClick={handleArchive}
+                            disabled={deleteBusy}
+                            className={cn(
+                                'px-6 py-3 rounded-xl font-semibold transition-all duration-200',
+                                'bg-danger-500 hover:bg-danger-600 text-white',
+                                deleteBusy && 'opacity-50 cursor-not-allowed'
+                            )}
+                        >
+                            {deleteBusy ? (
+                                <span className="flex items-center gap-2">
+                                    <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                                    Procesando...
+                                </span>
+                            ) : (
+                                'Archivar'
+                            )}
+                        </button>
+                    </>
+                }
+            >
+                <div className="space-y-3">
+                    <p className="text-slate-300">
+                        Se va a archivar a &quot;{usuarioToDelete?.nombre}&quot;: queda inactivo y no podrá acceder al sistema.
+                    </p>
+                    <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                        <div className="text-xs text-slate-500">Impacto detectado</div>
+                        {deleteImpactLoading ? (
+                            <div className="mt-2 text-sm text-slate-300">Cargando…</div>
+                        ) : (
+                            <div className="mt-2 space-y-2">
+                                {deleteImpact?.refs ? (
+                                    <div className="grid grid-cols-2 gap-2 text-sm">
+                                        {Object.entries(deleteImpact.refs)
+                                            .filter(([, v]) => Number(v || 0) > 0)
+                                            .slice(0, 10)
+                                            .map(([k, v]) => (
+                                                <div key={k} className="flex items-center justify-between gap-3">
+                                                    <span className="text-slate-400 truncate">{k}</span>
+                                                    <span className="text-slate-200 tabular-nums">{Number(v || 0)}</span>
+                                                </div>
+                                            ))}
+                                        {Object.entries(deleteImpact.refs).filter(([, v]) => Number(v || 0) > 0).length === 0 && (
+                                            <div className="col-span-2 text-slate-400">Sin dependencias relevantes</div>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div className="text-slate-400">No se pudo calcular el impacto</div>
+                                )}
+                                {!isOwner && (
+                                    <div className="text-xs text-slate-500">
+                                        Para purga definitiva se requieren permisos de dueño.
+                                    </div>
+                                )}
+                                {isOwner && deleteImpact && !deleteImpact.allow_purge && (
+                                    <div className="text-xs text-slate-500">
+                                        La purga está bloqueada por dependencias.
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </Modal>
+
+            <ConfirmModal
+                isOpen={purgeConfirmOpen}
+                onClose={() => {
+                    if (deleteBusy) return;
+                    setPurgeConfirmOpen(false);
+                }}
+                onConfirm={handlePurge}
+                title="Purgar Usuario"
+                message={`Esto elimina definitivamente a "${usuarioToDelete?.nombre}". No se puede deshacer.`}
+                confirmText="Purgar"
                 variant="danger"
+                isLoading={deleteBusy}
             />
 
             {/* Toggle Active Confirm Modal */}

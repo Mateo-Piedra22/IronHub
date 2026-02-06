@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useEffect, type ComponentType } from 'react';
+import { motion } from 'framer-motion';
 import { Clock, Users, Layers, Calendar, ChevronRight } from 'lucide-react';
 import { api, type Clase, type ClaseBloque, type ClaseHorario, type Inscripcion, type ClaseBloqueItem } from '@/lib/api';
 import { cn, formatTime } from '@/lib/utils';
@@ -18,9 +18,10 @@ const diasMap: Record<string, number> = {
     'jueves': 4, 'viernes': 5, 'sábado': 6, 'sabado': 6, 'domingo': 0
 };
 
+type TabId = 'proxima' | 'estructura' | 'horarios';
+
 export default function ClaseQuickView({ clase, onClose, onManage }: ClaseQuickViewProps) {
-    const [activeTab, setActiveTab] = useState<'proxima' | 'estructura' | 'horarios'>('proxima');
-    const [loading, setLoading] = useState(false);
+    const [activeTab, setActiveTab] = useState<TabId>('proxima');
 
     // Data
     const [horarios, setHorarios] = useState<ClaseHorario[]>([]);
@@ -65,7 +66,7 @@ export default function ClaseQuickView({ clase, onClose, onManage }: ClaseQuickV
 
         load();
         return () => { mounted = false; };
-    }, [clase?.id]);
+    }, [clase]);
 
     // Calculate Next Session and load assistants
     useEffect(() => {
@@ -176,14 +177,16 @@ export default function ClaseQuickView({ clase, onClose, onManage }: ClaseQuickV
 
                 {/* Tabs */}
                 <div className="flex border-b border-slate-800 mb-6">
-                    {[
-                        { id: 'proxima', label: 'Próxima Sesión', icon: Calendar },
-                        { id: 'estructura', label: 'Estructura (Bloques)', icon: Layers },
-                        { id: 'horarios', label: 'Horarios', icon: Clock },
-                    ].map((tab) => (
+                    {(
+                        [
+                            { id: 'proxima', label: 'Próxima Sesión', icon: Calendar },
+                            { id: 'estructura', label: 'Estructura (Bloques)', icon: Layers },
+                            { id: 'horarios', label: 'Horarios', icon: Clock },
+                        ] satisfies Array<{ id: TabId; label: string; icon: ComponentType<{ className?: string }> }>
+                    ).map((tab) => (
                         <button
                             key={tab.id}
-                            onClick={() => setActiveTab(tab.id as any)}
+                            onClick={() => setActiveTab(tab.id)}
                             className={cn(
                                 'flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors relative',
                                 activeTab === tab.id

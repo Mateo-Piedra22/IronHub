@@ -206,7 +206,7 @@ export default function EmpleadosPage() {
         }
         setExistingLoading(true);
         try {
-            const res = await api.getUsuarios({ search: term, limit: 10 });
+            const res = await api.getUsuariosDirectorio({ search: term, limit: 10, include_all: true });
             if (res.ok && res.data?.usuarios) {
                 const mapped = (res.data.usuarios || []).map((u) => ({
                     id: u.id,

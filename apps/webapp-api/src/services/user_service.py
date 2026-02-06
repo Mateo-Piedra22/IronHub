@@ -152,6 +152,60 @@ class UserService(BaseService):
 
         return {"items": items, "total": int(total or 0)}
 
+    def list_users_directory_paged(
+        self,
+        q: Optional[str] = None,
+        *,
+        activo: Optional[bool] = None,
+        limit: int = 50,
+        offset: int = 0,
+        sucursal_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        items = self.user_repo.listar_usuarios_directorio_paginados(
+            q, limit, offset, activo=activo, sucursal_id=sucursal_id
+        )
+        total = self.user_repo.contar_usuarios_directorio(
+            q, activo=activo, sucursal_id=sucursal_id
+        )
+
+        try:
+            tipos = self.payment_repo.obtener_tipos_cuota_activos()
+            map_nombre_a_id = {
+                str(t.nombre): int(t.id)
+                for t in tipos
+                if getattr(t, "nombre", None) is not None
+            }
+            map_nombre_a_duracion = {
+                str(t.nombre): int(getattr(t, "duracion_dias", 30) or 30)
+                for t in tipos
+                if getattr(t, "nombre", None) is not None
+            }
+        except Exception:
+            map_nombre_a_id = {}
+            map_nombre_a_duracion = {}
+
+        for it in items:
+            nombre = it.get("tipo_cuota")
+            if "tipo_cuota_nombre" not in it:
+                it["tipo_cuota_nombre"] = nombre
+            if "tipo_cuota_id" not in it:
+                it["tipo_cuota_id"] = map_nombre_a_id.get(nombre)
+            if "tipo_cuota_duracion_dias" not in it:
+                it["tipo_cuota_duracion_dias"] = map_nombre_a_duracion.get(nombre) or 30
+
+            try:
+                fpv = it.get("fecha_proximo_vencimiento")
+                if fpv:
+                    if isinstance(fpv, datetime):
+                        fpv_d = fpv.date()
+                    else:
+                        fpv_d = fpv
+                    it["dias_restantes"] = (fpv_d - self._today_local_date()).days
+            except Exception:
+                pass
+
+        return {"items": items, "total": int(total or 0)}
+
     def _is_privileged_role(self, role: Optional[str]) -> bool:
         r = str(role or "").strip().lower()
         return r in ("dueño", "dueno", "owner", "admin", "administrador")
@@ -298,6 +352,48 @@ class UserService(BaseService):
 
     def delete_user(self, user_id: int):
         self.user_repo.eliminar_usuario(user_id)
+
+    def get_delete_impact(self, user_id: int) -> Dict[str, Any]:
+        uid = int(user_id)
+        refs = self.user_repo.obtener_resumen_referencias_usuario(uid) or {}
+        blockers = [
+            "pagos",
+            "asistencias",
+            "rutinas",
+            "clase_usuarios",
+            "clase_lista_espera",
+            "usuario_notas",
+            "usuario_etiquetas",
+            "usuario_estados",
+            "historial_estados",
+            "profesores",
+            "notificaciones_cupos",
+            "audit_logs_user",
+            "checkin_pending",
+            "memberships",
+            "access_credentials",
+            "support_tickets",
+            "staff_profiles",
+            "staff_permissions",
+            "staff_sessions_total",
+        ]
+        allow_purge = True
+        reasons: List[str] = []
+        for k in blockers:
+            try:
+                c = int(refs.get(k) or 0)
+            except Exception:
+                c = 0
+            if c > 0:
+                allow_purge = False
+                reasons.append(k)
+        return {"refs": refs, "allow_purge": allow_purge, "blockers": reasons}
+
+    def archive_user(self, user_id: int) -> bool:
+        return bool(self.user_repo.archivar_usuario(int(user_id)))
+
+    def purge_user(self, user_id: int) -> bool:
+        return bool(self.user_repo.purgar_usuario_si_seguro(int(user_id)))
 
     def get_user_panel_data(self, user_id: int) -> Dict[str, Any]:
         u = self.user_repo.obtener_usuario(user_id)

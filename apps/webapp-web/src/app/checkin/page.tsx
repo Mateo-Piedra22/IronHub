@@ -10,9 +10,6 @@ import {
     User,
     Clock,
     LogOut,
-    Phone,
-    ChevronDown,
-    Camera,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -26,23 +23,10 @@ interface CheckinResult {
     timestamp?: string;
 }
 
-const COUNTRY_PREFIXES = [
-    { code: '+54', country: 'Argentina' },
-    { code: '+598', country: 'Uruguay' },
-    { code: '+56', country: 'Chile' },
-    { code: '+595', country: 'Paraguay' },
-    { code: '+55', country: 'Brasil' },
-    { code: '+1', country: 'Estados Unidos' },
-    { code: '+34', country: 'España' },
-];
-
 export default function CheckinPage() {
     // Auth state
     const [authenticated, setAuthenticated] = useState(false);
     const [authDni, setAuthDni] = useState('');
-    const [authPhone, setAuthPhone] = useState('');
-    const [countryPrefix, setCountryPrefix] = useState('+54');
-    const [showPrefixSelector, setShowPrefixSelector] = useState(false);
     const [authLoading, setAuthLoading] = useState(false);
     const [authError, setAuthError] = useState('');
 
@@ -56,54 +40,22 @@ export default function CheckinPage() {
     } | null>(null);
 
     // Scanner state
-    const [scannerReady, setScannerReady] = useState(false);
     const [scanning, setScanning] = useState(false);
     const [lastResult, setLastResult] = useState<CheckinResult | null>(null);
     const [recentCheckins, setRecentCheckins] = useState<Array<{ name: string; dni: string; time: string }>>([]);
 
     const scannerRef = useRef<Html5Qrcode | null>(null);
-    const scannerContainerRef = useRef<HTMLDivElement>(null);
     const autoSubmitAttempted = useRef(false);
     const logoutInProgress = useRef(false);
+    const startScanningRef = useRef<(() => void) | null>(null);
 
-    const makeIdempotencyKey = () => {
+    const makeIdempotencyKey = useCallback(() => {
         try {
-            const c = (globalThis as any).crypto;
-            if (c?.randomUUID) return String(c.randomUUID());
-        } catch { }
+            const id = globalThis.crypto?.randomUUID?.();
+            if (id) return id;
+        } catch {}
         return `${Date.now()}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;
-    };
-
-    // Auto-submit support - hardened to prevent loops
-    useEffect(() => {
-        // Skip if already attempted, logout in progress, or already authenticated
-        if (autoSubmitAttempted.current || logoutInProgress.current || authenticated || authLoading) {
-            return;
-        }
-
-        const query = new URLSearchParams(window.location.search);
-        const isAutoMode = query.get('auto') === 'true';
-
-        if (!isAutoMode) return;
-
-        // Validate that authDni is a valid DNI (has at least 6 numeric characters)
-        const cleanDni = authDni.replace(/\D/g, '');
-        if (!cleanDni || cleanDni.length < 6) {
-            return;
-        }
-
-        // Mark as attempted BEFORE triggering to prevent re-entry
-        autoSubmitAttempted.current = true;
-
-        // Remove auto param from URL to prevent loops on page reload
-        const url = new URL(window.location.href);
-        url.searchParams.delete('auto');
-        window.history.replaceState({}, '', url.toString());
-
-        // Trigger auth
-        const fakeEvent = { preventDefault: () => { } } as React.FormEvent;
-        handleAuth(fakeEvent);
-    }, [authDni, authenticated, authLoading]);
+    }, []);
 
     // Restore saved credentials
     useEffect(() => {
@@ -112,13 +64,12 @@ export default function CheckinPage() {
             if (saved) {
                 const data = JSON.parse(saved);
                 if (data.dni) setAuthDni(data.dni);
-                if (data.telefono) setAuthPhone(data.telefono);
             }
-        } catch { }
+        } catch {}
     }, []);
 
     // Auth submit with DNI only
-    const handleAuth = async (e: React.FormEvent) => {
+    const handleAuth = useCallback(async (e: React.FormEvent) => {
         e.preventDefault();
         setAuthError('');
 
@@ -161,134 +112,51 @@ export default function CheckinPage() {
         } finally {
             setAuthLoading(false);
         }
-    };
+    }, [authDni]);
 
-    // Initialize QR scanner when authenticated
+    // Auto-submit support - hardened to prevent loops
     useEffect(() => {
-        if (!authenticated) return;
-
-        const initScanner = async () => {
-            try {
-                scannerRef.current = new Html5Qrcode('qr-scanner-container');
-                setScannerReady(true);
-                startScanning();
-            } catch (err) {
-                console.error('Error initializing scanner:', err);
-            }
-        };
-
-        // Small delay to ensure DOM is ready
-        const timer = setTimeout(initScanner, 500);
-
-        return () => {
-            clearTimeout(timer);
-            if (scannerRef.current && scanning) {
-                scannerRef.current.stop().catch(() => { });
-            }
-        };
-    }, [authenticated]);
-
-    // Start scanning
-    const startScanning = useCallback(async () => {
-        if (!scannerRef.current || scanning) return;
-
-        try {
-            setScanning(true);
-            await scannerRef.current.start(
-                { facingMode: 'environment' },
-                {
-                    fps: 10,
-                    qrbox: { width: 250, height: 250 },
-                    aspectRatio: 1,
-                },
-                async (decodedText) => {
-                    // QR scanned successfully
-                    await handleQRScanned(decodedText);
-                },
-                () => { }
-            );
-        } catch (err) {
-            console.error('Error starting scanner:', err);
-            setScanning(false);
-        }
-    }, [scanning]);
-
-    // Handle QR scan
-    const handleQRScanned = async (token: string) => {
-        const idemKey = makeIdempotencyKey();
-        let raw = String(token || '').trim();
-        try {
-            if (raw.includes('token=')) {
-                const qsPart = raw.includes('?') ? raw.split('?', 2)[1] : raw;
-                const params = new URLSearchParams(qsPart);
-                const t = params.get('token');
-                if (t) raw = t.trim();
-            }
-        } catch { }
-
-        // Stop scanner temporarily
-        if (scannerRef.current) {
-            await scannerRef.current.stop();
-            setScanning(false);
+        if (autoSubmitAttempted.current || logoutInProgress.current || authenticated || authLoading) {
+            return;
         }
 
-        // Validate the token
-        try {
-            const resCheckin = await api.checkIn(raw, idemKey);
+        const query = new URLSearchParams(window.location.search);
+        const isAutoMode = query.get('auto') === 'true';
 
-            if (resCheckin.ok && resCheckin.data?.ok) {
-                const branch = (resCheckin.data as any)?.sucursal_nombre;
-                setLastResult({
-                    success: true,
-                    message: `${resCheckin.data?.mensaje || 'OK'}${branch ? ` • ${branch}` : ''}`,
-                });
-                playSuccessSound();
-            } else {
-                const res = await api.scanStationQR(raw, idemKey);
+        if (!isAutoMode) return;
 
-                if (res.ok && res.data?.ok) {
-                    const timestamp = new Date().toLocaleTimeString('es-AR');
-                    const branch = (res.data as any)?.usuario?.branch_name || (res.data as any)?.usuario?.sucursal_nombre;
-                    const result: CheckinResult = {
-                        success: true,
-                        message: `${res.data.mensaje || '¡Check-in exitoso!'}${branch ? ` • ${branch}` : ''}`,
-                        userName: res.data.usuario?.nombre || 'Usuario',
-                        userDni: res.data.usuario?.dni || '',
-                        timestamp,
-                    };
-                    setLastResult(result);
-
-                    setRecentCheckins((prev) => [
-                        { name: result.userName!, dni: result.userDni!, time: timestamp },
-                        ...prev.slice(0, 4),
-                    ]);
-
-                    playSuccessSound();
-                } else {
-                    setLastResult({
-                        success: false,
-                        message: res.data?.mensaje || res.error || resCheckin.error || 'Error al escanear',
-                    });
-                }
-            }
-        } catch {
-            setLastResult({
-                success: false,
-                message: 'Error de conexión',
-            });
+        const cleanDni = authDni.replace(/\D/g, '');
+        if (!cleanDni || cleanDni.length < 6) {
+            return;
         }
 
-        // Reset after delay and restart scanner
-        setTimeout(() => {
-            setLastResult(null);
-            startScanning();
-        }, 3000);
+        autoSubmitAttempted.current = true;
+
+        const url = new URL(window.location.href);
+        url.searchParams.delete('auto');
+        window.history.replaceState({}, '', url.toString());
+
+        const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
+        void handleAuth(fakeEvent);
+    }, [authDni, authenticated, authLoading, handleAuth]);
+
+    const asRecord = (v: unknown): Record<string, unknown> | null => {
+        if (!v || typeof v !== 'object') return null;
+        return v as Record<string, unknown>;
     };
 
-    // Play success sound
-    const playSuccessSound = () => {
+    const getString = (obj: Record<string, unknown> | null, key: string): string | null => {
+        if (!obj) return null;
+        const v = obj[key];
+        return typeof v === 'string' ? v : null;
+    };
+
+    const playSuccessSound = useCallback(() => {
         try {
-            const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+            const WebkitAudioContext = (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+            const AudioContextCtor = window.AudioContext || WebkitAudioContext;
+            if (!AudioContextCtor) return;
+            const ctx = new AudioContextCtor();
             const oscillator = ctx.createOscillator();
             const gainNode = ctx.createGain();
 
@@ -302,8 +170,126 @@ export default function CheckinPage() {
 
             oscillator.start(ctx.currentTime);
             oscillator.stop(ctx.currentTime + 0.3);
-        } catch { }
+        } catch {}
+    }, []);
+
+    const handleQRScanned = useCallback(
+        async (token: string) => {
+            const idemKey = makeIdempotencyKey();
+            let raw = String(token || '').trim();
+            try {
+                if (raw.includes('token=')) {
+                    const qsPart = raw.includes('?') ? raw.split('?', 2)[1] : raw;
+                    const params = new URLSearchParams(qsPart);
+                    const t = params.get('token');
+                    if (t) raw = t.trim();
+                }
+            } catch {}
+
+            if (scannerRef.current) {
+                await scannerRef.current.stop().catch(() => {});
+                setScanning(false);
+            }
+
+            try {
+                const resCheckin = await api.checkIn(raw, idemKey);
+
+                if (resCheckin.ok && resCheckin.data?.ok) {
+                    const branch = getString(asRecord(resCheckin.data), 'sucursal_nombre');
+                    setLastResult({
+                        success: true,
+                        message: `${resCheckin.data?.mensaje || 'OK'}${branch ? ` • ${branch}` : ''}`,
+                    });
+                    playSuccessSound();
+                } else {
+                    const res = await api.scanStationQR(raw, idemKey);
+
+                    if (res.ok && res.data?.ok) {
+                        const timestamp = new Date().toLocaleTimeString('es-AR');
+                        const result: CheckinResult = {
+                            success: true,
+                            message: res.data.mensaje || '¡Check-in exitoso!',
+                            userName: res.data.usuario?.nombre || 'Usuario',
+                            userDni: res.data.usuario?.dni || '',
+                            timestamp,
+                        };
+                        setLastResult(result);
+
+                        setRecentCheckins((prev) => [
+                            { name: result.userName || 'Usuario', dni: result.userDni || '', time: timestamp },
+                            ...prev.slice(0, 4),
+                        ]);
+
+                        playSuccessSound();
+                    } else {
+                        setLastResult({
+                            success: false,
+                            message: res.data?.mensaje || res.error || resCheckin.error || 'Error al escanear',
+                        });
+                    }
+                }
+            } catch {
+                setLastResult({
+                    success: false,
+                    message: 'Error de conexión',
+                });
+            }
+
+            setTimeout(() => {
+                setLastResult(null);
+                startScanningRef.current?.();
+            }, 3000);
+        },
+        [makeIdempotencyKey, playSuccessSound]
+    );
+
+    const startScanning = useCallback(async () => {
+        if (!scannerRef.current || scanning) return;
+
+        try {
+            setScanning(true);
+            await scannerRef.current.start(
+                { facingMode: 'environment' },
+                {
+                    fps: 10,
+                    qrbox: { width: 250, height: 250 },
+                    aspectRatio: 1,
+                },
+                async (decodedText) => {
+                    await handleQRScanned(decodedText);
+                },
+                () => {}
+            );
+        } catch {
+            setScanning(false);
+        }
+    }, [handleQRScanned, scanning]);
+
+    startScanningRef.current = () => {
+        void startScanning();
     };
+
+    useEffect(() => {
+        if (!authenticated) return;
+
+        const initScanner = async () => {
+            try {
+                scannerRef.current = new Html5Qrcode('qr-scanner-container');
+                await startScanning();
+            } catch {}
+        };
+
+        const timer = setTimeout(() => {
+            void initScanner();
+        }, 500);
+
+        return () => {
+            clearTimeout(timer);
+            if (scannerRef.current && scanning) {
+                scannerRef.current.stop().catch(() => {});
+            }
+        };
+    }, [authenticated, scanning, startScanning]);
 
     // Logout
     const handleLogout = async () => {
@@ -333,11 +319,9 @@ export default function CheckinPage() {
 
         // Reset all auth state
         setAuthDni('');
-        setAuthPhone('');
         setAuthenticated(false);
         setUserInfo(null);
         setScanning(false);
-        setScannerReady(false);
 
         // Reset refs
         autoSubmitAttempted.current = false;
@@ -539,10 +523,10 @@ export default function CheckinPage() {
                         </AnimatePresence>
 
                         {/* Loading state */}
-                        {!scannerReady && !lastResult && (
+                        {!scanning && !lastResult && (
                             <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
                                 <div className="text-center">
-                                    <Camera className="w-12 h-12 text-slate-600 mx-auto mb-4 animate-pulse" />
+                                    <ScanLine className="w-12 h-12 text-slate-600 mx-auto mb-4 animate-pulse" />
                                     <p className="text-slate-500">Iniciando cámara...</p>
                                 </div>
                             </div>

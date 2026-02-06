@@ -275,6 +275,168 @@ class UserRepository(BaseRepository):
             if r and r.get("id") is not None
         ]
 
+    def contar_usuarios_directorio(
+        self,
+        q: Optional[str] = None,
+        activo: Optional[bool] = None,
+        *,
+        sucursal_id: Optional[int] = None,
+    ) -> int:
+        if sucursal_id is None:
+            return self.contar_usuarios(q, activo=activo, sucursal_id=None)
+
+        where_parts: List[str] = []
+        params: Dict[str, Any] = {"sucursal_id": int(sucursal_id)}
+        if q:
+            where_parts.append(
+                "(u.nombre ILIKE :q OR u.dni ILIKE :q OR u.telefono ILIKE :q)"
+            )
+            params["q"] = f"%{q}%"
+        if activo is not None:
+            where_parts.append("u.activo = :activo")
+            params["activo"] = bool(activo)
+
+        where_parts.append(
+            """
+            (
+                COALESCE((
+                    SELECT uas.allow
+                    FROM usuario_accesos_sucursales uas
+                    WHERE uas.usuario_id = u.id
+                      AND uas.sucursal_id = :sucursal_id
+                      AND (uas.starts_at IS NULL OR uas.starts_at <= NOW())
+                      AND (uas.ends_at IS NULL OR uas.ends_at >= NOW())
+                    ORDER BY uas.id DESC
+                    LIMIT 1
+                ), (
+                    COALESCE(tc.all_sucursales, FALSE)
+                    OR EXISTS (
+                        SELECT 1
+                        FROM tipo_cuota_sucursales tcs
+                        WHERE tcs.tipo_cuota_id = tc.id
+                          AND tcs.sucursal_id = :sucursal_id
+                    )
+                )) = TRUE
+                OR EXISTS (
+                    SELECT 1
+                    FROM usuario_sucursales us
+                    WHERE us.usuario_id = u.id
+                      AND us.sucursal_id = :sucursal_id
+                )
+            )
+            """
+        )
+
+        where_sql = " AND ".join([p.strip() for p in where_parts if p and p.strip()])
+        query = f"SELECT COUNT(*) AS total FROM usuarios u LEFT JOIN tipos_cuota tc ON LOWER(tc.nombre) = LOWER(u.tipo_cuota) WHERE {where_sql}"
+        try:
+            row = self.db.execute(text(query), params).mappings().first()
+            return int((row or {}).get("total") or 0)
+        except Exception:
+            return 0
+
+    def listar_usuarios_directorio_paginados(
+        self,
+        q: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+        activo: Optional[bool] = None,
+        *,
+        sucursal_id: Optional[int] = None,
+    ) -> List[Dict]:
+        if sucursal_id is None:
+            return self.listar_usuarios_paginados(
+                q, limit, offset, activo=activo, sucursal_id=None
+            )
+
+        where_parts: List[str] = []
+        params: Dict[str, Any] = {
+            "sucursal_id": int(sucursal_id),
+            "limit": int(limit),
+            "offset": int(offset),
+        }
+        if q:
+            where_parts.append(
+                "(u.nombre ILIKE :q OR u.dni ILIKE :q OR u.telefono ILIKE :q)"
+            )
+            params["q"] = f"%{q}%"
+        if activo is not None:
+            where_parts.append("u.activo = :activo")
+            params["activo"] = bool(activo)
+
+        where_parts.append(
+            """
+            (
+                COALESCE((
+                    SELECT uas.allow
+                    FROM usuario_accesos_sucursales uas
+                    WHERE uas.usuario_id = u.id
+                      AND uas.sucursal_id = :sucursal_id
+                      AND (uas.starts_at IS NULL OR uas.starts_at <= NOW())
+                      AND (uas.ends_at IS NULL OR uas.ends_at >= NOW())
+                    ORDER BY uas.id DESC
+                    LIMIT 1
+                ), (
+                    COALESCE(tc.all_sucursales, FALSE)
+                    OR EXISTS (
+                        SELECT 1
+                        FROM tipo_cuota_sucursales tcs
+                        WHERE tcs.tipo_cuota_id = tc.id
+                          AND tcs.sucursal_id = :sucursal_id
+                    )
+                )) = TRUE
+                OR EXISTS (
+                    SELECT 1
+                    FROM usuario_sucursales us
+                    WHERE us.usuario_id = u.id
+                      AND us.sucursal_id = :sucursal_id
+                )
+            )
+            """
+        )
+
+        where_sql = " AND ".join([p.strip() for p in where_parts if p and p.strip()])
+        query = f"""
+            SELECT
+              u.id,
+              u.nombre,
+              u.dni,
+              u.telefono,
+              u.rol,
+              u.tipo_cuota,
+              u.activo,
+              u.fecha_registro,
+              u.fecha_proximo_vencimiento,
+              u.cuotas_vencidas,
+              u.ultimo_pago,
+              u.notas
+            FROM usuarios u
+            LEFT JOIN tipos_cuota tc ON LOWER(tc.nombre) = LOWER(u.tipo_cuota)
+            WHERE {where_sql}
+            ORDER BY u.nombre ASC
+            LIMIT :limit OFFSET :offset
+        """
+        rows = self.db.execute(text(query), params).mappings().all()
+        return [
+            {
+                "id": int(r.get("id")),
+                "nombre": str(r.get("nombre") or "").strip(),
+                "dni": r.get("dni"),
+                "telefono": r.get("telefono"),
+                "email": None,
+                "rol": str(r.get("rol") or "").strip().lower(),
+                "tipo_cuota": r.get("tipo_cuota"),
+                "activo": bool(r.get("activo")) if r.get("activo") is not None else False,
+                "fecha_registro": r.get("fecha_registro"),
+                "fecha_proximo_vencimiento": r.get("fecha_proximo_vencimiento"),
+                "cuotas_vencidas": r.get("cuotas_vencidas"),
+                "ultimo_pago": r.get("ultimo_pago"),
+                "notas": r.get("notas"),
+            }
+            for r in (rows or [])
+            if r and r.get("id") is not None
+        ]
+
     def cambiar_usuario_id(self, current_id: int, new_id: int):
         # This is a dangerous operation, but requested by the user/legacy code.
         # We need to disable foreign key checks or cascade updates if the DB supports it,
@@ -747,22 +909,87 @@ class UserRepository(BaseRepository):
         return result
 
     def obtener_resumen_referencias_usuario(self, usuario_id: int) -> dict:
-        def count_in(model, col_name="usuario_id"):
-            return self.db.scalar(
-                select(func.count())
-                .select_from(model)
-                .where(getattr(model, col_name) == usuario_id)
-            )
+        def count_in(model, col_name: str = "usuario_id") -> int:
+            try:
+                return int(
+                    self.db.scalar(
+                        select(func.count())
+                        .select_from(model)
+                        .where(getattr(model, col_name) == usuario_id)
+                    )
+                    or 0
+                )
+            except Exception:
+                return 0
 
-        wa_count = 0
-        try:
-            # Use text for table not yet imported or raw count
-            wa_count = self.db.scalar(
-                text("SELECT COUNT(*) FROM whatsapp_messages WHERE user_id = :uid"),
-                {"uid": usuario_id},
-            )
-        except:
-            pass
+        def count_sql(sql: str, params: Dict[str, Any]) -> int:
+            try:
+                return int(self.db.execute(text(sql), params).scalar() or 0)
+            except Exception:
+                return 0
+
+        wa_count = count_sql(
+            "SELECT COUNT(*) FROM whatsapp_messages WHERE user_id = :uid",
+            {"uid": int(usuario_id)},
+        )
+        memberships = count_sql(
+            "SELECT COUNT(*) FROM memberships WHERE usuario_id = :uid",
+            {"uid": int(usuario_id)},
+        )
+        membership_sucursales = count_sql(
+            """
+            SELECT COUNT(*)
+            FROM membership_sucursales ms
+            WHERE ms.membership_id IN (SELECT id FROM memberships WHERE usuario_id = :uid)
+            """,
+            {"uid": int(usuario_id)},
+        )
+        usuario_sucursales = count_sql(
+            "SELECT COUNT(*) FROM usuario_sucursales WHERE usuario_id = :uid",
+            {"uid": int(usuario_id)},
+        )
+        usuario_accesos_sucursales = count_sql(
+            "SELECT COUNT(*) FROM usuario_accesos_sucursales WHERE usuario_id = :uid",
+            {"uid": int(usuario_id)},
+        )
+        usuario_permisos_clases = count_sql(
+            "SELECT COUNT(*) FROM usuario_permisos_clases WHERE usuario_id = :uid",
+            {"uid": int(usuario_id)},
+        )
+        access_credentials = count_sql(
+            "SELECT COUNT(*) FROM access_credentials WHERE usuario_id = :uid",
+            {"uid": int(usuario_id)},
+        )
+        support_tickets = count_sql(
+            "SELECT COUNT(*) FROM support_tickets WHERE user_id = :uid",
+            {"uid": int(usuario_id)},
+        )
+        staff_profiles = count_sql(
+            "SELECT COUNT(*) FROM staff_profiles WHERE usuario_id = :uid",
+            {"uid": int(usuario_id)},
+        )
+        staff_permissions = count_sql(
+            "SELECT COUNT(*) FROM staff_permissions WHERE usuario_id = :uid",
+            {"uid": int(usuario_id)},
+        )
+        staff_sessions_total = count_sql(
+            """
+            SELECT COUNT(*)
+            FROM staff_sessions ss
+            JOIN staff_profiles sp ON sp.id = ss.staff_id
+            WHERE sp.usuario_id = :uid
+            """,
+            {"uid": int(usuario_id)},
+        )
+        staff_sessions_activas = count_sql(
+            """
+            SELECT COUNT(*)
+            FROM staff_sessions ss
+            JOIN staff_profiles sp ON sp.id = ss.staff_id
+            WHERE sp.usuario_id = :uid AND ss.hora_fin IS NULL
+            """,
+            {"uid": int(usuario_id)},
+        )
 
         return {
             "pagos": count_in(Pago),
@@ -773,12 +1000,121 @@ class UserRepository(BaseRepository):
             "usuario_notas": count_in(UsuarioNota),
             "usuario_etiquetas": count_in(UsuarioEtiqueta),
             "usuario_estados": count_in(UsuarioEstado),
+            "historial_estados": count_in(HistorialEstado),
             "profesores": count_in(Profesor),
             "notificaciones_cupos": count_in(NotificacionCupo),
             "audit_logs_user": count_in(AuditLog, "user_id"),
             "checkin_pending": count_in(CheckinPending),
             "whatsapp_messages": wa_count,
+            "memberships": memberships,
+            "membership_sucursales": membership_sucursales,
+            "usuario_sucursales": usuario_sucursales,
+            "usuario_accesos_sucursales": usuario_accesos_sucursales,
+            "usuario_permisos_clases": usuario_permisos_clases,
+            "access_credentials": access_credentials,
+            "support_tickets": support_tickets,
+            "staff_profiles": staff_profiles,
+            "staff_permissions": staff_permissions,
+            "staff_sessions_total": staff_sessions_total,
+            "staff_sessions_activas": staff_sessions_activas,
         }
+
+    def archivar_usuario(self, usuario_id: int) -> bool:
+        user = self.db.get(Usuario, int(usuario_id))
+        if not user:
+            return False
+
+        rol = str(getattr(user, "rol", "") or "").strip().lower()
+        if rol in ("dueño", "dueno", "owner", "admin", "administrador"):
+            raise PermissionError("No se puede archivar un usuario privilegiado")
+
+        staff_exists = False
+        try:
+            staff_exists = (
+                self.db.execute(
+                    text(
+                        "SELECT 1 FROM staff_profiles WHERE usuario_id = :uid LIMIT 1"
+                    ),
+                    {"uid": int(usuario_id)},
+                ).fetchone()
+                is not None
+            )
+        except Exception:
+            staff_exists = False
+
+        prof_exists = False
+        try:
+            prof_exists = (
+                self.db.execute(
+                    text("SELECT 1 FROM profesores WHERE usuario_id = :uid LIMIT 1"),
+                    {"uid": int(usuario_id)},
+                ).fetchone()
+                is not None
+            )
+        except Exception:
+            prof_exists = False
+
+        if staff_exists or prof_exists or rol in ("staff", "empleado", "recepcionista", "profesor"):
+            raise ValueError("Este usuario es staff/profesor. Gestioná el perfil desde Equipo.")
+
+        user.activo = False
+        self.db.commit()
+        self._invalidate_cache("usuarios")
+        return True
+
+    def purgar_usuario_si_seguro(self, usuario_id: int) -> bool:
+        user = self.db.get(Usuario, int(usuario_id))
+        if not user:
+            return False
+
+        rol = str(getattr(user, "rol", "") or "").strip().lower()
+        if rol in ("dueño", "dueno", "owner", "admin", "administrador"):
+            raise PermissionError("No se puede purgar un usuario privilegiado")
+
+        refs = self.obtener_resumen_referencias_usuario(int(usuario_id))
+        blockers = [
+            "pagos",
+            "asistencias",
+            "rutinas",
+            "clase_usuarios",
+            "clase_lista_espera",
+            "usuario_notas",
+            "usuario_etiquetas",
+            "usuario_estados",
+            "historial_estados",
+            "profesores",
+            "notificaciones_cupos",
+            "audit_logs_user",
+            "checkin_pending",
+            "memberships",
+            "access_credentials",
+            "support_tickets",
+            "staff_profiles",
+            "staff_permissions",
+            "staff_sessions_total",
+        ]
+        for k in blockers:
+            try:
+                if int(refs.get(k) or 0) > 0:
+                    raise ValueError("El usuario tiene dependencias y no puede purgarse")
+            except Exception:
+                raise ValueError("El usuario tiene dependencias y no puede purgarse")
+
+        try:
+            from ..orm_models import WhatsappMessage
+
+            self.db.execute(
+                update(WhatsappMessage)
+                .where(WhatsappMessage.user_id == int(usuario_id))
+                .values(user_id=None)
+            )
+        except Exception:
+            pass
+
+        self.db.delete(user)
+        self.db.commit()
+        self._invalidate_cache("usuarios")
+        return True
 
     def obtener_usuarios_con_cuotas_por_vencer(
         self, dias_anticipacion: int = 3

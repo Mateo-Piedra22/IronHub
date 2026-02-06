@@ -1,11 +1,11 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import Image from 'next/image';
+import { motion } from 'framer-motion';
 import {
     X,
     User,
-    Calendar,
     Copy,
     Phone,
     Mail,
@@ -33,7 +33,7 @@ import {
     KeyRound,
 } from 'lucide-react';
 import { Button, Modal, ConfirmModal, Input, useToast } from '@/components/ui';
-import { api, type AccessCredential, type AccessDevice, type Usuario, type Etiqueta, type Estado, type Pago, type EstadoTemplate, type Asistencia, type Membership, type Sucursal, type UsuarioEntitlements } from '@/lib/api';
+import { api, type AccessCredential, type AccessDevice, type ClaseTipo, type Usuario, type Etiqueta, type Estado, type Pago, type EstadoTemplate, type Asistencia, type Membership, type Sucursal, type UsuarioEntitlements } from '@/lib/api';
 import { formatDate, formatCurrency, getWhatsAppLink, cn } from '@/lib/utils';
 
 interface UserSidebarProps {
@@ -262,7 +262,6 @@ export default function UserSidebar({
 
     // Membresía / Pase libre
     const [membership, setMembership] = useState<Membership | null>(null);
-    const [membershipAllowedSucursales, setMembershipAllowedSucursales] = useState<number[]>([]);
     const [sucursales, setSucursales] = useState<Sucursal[]>([]);
     const [membershipLoading, setMembershipLoading] = useState(false);
     const [membershipSaving, setMembershipSaving] = useState(false);
@@ -315,79 +314,28 @@ export default function UserSidebar({
     // Rutina
     const [rutinaActiva, setRutinaActiva] = useState<{ id: number; nombre_rutina: string; dias_semana: number; activa: boolean } | null>(null);
 
-    // Load data when usuario changes
-    useEffect(() => {
-        if (usuario && isOpen) {
-            setNotas(usuario.notas || '');
-            loadEtiquetas();
-            loadEstados();
-            loadPagos();
-            loadMembership();
-            loadSucursales();
-            loadSuggestions();
-            loadEstadoTemplates();
-            void (async () => {
-                try {
-                    const res = await api.getGymData();
-                    if (res.ok && res.data) {
-                        setAllowMultipleAsistenciasDia(Boolean((res.data as any).attendance_allow_multiple_per_day));
-                    }
-                } catch {
-                }
-            })();
-            loadAsistenciaStatus();
-            loadRutinaActiva();
-        }
-        // Cleanup QR polling on unmount
-        return () => {
-            if (qrPollRef.current) clearInterval(qrPollRef.current);
-        };
-    }, [usuario?.id, isOpen]);
-
-    useEffect(() => {
-        if (!usuario || !isOpen) return;
-        if (activeTab !== 'accesos') return;
-        loadSucursales();
-        loadClaseTipos();
-        loadEntitlementsOverrides();
-    }, [activeTab, usuario?.id, isOpen]);
-
-    const loadRutinaActiva = async () => {
-        if (!usuario) return;
-        const res = await api.getRutinas({ usuario_id: usuario.id });
-        if (res.ok && res.data?.rutinas) {
-            const activa = res.data.rutinas.find((r: any) => r.activa) as { id: number; nombre_rutina: string; dias_semana: number; activa: boolean } | undefined;
-            setRutinaActiva(activa || null);
-        } else {
-            setRutinaActiva(null);
-        }
-    };
-
-    const loadEtiquetas = async () => {
-        if (!usuario) return;
-        const res = await api.getEtiquetas(usuario.id);
+    const loadEtiquetas = useCallback(async (usuarioId: number) => {
+        const res = await api.getEtiquetas(usuarioId);
         if (res.ok && res.data) {
             setEtiquetas(res.data.etiquetas);
         }
-    };
+    }, []);
 
-    const loadEstados = async () => {
-        if (!usuario) return;
-        const res = await api.getEstados(usuario.id);
+    const loadEstados = useCallback(async (usuarioId: number) => {
+        const res = await api.getEstados(usuarioId);
         if (res.ok && res.data) {
             setEstados(res.data.estados);
         }
-    };
+    }, []);
 
-    const loadPagos = async () => {
-        if (!usuario) return;
-        const res = await api.getPagos({ usuario_id: usuario.id, limit: 10 });
+    const loadPagos = useCallback(async (usuarioId: number) => {
+        const res = await api.getPagos({ usuario_id: usuarioId, limit: 10 });
         if (res.ok && res.data) {
             setPagos(res.data.pagos);
         }
-    };
+    }, []);
 
-    const loadSucursales = async () => {
+    const loadSucursales = useCallback(async () => {
         try {
             const res = await api.getSucursales();
             if (res.ok && res.data?.ok) {
@@ -395,18 +343,16 @@ export default function UserSidebar({
             }
         } catch {
         }
-    };
+    }, []);
 
-    const loadMembership = async () => {
-        if (!usuario) return;
+    const loadMembership = useCallback(async (usuarioId: number) => {
         setMembershipLoading(true);
         try {
-            const res = await api.getUsuarioMembership(usuario.id);
+            const res = await api.getUsuarioMembership(usuarioId);
             if (res.ok && res.data?.ok) {
                 const m = res.data.membership || null;
                 setMembership(m);
                 const allowed = Array.isArray(res.data.sucursales) ? res.data.sucursales : [];
-                setMembershipAllowedSucursales(allowed);
                 setMembershipForm({
                     plan_name: (m?.plan_name || '') as string,
                     start_date: (m?.start_date || '') as string,
@@ -416,7 +362,6 @@ export default function UserSidebar({
                 });
             } else {
                 setMembership(null);
-                setMembershipAllowedSucursales([]);
                 setMembershipForm({
                     plan_name: '',
                     start_date: '',
@@ -428,7 +373,151 @@ export default function UserSidebar({
         } finally {
             setMembershipLoading(false);
         }
-    };
+    }, []);
+
+    const loadSuggestions = useCallback(async () => {
+        const res = await api.getEtiquetasSuggestions();
+        if (res.ok && res.data) {
+            setEtiquetaSuggestions(res.data.etiquetas);
+        }
+    }, []);
+
+    const loadEstadoTemplates = useCallback(async () => {
+        const res = await api.getEstadoTemplates();
+        if (res.ok && res.data) {
+            setEstadoTemplates(res.data.templates);
+        }
+    }, []);
+
+    const loadAsistenciaStatus = useCallback(async (usuarioId: number) => {
+        try {
+            const hoy = new Date().toISOString().split('T')[0];
+            const todayRes = await api.getAsistencias({ usuario_id: usuarioId, desde: hoy, hasta: hoy, limit: 1 });
+            if (todayRes.ok && todayRes.data) {
+                const c = Number(todayRes.data.total || todayRes.data.asistencias?.length || 0);
+                setAsistenciasHoyCount(c);
+                setHasAsistenciaHoy(c > 0);
+            }
+            const recentRes = await api.getUserAsistencias(usuarioId, 200);
+            if (recentRes.ok && recentRes.data) {
+                setAsistencias(recentRes.data.asistencias || []);
+                const thirtyDaysAgo = new Date();
+                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                const recent = recentRes.data.asistencias.filter((a: Asistencia) => {
+                    const fecha = new Date(a.fecha);
+                    return fecha >= thirtyDaysAgo;
+                });
+                setAsistencias30d(recent.length);
+            }
+        } catch {
+        }
+    }, []);
+
+    const loadRutinaActiva = useCallback(async (usuarioId: number) => {
+        type RutinaActiva = { id: number; nombre_rutina: string; dias_semana: number; activa: boolean };
+
+        const res = await api.getRutinas({ usuario_id: usuarioId });
+        if (res.ok && res.data?.rutinas) {
+            const rutinas = res.data.rutinas as unknown[];
+            const activa = rutinas.find((r): r is RutinaActiva => {
+                const x = r as Partial<RutinaActiva> | null;
+                if (!x) return false;
+                return typeof x.id === 'number' && typeof x.nombre_rutina === 'string' && typeof x.dias_semana === 'number' && Boolean(x.activa);
+            });
+            setRutinaActiva(activa || null);
+        } else {
+            setRutinaActiva(null);
+        }
+    }, []);
+
+    const loadClaseTipos = useCallback(async () => {
+        try {
+            const res = await api.getClaseTipos();
+            if (res.ok && res.data?.tipos) {
+                const items = (res.data.tipos || []).map((t: ClaseTipo) => ({ id: Number(t.id), nombre: String(t.nombre || ''), activo: Boolean(t.activo) }));
+                setClaseTipos(items.filter((t) => Number.isFinite(t.id)));
+            } else {
+                setClaseTipos([]);
+            }
+        } catch {
+            setClaseTipos([]);
+        }
+    }, []);
+
+    const loadEntitlementsOverrides = useCallback(async (usuarioId: number) => {
+        setEntitlementsLoading(true);
+        try {
+            const res = await api.getUsuarioEntitlementsGestion(usuarioId);
+            if (res.ok && res.data?.ok) {
+                const next: Record<number, { allow: 'none' | 'allow' | 'deny'; motivo: string }> = {};
+                const overrides = Array.isArray(res.data.branch_overrides) ? res.data.branch_overrides : [];
+                overrides.forEach((o) => {
+                    const sid = Number(o.sucursal_id);
+                    if (!Number.isFinite(sid)) return;
+                    next[sid] = { allow: o.allow ? 'allow' : 'deny', motivo: String(o.motivo || '') };
+                });
+                setEntitlementsSucursalMode(next);
+                const cr = Array.isArray(res.data.class_overrides) ? res.data.class_overrides : [];
+                const rules = cr
+                    .filter((r) => String(r.target_type || '').toLowerCase() === 'tipo_clase')
+                    .map((r) => ({
+                        sucursal_id: r.sucursal_id ?? null,
+                        target_type: 'tipo_clase' as const,
+                        target_id: Number(r.target_id),
+                        allow: Boolean(r.allow),
+                        motivo: String(r.motivo || ''),
+                    }))
+                    .filter((r) => Number.isFinite(r.target_id));
+                setEntitlementsClaseRules(rules);
+            } else {
+                setEntitlementsSucursalMode({});
+                setEntitlementsClaseRules([]);
+            }
+        } catch {
+            setEntitlementsSucursalMode({});
+            setEntitlementsClaseRules([]);
+        } finally {
+            setEntitlementsLoading(false);
+        }
+    }, []);
+
+    // Load data when usuario changes
+    useEffect(() => {
+        if (!usuario || !isOpen) return;
+
+        const usuarioId = usuario.id;
+        setNotas(usuario.notas || '');
+        void loadEtiquetas(usuarioId);
+        void loadEstados(usuarioId);
+        void loadPagos(usuarioId);
+        void loadMembership(usuarioId);
+        void loadSucursales();
+        void loadSuggestions();
+        void loadEstadoTemplates();
+        void (async () => {
+            try {
+                const res = await api.getGymData();
+                if (res.ok && res.data) {
+                    setAllowMultipleAsistenciasDia(Boolean(res.data.attendance_allow_multiple_per_day));
+                }
+            } catch {
+            }
+        })();
+        void loadAsistenciaStatus(usuarioId);
+        void loadRutinaActiva(usuarioId);
+        // Cleanup QR polling on unmount
+        return () => {
+            if (qrPollRef.current) clearInterval(qrPollRef.current);
+        };
+    }, [usuario, isOpen, loadEtiquetas, loadEstados, loadPagos, loadMembership, loadSucursales, loadSuggestions, loadEstadoTemplates, loadAsistenciaStatus, loadRutinaActiva]);
+
+    useEffect(() => {
+        if (!usuario || !isOpen) return;
+        if (activeTab !== 'accesos') return;
+        void loadSucursales();
+        void loadClaseTipos();
+        void loadEntitlementsOverrides(usuario.id);
+    }, [activeTab, usuario, isOpen, loadSucursales, loadClaseTipos, loadEntitlementsOverrides]);
 
     const handleSaveMembership = async () => {
         if (!usuario) return;
@@ -443,7 +532,7 @@ export default function UserSidebar({
             });
             if (res.ok && res.data?.ok) {
                 success('Membresía guardada');
-                loadMembership();
+                void loadMembership(usuario.id);
                 onRefresh();
             } else {
                 error(res.data?.error || 'Error al guardar membresía');
@@ -452,58 +541,6 @@ export default function UserSidebar({
             error('Error al guardar membresía');
         } finally {
             setMembershipSaving(false);
-        }
-    };
-
-    const loadClaseTipos = async () => {
-        try {
-            const res = await api.getClaseTipos();
-            if (res.ok && res.data?.tipos) {
-                const items = (res.data.tipos || []).map((t: any) => ({ id: Number(t.id), nombre: String(t.nombre || ''), activo: Boolean(t.activo) }));
-                setClaseTipos(items.filter((t) => Number.isFinite(t.id)));
-            } else {
-                setClaseTipos([]);
-            }
-        } catch {
-            setClaseTipos([]);
-        }
-    };
-
-    const loadEntitlementsOverrides = async () => {
-        if (!usuario) return;
-        setEntitlementsLoading(true);
-        try {
-            const res = await api.getUsuarioEntitlementsGestion(usuario.id);
-            if (res.ok && res.data?.ok) {
-                const next: Record<number, { allow: 'none' | 'allow' | 'deny'; motivo: string }> = {};
-                const overrides = Array.isArray(res.data.branch_overrides) ? res.data.branch_overrides : [];
-                overrides.forEach((o) => {
-                    const sid = Number((o as any).sucursal_id);
-                    if (!Number.isFinite(sid)) return;
-                    next[sid] = { allow: (o.allow ? 'allow' : 'deny') as 'allow' | 'deny', motivo: String((o as any).motivo || '') };
-                });
-                setEntitlementsSucursalMode(next);
-                const cr = Array.isArray(res.data.class_overrides) ? res.data.class_overrides : [];
-                const rules = cr
-                    .filter((r) => String((r as any).target_type || '').toLowerCase() === 'tipo_clase')
-                    .map((r) => ({
-                        sucursal_id: (r as any).sucursal_id ?? null,
-                        target_type: 'tipo_clase' as const,
-                        target_id: Number((r as any).target_id),
-                        allow: Boolean((r as any).allow),
-                        motivo: String((r as any).motivo || ''),
-                    }))
-                    .filter((r) => Number.isFinite(r.target_id));
-                setEntitlementsClaseRules(rules);
-            } else {
-                setEntitlementsSucursalMode({});
-                setEntitlementsClaseRules([]);
-            }
-        } catch {
-            setEntitlementsSucursalMode({});
-            setEntitlementsClaseRules([]);
-        } finally {
-            setEntitlementsLoading(false);
         }
     };
 
@@ -535,7 +572,7 @@ export default function UserSidebar({
             const res = await api.updateUsuarioEntitlementsGestion(usuario.id, { branch_overrides, class_overrides });
             if (res.ok && res.data?.ok) {
                 success('Accesos guardados');
-                loadEntitlementsOverrides();
+                void loadEntitlementsOverrides(usuario.id);
                 onRefresh();
             } else {
                 error(res.error || 'Error al guardar accesos');
@@ -547,32 +584,6 @@ export default function UserSidebar({
         }
     };
 
-    const loadAsistenciaStatus = async () => {
-        if (!usuario) return;
-        try {
-            const hoy = new Date().toISOString().split('T')[0];
-            const todayRes = await api.getAsistencias({ usuario_id: usuario.id, desde: hoy, hasta: hoy, limit: 1 });
-            if (todayRes.ok && todayRes.data) {
-                const c = Number(todayRes.data.total || todayRes.data.asistencias?.length || 0);
-                setAsistenciasHoyCount(c);
-                setHasAsistenciaHoy(c > 0);
-            }
-            // Load recent 30d attendance count
-            const recentRes = await api.getUserAsistencias(usuario.id, 200);
-            if (recentRes.ok && recentRes.data) {
-                setAsistencias(recentRes.data.asistencias || []);
-                const thirtyDaysAgo = new Date();
-                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-                const recent = recentRes.data.asistencias.filter((a: Asistencia) => {
-                    const fecha = new Date(a.fecha);
-                    return fecha >= thirtyDaysAgo;
-                });
-                setAsistencias30d(recent.length);
-            }
-        } catch (e) {
-            // Silently fail
-        }
-    };
 
     const handleCopy = async (value: string | number | null | undefined, label: string) => {
         if (value === null || value === undefined || String(value).trim() === '') {
@@ -589,20 +600,6 @@ export default function UserSidebar({
 
     const goTo = (path: string) => {
         window.location.href = path;
-    };
-
-    const loadSuggestions = async () => {
-        const res = await api.getEtiquetasSuggestions();
-        if (res.ok && res.data) {
-            setEtiquetaSuggestions(res.data.etiquetas);
-        }
-    };
-
-    const loadEstadoTemplates = async () => {
-        const res = await api.getEstadoTemplates();
-        if (res.ok && res.data) {
-            setEstadoTemplates(res.data.templates);
-        }
     };
 
     // Auto-save notas
@@ -643,7 +640,7 @@ export default function UserSidebar({
         const res = await api.addEtiqueta(usuario.id, etiquetaInput.trim());
         if (res.ok) {
             setEtiquetaInput('');
-            loadEtiquetas();
+            void loadEtiquetas(usuario.id);
         } else {
             error(res.error || 'Error al agregar etiqueta');
         }
@@ -653,7 +650,7 @@ export default function UserSidebar({
         if (!usuario) return;
         const res = await api.deleteEtiqueta(usuario.id, etiquetaId);
         if (res.ok) {
-            loadEtiquetas();
+            void loadEtiquetas(usuario.id);
         } else {
             error(res.error || 'Error al eliminar etiqueta');
         }
@@ -669,7 +666,7 @@ export default function UserSidebar({
         });
         if (res.ok) {
             setEstadoForm({ nombre: '', descripcion: '', fecha_vencimiento: '' });
-            loadEstados();
+            void loadEstados(usuario.id);
         } else {
             error(res.error || 'Error al agregar estado');
         }
@@ -679,7 +676,7 @@ export default function UserSidebar({
         if (!usuario) return;
         const res = await api.deleteEstado(usuario.id, estadoId);
         if (res.ok) {
-            loadEstados();
+            void loadEstados(usuario.id);
         } else {
             error(res.error || 'Error al eliminar estado');
         }
@@ -688,6 +685,7 @@ export default function UserSidebar({
     // QR - Generate token and start polling
     const handleGenerateQR = async () => {
         if (!usuario) return;
+        const usuarioId = usuario.id;
         setQrLoading(true);
         setQrStatus('waiting');
 
@@ -712,7 +710,7 @@ export default function UserSidebar({
                         if (qrPollRef.current) clearInterval(qrPollRef.current);
                         success('¡Asistencia registrada!');
                         onRefresh();
-                        loadAsistenciaStatus();
+                        void loadAsistenciaStatus(usuarioId);
                     } else if (statusRes.data.expired) {
                         setQrStatus('expired');
                         if (qrPollRef.current) clearInterval(qrPollRef.current);
@@ -741,7 +739,7 @@ export default function UserSidebar({
                 if (res.ok) {
                     success('Asistencia registrada');
                     onRefresh();
-                    loadAsistenciaStatus();
+                    void loadAsistenciaStatus(usuario.id);
                 } else {
                     error(res.error || 'Error al registrar asistencia');
                 }
@@ -754,7 +752,7 @@ export default function UserSidebar({
                     success('Asistencia de hoy eliminada');
                     setHasAsistenciaHoy(false);
                     onRefresh();
-                    loadAsistenciaStatus();
+                    void loadAsistenciaStatus(usuario.id);
                 } else {
                     error(res.error || 'Error al eliminar asistencia');
                 }
@@ -764,7 +762,7 @@ export default function UserSidebar({
                     success('Asistencia registrada');
                     setHasAsistenciaHoy(true);
                     onRefresh();
-                    loadAsistenciaStatus();
+                    void loadAsistenciaStatus(usuario.id);
                 } else {
                     error(res.error || 'Error al registrar asistencia');
                 }
@@ -776,14 +774,15 @@ export default function UserSidebar({
     };
 
     const loadAsistenciasModal = useCallback(async () => {
-        if (!usuario) return;
+        const usuarioId = usuario?.id;
+        if (!usuarioId) return;
         setAsistenciasModalLoading(true);
         try {
             const today = new Date().toISOString().split('T')[0];
             const desde = asistenciasModalDesde || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
             const hasta = asistenciasModalHasta || today;
             const res = await api.getAsistencias({
-                usuario_id: usuario.id,
+                usuario_id: usuarioId,
                 desde,
                 hasta,
                 q: asistenciasModalQ || undefined,
@@ -967,8 +966,8 @@ export default function UserSidebar({
                                     variant="secondary"
                                     onClick={() => {
                                         onRefresh();
-                                        loadAsistenciaStatus();
-                                        loadPagos();
+                                        void loadAsistenciaStatus(usuario.id);
+                                        void loadPagos(usuario.id);
                                     }}
                                 >
                                     <RefreshCw className="w-3 h-3 mr-1" />
@@ -1584,16 +1583,19 @@ export default function UserSidebar({
                                         {(() => {
                                             const d = enrollDevices.find((x) => String(x.id) === String(enrollDeviceId));
                                             if (!d) return null;
-                                            const ls = (d as any).last_seen_at ? String((d as any).last_seen_at) : '';
+                                            const ls = d.last_seen_at ? String(d.last_seen_at) : '';
                                             const t = ls ? Date.parse(ls) : NaN;
                                             const online = Number.isFinite(t) ? Date.now() - t < 90_000 : false;
-                                            const cfg: any = (d as any).config && typeof (d as any).config === 'object' ? (d as any).config : {};
-                                            const em = cfg?.enroll_mode && typeof cfg.enroll_mode === 'object' ? cfg.enroll_mode : null;
-                                            const rt = cfg?.runtime_status && typeof cfg.runtime_status === 'object' ? cfg.runtime_status : null;
+                                            const cfg = d.config && typeof d.config === 'object' ? (d.config as Record<string, unknown>) : {};
+                                            const emRaw = cfg.enroll_mode;
+                                            const em = emRaw && typeof emRaw === 'object' ? (emRaw as Record<string, unknown>) : null;
+                                            const rtRaw = cfg.runtime_status;
+                                            const rt = rtRaw && typeof rtRaw === 'object' ? (rtRaw as Record<string, unknown>) : null;
                                             const rtAt = rt?.updated_at ? Date.parse(String(rt.updated_at)) : NaN;
                                             const rtFresh = Number.isFinite(rtAt) ? Date.now() - rtAt < 20_000 : false;
                                             const ready = Boolean(rt?.enroll_ready) && rtFresh;
-                                            const lt = rt?.last_test && typeof rt.last_test === 'object' ? rt.last_test : null;
+                                            const ltRaw = rt?.last_test;
+                                            const lt = ltRaw && typeof ltRaw === 'object' ? (ltRaw as Record<string, unknown>) : null;
                                             const ltLabel = lt?.kind ? String(lt.kind) : '';
                                             const ltAt = lt?.at ? String(lt.at) : '';
                                             const ltOk = lt ? Boolean(lt.ok) : false;
@@ -1601,7 +1603,7 @@ export default function UserSidebar({
                                                 <div className="text-xs text-slate-500">
                                                     Estado: {online ? 'online' : 'offline'}
                                                     {ls ? ` · last_seen ${ls}` : ''}
-                                                    {em?.enabled ? ` · enroll activo (#${em.usuario_id} ${String(em.credential_type || '').toUpperCase()})` : ''}
+                                                    {em?.enabled ? ` · enroll activo (#${String(em.usuario_id)} ${String(em.credential_type || '').toUpperCase()})` : ''}
                                                     {ready ? ' · ready' : ''}
                                                     {ltLabel ? ` · last_test ${ltLabel} ${ltOk ? 'ok' : 'fail'} ${ltAt ? `@ ${ltAt}` : ''}` : ''}
                                                 </div>
@@ -2043,9 +2045,11 @@ export default function UserSidebar({
                     {qrToken && qrStatus === 'waiting' && (
                         <>
                             <div className="bg-white p-4 rounded-lg inline-block">
-                                <img
+                                <Image
                                     src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrToken)}`}
                                     alt="QR Code"
+                                    width={192}
+                                    height={192}
                                     className="w-48 h-48"
                                 />
                             </div>
@@ -2224,7 +2228,7 @@ export default function UserSidebar({
                             success('Asistencia eliminada');
                             setAsistenciaDeleteConfirm({ open: false });
                             onRefresh();
-                            loadAsistenciaStatus();
+                            void loadAsistenciaStatus(usuario.id);
                             loadAsistenciasModal();
                         } else {
                             error(res.error || 'Error al eliminar asistencia');

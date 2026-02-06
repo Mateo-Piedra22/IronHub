@@ -64,12 +64,10 @@ export function QRScannerModal({ isOpen, onClose, onScan, description }: QRScann
             if (!selectedCameraId && list && list.length > 0) {
                 setSelectedCameraId(list[list.length - 1].id);
             }
-        } catch (e: any) {
+        } catch (e: unknown) {
             setCameras([]);
             setScanError(
-                typeof e?.message === 'string'
-                    ? e.message
-                    : 'No se pudo acceder a cámaras. Verifica permisos del navegador.'
+                e instanceof Error ? e.message : 'No se pudo acceder a cámaras. Verifica permisos del navegador.'
             );
         }
     };
@@ -94,13 +92,14 @@ export function QRScannerModal({ isOpen, onClose, onScan, description }: QRScann
             const onSuccess = (decodedText: string) => {
                 try {
                     try {
-                        if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-                            (navigator as any).vibrate?.([40, 30, 40]);
+                        if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+                            navigator.vibrate([40, 30, 40]);
                         }
                     } catch {
                     }
                     try {
-                        const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
+                        const w = window as Window & { webkitAudioContext?: typeof AudioContext };
+                        const AudioCtx = window.AudioContext || w.webkitAudioContext;
                         if (AudioCtx) {
                             const ctx = new AudioCtx();
                             const o = ctx.createOscillator();
@@ -137,12 +136,10 @@ export function QRScannerModal({ isOpen, onClose, onScan, description }: QRScann
                 await qr.start({ facingMode: 'environment' }, config, onSuccess, onError);
             }
             setRunning(true);
-        } catch (e: any) {
+        } catch (e: unknown) {
             setRunning(false);
             setScanError(
-                typeof e?.message === 'string'
-                    ? e.message
-                    : 'No se pudo iniciar la cámara. Verifica permisos y que estés en HTTPS.'
+                e instanceof Error ? e.message : 'No se pudo iniciar la cámara. Verifica permisos y que estés en HTTPS.'
             );
         } finally {
             setStarting(false);

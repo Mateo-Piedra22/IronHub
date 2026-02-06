@@ -1,17 +1,16 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import {
     Users,
     CreditCard,
-    GraduationCap,
     Clipboard,
     Dumbbell,
     CalendarDays,
     ScanLine,
-    Settings,
     LogOut,
     Menu,
     X,
@@ -19,7 +18,6 @@ import {
     Home,
     MessageSquare,
     Clock,
-    Briefcase,
     KeyRound
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -39,6 +37,33 @@ const navigation = [
     { key: 'accesos', name: 'Accesos', href: '/gestion/accesos', icon: KeyRound, description: 'Molinete/puerta' },
     { key: 'whatsapp', name: 'WhatsApp', href: '/gestion/whatsapp', icon: MessageSquare, description: 'Mensajes y API' },
 ];
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    return value as Record<string, unknown>;
+}
+
+function parseModuleFlags(value: unknown): Record<string, boolean> | null {
+    const root = asRecord(value);
+    const flags = asRecord(root?.flags);
+    const modulesRaw = flags?.modules;
+    const modules = asRecord(modulesRaw);
+    if (!modules) return null;
+
+    const out: Record<string, boolean> = {};
+    for (const [k, v] of Object.entries(modules)) {
+        if (typeof v === 'boolean') out[k] = v;
+    }
+    return Object.keys(out).length ? out : null;
+}
+
+function hasActiveWorkSession(value: unknown): boolean {
+    const root = asRecord(value);
+    if (!root) return false;
+    if (root.allowed !== true) return false;
+    const active = asRecord(root.active);
+    return typeof active?.session_id === 'number';
+}
 
 export default function AdminLayout({
     children,
@@ -64,16 +89,12 @@ export default function AdminLayout({
                 const res = await api.getBootstrap('gestion');
                 const logo = res.ok ? (res.data?.gym?.logo_url || '') : '';
                 if (logo) setGymLogoUrl(logo);
-                if (res.ok && (res.data as any)?.flags?.modules) {
-                    setModuleFlags(((res.data as any).flags.modules || null) as any);
-                } else {
-                    setModuleFlags(null);
-                }
+                setModuleFlags(res.ok ? parseModuleFlags(res.data) : null);
                 try {
                     const br = await api.getSucursales();
                     if (br.ok && br.data?.items) {
                         setSucursales(br.data.items.filter((s) => s.activa));
-                        setSucursalActualId((br.data.sucursal_actual_id ?? null) as any);
+                        setSucursalActualId(typeof br.data.sucursal_actual_id === 'number' ? br.data.sucursal_actual_id : null);
                     }
                 } catch {
                 }
@@ -117,7 +138,7 @@ export default function AdminLayout({
     }, [moduleFlags, pathname, router, userRole, userScopes, navItems]);
 
     const [logoutWarningOpen, setLogoutWarningOpen] = useState(false);
-    const [activeWorkSession, setActiveWorkSession] = useState<any>(null);
+    const [hasActiveSession, setHasActiveSession] = useState(false);
 
     // Load User & Session Data
     useEffect(() => {
@@ -127,7 +148,7 @@ export default function AdminLayout({
                 if (res.ok && res.data?.user) {
                     setUserName(res.data.user.nombre);
                     setUserRole(res.data.user.rol);
-                    setUserScopes((res.data.user.scopes || []) as any);
+                    setUserScopes(res.data.user.scopes || []);
                 }
             } catch { }
         };
@@ -152,21 +173,19 @@ export default function AdminLayout({
         setLoggingOut(true);
         try {
             const st = await api.getMyWorkSession();
-            const active = (st.ok ? (st.data as any)?.active : null) || null;
-            if (st.ok && (st.data as any)?.allowed && active?.session_id) {
-                setActiveWorkSession({ ...(active || {}), kind: (st.data as any)?.kind });
+            if (st.ok && hasActiveWorkSession(st.data)) {
+                setHasActiveSession(true);
                 setLogoutWarningOpen(true);
                 setLoggingOut(false);
                 return;
             }
-        } catch (e) {
-            // Ignore errors and proceed
+        } catch {
         }
         proceedLogout();
     };
 
     const handleCloseSessionAndLogout = async () => {
-        if (activeWorkSession) {
+        if (hasActiveSession) {
             try {
                 await api.endMyWorkSession();
             } catch { }
@@ -209,10 +228,13 @@ export default function AdminLayout({
                                 )}
                             >
                                 {gymLogoUrl ? (
-                                    <img
+                                    <Image
                                         src={gymLogoUrl}
                                         alt="Logo"
+                                        width={36}
+                                        height={36}
                                         className="w-full h-full object-contain"
+                                        unoptimized
                                         onError={() => setGymLogoUrl('')}
                                     />
                                 ) : (
@@ -336,7 +358,15 @@ export default function AdminLayout({
                                             )}
                                         >
                                             {gymLogoUrl ? (
-                                                <img src={gymLogoUrl} alt="Logo" className="w-full h-full object-contain" />
+                                                <Image
+                                                    src={gymLogoUrl}
+                                                    alt="Logo"
+                                                    width={36}
+                                                    height={36}
+                                                    className="w-full h-full object-contain"
+                                                    unoptimized
+                                                    onError={() => setGymLogoUrl('')}
+                                                />
                                             ) : (
                                                 <Dumbbell className="w-4 h-4 text-white" />
                                             )}

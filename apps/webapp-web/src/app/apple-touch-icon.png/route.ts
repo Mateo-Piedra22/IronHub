@@ -26,8 +26,9 @@ async function getBranding(tenant: string) {
         next: { revalidate: 300 },
     }).catch(() => null);
     if (!res || !res.ok) return null;
-    const data = (await res.json().catch(() => null)) as any;
-    return data || null;
+    const data = (await res.json().catch(() => null)) as unknown;
+    if (!data || typeof data !== 'object') return null;
+    return data as Record<string, unknown>;
 }
 
 async function fetchImage(url: string) {
@@ -57,7 +58,16 @@ export async function GET() {
         }
     }
 
-    const gymName = String(branding?.gym_name || branding?.gym?.name || '').trim();
+    const gymName = (() => {
+        if (!branding || typeof branding !== 'object' || Array.isArray(branding)) return '';
+        const b = branding as Record<string, unknown>;
+        const gymNameRaw = b.gym_name;
+        if (typeof gymNameRaw === 'string') return gymNameRaw;
+        const gym = b.gym;
+        if (!gym || typeof gym !== 'object' || Array.isArray(gym)) return '';
+        const name = (gym as Record<string, unknown>).name;
+        return typeof name === 'string' ? name : '';
+    })().trim();
     const letters = gymName
         ? gymName
               .split(/\s+/)

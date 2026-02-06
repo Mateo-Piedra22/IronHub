@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Send, RefreshCw, Trash2, MessageSquare, Clock, Check, X, AlertCircle } from "lucide-react";
+import { Send, RefreshCw, MessageSquare, Clock, Check, X, AlertCircle } from "lucide-react";
 import { Modal, Button, useToast, Select } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { getCurrentTenant, getCsrfTokenFromCookie } from "@/lib/tenant";

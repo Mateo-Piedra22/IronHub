@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Dumbbell, ChevronDown, ChevronUp, Loader2, QrCode, Lock, Info, PlayCircle } from 'lucide-react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth';
 import { api, type Rutina, type EjercicioRutina } from '@/lib/api';
 import { QRScannerModal } from '@/components/QrScannerModal';
@@ -12,9 +12,7 @@ import { Button, useToast } from '@/components/ui';
 
 function RoutinesContent() {
     const { user } = useAuth();
-    const router = useRouter();
     const searchParams = useSearchParams();
-    const [routines, setRoutines] = useState<Rutina[]>([]);
     const [routine, setRoutine] = useState<Rutina | null>(null);
     const [loading, setLoading] = useState(true);
     const [expandedDay, setExpandedDay] = useState<number | null>(0);
@@ -40,8 +38,7 @@ function RoutinesContent() {
                     localStorage.removeItem(`unlocked_routine_${uuid}`);
                 }
             }
-        } catch (e) {
-            // ignore
+        } catch {
         }
         return false;
     }, []);
@@ -75,8 +72,6 @@ function RoutinesContent() {
             const res = await api.getRutinas({ usuario_id: user.id });
             if (res.ok && res.data) {
                 const list = res.data.rutinas || [];
-                setRoutines(list);
-
                 // If we haven't set a specific routine yet (e.g. from QR param), pick the first one
                 setRoutine((prev) => {
                     if (prev) return prev; // Already set by effect?
@@ -139,7 +134,7 @@ function RoutinesContent() {
                     const urlObj = new URL(decodedText);
                     const u = urlObj.searchParams.get('uuid');
                     if (u) scannedUuid = u;
-                } catch (e) { }
+                } catch { }
             }
             // Clean params
             scannedUuid = scannedUuid.split('?')[0].split('&')[0];

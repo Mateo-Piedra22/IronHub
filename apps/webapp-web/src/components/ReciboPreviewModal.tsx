@@ -1,19 +1,18 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import Image from 'next/image';
+import { useState, useEffect, useCallback } from 'react';
 import {
-    FileText,
     Download,
     Printer,
     Settings,
     Plus,
     Trash2,
     DollarSign,
-    X,
 } from 'lucide-react';
 import { Button, Modal, Input, useToast } from '@/components/ui';
 import { api, type ReciboPreview, type ReciboItem, type ReciboConfig, type Pago } from '@/lib/api';
-import { formatCurrency, formatDate, cn } from '@/lib/utils';
+import { formatCurrency, cn } from '@/lib/utils';
 
 interface ReciboPreviewModalProps {
     isOpen: boolean;
@@ -36,14 +35,7 @@ export default function ReciboPreviewModal({
     const [pdfLoading, setPdfLoading] = useState(false);
     const [saving, setSaving] = useState(false);
 
-    // Load preview
-    useEffect(() => {
-        if (pago && isOpen) {
-            loadPreview();
-        }
-    }, [pago?.id, isOpen]);
-
-    const loadPreview = async () => {
+    const loadPreview = useCallback(async () => {
         if (!pago) return;
         setLoading(true);
         const res = await api.getReciboPreview(pago.id);
@@ -54,7 +46,13 @@ export default function ReciboPreviewModal({
             error(res.error || 'Error al cargar vista previa');
         }
         setLoading(false);
-    };
+    }, [pago, error]);
+
+    // Load preview
+    useEffect(() => {
+        if (!pago || !isOpen) return;
+        void loadPreview();
+    }, [pago, isOpen, loadPreview]);
 
     useEffect(() => {
         if (!isOpen) return;
@@ -268,8 +266,8 @@ export default function ReciboPreviewModal({
             } else {
                 error(res.error || 'Error al guardar cambios');
             }
-        } catch (e: any) {
-            error(e?.message || 'Error al guardar');
+        } catch (e: unknown) {
+            error(e instanceof Error ? e.message : 'Error al guardar');
         } finally {
             setSaving(false);
         }
@@ -476,7 +474,7 @@ export default function ReciboPreviewModal({
                                     {data.mostrar_logo && (
                                         <div className="w-16 h-16 bg-gray-200 rounded-lg mb-2 flex items-center justify-center text-gray-500 text-xs overflow-hidden">
                                             {data.logo_url ? (
-                                                <img src={data.logo_url} alt="Logo" className="w-full h-full object-contain bg-white" />
+                                                <Image src={data.logo_url} alt="Logo" width={64} height={64} className="w-full h-full object-contain bg-white" />
                                             ) : (
                                                 <>Logo</>
                                             )}

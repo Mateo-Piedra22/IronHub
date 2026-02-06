@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
     Clock,
     Users,
@@ -14,11 +14,10 @@ import {
     Dumbbell,
     Layers,
     Search,
-    ChevronRight,
     GripVertical,
     Save,
 } from 'lucide-react';
-import { Button, Modal, Input, Select, Checkbox, ConfirmModal, useToast } from '@/components/ui';
+import { Button, Modal, Input, Select, ConfirmModal, useToast } from '@/components/ui';
 import {
     api,
     type Clase,
@@ -110,47 +109,12 @@ export default function ClaseDetailModal({
     const [selectedBloqueId, setSelectedBloqueId] = useState<number | null>(null);
     const [bloqueNombre, setBloqueNombre] = useState('');
     const [bloqueItems, setBloqueItems] = useState<ClaseBloqueItem[]>([]);
-    const [bloqueItemsLoading, setBloqueItemsLoading] = useState(false);
-    const [newBloqueOpen, setNewBloqueOpen] = useState(false);
+    const [, setBloqueItemsLoading] = useState(false);
+    const [, setNewBloqueOpen] = useState(false);
     const [newBloqueNombre, setNewBloqueNombre] = useState('');
     const [savingBloque, setSavingBloque] = useState(false);
 
-    // Load data
-    useEffect(() => {
-        if (clase && isOpen) {
-            loadHorarios();
-            void loadProfesoresAsignados();
-            setActiveTab('horarios');
-            setUsuarios([]);
-            setUsuariosSearch('');
-            setSelectedUsuarioId(null);
-            setEjerciciosSearch('');
-            setSelectedEjercicioIds([]);
-            setSelectedBloqueId(null);
-            setBloques([]);
-            setBloqueItems([]);
-        }
-    }, [clase?.id, isOpen]);
-
-    useEffect(() => {
-        if (selectedHorarioId) {
-            loadInscripciones();
-            loadListaEspera();
-        }
-    }, [selectedHorarioId]);
-
-    useEffect(() => {
-        if (!isOpen || !clase?.id) return;
-        if (!assignedProfesorIds || assignedProfesorIds.length === 0) return;
-        const first = assignedProfesorIds[0];
-        if (!Number.isFinite(first)) return;
-        setHorarioForm((prev) => {
-            if (prev.profesor_id && assignedProfesorIds.includes(prev.profesor_id)) return prev;
-            return { ...prev, profesor_id: Number(first) };
-        });
-    }, [assignedProfesorIds, clase?.id, isOpen]);
-
-    const loadHorarios = async () => {
+    const loadHorarios = useCallback(async () => {
         if (!clase) return;
         const res = await api.getClaseHorarios(clase.id);
         if (res.ok && res.data) {
@@ -159,9 +123,9 @@ export default function ClaseDetailModal({
                 setSelectedHorarioId(res.data.horarios[0].id);
             }
         }
-    };
+    }, [clase, selectedHorarioId]);
 
-    const loadProfesoresAsignados = async () => {
+    const loadProfesoresAsignados = useCallback(async () => {
         if (!clase?.id) return;
         setAssignedProfesoresLoading(true);
         try {
@@ -180,25 +144,60 @@ export default function ClaseDetailModal({
         } finally {
             setAssignedProfesoresLoading(false);
         }
-    };
+    }, [clase?.id]);
 
-    const loadInscripciones = async () => {
+    const loadInscripciones = useCallback(async () => {
         if (!selectedHorarioId) return;
         const res = await api.getInscripciones(selectedHorarioId);
         if (res.ok && res.data) {
             setInscripciones(res.data.inscripciones);
         }
-    };
+    }, [selectedHorarioId]);
 
-    const loadListaEspera = async () => {
+    const loadListaEspera = useCallback(async () => {
         if (!selectedHorarioId) return;
         const res = await api.getListaEspera(selectedHorarioId);
         if (res.ok && res.data) {
             setListaEspera(res.data.lista);
         }
-    };
+    }, [selectedHorarioId]);
 
-    const loadUsuarios = async (search: string) => {
+    // Load data
+    useEffect(() => {
+        if (clase && isOpen) {
+            void loadHorarios();
+            void loadProfesoresAsignados();
+            setActiveTab('horarios');
+            setUsuarios([]);
+            setUsuariosSearch('');
+            setSelectedUsuarioId(null);
+            setEjerciciosSearch('');
+            setSelectedEjercicioIds([]);
+            setSelectedBloqueId(null);
+            setBloques([]);
+            setBloqueItems([]);
+        }
+    }, [clase, isOpen, loadHorarios, loadProfesoresAsignados]);
+
+    useEffect(() => {
+        if (selectedHorarioId) {
+            void loadInscripciones();
+            void loadListaEspera();
+        }
+    }, [selectedHorarioId, loadInscripciones, loadListaEspera]);
+
+    useEffect(() => {
+        if (!isOpen || !clase?.id) return;
+        if (!assignedProfesorIds || assignedProfesorIds.length === 0) return;
+        const first = assignedProfesorIds[0];
+        if (!Number.isFinite(first)) return;
+        setHorarioForm((prev) => {
+            if (prev.profesor_id && assignedProfesorIds.includes(prev.profesor_id)) return prev;
+            return { ...prev, profesor_id: Number(first) };
+        });
+    }, [assignedProfesorIds, clase?.id, isOpen]);
+
+    const loadUsuarios = useCallback(async (search: string) => {
         setUsuariosLoading(true);
         try {
             const res = await api.getUsuarios({ activo: true, limit: 60, search: search.trim() || undefined });
@@ -209,9 +208,9 @@ export default function ClaseDetailModal({
         } finally {
             setUsuariosLoading(false);
         }
-    };
+    }, []);
 
-    const loadClaseEjercicios = async () => {
+    const loadClaseEjercicios = useCallback(async () => {
         if (!clase) return;
         const res = await api.getClaseEjercicios(clase.id);
         if (res.ok && res.data) {
@@ -219,9 +218,9 @@ export default function ClaseDetailModal({
             setClaseEjercicios(items);
             setSelectedEjercicioIds(items.map((it) => Number(it.ejercicio_id)).filter((n) => Number.isFinite(n)));
         }
-    };
+    }, [clase]);
 
-    const loadEjerciciosCatalog = async (search: string) => {
+    const loadEjerciciosCatalog = useCallback(async (search: string) => {
         setEjerciciosLoading(true);
         try {
             const res = await api.getEjercicios({ search: search || undefined });
@@ -229,9 +228,9 @@ export default function ClaseDetailModal({
         } finally {
             setEjerciciosLoading(false);
         }
-    };
+    }, []);
 
-    const loadBloques = async () => {
+    const loadBloques = useCallback(async () => {
         if (!clase) return;
         setBloquesLoading(true);
         try {
@@ -247,9 +246,9 @@ export default function ClaseDetailModal({
         } finally {
             setBloquesLoading(false);
         }
-    };
+    }, [clase, selectedBloqueId]);
 
-    const loadBloqueItems = async (bloqueId: number) => {
+    const loadBloqueItems = useCallback(async (bloqueId: number) => {
         if (!clase) return;
         setBloqueItemsLoading(true);
         try {
@@ -261,91 +260,7 @@ export default function ClaseDetailModal({
         } finally {
             setBloqueItemsLoading(false);
         }
-    };
-
-    const addEjercicioToBloque = (e: Ejercicio) => {
-        setBloqueItems((prev) => [
-            ...prev,
-            {
-                ejercicio_id: Number(e.id),
-                nombre_ejercicio: String(e.nombre || ''),
-                orden: prev.length,
-                series: 0,
-                repeticiones: '',
-                descanso_segundos: 0,
-                notas: '',
-            },
-        ]);
-    };
-
-    const removeBloqueItem = (index: number) => {
-        setBloqueItems((prev) => prev.filter((_, i) => i !== index).map((it, i) => ({ ...it, orden: i })));
-    };
-
-    const saveBloque = async () => {
-        if (!clase || !selectedBloqueId) return;
-        setSavingBloque(true);
-        try {
-            const items = (bloqueItems || []).map((it, idx) => ({
-                ejercicio_id: Number(it.ejercicio_id),
-                orden: idx,
-                series: Number(it.series || 0),
-                repeticiones: String(it.repeticiones || ''),
-                descanso_segundos: Number(it.descanso_segundos || 0),
-                notas: String(it.notas || ''),
-            }));
-            const res = await api.updateClaseBloque(clase.id, selectedBloqueId, { nombre: bloqueNombre || 'Bloque', items });
-            if (res.ok) {
-                success('Bloque actualizado');
-                loadBloques();
-                loadBloqueItems(selectedBloqueId);
-            } else {
-                error(res.error || 'Error al guardar bloque');
-            }
-        } finally {
-            setSavingBloque(false);
-        }
-    };
-
-    const createBloque = async () => {
-        if (!clase) return;
-        const nombre = newBloqueNombre.trim();
-        if (!nombre) return;
-        setSavingBloque(true);
-        try {
-            const res = await api.createClaseBloque(clase.id, { nombre, items: [] });
-            if (res.ok && res.data?.id) {
-                success('Bloque creado');
-                setNewBloqueNombre('');
-                setNewBloqueOpen(false);
-                await loadBloques();
-                setSelectedBloqueId(res.data.id);
-            } else {
-                error(res.error || 'Error al crear bloque');
-            }
-        } finally {
-            setSavingBloque(false);
-        }
-    };
-
-    const deleteBloque = async () => {
-        if (!clase || !selectedBloqueId) return;
-        setSavingBloque(true);
-        try {
-            const res = await api.deleteClaseBloque(clase.id, selectedBloqueId);
-            if (res.ok) {
-                success('Bloque eliminado');
-                setSelectedBloqueId(null);
-                setBloqueItems([]);
-                setBloqueNombre('');
-                loadBloques();
-            } else {
-                error(res.error || 'Error al eliminar bloque');
-            }
-        } finally {
-            setSavingBloque(false);
-        }
-    };
+    }, [clase?.id]);
 
     // Race condition guard
     const selectedBloqueIdRef = useRef<number | null>(null);
@@ -358,38 +273,38 @@ export default function ClaseDetailModal({
 
     useEffect(() => {
         if (!isOpen || !clase) return;
-        if (activeTab === 'ejercicios') loadClaseEjercicios();
-        if (activeTab === 'ejercicios' || activeTab === 'bloques') loadEjerciciosCatalog('');
-        if (activeTab === 'bloques') loadBloques();
-        if (activeTab === 'inscripciones' || activeTab === 'espera') loadUsuarios('');
-    }, [activeTab, isOpen, clase?.id]);
+        if (activeTab === 'ejercicios') void loadClaseEjercicios();
+        if (activeTab === 'ejercicios' || activeTab === 'bloques') void loadEjerciciosCatalog('');
+        if (activeTab === 'bloques') void loadBloques();
+        if (activeTab === 'inscripciones' || activeTab === 'espera') void loadUsuarios('');
+    }, [activeTab, isOpen, clase, loadBloques, loadClaseEjercicios, loadEjerciciosCatalog, loadUsuarios]);
 
     useEffect(() => {
         if (!isOpen) return;
         if (activeTab !== 'ejercicios' && activeTab !== 'bloques') return;
         if (!ejerciciosSearch.trim()) return;
         const t = setTimeout(() => {
-            loadEjerciciosCatalog(ejerciciosSearch);
+            void loadEjerciciosCatalog(ejerciciosSearch);
         }, 250);
         return () => clearTimeout(t);
-    }, [ejerciciosSearch, activeTab, isOpen]);
+    }, [ejerciciosSearch, activeTab, isOpen, loadEjerciciosCatalog]);
 
     useEffect(() => {
         if (!isOpen) return;
         if (activeTab !== 'inscripciones' && activeTab !== 'espera') return;
         const t = setTimeout(() => {
-            loadUsuarios(usuariosSearch);
+            void loadUsuarios(usuariosSearch);
         }, 250);
         return () => clearTimeout(t);
-    }, [usuariosSearch, activeTab, isOpen]);
+    }, [usuariosSearch, activeTab, isOpen, loadUsuarios]);
 
     useEffect(() => {
         if (!isOpen || activeTab !== 'bloques') return;
         if (!selectedBloqueId) return;
-        loadBloqueItems(selectedBloqueId);
+        void loadBloqueItems(selectedBloqueId);
         const b = bloques.find((x) => x.id === selectedBloqueId);
         setBloqueNombre(b?.nombre || '');
-    }, [selectedBloqueId, bloques, activeTab, isOpen]);
+    }, [selectedBloqueId, bloques, activeTab, isOpen, loadBloqueItems]);
 
     // Horario CRUD
     const handleAddHorario = async () => {
@@ -1190,16 +1105,18 @@ export default function ClaseDetailModal({
                                                             <button
                                                                 key={e.id}
                                                                 onClick={() => {
-                                                                    // Add to items
-                                                                    setBloqueItems([...bloqueItems, {
-                                                                        ejercicio_id: e.id,
-                                                                        nombre_ejercicio: e.nombre,
-                                                                        series: 3,
-                                                                        repeticiones: '10',
-                                                                        descanso_segundos: 60,
-                                                                        orden: bloqueItems.length,
-                                                                        bloque_id: selectedBloqueId
-                                                                    } as any]);
+                                                                    setBloqueItems((prev) => [
+                                                                        ...prev,
+                                                                        {
+                                                                            bloque_id: selectedBloqueId ?? undefined,
+                                                                            ejercicio_id: Number(e.id),
+                                                                            nombre_ejercicio: String(e.nombre || ''),
+                                                                            series: 3,
+                                                                            repeticiones: '10',
+                                                                            descanso_segundos: 60,
+                                                                            orden: prev.length,
+                                                                        },
+                                                                    ]);
                                                                     setEjercicios([]); // clear search results
                                                                 }}
                                                                 className="text-left text-xs p-2 rounded border border-slate-800 hover:bg-slate-800 hover:text-white text-slate-300 transition-colors"

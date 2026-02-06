@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -132,11 +133,12 @@ export default function UsuarioLoginPage() {
     // Pre-fill PIN change DNI when expanding
     const togglePinChange = () => {
         if (!showPinChange && formData.dni) {
-            setPinChangeData(prev => ({ ...prev, dni: formData.dni }));
+            setPinChangeData((prev) => ({ ...prev, dni: formData.dni }));
         }
-        setShowPinChange(!showPinChange);
+        setShowPinChange((v) => !v);
         setPinChangeError('');
         setPinChangeSuccess('');
+        setShowPin(false);
     };
 
     return (
@@ -163,10 +165,13 @@ export default function UsuarioLoginPage() {
                         }`}
                     >
                         {gymLogoUrl ? (
-                            <img
+                            <Image
                                 src={gymLogoUrl}
                                 alt="Logo"
+                                width={64}
+                                height={64}
                                 className="w-full h-full object-contain"
+                                unoptimized
                                 onError={() => setGymLogoUrl('')}
                             />
                         ) : (
@@ -220,7 +225,7 @@ export default function UsuarioLoginPage() {
                         )}
 
                         {/* Actions */}
-                        <div className="flex gap-3">
+                        <div className="flex flex-col gap-3">
                             <button
                                 type="submit"
                                 disabled={loading}
@@ -239,6 +244,15 @@ export default function UsuarioLoginPage() {
                                         Entrar
                                     </>
                                 )}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={togglePinChange}
+                                className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 transition-all text-sm"
+                            >
+                                <KeyRound className="w-4 h-4" />
+                                Cambiar PIN
+                                {showPinChange ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                             </button>
                         </div>
                     </form>
@@ -265,15 +279,25 @@ export default function UsuarioLoginPage() {
                                             className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-neutral-500 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/50"
                                         />
                                         <div className="grid grid-cols-2 gap-3">
+                                            <div className="relative">
+                                                <input
+                                                    type={showPin ? 'text' : 'password'}
+                                                    value={pinChangeData.oldPin}
+                                                    onChange={(e) => setPinChangeData({ ...pinChangeData, oldPin: e.target.value })}
+                                                    placeholder="PIN actual"
+                                                    className="w-full pr-10 px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-neutral-500 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/50"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowPin((v) => !v)}
+                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                                                    aria-label={showPin ? 'Ocultar PIN' : 'Mostrar PIN'}
+                                                >
+                                                    {showPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                                </button>
+                                            </div>
                                             <input
-                                                type="password"
-                                                value={pinChangeData.oldPin}
-                                                onChange={(e) => setPinChangeData({ ...pinChangeData, oldPin: e.target.value })}
-                                                placeholder="PIN actual"
-                                                className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-neutral-500 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/50"
-                                            />
-                                            <input
-                                                type="password"
+                                                type={showPin ? 'text' : 'password'}
                                                 value={pinChangeData.newPin}
                                                 onChange={(e) => setPinChangeData({ ...pinChangeData, newPin: e.target.value })}
                                                 placeholder="PIN nuevo"

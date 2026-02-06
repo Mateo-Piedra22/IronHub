@@ -1,9 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { User, FileText, Plus, Search, ChevronRight, Users, Loader2 } from 'lucide-react';
-import { Modal, Button, Input } from '@/components/ui';
+import { useState, useEffect, type ComponentType } from 'react';
+import { FileText, Plus, Search, ChevronRight, Users, Loader2 } from 'lucide-react';
+import { Modal, Button } from '@/components/ui';
 import { api, type Usuario, type Rutina } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -19,18 +18,16 @@ export function RutinaCreationWizard({ isOpen, onClose, onProceed }: RutinaCreat
 
     // Search states
     const [searchQuery, setSearchQuery] = useState('');
-    const [searchResults, setSearchResults] = useState<any[]>([]);
-
-    // Selection
-    const [selectedUser, setSelectedUser] = useState<Usuario | null>(null);
+    const [userResults, setUserResults] = useState<Usuario[]>([]);
+    const [templateResults, setTemplateResults] = useState<Rutina[]>([]);
 
     // Reset on open
     useEffect(() => {
         if (isOpen) {
             setStep('choice');
             setSearchQuery('');
-            setSearchResults([]);
-            setSelectedUser(null);
+            setUserResults([]);
+            setTemplateResults([]);
         }
     }, [isOpen]);
 
@@ -38,7 +35,8 @@ export function RutinaCreationWizard({ isOpen, onClose, onProceed }: RutinaCreat
     useEffect(() => {
         const timeout = setTimeout(async () => {
             if (!searchQuery.trim()) {
-                setSearchResults([]);
+                setUserResults([]);
+                setTemplateResults([]);
                 return;
             }
 
@@ -46,17 +44,19 @@ export function RutinaCreationWizard({ isOpen, onClose, onProceed }: RutinaCreat
             try {
                 if (step === 'user_search') {
                     const res = await api.getUsuarios({ search: searchQuery, page: 1, limit: 5 });
-                    if (res.ok && res.data) setSearchResults(res.data.usuarios);
+                    if (res.ok && res.data) setUserResults(res.data.usuarios);
+                    else setUserResults([]);
+                    setTemplateResults([]);
                 } else if (step === 'template_search') {
                     const res = await api.getRutinas({ search: searchQuery, plantillas: true });
                     if (res.ok && res.data) {
-                        // Handle both array format and object format
-                        const items = Array.isArray(res.data) ? res.data : (res.data as any).rutinas || [];
-                        setSearchResults(items);
+                        setTemplateResults(res.data.rutinas || []);
+                    } else {
+                        setTemplateResults([]);
                     }
+                    setUserResults([]);
                 }
-            } catch (e) {
-                console.error(e);
+            } catch {
             } finally {
                 setLoading(false);
             }
@@ -67,13 +67,15 @@ export function RutinaCreationWizard({ isOpen, onClose, onProceed }: RutinaCreat
     const handleOptionUser = () => {
         setStep('user_search');
         setSearchQuery('');
-        setSearchResults([]);
+        setUserResults([]);
+        setTemplateResults([]);
     };
 
     const handleOptionTemplate = () => {
         setStep('template_search');
         setSearchQuery('');
-        setSearchResults([]);
+        setUserResults([]);
+        setTemplateResults([]);
     };
 
     const handleOptionScratch = () => {
@@ -177,11 +179,11 @@ export function RutinaCreationWizard({ isOpen, onClose, onProceed }: RutinaCreat
                         <div className="space-y-2 mt-4 max-h-[300px] overflow-y-auto">
                             {loading && <div className="p-4 text-center text-slate-500"><Loader2 className="w-6 h-6 animate-spin mx-auto" /></div>}
 
-                            {!loading && searchResults.length === 0 && searchQuery && (
+                        {!loading && userResults.length === 0 && searchQuery && (
                                 <div className="p-4 text-center text-slate-500">No se encontraron usuarios</div>
                             )}
 
-                            {searchResults.map((user: Usuario) => (
+                        {userResults.map((user) => (
                                 <div
                                     key={user.id}
                                     onClick={() => handleSelectUser(user)}
@@ -231,11 +233,11 @@ export function RutinaCreationWizard({ isOpen, onClose, onProceed }: RutinaCreat
                         <div className="space-y-2 mt-4 max-h-[300px] overflow-y-auto">
                             {loading && <div className="p-4 text-center text-slate-500"><Loader2 className="w-6 h-6 animate-spin mx-auto" /></div>}
 
-                            {!loading && searchResults.length === 0 && searchQuery && (
+                        {!loading && templateResults.length === 0 && searchQuery && (
                                 <div className="p-4 text-center text-slate-500">No se encontraron plantillas</div>
                             )}
 
-                            {searchResults.map((template: Rutina) => (
+                        {templateResults.map((template) => (
                                 <div
                                     key={template.id}
                                     onClick={() => handleSelectTemplate(template)}
@@ -265,7 +267,15 @@ export function RutinaCreationWizard({ isOpen, onClose, onProceed }: RutinaCreat
     );
 }
 
-function ChoiceCard({ icon: Icon, title, description, onClick, color }: any) {
+type ChoiceCardProps = {
+    icon: ComponentType<{ className?: string }>;
+    title: string;
+    description: string;
+    onClick: () => void;
+    color: string;
+};
+
+function ChoiceCard({ icon: Icon, title, description, onClick, color }: ChoiceCardProps) {
     return (
         <button
             onClick={onClick}

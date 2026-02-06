@@ -21,8 +21,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
         (async () => {
             try {
                 const res = await api.getBootstrap('auto');
-                if (res.ok && (res.data as any)?.gym?.theme) {
-                    applyGymTheme(((res.data as any).gym.theme || null) as any);
+                if (res.ok && res.data?.gym?.theme) {
+                    applyGymTheme(res.data.gym.theme);
                 }
             } catch {
             }

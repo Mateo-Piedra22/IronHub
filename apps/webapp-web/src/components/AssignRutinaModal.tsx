@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Search, Loader2, UserPlus, ChevronRight } from 'lucide-react';
-import { Modal, Button } from '@/components/ui';
+import { Search, Loader2, UserPlus } from 'lucide-react';
+import { Modal } from '@/components/ui';
 import { api, type Usuario, type Rutina } from '@/lib/api';
 
 interface AssignRutinaModalProps {

@@ -2,7 +2,7 @@
 const nextConfig = {
     reactStrictMode: true,
     images: {
-        domains: ['api.ironhub.motiona.xyz'],
+        domains: ['api.ironhub.motiona.xyz', 'api.qrserver.com'],
     },
 };
 

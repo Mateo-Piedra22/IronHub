@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
     Clock,
     Calendar,
@@ -25,7 +25,7 @@ import {
     type Clase,
 } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { formatTime, formatCurrency, cn } from '@/lib/utils';
+import { formatTime, cn } from '@/lib/utils';
 
 interface ProfesorDetailModalProps {
     isOpen: boolean;
@@ -40,7 +40,15 @@ const diasSemana = [
     'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'
 ];
 
-const permissionModules = [
+type PermissionModule = {
+    key: string;
+    label: string;
+    read: string;
+    write?: string;
+    extra?: readonly string[];
+};
+
+const permissionModules: PermissionModule[] = [
     { key: 'usuarios', label: 'Usuarios', read: 'usuarios:read', write: 'usuarios:write' },
     { key: 'pagos', label: 'Pagos', read: 'pagos:read', write: 'pagos:write' },
     { key: 'asistencias', label: 'Asistencias', read: 'asistencias:read', write: 'asistencias:write' },
@@ -49,8 +57,8 @@ const permissionModules = [
     { key: 'ejercicios', label: 'Ejercicios', read: 'ejercicios:read', write: 'ejercicios:write' },
     { key: 'whatsapp', label: 'WhatsApp', read: 'whatsapp:read', write: 'whatsapp:send', extra: ['whatsapp:config'] },
     { key: 'configuracion', label: 'Configuración', read: 'configuracion:read', write: 'configuracion:write' },
-    { key: 'reportes', label: 'Reportes', read: 'reportes:read', write: null },
-] as const;
+    { key: 'reportes', label: 'Reportes', read: 'reportes:read' },
+];
 
 export default function ProfesorDetailModal({
     isOpen,
@@ -106,6 +114,105 @@ export default function ProfesorDetailModal({
     const [editScopes, setEditScopes] = useState<string[]>([]);
     const [permsLoading, setPermsLoading] = useState(false);
 
+    const asRecord = (v: unknown): Record<string, unknown> | null => {
+        if (!v || typeof v !== 'object') return null;
+        return v as Record<string, unknown>;
+    };
+
+    const loadHorarios = useCallback(async () => {
+        if (!profesor) return;
+        const res = await api.getProfesorHorarios(profesor.id);
+        if (res.ok && res.data) {
+            setHorarios(res.data.horarios);
+        }
+    }, [profesor]);
+
+    const loadResumen = useCallback(async () => {
+        if (!profesor) return;
+        const [mensual, semanal] = await Promise.all([
+            api.getProfesorResumenMensual(profesor.id, selectedMes, selectedAnio),
+            api.getProfesorResumenSemanal(profesor.id),
+        ]);
+        if (mensual.ok && mensual.data) {
+            setResumenMensual(mensual.data);
+        }
+        if (semanal.ok && semanal.data) {
+            setResumenSemanal(semanal.data);
+        }
+    }, [profesor, selectedMes, selectedAnio]);
+
+    const loadConfig = useCallback(async () => {
+        if (!profesor) return;
+        const res = await api.getProfesorConfig(profesor.id);
+        if (res.ok && res.data) {
+            setConfig({
+                monto: res.data.monto,
+                monto_tipo: res.data.monto_tipo || 'mensual',
+                especialidad: res.data.especialidad || '',
+                experiencia_anios: res.data.experiencia_anios,
+                certificaciones: res.data.certificaciones || '',
+                usuario_vinculado_id: res.data.usuario_vinculado_id,
+                notas: res.data.notas || '',
+            });
+        }
+    }, [profesor]);
+
+    const loadUsuarios = useCallback(async () => {
+        const role = String(user?.rol || '').toLowerCase();
+        const includeAll = ['owner', 'dueño', 'dueno', 'admin', 'administrador'].includes(role);
+        const res = await api.getUsuariosDirectorio({ activo: true, limit: 500, include_all: includeAll || undefined });
+        if (res.ok && res.data) {
+            setUsuarios(res.data.usuarios);
+        }
+    }, [user?.rol]);
+
+    const loadSucursales = useCallback(async () => {
+        const res = await api.getSucursales();
+        if (res.ok && res.data?.ok) {
+            setSucursales((res.data.items || []).filter((s) => !!s.activa));
+            const currentId = res.data.sucursal_actual_id ?? null;
+            setSucursalActualId(typeof currentId === 'number' ? currentId : null);
+        } else {
+            setSucursales([]);
+            setSucursalActualId(null);
+        }
+    }, []);
+
+    const loadClases = useCallback(async () => {
+        if (!sucursalActualId) {
+            setClases([]);
+            return;
+        }
+        setClasesLoading(true);
+        try {
+            const res = await api.getClases();
+            if (res.ok && res.data) {
+                setClases((res.data.clases || []).filter((c) => (c.activa ?? c.activo) !== false));
+            } else {
+                setClases([]);
+            }
+        } finally {
+            setClasesLoading(false);
+        }
+    }, [sucursalActualId]);
+
+    const loadClasesAsignadas = useCallback(async () => {
+        if (!profesor?.id || !sucursalActualId) {
+            setEditClases([]);
+            return;
+        }
+        try {
+            const res = await api.getProfesorClasesAsignadas(profesor.id);
+            if (res.ok && res.data?.clase_ids) {
+                setEditClases((res.data.clase_ids || []).map((x) => Number(x)).filter((x) => Number.isFinite(x)));
+            } else {
+                setEditClases([]);
+            }
+        } catch {
+            setEditClases([]);
+        }
+    }, [profesor?.id, sucursalActualId]);
+
     const handlePasswordChange = async () => {
         if (!profesor || !newPassword) return;
         setPasswordLoading(true);
@@ -122,124 +229,31 @@ export default function ProfesorDetailModal({
     // Load data
     useEffect(() => {
         if (profesor && isOpen) {
-            setEditScopes((profesor.scopes || []) as any);
-            setEditBranches(((profesor as any)?.sucursales || []).map((s: any) => Number(s?.id)).filter((x: any) => Number.isFinite(x)));
-            loadHorarios();
-            loadResumen();
-            loadConfig();
-            loadUsuarios();
-            loadSucursales();
+            setEditScopes(profesor.scopes || []);
+            setEditBranches((profesor.sucursales || []).map((s) => Number(s.id)).filter((x) => Number.isFinite(x)));
+            void loadHorarios();
+            void loadResumen();
+            void loadConfig();
+            void loadUsuarios();
+            void loadSucursales();
             (async () => {
                 try {
                     const boot = await api.getBootstrap('auto');
-                    if (boot.ok && (boot.data as any)?.flags?.modules) {
-                        setModuleFlags(((boot.data as any).flags.modules || null) as any);
-                    } else {
-                        setModuleFlags(null);
-                    }
+                    const flagsObj = asRecord(boot.ok ? (boot.data?.flags as unknown) : null);
+                    const modulesObj = asRecord(flagsObj ? flagsObj['modules'] : null);
+                    setModuleFlags(modulesObj ? (modulesObj as Record<string, boolean>) : null);
                 } catch {
                     setModuleFlags(null);
                 }
             })();
         }
-    }, [profesor?.id, isOpen]);
+    }, [isOpen, profesor, loadConfig, loadHorarios, loadResumen, loadSucursales, loadUsuarios]);
 
     useEffect(() => {
         if (profesor && isOpen) {
-            loadResumen();
+            void loadResumen();
         }
-    }, [selectedMes, selectedAnio]);
-
-    const loadHorarios = async () => {
-        if (!profesor) return;
-        const res = await api.getProfesorHorarios(profesor.id);
-        if (res.ok && res.data) {
-            setHorarios(res.data.horarios);
-        }
-    };
-
-    const loadResumen = async () => {
-        if (!profesor) return;
-        const [mensual, semanal] = await Promise.all([
-            api.getProfesorResumenMensual(profesor.id, selectedMes, selectedAnio),
-            api.getProfesorResumenSemanal(profesor.id),
-        ]);
-        if (mensual.ok && mensual.data) {
-            setResumenMensual(mensual.data);
-        }
-        if (semanal.ok && semanal.data) {
-            setResumenSemanal(semanal.data);
-        }
-    };
-
-    const loadConfig = async () => {
-        if (!profesor) return;
-        const res = await api.getProfesorConfig(profesor.id);
-        if (res.ok && res.data) {
-            setConfig({
-                monto: res.data.monto,
-                monto_tipo: res.data.monto_tipo || 'mensual',
-                especialidad: res.data.especialidad || '',
-                experiencia_anios: res.data.experiencia_anios,
-                certificaciones: res.data.certificaciones || '',
-                usuario_vinculado_id: res.data.usuario_vinculado_id,
-                notas: res.data.notas || '',
-            });
-        }
-    };
-
-    const loadUsuarios = async () => {
-        const res = await api.getUsuarios({ activo: true, limit: 500 });
-        if (res.ok && res.data) {
-            setUsuarios(res.data.usuarios);
-        }
-    };
-
-    const loadSucursales = async () => {
-        const res = await api.getSucursales();
-        if (res.ok && res.data?.ok) {
-            setSucursales((res.data.items || []).filter((s) => !!s.activa));
-            setSucursalActualId((res.data.sucursal_actual_id ?? null) as any);
-        } else {
-            setSucursales([]);
-            setSucursalActualId(null);
-        }
-    };
-
-    const loadClases = async () => {
-        if (!sucursalActualId) {
-            setClases([]);
-            return;
-        }
-        setClasesLoading(true);
-        try {
-            const res = await api.getClases();
-            if (res.ok && res.data) {
-                setClases((res.data.clases || []).filter((c: any) => !!(c as any).activa));
-            } else {
-                setClases([]);
-            }
-        } finally {
-            setClasesLoading(false);
-        }
-    };
-
-    const loadClasesAsignadas = async () => {
-        if (!profesor?.id || !sucursalActualId) {
-            setEditClases([]);
-            return;
-        }
-        try {
-            const res = await api.getProfesorClasesAsignadas(profesor.id);
-            if (res.ok && res.data?.clase_ids) {
-                setEditClases((res.data.clase_ids || []).map((x) => Number(x)).filter((x) => Number.isFinite(x)));
-            } else {
-                setEditClases([]);
-            }
-        } catch {
-            setEditClases([]);
-        }
-    };
+    }, [isOpen, loadResumen, profesor, selectedAnio, selectedMes]);
 
     const isModuleEnabled = (key: string) => {
         if (!moduleFlags) return true;
@@ -258,7 +272,7 @@ export default function ProfesorDetailModal({
         });
     };
 
-    const setModuleRead = (key: string, readScope: string, writeScope: string | null, extra: readonly string[] | undefined, enabled: boolean) => {
+    const setModuleRead = (key: string, readScope: string, writeScope: string | undefined, extra: readonly string[] | undefined, enabled: boolean) => {
         if (!isModuleEnabled(key)) return;
         if (enabled) {
             toggleScope(readScope, true);
@@ -269,7 +283,7 @@ export default function ProfesorDetailModal({
         for (const ex of extra || []) toggleScope(ex, false);
     };
 
-    const setModuleWrite = (key: string, readScope: string, writeScope: string | null, enabled: boolean) => {
+    const setModuleWrite = (key: string, readScope: string, writeScope: string | undefined, enabled: boolean) => {
         if (!isModuleEnabled(key)) return;
         if (!writeScope) return;
         if (enabled) {
@@ -289,11 +303,12 @@ export default function ProfesorDetailModal({
                 if (!isModuleEnabled(m.key)) {
                     disabled.add(m.read);
                     if (m.write) disabled.add(m.write);
-                    for (const ex of (m as any).extra || []) disabled.add(String(ex));
+                    const extra = 'extra' in m ? m.extra : undefined;
+                    for (const ex of extra || []) disabled.add(String(ex));
                 }
             }
             const scopesSanitized = Array.from(new Set(editScopes)).filter((s) => !disabled.has(String(s)));
-            const res = await api.updateStaff(profesor.usuario_id, { scopes: scopesSanitized } as any);
+            const res = await api.updateStaff(profesor.usuario_id, { scopes: scopesSanitized });
             if (!res.ok) throw new Error(res.error || 'No se pudo guardar permisos');
             success('Permisos actualizados');
             onRefresh();
@@ -320,7 +335,7 @@ export default function ProfesorDetailModal({
         setBranchesSaving(true);
         try {
             const ids = Array.from(new Set(editBranches)).filter((x) => Number.isFinite(x) && x > 0);
-            const res = await api.updateStaff(profesor.usuario_id, { sucursales: ids } as any);
+            const res = await api.updateStaff(profesor.usuario_id, { sucursales: ids });
             if (!res.ok) throw new Error(res.error || 'No se pudieron guardar sucursales');
             success('Sucursales actualizadas');
             onRefresh();
@@ -354,7 +369,7 @@ export default function ProfesorDetailModal({
         try {
             const ids = Array.from(new Set(editClases)).filter((x) => Number.isFinite(x) && x > 0);
             const res = await api.updateProfesorClasesAsignadas(profesor.id, { clase_ids: ids });
-            if (!res.ok || !(res.data as any)?.ok) throw new Error(res.error || (res.data as any)?.error || 'No se pudieron guardar clases');
+            if (!res.ok || !res.data?.ok) throw new Error(res.error || res.data?.error || 'No se pudieron guardar clases');
             success('Clases asignadas actualizadas');
             onRefresh();
         } catch (e) {
@@ -368,7 +383,7 @@ export default function ProfesorDetailModal({
         if (!isOpen) return;
         void loadClases();
         void loadClasesAsignadas();
-    }, [isOpen, sucursalActualId, profesor?.id]);
+    }, [isOpen, loadClases, loadClasesAsignadas]);
 
     // Horario CRUD
     const handleAddHorario = async () => {
@@ -793,7 +808,7 @@ export default function ProfesorDetailModal({
                                             {permissionModules.filter((m) => isModuleEnabled(m.key)).map((m) => {
                                                 const readOn = editScopes.includes(m.read) || (m.write ? editScopes.includes(m.write) : false);
                                                 const writeOn = m.write ? editScopes.includes(m.write) : false;
-                                                const extra = (m as any).extra as readonly string[] | undefined;
+                                                const extra = m.extra;
                                                 const configOn = extra ? extra.every((s) => editScopes.includes(s)) : false;
                                                 return (
                                                     <div key={m.key} className="flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-800/60 bg-slate-950/20">

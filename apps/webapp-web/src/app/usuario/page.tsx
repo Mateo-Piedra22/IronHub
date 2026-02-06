@@ -1,25 +1,32 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { QRScannerModal } from '@/components/QrScannerModal';
 import {
-    User,
-    Calendar,
     CreditCard,
     Dumbbell,
     QrCode,
     LogOut,
     ChevronRight,
-    Clock,
     CheckCircle2,
     AlertCircle,
     X,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { api, type Usuario, type Pago, type Rutina, type UsuarioEntitlements } from '@/lib/api';
-import { formatDate, formatDateRelative, formatCurrency, cn } from '@/lib/utils';
+import { formatDate, formatCurrency, cn } from '@/lib/utils';
+
+function parseCycleDays(userData: Usuario): number {
+    const raw = (userData as unknown as { tipo_cuota_duracion_dias?: unknown }).tipo_cuota_duracion_dias;
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) return raw;
+    if (typeof raw === 'string') {
+        const asNum = Number(raw);
+        if (Number.isFinite(asNum) && asNum > 0) return asNum;
+    }
+    return 30;
+}
 
 function UserDashboardContent() {
     const router = useRouter();
@@ -34,22 +41,7 @@ function UserDashboardContent() {
     const [entitlementsLoading, setEntitlementsLoading] = useState(false);
     const [entitlements, setEntitlements] = useState<UsuarioEntitlements | null>(null);
 
-    useEffect(() => {
-        if (user?.id) {
-            loadData();
-        }
-    }, [user?.id]);
-
-    useEffect(() => {
-        // Check for scan action from URL (Deep link / QR Redirect)
-        const action = searchParams.get('action');
-        const uuid = searchParams.get('uuid');
-        if (action === 'scan' && uuid) {
-            handleRoutineAccess(uuid);
-        }
-    }, [searchParams]);
-
-    const loadData = async () => {
+    const loadData = useCallback(async () => {
         if (!user?.id) return;
         setLoading(true);
         try {
@@ -70,13 +62,12 @@ function UserDashboardContent() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [user?.id]);
 
-    const handleRoutineAccess = async (uuid: string) => {
+    const handleRoutineAccess = useCallback(async (uuid: string) => {
         try {
             const res = await api.verifyRoutineQR(uuid);
             if (res.ok && res.data) {
-                // Success - Navigate to Routine View
                 router.push(`/usuario/routines?uuid=${uuid}`);
             } else {
                 alert('Código QR inválido o rutina no encontrada');
@@ -85,11 +76,23 @@ function UserDashboardContent() {
             console.error('Error verifying QR:', error);
             alert('Error al verificar el código QR');
         }
-    };
+    }, [router]);
+
+    useEffect(() => {
+        if (user?.id) {
+            loadData();
+        }
+    }, [loadData, user?.id]);
+
+    useEffect(() => {
+        const action = searchParams.get('action');
+        const uuid = searchParams.get('uuid');
+        if (action === 'scan' && uuid) {
+            handleRoutineAccess(uuid);
+        }
+    }, [handleRoutineAccess, searchParams]);
 
     const handleScan = (decodedText: string) => {
-        console.log("Scanned:", decodedText);
-
         let uuid = decodedText;
         try {
             if (decodedText.includes('/qr_scan/')) {
@@ -102,8 +105,7 @@ function UserDashboardContent() {
                 const u = urlObj.searchParams.get('uuid');
                 if (u) uuid = u;
             }
-        } catch (e) {
-            // Fallback to using text as is
+        } catch {
         }
 
         uuid = uuid.split('?')[0].split('&')[0];
@@ -258,7 +260,7 @@ function UserDashboardContent() {
     const daysRemaining = userData.dias_restantes ?? 0;
     const isExpired = daysRemaining <= 0;
     const isExpiringSoon = daysRemaining > 0 && daysRemaining <= 7;
-    const cycleDays = Math.max(1, Number((userData as any).tipo_cuota_duracion_dias || 30));
+    const cycleDays = parseCycleDays(userData);
 
     return (
         <div className="min-h-screen bg-slate-950 pb-20">
@@ -368,7 +370,7 @@ function UserDashboardContent() {
                         className="card p-4 text-left hover:border-primary-500/50 transition-colors group"
                         onClick={() => {
                             if (userData.dni) {
-                                try { localStorage.setItem('checkin_saved_user', JSON.stringify({ dni: userData.dni })); } catch (e) { }
+                                try { localStorage.setItem('checkin_saved_user', JSON.stringify({ dni: userData.dni })); } catch { }
                             }
                             router.push('/checkin?auto=true');
                         }}

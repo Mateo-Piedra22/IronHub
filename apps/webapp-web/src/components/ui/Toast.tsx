@@ -3,7 +3,7 @@
 import { create } from 'zustand';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X, CheckCircle2, AlertCircle, AlertTriangle, Info } from 'lucide-react';
-import { useEffect, useCallback } from 'react';
+import { useCallback } from 'react';
 import { cn } from '@/lib/utils';
 
 // Toast types

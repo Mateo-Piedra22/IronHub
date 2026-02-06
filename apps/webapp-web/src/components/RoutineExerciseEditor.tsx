@@ -22,7 +22,7 @@ import {
     verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Plus, Trash2, ChevronDown, ChevronRight, FileSpreadsheet } from 'lucide-react';
+import { GripVertical, Plus, Trash2, FileSpreadsheet } from 'lucide-react';
 import { Button, Modal, Select, Input, useToast } from '@/components/ui';
 import { api, type Ejercicio, type EjercicioRutina } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -500,7 +500,7 @@ export function RoutineExerciseEditor({
         try {
             await onSave(days);
             success('Rutina guardada correctamente');
-        } catch (e) {
+        } catch {
             error('Error al guardar la rutina');
         } finally {
             setSaving(false);

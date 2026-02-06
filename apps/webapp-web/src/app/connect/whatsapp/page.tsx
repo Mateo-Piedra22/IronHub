@@ -37,8 +37,16 @@ export default function WhatsAppConnectPage() {
         } catch {}
     };
 
+    type FacebookSdk = {
+        init: (opts: { appId: string; cookie: boolean; xfbml: boolean; version: string }) => void;
+        login: (
+            cb: (response: { authResponse?: { code?: string } | null } | null) => void,
+            opts: Record<string, unknown>
+        ) => void;
+    };
+
     const ensureFacebookSdk = async () => {
-        const w = window as any;
+        const w = window as unknown as { FB?: FacebookSdk; fbAsyncInit?: () => void };
         if (w.FB) {
             try {
                 w.FB.init({ appId, cookie: true, xfbml: false, version: apiVersion });
@@ -48,6 +56,10 @@ export default function WhatsAppConnectPage() {
         await new Promise<void>((resolve, reject) => {
             w.fbAsyncInit = function () {
                 try {
+                    if (!w.FB) {
+                        reject(new Error('El SDK de Meta no está disponible'));
+                        return;
+                    }
                     w.FB.init({ appId, cookie: true, xfbml: false, version: apiVersion });
                     resolve();
                 } catch (e) {
@@ -80,7 +92,7 @@ export default function WhatsAppConnectPage() {
         let listener: ((event: MessageEvent) => void) | null = null;
         try {
             await ensureFacebookSdk();
-            const w = window as any;
+            const w = window as unknown as { FB?: FacebookSdk };
 
             let code: string | null = null;
             let wabaId: string | null = null;
@@ -124,8 +136,8 @@ export default function WhatsAppConnectPage() {
             window.addEventListener('message', listener);
 
             await new Promise<void>((resolve) => {
-                w.FB.login(
-                    (response: any) => {
+                w.FB?.login(
+                    (response) => {
                         try {
                             code = response?.authResponse?.code ? String(response.authResponse.code) : null;
                         } catch {
@@ -151,9 +163,10 @@ export default function WhatsAppConnectPage() {
                 finishPromise,
                 new Promise<void>((_resolve, reject) => setTimeout(() => reject(new Error('Tiempo de espera agotado')), 120000)),
             ]);
-        } catch (e: any) {
-            postToOpener({ ok: false, error: e?.message || 'Error iniciando conexión' });
-            setStatus(e?.message || 'Error iniciando conexión');
+        } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : 'Error iniciando conexión';
+            postToOpener({ ok: false, error: msg });
+            setStatus(msg);
         } finally {
             try {
                 if (listener) window.removeEventListener('message', listener);
@@ -196,4 +209,3 @@ export default function WhatsAppConnectPage() {
         </div>
     );
 }
-

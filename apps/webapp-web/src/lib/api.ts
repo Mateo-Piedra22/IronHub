@@ -398,6 +398,7 @@ export interface GymData {
     logo_url?: string;
     theme?: Record<string, string>;
     subdominio?: string;
+    attendance_allow_multiple_per_day?: boolean;
 }
 
 export interface PublicGymData {
@@ -1446,6 +1447,20 @@ class ApiClient {
         );
     }
 
+    async getUsuariosDirectorio(params?: { search?: string; activo?: boolean; page?: number; limit?: number; include_all?: boolean }) {
+        const searchParams = new URLSearchParams();
+        if (params?.search) searchParams.set('search', params.search);
+        if (params?.activo !== undefined) searchParams.set('activo', String(params.activo));
+        if (params?.include_all !== undefined) searchParams.set('include_all', String(params.include_all));
+        if (params?.page) searchParams.set('page', String(params.page));
+        if (params?.limit) searchParams.set('limit', String(params.limit));
+
+        const query = searchParams.toString();
+        return this.request<{ usuarios: Usuario[]; total: number }>(
+            `/api/usuarios/directorio${query ? `?${query}` : ''}`
+        );
+    }
+
     async getUsuario(id: number) {
         return this.request<Usuario>(`/api/usuarios/${id}`);
     }
@@ -1479,6 +1494,21 @@ class ApiClient {
     async deleteUsuario(id: number) {
         return this.request<{ ok: boolean }>(`/api/usuarios/${id}`, {
             method: 'DELETE',
+        });
+    }
+
+    async getUsuarioDeleteImpact(id: number) {
+        return this.request<{
+            ok: boolean;
+            refs?: Record<string, number>;
+            allow_purge?: boolean;
+            blockers?: string[];
+        }>(`/api/usuarios/${id}/delete-impact`);
+    }
+
+    async purgeUsuario(id: number) {
+        return this.request<{ ok: boolean }>(`/api/usuarios/${id}/purge`, {
+            method: 'POST',
         });
     }
 

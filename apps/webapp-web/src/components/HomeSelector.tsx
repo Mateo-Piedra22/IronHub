@@ -1,7 +1,9 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
+import { useState } from 'react';
 import {
     BarChart3,
     QrCode,
@@ -71,6 +73,9 @@ const options: OptionCard[] = [
 ];
 
 export default function HomeSelector({ gymName, logoUrl }: HomeSelectorProps) {
+    const [logoBroken, setLogoBroken] = useState(false);
+    const showLogo = !!logoUrl && !logoBroken;
+
     return (
         <div className="min-h-screen flex items-center justify-center p-6">
             {/* Background effects */}
@@ -88,18 +93,15 @@ export default function HomeSelector({ gymName, logoUrl }: HomeSelectorProps) {
                 >
                     {/* Brand */}
                     <div className="flex items-center gap-3 mb-4">
-                        {logoUrl ? (
-                            <img
+                        {showLogo ? (
+                            <Image
                                 src={logoUrl}
                                 alt={`Logo de ${gymName}`}
+                                width={44}
+                                height={44}
                                 className="w-11 h-11 rounded-xl object-cover"
-                                onError={(e) => {
-                                    try {
-                                        (e.currentTarget as HTMLImageElement).src = '';
-                                    } catch {
-                                        // ignore
-                                    }
-                                }}
+                                unoptimized
+                                onError={() => setLogoBroken(true)}
                             />
                         ) : (
                             <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center">

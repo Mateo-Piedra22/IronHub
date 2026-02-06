@@ -36,10 +36,6 @@ import {
     Copy,
     ArrowUp,
     ArrowDown,
-    Edit,
-    Loader2,
-    ZoomIn,
-    ZoomOut,
     Minimize2,
     Maximize2,
     RefreshCw,
@@ -66,6 +62,27 @@ interface DayWithIds {
     dayName: string;
     exercises: DraggableExercise[];
 }
+
+type DraftRutinaExportPayload = {
+    rutina: {
+        nombre: string;
+        descripcion: string;
+        dias_semana: number;
+        objetivo: string;
+        notas: string;
+    };
+    usuario: { nombre: string };
+    ejercicios: Array<{
+        dia: number;
+        orden: number;
+        nombre_ejercicio?: string;
+        series?: EjercicioRutina['series'];
+        repeticiones?: EjercicioRutina['repeticiones'];
+        descanso?: EjercicioRutina['descanso'];
+        notas?: EjercicioRutina['notas'];
+    }>;
+    weeks: number;
+};
 
 interface UnifiedRutinaEditorProps {
     isOpen: boolean;
@@ -396,7 +413,7 @@ function ExerciseEditorPanel({
 interface ExcelPreviewPanelProps {
     rutinaId: number | null;
     isVisible: boolean;
-    draftData: any;
+    draftData: DraftRutinaExportPayload | null;
     weeks: number;
 }
 
@@ -408,8 +425,7 @@ function ExcelPreviewPanel({ rutinaId, isVisible, draftData, weeks }: ExcelPrevi
 
     // Export Options
     const [qrMode, setQrMode] = useState<'inline' | 'sheet' | 'none'>('sheet');
-    const [sheetName, setSheetName] = useState('');
-    const [userOverride, setUserOverride] = useState('');
+    const [sheetName] = useState('');
 
     useEffect(() => {
         if (!isVisible) return;
@@ -451,7 +467,7 @@ function ExcelPreviewPanel({ rutinaId, isVisible, draftData, weeks }: ExcelPrevi
 
         const timer = setTimeout(loadUrl, 500); // Debounce
         return () => clearTimeout(timer);
-    }, [isVisible, rutinaId, draftData, refreshKey, qrMode, sheetName]);
+    }, [isVisible, rutinaId, draftData, weeks, refreshKey, qrMode, sheetName]);
 
 
     if (!isVisible) {
@@ -497,7 +513,7 @@ function ExcelPreviewPanel({ rutinaId, isVisible, draftData, weeks }: ExcelPrevi
                     <span className="text-slate-500">QR:</span>
                     <select
                         value={qrMode}
-                        onChange={(e) => setQrMode(e.target.value as any)}
+                        onChange={(e) => setQrMode(e.target.value as 'inline' | 'sheet' | 'none')}
                         className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-primary-500"
                     >
                         <option value="inline">Incluido</option>
@@ -578,7 +594,7 @@ export function UnifiedRutinaEditor({
 
     // Calc draft data for preview
     const draftData = useMemo(() => {
-        const flatExercises: any[] = [];
+        const flatExercises: DraftRutinaExportPayload["ejercicios"] = [];
         days.forEach(d => {
             d.exercises.forEach(e => {
                 flatExercises.push({
@@ -608,6 +624,13 @@ export function UnifiedRutinaEditor({
         };
     }, [days, nombre, descripcion, diasSemana, categoria, semanas]);
 
+    const loadEjercicios = useCallback(async () => {
+        const res = await api.getEjercicios({ search: ejercicioSearch, grupo: grupoFilter, objetivo: objetivoFilter });
+        if (res.ok && res.data) {
+            setEjercicios(res.data.ejercicios);
+        }
+    }, [ejercicioSearch, grupoFilter, objetivoFilter]);
+
     // Initialize data
     useEffect(() => {
         if (isOpen) {
@@ -620,15 +643,21 @@ export function UnifiedRutinaEditor({
                 setSemanas(4); // Default
 
                 // Convert rutina.dias to DayExercises[]
-                const daysData: DayExercises[] = (rutina.dias || []).map((d: any) => ({
-                    dayNumber: d.numero || d.dayNumber || 1,
-                    dayName: d.nombre || '',
-                    exercises: (d.ejercicios || []).map((e: any) => ({
-                        ...e,
-                        ejercicio_id: e.ejercicio_id || e.id,
-                        ejercicio_nombre: e.ejercicio_nombre || e.nombre,
-                    })),
-                }));
+                const daysData: DayExercises[] = (rutina.dias || []).map((d) => {
+                    const legacyDay = d as Rutina["dias"][number] & { dayNumber?: number; nombre?: string };
+                    const dayNumber = Number(legacyDay.numero || legacyDay.dayNumber || 1);
+                    const exercises = (legacyDay.ejercicios || []).map((e) => {
+                        const legacyEx = e as EjercicioRutina & { id?: number; nombre?: string };
+                        const ejercicio_id = Number(legacyEx.ejercicio_id || legacyEx.id || 0);
+                        const ejercicio_nombre = legacyEx.ejercicio_nombre || legacyEx.nombre || '';
+                        return { ...legacyEx, ejercicio_id, ejercicio_nombre };
+                    });
+                    return {
+                        dayNumber,
+                        dayName: legacyDay.nombre || '',
+                        exercises,
+                    };
+                });
 
                 // Ensure we have all days
                 for (let i = 1; i <= (rutina.dias?.length || diasSemana); i++) {
@@ -652,7 +681,7 @@ export function UnifiedRutinaEditor({
                 ]);
             }
         }
-    }, [isOpen, rutina]);
+    }, [isOpen, rutina, diasSemana, loadEjercicios]);
 
     // Update days when diasSemana changes
     useEffect(() => {
@@ -669,16 +698,9 @@ export function UnifiedRutinaEditor({
         });
     }, [diasSemana]);
 
-    const loadEjercicios = async () => {
-        const res = await api.getEjercicios({ search: ejercicioSearch, grupo: grupoFilter, objetivo: objetivoFilter });
-        if (res.ok && res.data) {
-            setEjercicios(res.data.ejercicios);
-        }
-    };
-
     useEffect(() => {
         if (isOpen) loadEjercicios();
-    }, [ejercicioSearch, grupoFilter, objetivoFilter, isOpen]);
+    }, [isOpen, loadEjercicios]);
 
     // Generate unique IDs for exercises
     const getDaysWithIds = useCallback((): DayWithIds[] => {
@@ -931,7 +953,7 @@ export function UnifiedRutinaEditor({
             } else {
                 error(res.error || 'Error al guardar');
             }
-        } catch (e) {
+        } catch {
             error('Error de conexión');
         } finally {
             setSaving(false);

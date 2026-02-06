@@ -7,6 +7,36 @@ import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useGestionSession } from '@/hooks/useGestionSession';
 
+type WorkSessionActive = {
+    paused: boolean;
+    effective_elapsed_seconds: number;
+};
+
+type WorkSessionState = {
+    allowed: boolean;
+    active: WorkSessionActive | null;
+};
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    return value as Record<string, unknown>;
+}
+
+function parseWorkSession(value: unknown): WorkSessionState | null {
+    const root = asRecord(value);
+    if (!root) return null;
+
+    const allowed = root.allowed === true;
+    const activeRec = asRecord(root.active);
+    const paused = activeRec?.paused === true;
+    const eff = typeof activeRec?.effective_elapsed_seconds === 'number' ? activeRec.effective_elapsed_seconds : 0;
+
+    return {
+        allowed,
+        active: activeRec ? { paused, effective_elapsed_seconds: eff } : null,
+    };
+}
+
 function pad2(n: number) {
     return String(Math.max(0, Math.floor(n))).padStart(2, '0');
 }
@@ -21,7 +51,7 @@ function formatHms(totalSeconds: number) {
 
 export function MiJornadaWidget({ className = '' }: { className?: string }) {
     const { claims } = useGestionSession();
-    const role = String((claims as any)?.role || '').toLowerCase().trim();
+    const role = String(claims?.rol || '').toLowerCase().trim();
 
     const shouldShow = useMemo(() => {
         if (!role) return false;
@@ -30,19 +60,24 @@ export function MiJornadaWidget({ className = '' }: { className?: string }) {
     }, [role]);
 
     const [loading, setLoading] = useState(false);
-    const [state, setState] = useState<any>(null);
+    const [state, setState] = useState<WorkSessionState | null>(null);
     const [errorText, setErrorText] = useState('');
     const tickRef = useRef<number | null>(null);
 
     const refresh = useCallback(async () => {
         setErrorText('');
         const res = await api.getMyWorkSession();
-        if (res.ok && res.data) {
-            setState(res.data);
+        if (res.ok) {
+            const parsed = parseWorkSession(res.data);
+            if (parsed) {
+                setState(parsed);
+                return;
+            }
         } else {
-            setState(null);
             setErrorText(res.error || 'No disponible');
         }
+        setState(null);
+        setErrorText('No disponible');
     }, []);
 
     useEffect(() => {
@@ -56,14 +91,16 @@ export function MiJornadaWidget({ className = '' }: { className?: string }) {
         if (!shouldShow) return;
         if (tickRef.current != null) window.clearInterval(tickRef.current);
         tickRef.current = window.setInterval(() => {
-            setState((prev: any) => {
-                const a = prev?.active;
-                if (!a) return prev;
-                if (a.paused) return prev;
-                const next = { ...prev, active: { ...a } };
-                const eff = Number(a.effective_elapsed_seconds || 0);
-                next.active.effective_elapsed_seconds = eff + 1;
-                return next;
+            setState((prev) => {
+                if (!prev?.active) return prev;
+                if (prev.active.paused) return prev;
+                return {
+                    ...prev,
+                    active: {
+                        ...prev.active,
+                        effective_elapsed_seconds: prev.active.effective_elapsed_seconds + 1,
+                    },
+                };
             });
         }, 1000);
         return () => {
@@ -73,9 +110,9 @@ export function MiJornadaWidget({ className = '' }: { className?: string }) {
     }, [shouldShow]);
 
     const active = state?.active || null;
-    const allowed = !!state?.allowed;
-    const paused = !!active?.paused;
-    const effectiveSeconds = Number(active?.effective_elapsed_seconds || 0);
+    const allowed = state?.allowed === true;
+    const paused = active?.paused === true;
+    const effectiveSeconds = active ? active.effective_elapsed_seconds : 0;
 
     const onStart = async () => {
         setLoading(true);
@@ -153,4 +190,3 @@ export function MiJornadaWidget({ className = '' }: { className?: string }) {
         </div>
     );
 }
-

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
@@ -230,10 +231,13 @@ export default function GestionLoginPage() {
                         }`}
                     >
                         {gymLogoUrl ? (
-                            <img
+                            <Image
                                 src={gymLogoUrl}
                                 alt="Logo"
+                                width={64}
+                                height={64}
                                 className="w-full h-full object-contain"
+                                unoptimized
                                 onError={() => setGymLogoUrl('')}
                             />
                         ) : (
@@ -319,7 +323,7 @@ export default function GestionLoginPage() {
                             )}
                         </div>
 
-                        {/* Conditional: PIN for professors */}
+                        {/* Conditional: PIN for gestion profiles */}
                         {!isOwnerSelected && (
                             <motion.div
                                 initial={{ opacity: 0, height: 0 }}
@@ -328,7 +332,7 @@ export default function GestionLoginPage() {
                                 className="space-y-2"
                             >
                                 <label htmlFor="pin" className="block text-sm font-medium text-slate-300">
-                                    PIN
+                                    PIN / Contraseña
                                 </label>
                                 <div className="relative">
                                     <input
@@ -336,8 +340,7 @@ export default function GestionLoginPage() {
                                         type={showPassword ? 'text' : 'password'}
                                         value={pin}
                                         onChange={(e) => setPin(e.target.value)}
-                                        placeholder="Ingresá tu PIN"
-                                        maxLength={6}
+                                        placeholder="Ingresá tu PIN o contraseña"
                                         className="w-full px-4 py-3 pl-11 pr-12 rounded-xl bg-slate-900 border border-slate-800 text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all"
                                         autoComplete="current-password"
                                     />
