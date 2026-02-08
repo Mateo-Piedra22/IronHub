@@ -15,6 +15,7 @@ type LoginProfile = {
     id: string | number;
     nombre: string;
     rol: string;
+    sucursales?: Array<{ id: number; nombre: string }>;
 };
 
 export default function GestionLoginPage() {
@@ -41,6 +42,9 @@ export default function GestionLoginPage() {
 
     const selectedProfileItem = profiles.find((p) => String(p.id) === String(selectedProfile)) || null;
     const selectedRole = String(selectedProfileItem?.rol || (selectedProfile === '__OWNER__' ? 'owner' : '')).toLowerCase();
+    const selectedProfileSucursales = Array.isArray(selectedProfileItem?.sucursales) ? selectedProfileItem!.sucursales! : [];
+    const selectedProfileSucursalesKey = selectedProfileSucursales.map((s) => String(s.id)).join(',');
+    const isOwnerSelected = selectedProfile === '__OWNER__' || selectedRole === 'owner';
 
     const roleLabel = (rol: string) => {
         const r = String(rol || '').trim().toLowerCase();
@@ -76,6 +80,10 @@ export default function GestionLoginPage() {
                     if (first !== undefined && first !== null) {
                         setSelectedProfile(String(first));
                     }
+                    const firstItem = items.find((x) => String(x.id) === String(first)) || null;
+                    const firstBranches = Array.isArray(firstItem?.sucursales) ? firstItem!.sucursales! : [];
+                    const firstSid = Number(firstBranches[0]?.id || 0);
+                    setSelectedSucursalId(firstSid > 0 ? firstSid : 0);
                 }
             } catch {
             } finally {
@@ -84,6 +92,21 @@ export default function GestionLoginPage() {
         };
         loadProfiles();
     }, []);
+
+    useEffect(() => {
+        if (step !== 'auth') return;
+        if (isOwnerSelected) return;
+        const branchIds = selectedProfileSucursalesKey
+            ? selectedProfileSucursalesKey
+                  .split(',')
+                  .map((x) => Number(x))
+                  .filter((x) => x > 0)
+            : [];
+        const current = Number(selectedSucursalId || 0);
+        const currentValid = current > 0 && branchIds.includes(current);
+        if (currentValid) return;
+        setSelectedSucursalId(Number(branchIds[0] || 0));
+    }, [isOwnerSelected, selectedProfile, selectedProfileSucursalesKey, selectedSucursalId, step]);
 
     useEffect(() => {
         const loadBranding = async () => {
@@ -97,8 +120,6 @@ export default function GestionLoginPage() {
         };
         loadBranding();
     }, []);
-
-    const isOwnerSelected = selectedProfile === '__OWNER__' || selectedRole === 'owner';
 
     const loadSucursalesAfterLogin = async () => {
         setBranchLoading(true);
@@ -184,13 +205,22 @@ export default function GestionLoginPage() {
                 setError('Ingresá tu PIN');
                 return;
             }
+            if (!selectedProfileSucursales.length) {
+                setError('No tenés sucursales asignadas. Pedile al dueño que te habilite una.');
+                return;
+            }
+            const sid = Number(selectedSucursalId || 0);
+            if (!sid || !selectedProfileSucursales.some((s) => Number(s.id) === sid)) {
+                setError('Seleccioná una sucursal');
+                return;
+            }
         }
 
         setLoading(true);
         try {
             const credentials = isOwnerSelected
                 ? { usuario_id: '__OWNER__', owner_password: ownerPassword }
-                : { usuario_id: selectedProfile, pin };
+                : { usuario_id: selectedProfile, pin, sucursal_id: Number(selectedSucursalId || 0) || undefined };
 
             const res = await api.gestionLogin(credentials);
 
@@ -305,6 +335,9 @@ export default function GestionLoginPage() {
                                                     setError('');
                                                     setPin('');
                                                     setOwnerPassword('');
+                                                    const branches = Array.isArray(p.sucursales) ? p.sucursales : [];
+                                                    const firstSid = Number(branches[0]?.id || 0);
+                                                    setSelectedSucursalId(firstSid > 0 ? firstSid : 0);
                                                 }}
                                                 className={cn(
                                                     'w-full px-4 py-3 flex items-center justify-between gap-3 text-left',
@@ -322,6 +355,36 @@ export default function GestionLoginPage() {
                                 </div>
                             )}
                         </div>
+
+                        {/* Conditional: Branch selector for gestion profiles */}
+                        {!isOwnerSelected && (
+                            <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="space-y-2"
+                            >
+                                <label className="block text-sm font-medium text-slate-300">Sucursal</label>
+                                <div className="relative">
+                                    <select
+                                        value={String(selectedSucursalId || '')}
+                                        onChange={(e) => setSelectedSucursalId(Number(e.target.value) || 0)}
+                                        disabled={loading || profilesLoading || selectedProfileSucursales.length <= 1}
+                                        className="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-800 text-white appearance-none focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all disabled:opacity-50"
+                                    >
+                                        <option value="">Seleccioná una sucursal</option>
+                                        {selectedProfileSucursales.map((s) => (
+                                            <option key={String(s.id)} value={String(s.id)}>
+                                                {s.nombre}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    {loading && (
+                                        <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 animate-spin" />
+                                    )}
+                                </div>
+                            </motion.div>
+                        )}
 
                         {/* Conditional: PIN for gestion profiles */}
                         {!isOwnerSelected && (

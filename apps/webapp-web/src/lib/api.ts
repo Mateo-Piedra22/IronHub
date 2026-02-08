@@ -965,6 +965,12 @@ class ApiClient {
                 }
 
                 const okRes: ApiResponse<T> = { ok: true, data: data as T };
+                if (!isGet) {
+                    try {
+                        _clearCacheByPrefix('GET:');
+                    } catch {
+                    }
+                }
                 if (isGet) {
                     const etag = response.headers.get('etag') || undefined;
                     _setCache(cacheKey, { ts: now, data: okRes, etag: etag || cached?.etag });
@@ -1057,6 +1063,7 @@ class ApiClient {
         profesor_id?: string; // professor profile id
         pin?: string;
         owner_password?: string;
+        sucursal_id?: number;
     }) {
         return this.request<{ ok: boolean; message?: string }>('/gestion/auth', {
             method: 'POST',
@@ -1116,7 +1123,7 @@ class ApiClient {
     }
 
     async getGestionLoginProfiles() {
-        return this.request<{ ok: boolean; items: Array<{ kind: 'owner' | 'user'; id: string | number; nombre: string; rol: string }> }>(
+        return this.request<{ ok: boolean; items: Array<{ kind: 'owner' | 'user'; id: string | number; nombre: string; rol: string; sucursales?: Array<{ id: number; nombre: string }> }> }>(
             '/api/gestion/login-profiles'
         );
     }

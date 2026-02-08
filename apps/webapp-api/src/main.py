@@ -450,6 +450,12 @@ async def tenant_context_middleware(request: Request, call_next):
 
     try:
         try:
+            if request.method != "GET" and str(request.url.path).startswith("/api/"):
+                with _API_GET_CACHE_LOCK:
+                    _API_GET_CACHE.clear()
+        except Exception:
+            pass
+        try:
             if request.method == "GET" and str(request.url.path).startswith("/api/"):
                 pth = str(request.url.path)
                 if any(pth.startswith(x) for x in _API_GET_CACHE_PATH_PREFIXES):

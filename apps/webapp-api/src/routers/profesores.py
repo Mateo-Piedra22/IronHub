@@ -375,7 +375,6 @@ async def api_profesor_config_get(
         if role == "profesor":
             try:
                 cfg.pop("monto", None)
-                cfg.pop("usuario_vinculado_id", None)
             except Exception:
                 pass
         return cfg

@@ -54,6 +54,7 @@ async def api_gestion_login_profiles(db: Session = Depends(get_db_session)):
             .order_by(Usuario.nombre.asc())
         )
         rows = db.execute(stmt).all()
+        user_ids: List[int] = []
         for r in rows or []:
             try:
                 uid = int(r[0])
@@ -69,7 +70,42 @@ async def api_gestion_login_profiles(db: Session = Depends(get_db_session)):
                 continue
             if rol_out in ("owner", "admin"):
                 continue
-            items.append({"kind": "user", "id": uid, "nombre": nombre, "rol": rol_out})
+            user_ids.append(uid)
+            items.append({"kind": "user", "id": uid, "nombre": nombre, "rol": rol_out, "sucursales": []})
+
+        if user_ids:
+            rows2 = (
+                db.execute(
+                    text(
+                        """
+                        SELECT us.usuario_id, s.id, s.nombre
+                        FROM usuario_sucursales us
+                        JOIN sucursales s ON s.id = us.sucursal_id
+                        WHERE us.usuario_id = ANY(:ids) AND s.activa = TRUE
+                        ORDER BY us.usuario_id ASC, s.id ASC
+                        """
+                    ),
+                    {"ids": user_ids},
+                )
+                .mappings()
+                .all()
+            )
+            by_user: Dict[int, List[Dict[str, Any]]] = {}
+            for r in rows2 or []:
+                try:
+                    uid = int(r.get("usuario_id"))
+                    sid = int(r.get("id"))
+                except Exception:
+                    continue
+                by_user.setdefault(uid, []).append({"id": sid, "nombre": str(r.get("nombre") or "")})
+            for it in items:
+                if it.get("kind") != "user":
+                    continue
+                try:
+                    uid = int(it.get("id"))
+                except Exception:
+                    continue
+                it["sucursales"] = by_user.get(uid, [])
     except Exception:
         pass
     return {"ok": True, "items": items}
@@ -394,6 +430,7 @@ async def gestion_auth(
     profesor_id_raw = data.get("profesor_id")
     owner_password = str(data.get("owner_password", "")).strip()
     pin_raw = data.get("pin")
+    sucursal_id_raw = data.get("sucursal_id")
 
     # Owner login logic
     if isinstance(usuario_id_raw, str) and usuario_id_raw == "__OWNER__":
@@ -449,6 +486,13 @@ async def gestion_auth(
             usuario_id = None
 
     pin = str(pin_raw or "").strip()
+    sucursal_id: Optional[int] = None
+    try:
+        sucursal_id = int(sucursal_id_raw) if sucursal_id_raw is not None else None
+    except Exception:
+        sucursal_id = None
+    if sucursal_id is not None and sucursal_id <= 0:
+        sucursal_id = None
 
     if not usuario_id or not pin:
         return error_response("Parámetros inválidos")
@@ -484,6 +528,36 @@ async def gestion_auth(
     if (role_norm not in GESTION_ROLES) and not profesor_id:
         return error_response("Sin permisos de gestión")
 
+    selected_sucursal_id: Optional[int] = None
+    if role_norm in ("profesor", "empleado", "recepcionista", "staff") or bool(profesor_id):
+        rows = svc.db.execute(
+            text(
+                """
+                SELECT us.sucursal_id
+                FROM usuario_sucursales us
+                JOIN sucursales s ON s.id = us.sucursal_id
+                WHERE us.usuario_id = :uid AND s.activa = TRUE
+                ORDER BY us.sucursal_id ASC
+                """
+            ),
+            {"uid": int(usuario_id)},
+        ).fetchall()
+        allowed_sids: List[int] = []
+        for r in rows or []:
+            try:
+                allowed_sids.append(int(r[0]))
+            except Exception:
+                pass
+        allowed_sids = [x for x in allowed_sids if x > 0]
+        if not allowed_sids:
+            return error_response(
+                "No tenés sucursales asignadas. Pedile al dueño que te habilite una."
+            )
+        if sucursal_id is not None and int(sucursal_id) in allowed_sids:
+            selected_sucursal_id = int(sucursal_id)
+        else:
+            selected_sucursal_id = int(allowed_sids[0])
+
     set_session_claims(
         request.session,
         tenant=tenant,
@@ -491,6 +565,7 @@ async def gestion_auth(
         role=(role_norm or "profesor"),
         user_id=usuario_id,
         logged_in=True,
+        sucursal_id=selected_sucursal_id,
     )
     try:
         audit.log_from_request(

@@ -286,7 +286,7 @@ export default function EquipoPage() {
                     force = true;
                     message = `${message}\nTiene ${clases} clase(s) asignada(s). Se desactivarán esas asignaciones.`;
                 }
-                message = `${message}\nEsta acción puede borrar datos asociados (horarios/sesiones).`;
+                message = `${message}\nEsta acción no borra historial: desactiva el perfil.`;
             } else {
                 const scopes = Number(impact?.staff?.scopes_count || 0);
                 const sucursales = Number(impact?.staff?.sucursales_count || 0);
@@ -294,7 +294,7 @@ export default function EquipoPage() {
                 if (scopes > 0) parts.push(`${scopes} permiso(s)`);
                 if (sucursales > 0) parts.push(`${sucursales} sucursal(es)`);
                 if (parts.length) message = `${message}\nSe van a eliminar: ${parts.join(', ')}.`;
-                message = `${message}\nEsta acción puede borrar datos asociados (sesiones).`;
+                message = `${message}\nEsta acción no borra historial: desactiva el perfil.`;
             }
 
             setConfirmTitle(`Eliminar perfil ${kind}`);
@@ -318,7 +318,7 @@ export default function EquipoPage() {
                 toast({ title: 'Actualizado', description: 'Cambios aplicados', variant: 'success' });
             } else if (pendingDeleteProfile) {
                 await deleteProfile(pendingDeleteProfile);
-                toast({ title: 'Actualizado', description: 'Perfil eliminado', variant: 'success' });
+                toast({ title: 'Actualizado', description: 'Perfil desactivado', variant: 'success' });
             }
             setConfirmOpen(false);
             setPendingConvert(null);

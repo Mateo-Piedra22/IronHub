@@ -639,16 +639,10 @@ async def api_team_delete_profile(
                 ),
                 {"pid": int(pid)},
             )
-        try:
-            svc_staff.db.execute(
-                text("DELETE FROM profesores WHERE id = :pid"),
-                {"pid": int(pid)},
-            )
-        except Exception:
-            svc_staff.db.execute(
-                text("UPDATE profesores SET estado = 'inactivo' WHERE id = :pid"),
-                {"pid": int(pid)},
-            )
+        svc_staff.db.execute(
+            text("UPDATE profesores SET estado = 'inactivo' WHERE id = :pid"),
+            {"pid": int(pid)},
+        )
 
         if st is not None:
             st_estado = str(getattr(st, "estado", "") or "").strip().lower()
@@ -692,21 +686,24 @@ async def api_team_delete_profile(
         return {"ok": True, "usuario_id": int(usuario_id), "kind": "staff", "deleted": False}
     try:
         svc_staff.db.execute(
-            text("DELETE FROM staff_permissions WHERE usuario_id = :uid"),
+            text(
+                "UPDATE staff_permissions SET scopes = '[]'::jsonb WHERE usuario_id = :uid"
+            ),
             {"uid": int(usuario_id)},
         )
     except Exception:
-        pass
-    try:
-        svc_staff.db.execute(
-            text("DELETE FROM staff_profiles WHERE usuario_id = :uid"),
-            {"uid": int(usuario_id)},
-        )
-    except Exception:
-        svc_staff.db.execute(
-            text("UPDATE staff_profiles SET estado = 'inactivo' WHERE usuario_id = :uid"),
-            {"uid": int(usuario_id)},
-        )
+        try:
+            svc_staff.db.execute(
+                text("DELETE FROM staff_permissions WHERE usuario_id = :uid"),
+                {"uid": int(usuario_id)},
+            )
+        except Exception:
+            pass
+
+    svc_staff.db.execute(
+        text("UPDATE staff_profiles SET estado = 'inactivo' WHERE usuario_id = :uid"),
+        {"uid": int(usuario_id)},
+    )
 
     if pid:
         prof_estado = str(getattr(prof, "estado", "") or "").strip().lower() if prof is not None else ""
