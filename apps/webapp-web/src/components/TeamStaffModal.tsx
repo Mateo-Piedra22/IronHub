@@ -10,6 +10,7 @@ const permissionModules = [
     { key: 'usuarios', label: 'Usuarios', read: 'usuarios:read', write: 'usuarios:write' },
     { key: 'pagos', label: 'Pagos', read: 'pagos:read', write: 'pagos:write' },
     { key: 'asistencias', label: 'Asistencias', read: 'asistencias:read', write: 'asistencias:write' },
+    { key: 'accesos', label: 'Accesos', read: 'accesos:read', write: 'accesos:write' },
     { key: 'clases', label: 'Clases', read: 'clases:read', write: 'clases:write' },
     { key: 'rutinas', label: 'Rutinas', read: 'rutinas:read', write: 'rutinas:write' },
     { key: 'ejercicios', label: 'Ejercicios', read: 'ejercicios:read', write: 'ejercicios:write' },

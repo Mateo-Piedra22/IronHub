@@ -18,7 +18,9 @@ import {
     Home,
     MessageSquare,
     Clock,
-    KeyRound
+    KeyRound,
+    BarChart3,
+    Settings
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ToastContainer, Modal, Button } from '@/components/ui';
@@ -36,6 +38,8 @@ const navigation = [
     { key: 'asistencias', name: 'Asistencias', href: '/gestion/asistencias', icon: ScanLine, description: 'Check-in y registro' },
     { key: 'accesos', name: 'Accesos', href: '/gestion/accesos', icon: KeyRound, description: 'Molinete/puerta' },
     { key: 'whatsapp', name: 'WhatsApp', href: '/gestion/whatsapp', icon: MessageSquare, description: 'Mensajes y API' },
+    { key: 'reportes', name: 'Reportes', href: '/gestion/reportes', icon: BarChart3, description: 'KPIs y métricas' },
+    { key: 'configuracion', name: 'Configuración', href: '/gestion/configuracion', icon: Settings, description: 'Cuotas y módulos' },
 ];
 
 function asRecord(value: unknown): Record<string, unknown> | null {

@@ -494,6 +494,7 @@ export default function ConfiguracionPage() {
     const { user, isLoading: authLoading } = useAuth();
     const [sessionRole, setSessionRole] = useState<string>('');
     const [sessionScopes, setSessionScopes] = useState<string[]>([]);
+    const [sessionLoaded, setSessionLoaded] = useState(false);
     const readOnlyModules = (pathname || '').startsWith('/dashboard');
 
     useEffect(() => {
@@ -510,9 +511,17 @@ export default function ConfiguracionPage() {
             } catch {
                 setSessionRole('');
                 setSessionScopes([]);
+            } finally {
+                setSessionLoaded(true);
             }
         })();
     }, []);
+
+    const canRead = (() => {
+        const r = String(sessionRole || user?.rol || '').toLowerCase();
+        if (r === 'owner' || r === 'admin') return true;
+        return sessionScopes.includes('configuracion:read') || sessionScopes.includes('configuracion:write');
+    })();
 
     const canWrite = (() => {
         const r = String(sessionRole || user?.rol || '').toLowerCase();
@@ -520,17 +529,20 @@ export default function ConfiguracionPage() {
         return sessionScopes.includes('configuracion:write');
     })();
 
+    const isReadOnly = readOnlyModules || !canWrite;
+
     useEffect(() => {
         const p = pathname || '';
         if (!p.startsWith('/gestion/configuracion')) return;
         if (authLoading) return;
+        if (!sessionLoaded) return;
         const rol = String(sessionRole || user?.rol || '').toLowerCase();
         if (rol === 'owner' || rol === 'admin') {
             router.replace('/dashboard/configuracion');
-        } else {
+        } else if (!canRead) {
             router.replace('/gestion');
         }
-    }, [pathname, authLoading, sessionRole, user?.rol, router]);
+    }, [pathname, authLoading, sessionLoaded, sessionRole, user?.rol, router, canRead]);
 
     // State
     const [loading, setLoading] = useState(true);
@@ -737,7 +749,7 @@ export default function ConfiguracionPage() {
                 <div className="space-y-3">
                     <div className="card p-4">
                         <div className="text-sm text-slate-300">
-                            {readOnlyModules
+                            {isReadOnly
                                 ? 'Panel informativo. Los módulos se gestionan desde Admin.'
                                 : 'Activá o desactivá módulos del panel de gestión. Desactivar Configuración puede ocultar esta pantalla.'}
                         </div>
@@ -749,9 +761,9 @@ export default function ConfiguracionPage() {
                                 <input
                                     type="checkbox"
                                     checked={modules[m.key] !== false}
-                                    disabled={readOnlyModules}
+                                    disabled={isReadOnly}
                                     onChange={(e) => {
-                                        if (readOnlyModules) return;
+                                        if (isReadOnly) return;
                                         const next = { ...(featureFlags.modules || {}) };
                                         next[m.key] = e.target.checked;
                                         setFeatureFlags({ ...(featureFlags || { modules: {} }), modules: next });
@@ -759,7 +771,7 @@ export default function ConfiguracionPage() {
                                 />
                             </label>
                         ))}
-                        {!readOnlyModules ? (
+                        {!isReadOnly ? (
                             <div className="flex items-center justify-end pt-2">
                                 <Button
                                     size="sm"
@@ -784,9 +796,9 @@ export default function ConfiguracionPage() {
                             <input
                                 type="checkbox"
                                 checked={bulkModuleEnabled && bulkActions['usuarios_import'] !== false}
-                                disabled={readOnlyModules || !bulkModuleEnabled}
+                                disabled={isReadOnly || !bulkModuleEnabled}
                                 onChange={(e) => {
-                                    if (readOnlyModules) return;
+                                    if (isReadOnly) return;
                                     const nextFeatures: NonNullable<FeatureFlags['features']> = { ...(featureFlags.features || {}) };
                                     const prevBulk = nextFeatures['bulk_actions'];
                                     const nextBulk =
@@ -799,7 +811,7 @@ export default function ConfiguracionPage() {
                                 }}
                             />
                         </label>
-                        {!readOnlyModules ? (
+                        {!isReadOnly ? (
                             <div className="flex items-center justify-end pt-2">
                                 <Button
                                     size="sm"
@@ -832,9 +844,9 @@ export default function ConfiguracionPage() {
                                     <input
                                         type="checkbox"
                                         checked={enabled && current[it.key] !== false}
-                                        disabled={readOnlyModules || !enabled}
+                                        disabled={isReadOnly || !enabled}
                                         onChange={(e) => {
-                                            if (readOnlyModules) return;
+                                            if (isReadOnly) return;
                                             const nextFeatures: NonNullable<FeatureFlags['features']> = { ...(featureFlags.features || {}) };
                                             const prev = nextFeatures['usuarios'];
                                             const next =
@@ -849,7 +861,7 @@ export default function ConfiguracionPage() {
                                 </label>
                             );
                         })}
-                        {!readOnlyModules ? (
+                        {!isReadOnly ? (
                             <div className="flex items-center justify-end pt-2">
                                 <Button
                                     size="sm"
@@ -882,9 +894,9 @@ export default function ConfiguracionPage() {
                                     <input
                                         type="checkbox"
                                         checked={enabled && current[it.key] !== false}
-                                        disabled={readOnlyModules || !enabled}
+                                        disabled={isReadOnly || !enabled}
                                         onChange={(e) => {
-                                            if (readOnlyModules) return;
+                                            if (isReadOnly) return;
                                             const nextFeatures: NonNullable<FeatureFlags['features']> = { ...(featureFlags.features || {}) };
                                             const prev = nextFeatures['pagos'];
                                             const next =
@@ -899,7 +911,7 @@ export default function ConfiguracionPage() {
                                 </label>
                             );
                         })}
-                        {!readOnlyModules ? (
+                        {!isReadOnly ? (
                             <div className="flex items-center justify-end pt-2">
                                 <Button
                                     size="sm"
