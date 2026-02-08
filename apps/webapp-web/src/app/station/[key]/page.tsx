@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { QrCode, Check, User, Clock, Wifi, WifiOff, Users, RefreshCw } from 'lucide-react';
 import { useParams } from 'next/navigation';
+import Image from 'next/image';
 import QRCode from 'qrcode';
 import { getCurrentTenant } from '@/lib/tenant';
 
@@ -50,7 +51,6 @@ export default function StationPage() {
     const [showCelebration, setShowCelebration] = useState(false);
     const [timeLeft, setTimeLeft] = useState(0);
 
-    const audioRef = useRef<HTMLAudioElement | null>(null);
     const pollRef = useRef<NodeJS.Timeout | null>(null);
     const countdownRef = useRef<NodeJS.Timeout | null>(null);
     const celebrationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -67,7 +67,11 @@ export default function StationPage() {
     const playSuccessSound = useCallback(() => {
         try {
             // Create a simple beep using Web Audio API
-            const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+            const WebkitAudioContext = (window as typeof window & { webkitAudioContext?: typeof AudioContext })
+                .webkitAudioContext;
+            const Ctx = window.AudioContext || WebkitAudioContext;
+            if (!Ctx) return;
+            const ctx = new Ctx();
             const oscillator = ctx.createOscillator();
             const gainNode = ctx.createGain();
 
@@ -81,8 +85,7 @@ export default function StationPage() {
 
             oscillator.start(ctx.currentTime);
             oscillator.stop(ctx.currentTime + 0.3);
-        } catch (e) {
-            console.log('Audio not available');
+        } catch {
         }
     }, []);
 
@@ -119,7 +122,7 @@ export default function StationPage() {
 
             setStationInfo(data);
             return true;
-        } catch (e) {
+        } catch {
             setError('Error de conexión');
             setConnected(false);
             setLoading(false);
@@ -142,7 +145,7 @@ export default function StationPage() {
             } else {
                 setConnected(false);
             }
-        } catch (e) {
+        } catch {
             setConnected(false);
         } finally {
             tokenRefreshInFlightRef.current = false;
@@ -165,7 +168,7 @@ export default function StationPage() {
                 setTotalHoy(data.stats?.total_hoy || 0);
                 setConnected(true);
             }
-        } catch (e) {
+        } catch {
             // Ignore polling errors
         }
     }, [stationKey, API_BASE]);
@@ -224,7 +227,7 @@ export default function StationPage() {
                 return deduped;
             });
             setConnected(true);
-        } catch (e) {
+        } catch {
             setConnected(false);
         }
     }, [API_BASE, stationKey, loadToken, playSuccessSound]);
@@ -259,7 +262,7 @@ export default function StationPage() {
         let ws: WebSocket;
         try {
             ws = new WebSocket(wsUrl);
-        } catch (e) {
+        } catch {
             setWsConnected(false);
             wsReconnectRef.current = setTimeout(() => {
                 wsRetryMsRef.current = Math.min(wsRetryMsRef.current * 2, 30000);
@@ -291,25 +294,27 @@ export default function StationPage() {
             }
             if (event.data === 'pong') return;
 
-            let data: any = null;
+            let data: unknown = null;
             try {
                 data = JSON.parse(event.data);
-            } catch (e) {
+            } catch {
                 return;
             }
 
-            const incomingId = typeof data?.id === 'number' ? data.id : 0;
+            if (typeof data !== 'object' || data === null) return;
+            const record = data as Record<string, unknown>;
+            const incomingId = typeof record.id === 'number' ? record.id : 0;
             if (!incomingId) return;
             if (incomingId <= lastSeenIdRef.current) return;
             lastSeenIdRef.current = Math.max(lastSeenIdRef.current, incomingId);
 
             const entry: CheckinEntry = {
                 id: incomingId,
-                nombre: String(data?.nombre || ''),
-                dni: String(data?.dni || ''),
-                hora: String(data?.hora || ''),
-                tipo: data?.tipo ? String(data.tipo) : undefined,
-                sucursal_id: data?.sucursal_id ?? undefined,
+                nombre: String(record.nombre || ''),
+                dni: String(record.dni || ''),
+                hora: String(record.hora || ''),
+                tipo: record.tipo ? String(record.tipo) : undefined,
+                sucursal_id: (record.sucursal_id as number | null | undefined) ?? undefined,
             };
 
             setTotalHoy((prev) => prev + 1);
@@ -468,10 +473,13 @@ export default function StationPage() {
             <header className="flex items-center justify-between p-6 border-b border-slate-800">
                 <div className="flex items-center gap-4">
                     {stationInfo?.logo_url ? (
-                        <img
+                        <Image
                             src={stationInfo.logo_url}
-                            alt={stationInfo.gym_name}
+                            alt={stationInfo.gym_name || 'Logo'}
+                            width={160}
+                            height={48}
                             className="h-12 w-auto object-contain"
+                            unoptimized
                         />
                     ) : (
                         <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center">
@@ -512,10 +520,13 @@ export default function StationPage() {
                             {/* QR Container */}
                             <div className="bg-white p-6 rounded-3xl shadow-2xl shadow-primary-500/20">
                                 {qrDataUrl ? (
-                                    <img
+                                    <Image
                                         src={qrDataUrl}
                                         alt="QR Code"
+                                        width={320}
+                                        height={320}
                                         className="w-80 h-80"
+                                        unoptimized
                                     />
                                 ) : (
                                     <div className="w-80 h-80 flex items-center justify-center bg-slate-100 rounded-2xl">

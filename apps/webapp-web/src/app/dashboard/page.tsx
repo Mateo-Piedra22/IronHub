@@ -20,6 +20,7 @@ interface WaPendiente {
     fecha?: string;
     telefono?: string;
     phone?: string;
+    sucursal_nombre?: string | null;
     [key: string]: unknown;
 }
 
@@ -41,8 +42,44 @@ interface AuditData {
 interface OwnerGymBilling {
     gym?: { status?: string; nombre?: string; slug?: string; plan?: string; suspended_reason?: string;[k: string]: unknown };
     subscription?: { status?: string; plan?: { name?: string; currency?: string; amount?: number } | string; plan_name?: string; valid_until?: string; trial_ends?: string; next_due_date?: string;[k: string]: unknown };
-    payments?: Array<{ id?: number; monto?: number; fecha?: string; estado?: string; notes?: string;[k: string]: unknown }>;
+    payments?: Array<{
+        id?: number;
+        amount?: number;
+        monto?: number;
+        currency?: string;
+        paid_at?: string;
+        fecha?: string;
+        status?: string;
+        estado?: string;
+        notes?: string;
+        [k: string]: unknown;
+    }>;
     [key: string]: unknown;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    return value as Record<string, unknown>;
+}
+
+function asArray(value: unknown): unknown[] {
+    return Array.isArray(value) ? value : [];
+}
+
+function getStringField(value: unknown, key: string): string | null {
+    const rec = asRecord(value);
+    if (!rec) return null;
+    const v = rec[key];
+    return typeof v === 'string' ? v : null;
+}
+
+function getNumberField(value: unknown, key: string): number | null {
+    const rec = asRecord(value);
+    if (!rec) return null;
+    const v = rec[key];
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string' && v.trim() && Number.isFinite(Number(v))) return Number(v);
+    return null;
 }
 
 export default function DashboardPage() {
@@ -104,33 +141,109 @@ function OwnerDashboard() {
             ]);
 
             if (rOverview.ok && rOverview.data?.ok) {
-                const d = rOverview.data as any;
-                setScope((d.scope || null) as any);
-                if (d.kpis) setKpis(d.kpis);
-                if (d.kpis_avanzados) setKpisAdv(d.kpis_avanzados);
-                if (d.activos_inactivos) setActivos(d.activos_inactivos);
-                setIngresos12m((d.ingresos12m?.data || []) as any[]);
-                setNuevos12m((d.nuevos12m?.data || []) as any[]);
-                setArpu12m((d.arpu12m?.data || []) as any[]);
-                setArpaTipos((d.arpa_por_tipo_cuota?.data || []) as any[]);
-                if (d.payment_status_dist) setPaymentDist(d.payment_status_dist);
-                const items = (d.cohort_retencion_6m?.cohorts || []) as Array<any>;
-                setCohorts(
-                    items.map((it) => ({
-                        cohort: String((it as any)?.cohort || ''),
-                        retention_rate: Number((it as any)?.retention_rate || 0),
-                        total: Number((it as any)?.total || 0),
-                        retained: Number((it as any)?.retained || 0),
-                    }))
+                const d = asRecord(rOverview.data) || {};
+                const scopeRaw = asRecord(d.scope);
+                setScope(
+                    scopeRaw
+                        ? {
+                            mode: getStringField(scopeRaw, 'mode') || undefined,
+                            sucursal_id: getNumberField(scopeRaw, 'sucursal_id'),
+                            sucursal_nombre: getStringField(scopeRaw, 'sucursal_nombre'),
+                        }
+                        : null
                 );
-                setWaitlistEvents((d.waitlist_events?.events || []) as any[]);
-                setDelinquencyAlerts((d.delinquency_alerts_recent?.alerts || []) as any[]);
-                setWaStats((d.whatsapp_stats || null) as any);
-                setWaPendientes((d.whatsapp_pendientes?.mensajes || []) as any[]);
+
+                const kpisRaw = asRecord(d.kpis);
+                if (kpisRaw) {
+                    const total_activos = getNumberField(kpisRaw, 'total_activos') ?? 0;
+                    const total_inactivos = getNumberField(kpisRaw, 'total_inactivos') ?? 0;
+                    const ingresos_mes = getNumberField(kpisRaw, 'ingresos_mes') ?? 0;
+                    const asistencias_hoy = getNumberField(kpisRaw, 'asistencias_hoy') ?? 0;
+                    const nuevos_30_dias = getNumberField(kpisRaw, 'nuevos_30_dias') ?? 0;
+                    setKpis({ total_activos, total_inactivos, ingresos_mes, asistencias_hoy, nuevos_30_dias });
+                }
+
+                const kpisAdvRaw = asRecord(d.kpis_avanzados);
+                if (kpisAdvRaw) {
+                    setKpisAdv({
+                        churn_rate: getNumberField(kpisAdvRaw, 'churn_rate') ?? undefined,
+                        avg_pago: getNumberField(kpisAdvRaw, 'avg_pago') ?? undefined,
+                        churned_30d: getNumberField(kpisAdvRaw, 'churned_30d') ?? undefined,
+                    });
+                }
+
+                const activosRaw = asRecord(d.activos_inactivos);
+                if (activosRaw) {
+                    setActivos({
+                        activos: getNumberField(activosRaw, 'activos') ?? 0,
+                        inactivos: getNumberField(activosRaw, 'inactivos') ?? 0,
+                    });
+                }
+
+                const ingresos12 = asArray(asRecord(d.ingresos12m)?.data).map((it) => ({
+                    mes: String(getStringField(it, 'mes') || ''),
+                    total: Number(getNumberField(it, 'total') ?? 0),
+                }));
+                setIngresos12m(ingresos12);
+
+                const nuevos12 = asArray(asRecord(d.nuevos12m)?.data).map((it) => ({
+                    mes: String(getStringField(it, 'mes') || ''),
+                    total: Number(getNumberField(it, 'total') ?? 0),
+                }));
+                setNuevos12m(nuevos12);
+
+                const arpu12 = asArray(asRecord(d.arpu12m)?.data).map((it) => ({
+                    mes: String(getStringField(it, 'mes') || ''),
+                    arpu: Number(getNumberField(it, 'arpu') ?? 0),
+                }));
+                setArpu12m(arpu12);
+
+                const arpa = asArray(asRecord(d.arpa_por_tipo_cuota)?.data).map((it) => ({
+                    tipo: String(getStringField(it, 'tipo') || ''),
+                    arpa: Number(getNumberField(it, 'arpa') ?? 0),
+                }));
+                setArpaTipos(arpa);
+
+                const payDistRaw = asRecord(d.payment_status_dist);
+                if (payDistRaw) {
+                    setPaymentDist({
+                        al_dia: getNumberField(payDistRaw, 'al_dia') ?? 0,
+                        vencido: getNumberField(payDistRaw, 'vencido') ?? 0,
+                        sin_pagos: getNumberField(payDistRaw, 'sin_pagos') ?? 0,
+                    });
+                }
+
+                const cohortsItems = asArray(asRecord(asRecord(d.cohort_retencion_6m)?.cohorts) ?? asRecord(d.cohort_retencion_6m)?.cohorts);
+                const cohortsRaw = asArray(asRecord(d.cohort_retencion_6m)?.cohorts);
+                const cohortsMapped = (cohortsRaw.length ? cohortsRaw : cohortsItems).map((it) => ({
+                    cohort: String(getStringField(it, 'cohort') || ''),
+                    retention_rate: Number(getNumberField(it, 'retention_rate') ?? 0),
+                    total: Number(getNumberField(it, 'total') ?? 0),
+                    retained: Number(getNumberField(it, 'retained') ?? 0),
+                }));
+                setCohorts(cohortsMapped);
+
+                setWaitlistEvents(asArray(asRecord(d.waitlist_events)?.events).map((it) => asRecord(it) || {}));
+                setDelinquencyAlerts(asArray(asRecord(d.delinquency_alerts_recent)?.alerts).map((it) => asRecord(it) || {}));
+
+                const waStatsRaw = asRecord(d.whatsapp_stats);
+                setWaStats(
+                    waStatsRaw
+                        ? {
+                            total: getNumberField(waStatsRaw, 'total') ?? undefined,
+                            ultimo_mes: getNumberField(waStatsRaw, 'ultimo_mes') ?? undefined,
+                            por_tipo: (asRecord(waStatsRaw.por_tipo) as Record<string, number>) || undefined,
+                            por_estado: (asRecord(waStatsRaw.por_estado) as Record<string, number>) || undefined,
+                        }
+                        : null
+                );
+
+                setWaPendientes(asArray(asRecord(d.whatsapp_pendientes)?.mensajes).map((it) => (asRecord(it) || {}) as WaPendiente));
             } else {
-                setError((rOverview as any)?.error || (rOverview as any)?.data?.mensaje || 'No se pudieron cargar los datos del overview');
+                const msg = rOverview.error || getStringField(rOverview.data, 'mensaje') || 'No se pudieron cargar los datos del overview';
+                setError(msg);
             }
-            if (rMetodos.ok && rMetodos.data) setMetodosPago((rMetodos.data.metodos || []) as any[]);
+            if (rMetodos.ok && rMetodos.data) setMetodosPago(rMetodos.data.metodos || []);
             if (rSettings.ok && rSettings.data?.ok) {
                 const v = Boolean((rSettings.data.settings || {})['attendance_allow_multiple_per_day']);
                 setOwnerGymSettings({ attendance_allow_multiple_per_day: v });
@@ -223,18 +336,18 @@ function OwnerDashboard() {
                 }),
             ]);
             if (rUsuarios.ok && rUsuarios.data?.ok) {
-                setUsuarios((rUsuarios.data.usuarios || []) as any[]);
+                setUsuarios(rUsuarios.data.usuarios || []);
                 setUsuariosTotal(Number(rUsuarios.data.total || 0));
             } else if (!rUsuarios.ok) {
                 setError(rUsuarios.error || 'No se pudieron cargar usuarios');
             }
             if (rPagos.ok && rPagos.data?.ok) {
-                setPagos((rPagos.data.pagos || []) as any[]);
+                setPagos(rPagos.data.pagos || []);
             } else if (!rPagos.ok) {
                 setError(rPagos.error || 'No se pudieron cargar pagos');
             }
             if (rAsist.ok && rAsist.data?.ok) {
-                setAsistencias((rAsist.data.asistencias || []) as any[]);
+                setAsistencias(rAsist.data.asistencias || []);
             } else if (!rAsist.ok) {
                 setError(rAsist.error || 'No se pudieron cargar asistencias');
             }
@@ -250,12 +363,13 @@ function OwnerDashboard() {
     }, [loading, refreshTables, usuariosSearchDebounced, usuariosActivo, pagosDesde, pagosHasta, metodoId]);
 
     useEffect(() => {
-        const handler = async () => {
-            await reloadOverview();
-            refreshTables();
+        const handler: EventListener = () => {
+            void reloadOverview().finally(() => {
+                void refreshTables();
+            });
         };
-        window.addEventListener('ironhub:sucursal-changed', handler as any);
-        return () => window.removeEventListener('ironhub:sucursal-changed', handler as any);
+        window.addEventListener('ironhub:sucursal-changed', handler);
+        return () => window.removeEventListener('ironhub:sucursal-changed', handler);
     }, [reloadOverview, refreshTables]);
 
     useEffect(() => {
@@ -268,8 +382,8 @@ function OwnerDashboard() {
     const arpuSeries = useMemo(() => arpu12m.map((x) => Number(x.arpu || 0)), [arpu12m]);
     const arpaSeries = useMemo(() => arpaTipos.map((x) => Number(x.arpa || 0)), [arpaTipos]);
     const waitlistSeries = useMemo(() => waitlistEvents.map((e) => Number(e.posicion || 0)).slice(0, 12), [waitlistEvents]);
-    const auditDailyTotals = useMemo(() => ((audit?.daily || []) as any[]).map((d) => Number(d.total_checkins || 0)), [audit]);
-    const auditDailyUnique = useMemo(() => ((audit?.daily || []) as any[]).map((d) => Number(d.unique_users || 0)), [audit]);
+    const auditDailyTotals = useMemo(() => (audit?.daily || []).map((d) => Number(d.total_checkins || 0)), [audit]);
+    const auditDailyUnique = useMemo(() => (audit?.daily || []).map((d) => Number(d.unique_users || 0)), [audit]);
 
     const kpiCards = useMemo(() => {
         const activosN = Number(kpis?.total_activos || 0);
@@ -463,18 +577,18 @@ function OwnerDashboard() {
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-800">
-                                                {(ownerGymBilling.payments || []).slice(0, 5).map((p: any) => (
-                                                    <tr key={p.id} className="text-slate-200">
-                                                        <td className="px-4 py-3">{p.paid_at ? formatDate(p.paid_at) : '—'}</td>
+                                                {(ownerGymBilling.payments || []).slice(0, 5).map((p) => (
+                                                    <tr key={String(p.id || '')} className="text-slate-200">
+                                                        <td className="px-4 py-3">{p.paid_at || p.fecha ? formatDate(String(p.paid_at || p.fecha || '')) : '—'}</td>
                                                         <td className="px-4 py-3">
-                                                            {p.currency || 'ARS'} {formatCurrency(Number(p.amount || 0))}
+                                                            {String(p.currency || 'ARS')} {formatCurrency(Number(p.amount ?? p.monto ?? 0))}
                                                         </td>
                                                         <td className="px-4 py-3">
-                                                            <span className={`badge ${String(p.status) === 'paid' ? 'badge-success' : 'badge-warning'}`}>
-                                                                {String(p.status || '—')}
+                                                            <span className={`badge ${String(p.status || p.estado) === 'paid' ? 'badge-success' : 'badge-warning'}`}>
+                                                                {String(p.status || p.estado || '—')}
                                                             </span>
                                                         </td>
-                                                        <td className="px-4 py-3 text-slate-400 max-w-xs truncate">{p.notes || '—'}</td>
+                                                        <td className="px-4 py-3 text-slate-400 max-w-xs truncate">{String(p.notes || '—')}</td>
                                                     </tr>
                                                 ))}
                                                 {(ownerGymBilling.payments || []).length === 0 && (
@@ -631,7 +745,7 @@ function OwnerDashboard() {
                     <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
                         <ChartCard title="Picos detectados" subtitle="Días con spike vs promedio 7d" className="lg:col-span-1">
                             <div className="space-y-2">
-                                {(audit?.anomalies?.spikes || []).slice(0, 8).map((s: any) => (
+                                {(audit?.anomalies?.spikes || []).slice(0, 8).map((s) => (
                                     <div key={String(s?.fecha || '')} className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
                                         <div className="flex items-center justify-between gap-2">
                                             <div className="text-sm text-slate-200">{formatDate(String(s?.fecha || ''))}</div>
@@ -646,7 +760,7 @@ function OwnerDashboard() {
 
                         <ChartCard title="Múltiples en un día" subtitle="Usuarios con alta frecuencia" className="lg:col-span-1">
                             <div className="space-y-2">
-                                {(audit?.anomalies?.multiples_en_dia || []).slice(0, 8).map((m: any, idx: number) => (
+                                {(audit?.anomalies?.multiples_en_dia || []).slice(0, 8).map((m, idx) => (
                                     <div key={`${m?.fecha || ''}-${m?.usuario_id || idx}`} className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
                                         <div className="flex items-center justify-between gap-2">
                                             <div className="text-sm text-slate-200">{m?.usuario_nombre || `ID ${m?.usuario_id}`}</div>
@@ -663,8 +777,8 @@ function OwnerDashboard() {
 
                         <ChartCard title="Repeticiones rápidas" subtitle="Check-ins con delta muy bajo" className="lg:col-span-1">
                             <div className="space-y-2">
-                                {(audit?.anomalies?.repeticiones_rapidas || []).slice(0, 8).map((r: any, idx: number) => (
-                                    <div key={`${r?.hora || ''}-${idx}`} className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                                {(audit?.anomalies?.repeticiones_rapidas || []).slice(0, 8).map((r, idx) => (
+                                    <div key={`${(r as Record<string, unknown>)?.hora || ''}-${idx}`} className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
                                         <div className="flex items-center justify-between gap-2">
                                             <div className="text-sm text-slate-200">{r?.usuario_nombre || `ID ${r?.usuario_id}`}</div>
                                             <div className="text-sm text-danger-200 font-semibold">{Math.max(0, Math.round(Number(r?.delta_seconds || 0) / 60))}m</div>
@@ -807,7 +921,14 @@ function OwnerDashboard() {
                                 value={usuariosSearch}
                                 onChange={(e) => setUsuariosSearch(e.target.value)}
                             />
-                            <select className="input" value={usuariosActivo} onChange={(e) => setUsuariosActivo(e.target.value as any)}>
+                            <select
+                                className="input"
+                                value={usuariosActivo}
+                                onChange={(e) => {
+                                    const v = e.target.value;
+                                    if (v === 'all' || v === 'true' || v === 'false') setUsuariosActivo(v);
+                                }}
+                            >
                                 <option value="all">Todos</option>
                                 <option value="true">Activos</option>
                                 <option value="false">Inactivos</option>
@@ -836,7 +957,7 @@ function OwnerDashboard() {
                                         <td className="py-2 pr-4 text-slate-200">{u.nombre}</td>
                                         <td className="py-2 pr-4 text-slate-400">{u.dni}</td>
                                         <td className="py-2 pr-4 text-slate-400">{u.telefono || '-'}</td>
-                                        <td className="py-2 pr-4 text-slate-400">{(u as any).sucursal_registro_nombre || '-'}</td>
+                                        <td className="py-2 pr-4 text-slate-400">{getStringField(u, 'sucursal_registro_nombre') || '-'}</td>
                                         <td className="py-2 pr-4">
                                             {u.activo ? (
                                                 <span className="text-emerald-300">Activo</span>
@@ -911,7 +1032,7 @@ function OwnerDashboard() {
                                     <tr key={String(p.id)} className="border-t border-slate-800/60">
                                         <td className="py-2 pr-4 text-slate-400">{formatDate(p.fecha_pago)}</td>
                                         <td className="py-2 pr-4 text-slate-200">{p.usuario_nombre || `#${p.usuario_id}`}</td>
-                                        <td className="py-2 pr-4 text-slate-400">{(p as any).sucursal_nombre || '-'}</td>
+                                        <td className="py-2 pr-4 text-slate-400">{getStringField(p, 'sucursal_nombre') || '-'}</td>
                                         <td className="py-2 pr-4 text-slate-200">{formatCurrency(Number(p.monto || 0))}</td>
                                         <td className="py-2 pr-4 text-slate-400">{p.metodo_pago || '-'}</td>
                                     </tr>
@@ -978,8 +1099,8 @@ function OwnerDashboard() {
                                             <div className="text-xs text-slate-500">{String(m?.estado || m?.status || '')}</div>
                                         </div>
                                         <div className="text-xs text-slate-500 mt-1 truncate">{String(m?.telefono || m?.phone || '')}</div>
-                                        {scope?.mode === 'general' && (m as any)?.sucursal_nombre ? (
-                                            <div className="text-xs text-slate-600 mt-1 truncate">{String((m as any)?.sucursal_nombre || '')}</div>
+                                        {scope?.mode === 'general' && m?.sucursal_nombre ? (
+                                            <div className="text-xs text-slate-600 mt-1 truncate">{String(m.sucursal_nombre || '')}</div>
                                         ) : null}
                                     </div>
                                 ))}
@@ -1016,7 +1137,7 @@ function OwnerDashboard() {
                                         <td className="py-2 pr-4 text-slate-400">{formatDate(a.fecha)}</td>
                                         <td className="py-2 pr-4 text-slate-200">{a.usuario_nombre || `#${a.usuario_id}`}</td>
                                         <td className="py-2 pr-4 text-slate-400">{a.tipo || '-'}</td>
-                                        <td className="py-2 pr-4 text-slate-400">{(a as any).sucursal_nombre || '-'}</td>
+                                        <td className="py-2 pr-4 text-slate-400">{getStringField(a, 'sucursal_nombre') || '-'}</td>
                                     </tr>
                                 ))}
                                 {!asistencias.length ? (

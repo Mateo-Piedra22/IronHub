@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
     Plus,
@@ -26,6 +26,11 @@ import {
 import ProfesorDetailModal from '@/components/ProfesorDetailModal';
 import { api, type Profesor, type Sesion } from '@/lib/api';
 import { formatDate, formatTime, cn } from '@/lib/utils';
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+    return v as Record<string, unknown>;
+}
 
 // Profesor form modal
 interface ProfesorFormModalProps {
@@ -81,8 +86,8 @@ function ProfesorFormModal({ isOpen, onClose, profesor, onSuccess }: ProfesorFor
                 const mapped = (res.data.usuarios || []).map((u) => ({
                     id: u.id,
                     nombre: u.nombre,
-                    dni: (u as any).dni,
-                    email: (u as any).email,
+                    dni: u.dni,
+                    email: u.email,
                 }));
                 setExistingUsers(mapped);
             } else {
@@ -289,17 +294,18 @@ function SessionTimer({ profesor, onSessionUpdate }: SessionTimerProps) {
         const hydrate = async () => {
             try {
                 const resActive = await api.getSesionActiva(profesor.id);
-                let active = resActive.ok ? (resActive.data?.sesion as any) : null;
+                let active = resActive.ok ? resActive.data?.sesion : null;
                 if (!active) {
                     const res = await api.getSesiones(profesor.id);
                     if (!res.ok || !res.data?.sesiones) return;
-                    const fallback = (res.data.sesiones as any[]).find((s) => !s.hora_fin && !s.fin);
+                    const fallback = (res.data.sesiones || []).find((s) => !s.hora_fin);
                     if (!fallback) return;
                     active = fallback;
                 }
                 setIsActive(true);
                 setCurrentSesionId(active.id);
-                const iso = active.inicio || null;
+                const activeObj = asRecord(active);
+                const iso = activeObj && typeof activeObj.inicio === 'string' ? activeObj.inicio : null;
                 if (iso) {
                     const dt = new Date(iso);
                     if (!isNaN(dt.getTime())) {
@@ -347,16 +353,16 @@ function SessionTimer({ profesor, onSessionUpdate }: SessionTimerProps) {
             const res = await api.startSesion(profesor.id);
             if (res.ok && res.data) {
                 setIsActive(true);
-                const iso = (res.data as any).inicio || null;
-                if (iso) {
-                    const dt = new Date(iso);
-                    if (!isNaN(dt.getTime())) {
-                        setStartTime(dt);
-                        setElapsed(Math.floor((Date.now() - dt.getTime()) / 1000));
-                    } else {
-                        setStartTime(new Date());
-                        setElapsed(0);
-                    }
+                const dataObj = asRecord(res.data);
+                const iso = dataObj && typeof dataObj.inicio === 'string' ? dataObj.inicio : null;
+                const dt = iso
+                    ? new Date(iso)
+                    : res.data.fecha && res.data.hora_inicio
+                      ? new Date(`${res.data.fecha}T${res.data.hora_inicio}`)
+                      : new Date();
+                if (!isNaN(dt.getTime())) {
+                    setStartTime(dt);
+                    setElapsed(Math.floor((Date.now() - dt.getTime()) / 1000));
                 } else {
                     setStartTime(new Date());
                     setElapsed(0);
@@ -475,14 +481,14 @@ export default function ProfesoresPage() {
         try {
             const res = await api.getProfesores();
             if (res.ok && res.data) {
-                const list = (res.data.profesores || []) as any[];
+                const list = res.data.profesores || [];
                 setProfesores(list);
                 const currentId = selectedProfesor?.id;
                 const found = currentId ? list.find((p) => Number(p?.id) === Number(currentId)) : null;
                 if (found) {
-                    setSelectedProfesor(found as any);
+                    setSelectedProfesor(found);
                 } else if (list.length > 0) {
-                    setSelectedProfesor(list[0] as any);
+                    setSelectedProfesor(list[0]);
                 } else {
                     setSelectedProfesor(null);
                 }
@@ -541,8 +547,8 @@ export default function ProfesoresPage() {
             setSelectedProfesor(null);
             void loadProfesores();
         };
-        window.addEventListener('ironhub:sucursal-changed', handler as any);
-        return () => window.removeEventListener('ironhub:sucursal-changed', handler as any);
+        window.addEventListener('ironhub:sucursal-changed', handler);
+        return () => window.removeEventListener('ironhub:sucursal-changed', handler);
     }, [loadProfesores]);
 
     useEffect(() => {

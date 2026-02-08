@@ -1,13 +1,9 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     UserPlus,
-    Filter,
-    Download,
-    MoreVertical,
     Edit,
     Trash2,
     CheckCircle2,
@@ -30,7 +26,7 @@ import {
     type Column,
 } from '@/components/ui';
 import UserSidebar from '@/components/UserSidebar';
-import { api, type Usuario, type UsuarioCreateInput, type TipoCuota } from '@/lib/api';
+import { api, type ApiResponse, type Usuario, type UsuarioCreateInput, type TipoCuota } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { formatDate, formatDateRelative, getInitials, getWhatsAppLink, cn } from '@/lib/utils';
 
@@ -208,7 +204,6 @@ function UsuarioFormModal({ isOpen, onClose, usuario, tiposCuota, onSuccess }: U
 }
 
 export default function UsuariosPage() {
-    const router = useRouter();
     const { user: sessionUser } = useAuth();
     const { success, error } = useToast();
 
@@ -249,6 +244,9 @@ export default function UsuariosPage() {
     const loadUsuarios = useCallback(async () => {
         setLoading(true);
         try {
+            const hoyPromise = api.getAsistenciasHoyIds().catch(
+                (): ApiResponse<number[]> => ({ ok: false })
+            );
             const [res, hoyRes] = await Promise.all([
                 api.getUsuarios({
                     search: search || undefined,
@@ -256,14 +254,14 @@ export default function UsuariosPage() {
                     page,
                     limit: pageSize,
                 }),
-                api.getAsistenciasHoyIds().catch(() => ({ ok: false } as any)),
+                hoyPromise,
             ]);
             if (res.ok && res.data) {
                 setUsuarios(res.data.usuarios);
                 setTotal(res.data.total);
             }
-            if (hoyRes && (hoyRes as any).ok && Array.isArray((hoyRes as any).data)) {
-                setAsistenciasHoyIds(new Set<number>((hoyRes as any).data as number[]));
+            if (hoyRes.ok && Array.isArray(hoyRes.data)) {
+                setAsistenciasHoyIds(new Set<number>(hoyRes.data));
             }
         } catch {
             error('Error al cargar usuarios');
@@ -288,12 +286,12 @@ export default function UsuariosPage() {
     }, [loadUsuarios]);
 
     useEffect(() => {
-        const handler = () => {
+        const handler: EventListener = () => {
             setPage(1);
             loadUsuarios();
         };
-        window.addEventListener('ironhub:sucursal-changed', handler as any);
-        return () => window.removeEventListener('ironhub:sucursal-changed', handler as any);
+        window.addEventListener('ironhub:sucursal-changed', handler);
+        return () => window.removeEventListener('ironhub:sucursal-changed', handler);
     }, [loadUsuarios]);
 
     const isOwner = (() => {

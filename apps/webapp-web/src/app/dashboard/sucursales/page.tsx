@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Building2, RefreshCw, AlertTriangle } from 'lucide-react';
 import { Button, Input, Modal, ConfirmModal, useToast } from '@/components/ui';
 import { api, type Sucursal } from '@/lib/api';
@@ -34,7 +34,7 @@ export default function DashboardSucursalesPage() {
     const active = useMemo(() => items.filter((s) => !!s.activa), [items]);
     const inactive = useMemo(() => items.filter((s) => !s.activa), [items]);
 
-    const load = async () => {
+    const load = useCallback(async () => {
         setLoading(true);
         try {
             const res = await api.getSucursales();
@@ -49,11 +49,11 @@ export default function DashboardSucursalesPage() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [toast]);
 
     useEffect(() => {
         load();
-    }, []);
+    }, [load]);
 
     const openEdit = (s: Sucursal) => {
         const st: EditState = {
@@ -83,9 +83,9 @@ export default function DashboardSucursalesPage() {
         })();
     };
 
-    const saveNow = async () => {
+    const saveNow = useCallback(async () => {
         if (!edit || !original) return;
-        const payload: any = {};
+        const payload: Partial<{ nombre: string; codigo: string; direccion: string | null; timezone: string | null; activa: boolean }> = {};
         if (edit.nombre.trim() !== original.nombre.trim()) payload.nombre = edit.nombre.trim();
         if (edit.codigo.trim().toLowerCase() !== original.codigo.trim().toLowerCase()) payload.codigo = edit.codigo.trim().toLowerCase();
         if (edit.direccion.trim() !== original.direccion.trim()) payload.direccion = edit.direccion.trim() || null;
@@ -110,7 +110,7 @@ export default function DashboardSucursalesPage() {
         } finally {
             setSaving(false);
         }
-    };
+    }, [edit, load, original, toast]);
 
     const requestSave = async () => {
         if (!edit || !original) return;

@@ -4,15 +4,11 @@ import { useEffect, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
     Plus,
-    Search,
     Video,
     Edit,
     Trash2,
-    Filter,
     X,
-    Play,
     ExternalLink,
-    PlayCircle,
 } from 'lucide-react';
 import { VideoDropzone } from '@/components/VideoDropzone';
 import {
@@ -28,7 +24,6 @@ import {
     type Column,
 } from '@/components/ui';
 import { api, type Ejercicio } from '@/lib/api';
-import { cn } from '@/lib/utils';
 
 // Muscle groups for filtering
 const gruposMusculares = [
@@ -552,9 +547,9 @@ export default function EjerciciosPage() {
                                         {selectedEjercicio.grupo_muscular}
                                     </span>
                                 )}
-                                {(selectedEjercicio as any).objetivo && (
+                                {selectedEjercicio.objetivo && (
                                     <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-success-500/20 text-success-300 text-xs">
-                                        {(selectedEjercicio as any).objetivo}
+                                        {selectedEjercicio.objetivo}
                                     </span>
                                 )}
                                 {selectedEjercicio.equipamiento && (

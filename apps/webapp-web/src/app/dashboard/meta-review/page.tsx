@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Loader2, Send, Activity, Copy, MessageSquareText } from 'lucide-react';
 import { Button, Input, useToast } from '@/components/ui';
@@ -31,6 +31,27 @@ function getApiBaseUrl(): string {
 }
 const API_BASE = getApiBaseUrl();
 
+const ENDPOINTS = {
+    health: '/api/meta-review/whatsapp/health',
+    send: '/api/meta-review/whatsapp/send-text',
+    sendTemplate: '/api/meta-review/whatsapp/send-template',
+    createTemplate: '/api/meta-review/whatsapp/create-template',
+} as const;
+
+function extractApiErrorMessage(payload: unknown): string {
+    if (!payload) return 'Error';
+    if (typeof payload === 'string') return payload;
+    if (typeof payload !== 'object') return 'Error';
+    const rec = payload as Record<string, unknown>;
+    const raw = rec.error ?? rec.detail ?? rec.mensaje ?? 'Error';
+    if (typeof raw === 'string') return raw;
+    try {
+        return JSON.stringify(raw);
+    } catch {
+        return 'Error';
+    }
+}
+
 async function apiRequest<T>(url: string, opts: RequestInit = {}): Promise<ApiResult<T>> {
     try {
         const currentTenant = typeof window !== 'undefined' ? getCurrentSubdomain() : '';
@@ -55,13 +76,11 @@ async function apiRequest<T>(url: string, opts: RequestInit = {}): Promise<ApiRe
                 ...(opts.headers || {}),
             },
         });
-        const data = (await res.json().catch(() => null)) as { error?: unknown; detail?: unknown; mensaje?: unknown };
+        const payload = (await res.json().catch(() => null)) as unknown;
         if (!res.ok) {
-            const raw = (data as any)?.error || (data as any)?.detail || (data as any)?.mensaje || 'Error';
-            const msg = typeof raw === 'string' ? raw : JSON.stringify(raw);
-            return { ok: false, error: msg };
+            return { ok: false, error: extractApiErrorMessage(payload) };
         }
-        return { ok: true, data: data as any };
+        return { ok: true, data: payload as T };
     } catch {
         return { ok: false, error: 'Error de conexión' };
     }
@@ -87,45 +106,35 @@ export default function MetaReviewOwnerPage() {
 
     const [lastOutput, setLastOutput] = useState<unknown>(null);
 
-    const endpoints = useMemo(
-        () => ({
-            health: '/api/meta-review/whatsapp/health',
-            send: '/api/meta-review/whatsapp/send-text',
-            sendTemplate: '/api/meta-review/whatsapp/send-template',
-            createTemplate: '/api/meta-review/whatsapp/create-template',
-        }),
-        []
-    );
-
-    const copy = async (value: string) => {
+    const copy = useCallback(async (value: string) => {
         try {
             await navigator.clipboard.writeText(value);
             success('Copiado');
         } catch {
             error('No se pudo copiar');
         }
-    };
+    }, [error, success]);
 
-    const runHealth = async () => {
+    const runHealth = useCallback(async () => {
         setChecking(true);
         setLastOutput(null);
-        const res = await apiRequest<unknown>(endpoints.health, { method: 'GET' });
+        const res = await apiRequest<unknown>(ENDPOINTS.health, { method: 'GET' });
         setChecking(false);
         if (!res.ok) {
             error(res.error || 'Error');
             return;
         }
         setLastOutput(res.data);
-    };
+    }, [error]);
 
-    const runSend = async () => {
+    const runSend = useCallback(async () => {
         if (!to.trim() || !message.trim()) {
             error('Completar número y mensaje');
             return;
         }
         setSending(true);
         setLastOutput(null);
-        const res = await apiRequest<unknown>(endpoints.send, {
+        const res = await apiRequest<unknown>(ENDPOINTS.send, {
             method: 'POST',
             body: JSON.stringify({ to: to.trim(), body: message.trim() }),
         });
@@ -136,9 +145,9 @@ export default function MetaReviewOwnerPage() {
         }
         setLastOutput(res.data);
         success('Solicitud enviada');
-    };
+    }, [error, message, success, to]);
 
-    const runSendTemplate = async () => {
+    const runSendTemplate = useCallback(async () => {
         if (!to.trim() || !sendTplName.trim()) {
             error('Completar número y template');
             return;
@@ -149,7 +158,7 @@ export default function MetaReviewOwnerPage() {
             .split(',')
             .map((x) => x.trim())
             .filter(Boolean);
-        const res = await apiRequest<unknown>(endpoints.sendTemplate, {
+        const res = await apiRequest<unknown>(ENDPOINTS.sendTemplate, {
             method: 'POST',
             body: JSON.stringify({
                 to: to.trim(),
@@ -165,9 +174,9 @@ export default function MetaReviewOwnerPage() {
         }
         setLastOutput(res.data);
         success('Template enviado');
-    };
+    }, [error, sendTplLanguage, sendTplName, sendTplParams, success, to]);
 
-    const runCreateTemplate = async () => {
+    const runCreateTemplate = useCallback(async () => {
         if (!tplName.trim() || !tplBody.trim()) {
             error('Completar nombre y cuerpo');
             return;
@@ -178,7 +187,7 @@ export default function MetaReviewOwnerPage() {
             .split(',')
             .map((x) => x.trim())
             .filter(Boolean);
-        const res = await apiRequest<unknown>(endpoints.createTemplate, {
+        const res = await apiRequest<unknown>(ENDPOINTS.createTemplate, {
             method: 'POST',
             body: JSON.stringify({
                 name: tplName.trim(),
@@ -195,11 +204,11 @@ export default function MetaReviewOwnerPage() {
         }
         setLastOutput(res.data);
         success('Plantilla enviada a Meta');
-    };
+    }, [error, success, tplBody, tplCategory, tplExamples, tplLanguage, tplName]);
 
     useEffect(() => {
         void runHealth();
-    }, []);
+    }, [runHealth]);
 
     return (
         <div className="space-y-6">
@@ -263,7 +272,14 @@ export default function MetaReviewOwnerPage() {
                     <Input label="Template name" value={tplName} onChange={(e) => setTplName(e.target.value)} placeholder="ih_meta_review_demo_v1" />
                     <div>
                         <label className="block text-sm text-slate-300 mb-1">Category</label>
-                        <select className="input w-full" value={tplCategory} onChange={(e) => setTplCategory(e.target.value as any)}>
+                        <select
+                            className="input w-full"
+                            value={tplCategory}
+                            onChange={(e) => {
+                                const v = e.target.value;
+                                if (v === 'UTILITY' || v === 'AUTHENTICATION' || v === 'MARKETING') setTplCategory(v);
+                            }}
+                        >
                             <option value="UTILITY">UTILITY</option>
                             <option value="AUTHENTICATION">AUTHENTICATION</option>
                             <option value="MARKETING">MARKETING</option>

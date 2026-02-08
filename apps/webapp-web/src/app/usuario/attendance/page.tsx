@@ -6,7 +6,6 @@ import { Calendar, TrendingUp, Loader2 } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import { api, type Asistencia } from '@/lib/api';
 import { Button, Input } from '@/components/ui';
-import { formatDate } from '@/lib/utils';
 
 export default function AttendancePage() {
     const { user } = useAuth();

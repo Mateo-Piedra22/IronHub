@@ -4,11 +4,6 @@ import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
     Plus,
-    Download,
-    Filter,
-    Calendar,
-    Printer,
-    Eye,
     Trash2,
     FileText,
     RefreshCw,
@@ -18,7 +13,6 @@ import {
 } from 'lucide-react';
 import {
     Button,
-    SearchInput,
     DataTable,
     Modal,
     ConfirmModal,
@@ -33,7 +27,6 @@ import {
     api,
     type Pago,
     type PagoCreateInput,
-    type PagoConceptoItem,
     type Usuario,
     type TipoCuota,
     type MetodoPago,
@@ -80,7 +73,7 @@ function createEmptyLineItem(): ConceptoLineItem {
 function PagoFormModal({
     isOpen,
     onClose,
-    pago,
+    pago: _pago,
     usuarios,
     tiposCuota,
     metodosPago,
@@ -571,7 +564,6 @@ export default function PagosPage() {
     // State
     const [pagos, setPagos] = useState<Pago[]>([]);
     const [loading, setLoading] = useState(true);
-    const [search, setSearch] = useState('');
     const [filterDesde, setFilterDesde] = useState('');
     const [filterHasta, setFilterHasta] = useState('');
     const [filterMetodo, setFilterMetodo] = useState<number | undefined>();
@@ -646,8 +638,8 @@ export default function PagosPage() {
             } catch {
             }
         };
-        window.addEventListener('ironhub:sucursal-changed', handler as any);
-        return () => window.removeEventListener('ironhub:sucursal-changed', handler as any);
+        window.addEventListener('ironhub:sucursal-changed', handler);
+        return () => window.removeEventListener('ironhub:sucursal-changed', handler);
     }, [loadPagos]);
 
     // Delete

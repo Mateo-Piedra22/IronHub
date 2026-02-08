@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
+import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
@@ -281,13 +282,15 @@ function CuotaEntitlementsModal({ isOpen, onClose, item }: CuotaEntitlementsModa
     const [scopeKey, setScopeKey] = useState<string>('0');
     const [classRulesByScope, setClassRulesByScope] = useState<Record<string, number[]>>({});
 
+    const itemId = item?.id;
+
     useEffect(() => {
-        if (!isOpen || !item) return;
+        if (!isOpen || !itemId) return;
         setLoading(true);
         void (async () => {
             try {
                 const [entRes, sucRes, tiposRes] = await Promise.all([
-                    api.getTipoCuotaEntitlements(item.id),
+                    api.getTipoCuotaEntitlements(itemId),
                     api.getSucursales(),
                     api.getClaseTipos(),
                 ]);
@@ -336,7 +339,7 @@ function CuotaEntitlementsModal({ isOpen, onClose, item }: CuotaEntitlementsModa
                 setLoading(false);
             }
         })();
-    }, [isOpen, item?.id]);
+    }, [isOpen, itemId]);
 
     const toggleSucursal = (sid: number) => {
         setSelectedSucursales((prev) => {
@@ -364,8 +367,9 @@ function CuotaEntitlementsModal({ isOpen, onClose, item }: CuotaEntitlementsModa
             const class_rules: { sucursal_id?: number | null; target_type: 'tipo_clase'; target_id: number; allow: boolean }[] = [];
             Object.entries(classRulesByScope || {}).forEach(([k, ids]) => {
                 const sid = k === '0' ? null : Number(k);
+                const sucursalId = sid === null ? null : (Number.isFinite(sid) ? sid : null);
                 (ids || []).forEach((id) => {
-                    class_rules.push({ sucursal_id: Number.isFinite(sid as any) ? (sid as any) : null, target_type: 'tipo_clase', target_id: Number(id), allow: true });
+                    class_rules.push({ sucursal_id: sucursalId, target_type: 'tipo_clase', target_id: Number(id), allow: true });
                 });
             });
             const res = await api.updateTipoCuotaEntitlements(item.id, {
@@ -496,9 +500,9 @@ export default function ConfiguracionPage() {
         (async () => {
             try {
                 const r = await api.getSession('gestion');
-                if (r.ok && (r.data as any)?.user) {
-                    setSessionRole(String((r.data as any).user.rol || ''));
-                    setSessionScopes((((r.data as any).user.scopes || []) as any[]).map((s) => String(s)));
+                if (r.ok && r.data?.user) {
+                    setSessionRole(String(r.data.user.rol || ''));
+                    setSessionScopes((r.data.user.scopes || []).map((s) => String(s)));
                 } else {
                     setSessionRole('');
                     setSessionScopes([]);
@@ -722,8 +726,12 @@ export default function ConfiguracionPage() {
 
         if (activeTab === 'modulos') {
             const modules = (featureFlags && featureFlags.modules) || {};
-            const features = (featureFlags && (featureFlags as any).features) || {};
-            const bulkActions = (features && (features as any).bulk_actions) || {};
+            const features = (featureFlags && featureFlags.features) || {};
+            const bulkActionsRaw = features['bulk_actions'];
+            const bulkActions =
+                bulkActionsRaw && typeof bulkActionsRaw === 'object' && !Array.isArray(bulkActionsRaw)
+                    ? (bulkActionsRaw as Record<string, unknown>)
+                    : {};
             const bulkModuleEnabled = modules['bulk_actions'] !== false;
             return (
                 <div className="space-y-3">
@@ -779,11 +787,15 @@ export default function ConfiguracionPage() {
                                 disabled={readOnlyModules || !bulkModuleEnabled}
                                 onChange={(e) => {
                                     if (readOnlyModules) return;
-                                    const nextFeatures: any = { ...(featureFlags as any).features };
-                                    const nextBulk: any = { ...(nextFeatures?.bulk_actions || {}) };
+                                    const nextFeatures: NonNullable<FeatureFlags['features']> = { ...(featureFlags.features || {}) };
+                                    const prevBulk = nextFeatures['bulk_actions'];
+                                    const nextBulk =
+                                        prevBulk && typeof prevBulk === 'object' && !Array.isArray(prevBulk)
+                                            ? { ...(prevBulk as Record<string, unknown>) }
+                                            : {};
                                     nextBulk['usuarios_import'] = e.target.checked;
-                                    nextFeatures.bulk_actions = nextBulk;
-                                    setFeatureFlags({ ...(featureFlags || { modules: {} }), ...(featureFlags as any), features: nextFeatures } as any);
+                                    nextFeatures['bulk_actions'] = nextBulk as unknown as NonNullable<FeatureFlags['features']>[string];
+                                    setFeatureFlags({ ...(featureFlags || { modules: {} }), features: nextFeatures });
                                 }}
                             />
                         </label>
@@ -811,7 +823,9 @@ export default function ConfiguracionPage() {
                             { key: 'delete', label: 'Eliminación' },
                         ].map((it) => {
                             const enabled = modules['usuarios'] !== false;
-                            const current = ((features && (features as any).usuarios) || {}) as any;
+                            const raw = features['usuarios'];
+                            const current =
+                                raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
                             return (
                                 <label key={it.key} className="flex items-center justify-between gap-3 py-1">
                                     <span className={cn('text-sm', enabled ? 'text-white' : 'text-slate-500')}>{it.label}</span>
@@ -821,11 +835,15 @@ export default function ConfiguracionPage() {
                                         disabled={readOnlyModules || !enabled}
                                         onChange={(e) => {
                                             if (readOnlyModules) return;
-                                            const nextFeatures: any = { ...(featureFlags as any).features };
-                                            const next: any = { ...(nextFeatures?.usuarios || {}) };
+                                            const nextFeatures: NonNullable<FeatureFlags['features']> = { ...(featureFlags.features || {}) };
+                                            const prev = nextFeatures['usuarios'];
+                                            const next =
+                                                prev && typeof prev === 'object' && !Array.isArray(prev)
+                                                    ? { ...(prev as Record<string, unknown>) }
+                                                    : {};
                                             next[it.key] = e.target.checked;
-                                            nextFeatures.usuarios = next;
-                                            setFeatureFlags({ ...(featureFlags || { modules: {} }), ...(featureFlags as any), features: nextFeatures } as any);
+                                            nextFeatures['usuarios'] = next as unknown as NonNullable<FeatureFlags['features']>[string];
+                                            setFeatureFlags({ ...(featureFlags || { modules: {} }), features: nextFeatures });
                                         }}
                                     />
                                 </label>
@@ -855,7 +873,9 @@ export default function ConfiguracionPage() {
                             { key: 'export', label: 'Exportaciones' },
                         ].map((it) => {
                             const enabled = modules['pagos'] !== false;
-                            const current = ((features && (features as any).pagos) || {}) as any;
+                            const raw = features['pagos'];
+                            const current =
+                                raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
                             return (
                                 <label key={it.key} className="flex items-center justify-between gap-3 py-1">
                                     <span className={cn('text-sm', enabled ? 'text-white' : 'text-slate-500')}>{it.label}</span>
@@ -865,11 +885,15 @@ export default function ConfiguracionPage() {
                                         disabled={readOnlyModules || !enabled}
                                         onChange={(e) => {
                                             if (readOnlyModules) return;
-                                            const nextFeatures: any = { ...(featureFlags as any).features };
-                                            const next: any = { ...(nextFeatures?.pagos || {}) };
+                                            const nextFeatures: NonNullable<FeatureFlags['features']> = { ...(featureFlags.features || {}) };
+                                            const prev = nextFeatures['pagos'];
+                                            const next =
+                                                prev && typeof prev === 'object' && !Array.isArray(prev)
+                                                    ? { ...(prev as Record<string, unknown>) }
+                                                    : {};
                                             next[it.key] = e.target.checked;
-                                            nextFeatures.pagos = next;
-                                            setFeatureFlags({ ...(featureFlags || { modules: {} }), ...(featureFlags as any), features: nextFeatures } as any);
+                                            nextFeatures['pagos'] = next as unknown as NonNullable<FeatureFlags['features']>[string];
+                                            setFeatureFlags({ ...(featureFlags || { modules: {} }), features: nextFeatures });
                                         }}
                                     />
                                 </label>
@@ -1016,7 +1040,7 @@ export default function ConfiguracionPage() {
                     <div className="flex items-center gap-4">
                         <div className="w-14 h-14 rounded-xl bg-slate-800 border border-slate-700 overflow-hidden flex items-center justify-center">
                             {gymLogoUrl ? (
-                                <img src={gymLogoUrl} alt="Logo" className="w-full h-full object-contain bg-white" />
+                                <Image src={gymLogoUrl} alt="Logo" width={56} height={56} className="w-full h-full object-contain bg-white" unoptimized />
                             ) : (
                                 <span className="text-xs text-slate-500">Sin logo</span>
                             )}
@@ -1155,6 +1179,7 @@ export default function ConfiguracionPage() {
                 message={`¿Estás seguro de eliminar "${itemToDelete?.item.nombre}"?`}
                 confirmText="Eliminar"
                 variant="danger"
+                isLoading={deleteLoading}
             />
         </div>
     );

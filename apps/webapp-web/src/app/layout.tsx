@@ -29,8 +29,16 @@ export async function generateMetadata(): Promise<Metadata> {
                 headers: { 'X-Tenant': tenant },
                 next: { revalidate: 300 },
             });
-            const data = (await res.json().catch(() => null)) as any;
-            gymName = String(data?.gym_name || data?.gym?.name || '').trim();
+            const raw = (await res.json().catch(() => null)) as unknown;
+            if (raw && typeof raw === 'object') {
+                const record = raw as Record<string, unknown>;
+                const gymNameDirect = typeof record.gym_name === 'string' ? record.gym_name : '';
+                const gym = record.gym && typeof record.gym === 'object' ? (record.gym as Record<string, unknown>) : null;
+                const gymNameNested = gym && typeof gym.name === 'string' ? gym.name : '';
+                gymName = String(gymNameDirect || gymNameNested || '').trim();
+            } else {
+                gymName = '';
+            }
         }
     } catch {
         gymName = '';

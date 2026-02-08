@@ -54,6 +54,16 @@ function normalizeEstado(raw: string): 'pending' | 'sent' | 'failed' {
     return 'pending';
 }
 
+type FacebookSDK = {
+    init: (opts: { appId: string; cookie: boolean; xfbml: boolean; version: string }) => void;
+    login: (cb: (response: unknown) => void, opts: Record<string, unknown>) => void;
+};
+
+type WindowWithFacebookSDK = typeof window & {
+    FB?: FacebookSDK;
+    fbAsyncInit?: () => void;
+};
+
 export default function WhatsAppPage() {
     const { success, error } = useToast();
 
@@ -198,7 +208,7 @@ export default function WhatsAppPage() {
     };
 
     const ensureFacebookSdk = async (appId: string, apiVersion: string) => {
-        const w = window as any;
+        const w = window as WindowWithFacebookSDK;
         if (w.FB) {
             try {
                 w.FB.init({ appId, cookie: true, xfbml: false, version: apiVersion });
@@ -208,10 +218,10 @@ export default function WhatsAppPage() {
         await new Promise<void>((resolve, reject) => {
             w.fbAsyncInit = function () {
                 try {
-                    w.FB.init({ appId, cookie: true, xfbml: false, version: apiVersion });
+                    w.FB?.init({ appId, cookie: true, xfbml: false, version: apiVersion });
                     resolve();
-                } catch (e) {
-                    reject(e);
+                } catch {
+                    reject(new Error('No se pudo inicializar el SDK de Meta'));
                 }
             };
             const id = 'facebook-jssdk';
@@ -257,15 +267,16 @@ export default function WhatsAppPage() {
                 let finishResolve: (() => void) | null = null;
                 const finishPromise = new Promise<void>((resolve) => (finishResolve = resolve));
 
-                const maybeDone = async (payload: any) => {
+                const maybeDone = async (payload: unknown) => {
                     if (done) return;
                     done = true;
                     try {
-                        if (payload?.ok) {
+                        const p = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : null;
+                        if (p?.ok) {
                             const res = await api.completeWhatsAppEmbeddedSignup({
-                                code: String(payload.code || ''),
-                                waba_id: String(payload.waba_id || ''),
-                                phone_number_id: String(payload.phone_number_id || ''),
+                                code: String(p.code || ''),
+                                waba_id: String(p.waba_id || ''),
+                                phone_number_id: String(p.phone_number_id || ''),
                             });
                             if (res.ok) {
                                 success('WhatsApp conectado. Plantillas en proceso de creación.');
@@ -275,7 +286,7 @@ export default function WhatsAppPage() {
                                 error(res.error || 'Error al completar el registro');
                             }
                         } else {
-                            error(String(payload?.error || 'No se pudo completar el registro'));
+                            error(String(p?.error || 'No se pudo completar el registro'));
                         }
                     } finally {
                         finishResolve?.();
@@ -288,8 +299,10 @@ export default function WhatsAppPage() {
                 listener = (event: MessageEvent) => {
                     try {
                         if (!connectOrigins.includes(event.origin)) return;
-                        const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-                        if (!data || data.type !== 'IH_WA_CONNECT_RESULT') return;
+                        const raw = typeof event.data === 'string' ? (JSON.parse(event.data) as unknown) : (event.data as unknown);
+                        if (!raw || typeof raw !== 'object') return;
+                        const data = raw as Record<string, unknown>;
+                        if (data.type !== 'IH_WA_CONNECT_RESULT') return;
                         void maybeDone(data.payload);
                     } catch {}
                 };
@@ -322,7 +335,7 @@ export default function WhatsAppPage() {
 
             await ensureFacebookSdk(embedded.app_id, embedded.api_version || 'v19.0');
 
-            const w = window as any;
+            const w = window as WindowWithFacebookSDK;
             let code: string | null = null;
             let wabaId: string | null = null;
             let phoneNumberId: string | null = null;
@@ -354,10 +367,12 @@ export default function WhatsAppPage() {
             listener = (event: MessageEvent) => {
                 try {
                     if (event.origin !== 'https://www.facebook.com' && event.origin !== 'https://web.facebook.com') return;
-                    const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-                    if (!data || data.type !== 'WA_EMBEDDED_SIGNUP') return;
+                    const raw = typeof event.data === 'string' ? (JSON.parse(event.data) as unknown) : (event.data as unknown);
+                    if (!raw || typeof raw !== 'object') return;
+                    const data = raw as Record<string, unknown>;
+                    if (data.type !== 'WA_EMBEDDED_SIGNUP') return;
                     if (data.event === 'FINISH') {
-                        const d = data.data || {};
+                        const d = data.data && typeof data.data === 'object' ? (data.data as Record<string, unknown>) : {};
                         wabaId = String(d.waba_id || '');
                         phoneNumberId = String(d.phone_number_id || '');
                         void maybeComplete();
@@ -368,10 +383,18 @@ export default function WhatsAppPage() {
             window.addEventListener('message', listener);
 
             await new Promise<void>((resolve) => {
-                w.FB.login(
-                    (response: any) => {
+                w.FB?.login(
+                    (response: unknown) => {
                         try {
-                            code = response?.authResponse?.code ? String(response.authResponse.code) : null;
+                            if (response && typeof response === 'object') {
+                                const r = response as Record<string, unknown>;
+                                const auth = r.authResponse && typeof r.authResponse === 'object'
+                                    ? (r.authResponse as Record<string, unknown>)
+                                    : null;
+                                code = auth?.code ? String(auth.code) : null;
+                            } else {
+                                code = null;
+                            }
                         } catch {
                             code = null;
                         }
@@ -390,8 +413,9 @@ export default function WhatsAppPage() {
                 finishPromise,
                 new Promise<void>((_resolve, reject) => setTimeout(() => reject(new Error('Tiempo de espera agotado')), 120000)),
             ]);
-        } catch (e: any) {
-            error(e?.message || 'Error al iniciar el registro');
+        } catch (e) {
+            const message = e instanceof Error ? e.message : '';
+            error(message || 'Error al iniciar el registro');
         } finally {
             try {
                 if (listener) window.removeEventListener('message', listener);
@@ -504,7 +528,7 @@ export default function WhatsAppPage() {
         const res = await api.runWhatsAppAutomation({ dry_run: dryRun, trigger_keys });
         setAutomationLoading(false);
         if (res.ok && res.data) {
-            setAutomationLastResult({ scanned: res.data.scanned, sent: res.data.sent, dry_run: res.data.dry_run, skipped: (res.data as any).skipped });
+            setAutomationLastResult({ scanned: res.data.scanned, sent: res.data.sent, dry_run: res.data.dry_run, skipped: res.data.skipped });
             success(dryRun ? 'Dry-run ejecutado' : 'Automatización ejecutada');
         } else {
             error(res.error || 'Error al ejecutar automatización');
@@ -1159,7 +1183,7 @@ export default function WhatsAppPage() {
                     const res = await api.runWhatsAppAutomation({ dry_run: false, trigger_keys });
                     setAutomationLoading(false);
                     if (res.ok && res.data) {
-                        setAutomationLastResult({ scanned: res.data.scanned, sent: res.data.sent, dry_run: res.data.dry_run, skipped: (res.data as any).skipped });
+                        setAutomationLastResult({ scanned: res.data.scanned, sent: res.data.sent, dry_run: res.data.dry_run, skipped: res.data.skipped });
                         success('Automatización ejecutada');
                     } else {
                         error(res.error || 'Error al ejecutar automatización');

@@ -13,7 +13,6 @@ import {
     Download,
     ChevronDown,
     ChevronRight,
-    GripVertical,
     QrCode,
     Settings2,
     FileDown,
@@ -26,8 +25,6 @@ import {
     Modal,
     ConfirmModal,
     useToast,
-    Input,
-    Textarea,
     SearchInput,
     type Column,
 } from '@/components/ui';
@@ -44,131 +41,6 @@ const subtabs = [
     { id: 'plantillas', label: 'Plantillas', icon: FileText },
     { id: 'asignadas', label: 'Asignadas', icon: Users },
 ];
-
-// Rutina form/editor modal
-interface RutinaEditorModalProps {
-    isOpen: boolean;
-    onClose: () => void;
-    rutina?: Rutina | null;
-    ejercicios: Ejercicio[];
-    isPlantilla: boolean;
-    onSuccess: () => void;
-}
-
-function RutinaEditorModal({
-    isOpen,
-    onClose,
-    rutina,
-    ejercicios,
-    isPlantilla,
-    onSuccess,
-}: RutinaEditorModalProps) {
-    const [loading, setLoading] = useState(false);
-    const [formData, setFormData] = useState({
-        nombre: '',
-        descripcion: '',
-        categoria: '',
-    });
-    const { success, error } = useToast();
-
-    useEffect(() => {
-        if (isOpen) {
-            if (rutina) {
-                setFormData({
-                    nombre: rutina.nombre || '',
-                    descripcion: rutina.descripcion || '',
-                    categoria: rutina.categoria || '',
-                });
-            } else {
-                setFormData({ nombre: '', descripcion: '', categoria: '' });
-            }
-        }
-    }, [isOpen, rutina]);
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!formData.nombre.trim()) {
-            error('El nombre es requerido');
-            return;
-        }
-
-        setLoading(true);
-        try {
-            if (rutina) {
-                const res = await api.updateRutina(rutina.id, {
-                    ...formData,
-                    es_plantilla: isPlantilla,
-                });
-                if (res.ok) {
-                    success('Rutina actualizada');
-                    onSuccess();
-                    onClose();
-                } else {
-                    error(res.error || 'Error al actualizar');
-                }
-            } else {
-                const res = await api.createRutina({
-                    ...formData,
-                    es_plantilla: isPlantilla,
-                    activa: true,
-                    dias: [],
-                });
-                if (res.ok) {
-                    success('Rutina creada');
-                    onSuccess();
-                    onClose();
-                } else {
-                    error(res.error || 'Error al crear');
-                }
-            }
-        } catch {
-            error('Error de conexión');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    return (
-        <Modal
-            isOpen={isOpen}
-            onClose={onClose}
-            title={rutina ? 'Editar Rutina' : 'Nueva Plantilla'}
-            size="lg"
-            footer={
-                <>
-                    <Button variant="secondary" onClick={onClose} disabled={loading}>
-                        Cancelar
-                    </Button>
-                    <Button onClick={handleSubmit} isLoading={loading}>
-                        {rutina ? 'Guardar' : 'Crear'}
-                    </Button>
-                </>
-            }
-        >
-            <form onSubmit={handleSubmit} className="space-y-4">
-                <Input
-                    label="Nombre de la rutina"
-                    value={formData.nombre}
-                    onChange={(e) => setFormData({ ...formData, nombre: e.target.value })}
-                    placeholder="Ej: Rutina Full Body Principiante"
-                    required
-                />
-                <Input
-                    label="Categoría"
-                    value={formData.categoria}
-                    onChange={(e) => setFormData({ ...formData, categoria: e.target.value })}
-                    placeholder="Ej: Fuerza, Hipertofia, Cardio"
-                />
-                <Textarea
-                    label="Descripción"
-                    value={formData.descripcion}
-                    onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })}
-                    placeholder="Descripción breve de la rutina..."
-                />
-            </form>
-        </Modal>
-    );
-}
 
 // Rutina preview modal
 interface RutinaPreviewModalProps {
@@ -602,7 +474,9 @@ export default function RutinasPage() {
             header: 'Ejercicios',
             align: 'center' as const,
             render: (row) => {
-                const explicit = (row as any).ejercicios_count;
+                const r = row as unknown;
+                const explicit =
+                    r && typeof r === 'object' && !Array.isArray(r) ? (r as Record<string, unknown>).ejercicios_count : undefined;
                 const reduced = row.dias?.reduce((acc, d) => acc + (d.ejercicios?.length || 0), 0);
                 const count = (typeof explicit === 'number') ? explicit : (reduced || 0);
                 return <span className="text-slate-400">{count}</span>;

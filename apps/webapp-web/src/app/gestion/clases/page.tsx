@@ -18,7 +18,7 @@ import {
     Textarea,
 } from '@/components/ui';
 import ClaseDetailModal from '@/components/ClaseDetailModal';
-import { api, type Clase, type ClaseAgendaItem, type Profesor } from '@/lib/api';
+import { api, type Clase, type ClaseAgendaItem, type ClaseTipo, type Profesor } from '@/lib/api';
 import { formatTime, cn } from '@/lib/utils';
 
 // Days of week
@@ -251,7 +251,7 @@ export default function ClasesPage() {
     const [clasesSearch, setClasesSearch] = useState('');
 
     const [tiposOpen, setTiposOpen] = useState(false);
-    const [tipos, setTipos] = useState<any[]>([]);
+    const [tipos, setTipos] = useState<ClaseTipo[]>([]);
     const [tiposLoading, setTiposLoading] = useState(false);
     const [tipoNombre, setTipoNombre] = useState('');
     const [tipoColor, setTipoColor] = useState('#6366f1');
@@ -298,8 +298,8 @@ export default function ClasesPage() {
             setDetailOpen(false);
             loadClases();
         };
-        window.addEventListener('ironhub:sucursal-changed', handler as any);
-        return () => window.removeEventListener('ironhub:sucursal-changed', handler as any);
+        window.addEventListener('ironhub:sucursal-changed', handler);
+        return () => window.removeEventListener('ironhub:sucursal-changed', handler);
     }, [loadClases]);
 
     const horariosCount = useMemo(() => {
@@ -322,7 +322,7 @@ export default function ClasesPage() {
         setTiposLoading(true);
         try {
             const res = await api.getClaseTipos();
-            if (res.ok && res.data) setTipos((res.data.tipos || []) as any[]);
+            if (res.ok && res.data) setTipos(res.data.tipos || []);
         } finally {
             setTiposLoading(false);
         }
@@ -580,6 +580,7 @@ export default function ClasesPage() {
                 message={`¿Estás seguro de eliminar "${claseToDelete?.nombre}"?`}
                 confirmText="Eliminar"
                 variant="danger"
+                isLoading={deleteLoading}
             />
 
             {/* Detail Modal */}

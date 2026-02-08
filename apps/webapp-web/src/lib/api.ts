@@ -438,7 +438,7 @@ export interface BootstrapPayload {
 
 export interface FeatureFlags {
     modules?: Record<string, boolean>;
-    features?: Record<string, boolean | string | number | null>;
+    features?: Record<string, boolean | string | number | null | Record<string, boolean | string | number | null>>;
 }
 
 export interface SessionUser {
@@ -2756,7 +2756,7 @@ class ApiClient {
     }
 
     async runWhatsAppAutomation(data: { trigger_keys?: string[]; dry_run?: boolean }) {
-        return this.request<{ ok: boolean; scanned: number; sent: number; dry_run: boolean }>('/api/whatsapp/automation/run', {
+        return this.request<{ ok: boolean; scanned: number; sent: number; dry_run: boolean; skipped?: Record<string, string> }>('/api/whatsapp/automation/run', {
             method: 'POST',
             body: JSON.stringify(data),
         });

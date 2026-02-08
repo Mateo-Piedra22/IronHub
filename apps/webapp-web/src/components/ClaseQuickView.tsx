@@ -41,7 +41,6 @@ export default function ClaseQuickView({ clase, onClose, onManage }: ClaseQuickV
 
         let mounted = true;
         const load = async () => {
-            setLoading(true);
             try {
                 // 1. Load Horarios & Bloques
                 const [resHorarios, resBloques] = await Promise.all([
@@ -59,8 +58,6 @@ export default function ClaseQuickView({ clase, onClose, onManage }: ClaseQuickV
                 }
             } catch (e) {
                 console.error(e);
-            } finally {
-                if (mounted) setLoading(false);
             }
         };
 

@@ -1,23 +1,28 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, UploadCloud, Download, RefreshCw, XCircle, Play, CheckCircle2 } from 'lucide-react';
 import { Button, DataTable, Input, Select, useToast, type Column } from '@/components/ui';
-import { api, type BulkJob, type BulkPreviewRow, type TipoCuota } from '@/lib/api';
+import { api, type BulkJob, type TipoCuota } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 type RowView = {
     id: string;
     row_index: number;
-    data: Record<string, any>;
+    data: Record<string, unknown>;
     errors: string[];
     warnings: string[];
     is_valid?: boolean;
     applied?: boolean;
-    result?: any;
+    result?: unknown;
 };
 
 const KIND = 'usuarios_import';
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+    return v as Record<string, unknown>;
+}
 
 function downloadBlob(blob: Blob, filename: string) {
     const url = URL.createObjectURL(blob);
@@ -48,10 +53,19 @@ export default function DashboardAccionesMasivasPage() {
             try {
                 try {
                     const b = await api.getBootstrap('auto');
-                    const modules = (b.ok ? (b.data?.flags as any)?.modules : null) as Record<string, boolean> | null;
-                    const features = (b.ok ? (b.data?.flags as any)?.features : null) as any;
-                    const bulkModule = !!modules && modules['bulk_actions'] !== false;
-                    const usuariosImport = bulkModule && !!features?.bulk_actions && features.bulk_actions['usuarios_import'] !== false;
+                    const flags = b.ok ? b.data?.flags : null;
+                    const flagsRecord = flags && typeof flags === 'object' ? (flags as Record<string, unknown>) : null;
+                    const modules = flagsRecord?.modules && typeof flagsRecord.modules === 'object'
+                        ? (flagsRecord.modules as Record<string, unknown>)
+                        : null;
+                    const features = flagsRecord?.features && typeof flagsRecord.features === 'object'
+                        ? (flagsRecord.features as Record<string, unknown>)
+                        : null;
+                    const bulkActions = features?.bulk_actions && typeof features.bulk_actions === 'object'
+                        ? (features.bulk_actions as Record<string, unknown>)
+                        : null;
+                    const bulkModule = !!modules && modules.bulk_actions !== false;
+                    const usuariosImport = bulkModule && !!bulkActions && bulkActions.usuarios_import !== false;
                     setAllowed({ bulkModule, usuariosImport });
                 } catch {
                     setAllowed({ bulkModule: false, usuariosImport: false });
@@ -85,7 +99,7 @@ export default function DashboardAccionesMasivasPage() {
         return !(allowed.bulkModule && allowed.usuariosImport);
     }, [allowed]);
 
-    const loadJob = async (jobId: number) => {
+    const loadJob = useCallback(async (jobId: number) => {
         const r = await api.bulkGetJob(jobId);
         if (!r.ok || !r.data?.ok) throw new Error(r.error || 'No se pudo cargar job');
         setJob(r.data.job);
@@ -100,7 +114,7 @@ export default function DashboardAccionesMasivasPage() {
             result: it.result,
         }));
         setRows(mapped);
-    };
+    }, []);
 
     const resetAll = () => {
         setJob(null);
@@ -149,14 +163,14 @@ export default function DashboardAccionesMasivasPage() {
         }
     };
 
-    const updateLocal = (rowIndex: number, patch: Record<string, any>) => {
+    const updateLocal = useCallback((rowIndex: number, patch: Record<string, unknown>) => {
         setRows((prev) =>
             prev.map((r) => (r.row_index === rowIndex ? { ...r, data: { ...(r.data || {}), ...patch } } : r))
         );
         setDirtyRows((p) => ({ ...p, [rowIndex]: true }));
-    };
+    }, []);
 
-    const persistRow = async (rowIndex: number) => {
+    const persistRow = useCallback(async (rowIndex: number) => {
         if (!job) return;
         if (!dirtyRows[rowIndex]) return;
         const row = rows.find((r) => r.row_index === rowIndex);
@@ -170,7 +184,7 @@ export default function DashboardAccionesMasivasPage() {
                     r.row_index === rowIndex
                         ? {
                             ...r,
-                            data: res.data?.data ?? r.data,
+                            data: asRecord(res.data?.data) ?? r.data,
                             errors: res.data?.errors || [],
                             warnings: res.data?.warnings || [],
                         }
@@ -185,7 +199,7 @@ export default function DashboardAccionesMasivasPage() {
         } catch (e) {
             toast({ title: 'Error al guardar fila', description: e instanceof Error ? e.message : 'Error', variant: 'error' });
         }
-    };
+    }, [dirtyRows, job, rows, toast]);
 
     const confirmJob = async () => {
         if (!job) return;
@@ -241,7 +255,7 @@ export default function DashboardAccionesMasivasPage() {
             clearInterval(t);
             setPolling(false);
         };
-    }, [job?.id, job?.status]);
+    }, [job, loadJob, polling]);
 
     const columns = useMemo<Column<RowView>[]>(() => {
         return [
@@ -369,7 +383,7 @@ export default function DashboardAccionesMasivasPage() {
                 },
             },
         ];
-    }, [dirtyRows, rows, tipoOptions, tipos]);
+    }, [dirtyRows, persistRow, tipoOptions, updateLocal]);
 
     return (
         <div className="space-y-6">

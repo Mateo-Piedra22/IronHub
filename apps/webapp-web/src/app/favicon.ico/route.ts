@@ -7,6 +7,11 @@ export const runtime = 'edge';
 const TENANT_DOMAIN = process.env.NEXT_PUBLIC_TENANT_DOMAIN || 'ironhub.motiona.xyz';
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || `https://api.${TENANT_DOMAIN}`;
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    return value as Record<string, unknown>;
+}
+
 function getTenantFromHost(host: string | null): string {
     const raw = String(host || '').toLowerCase().split(':')[0];
     if (!raw || raw === 'localhost' || raw === '127.0.0.1') {
@@ -26,8 +31,8 @@ async function getBranding(tenant: string) {
         next: { revalidate: 300 },
     }).catch(() => null);
     if (!res || !res.ok) return null;
-    const data = (await res.json().catch(() => null)) as any;
-    return data || null;
+    const payload = (await res.json().catch(() => null)) as unknown;
+    return asRecord(payload);
 }
 
 async function fetchImage(url: string) {
@@ -57,7 +62,7 @@ export async function GET() {
         }
     }
 
-    const gymName = String(branding?.gym_name || branding?.gym?.name || '').trim();
+    const gymName = String(branding?.gym_name || asRecord(branding?.gym)?.name || '').trim();
     const letters = gymName
         ? gymName
               .split(/\s+/)

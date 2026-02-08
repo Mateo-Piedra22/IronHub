@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
 import { Dumbbell, Eye, EyeOff, Loader2, AlertCircle, Lock } from 'lucide-react';
+import Image from 'next/image';
 import { api } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 
@@ -79,11 +80,14 @@ export default function OwnerLoginPage() {
                             }`}
                         >
                             {gymLogoUrl ? (
-                                <img
+                                <Image
                                     src={gymLogoUrl}
                                     alt="Logo"
+                                    width={64}
+                                    height={64}
                                     className="w-full h-full object-contain"
                                     onError={() => setGymLogoUrl('')}
+                                    unoptimized
                                 />
                             ) : (
                                 <Dumbbell className="w-8 h-8 text-white" />

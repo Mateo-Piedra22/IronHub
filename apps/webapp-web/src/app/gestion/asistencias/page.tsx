@@ -75,7 +75,7 @@ export default function AsistenciasPage() {
             try {
                 const res = await api.getGymData();
                 if (res.ok && res.data) {
-                    setAllowMultipleAsistenciasDia(Boolean((res.data as any).attendance_allow_multiple_per_day));
+                    setAllowMultipleAsistenciasDia(Boolean(res.data.attendance_allow_multiple_per_day));
                 }
             } catch {
             }
@@ -119,8 +119,8 @@ export default function AsistenciasPage() {
             setPage(1);
             loadAsistencias();
         };
-        window.addEventListener('ironhub:sucursal-changed', handler as any);
-        return () => window.removeEventListener('ironhub:sucursal-changed', handler as any);
+        window.addEventListener('ironhub:sucursal-changed', handler);
+        return () => window.removeEventListener('ironhub:sucursal-changed', handler);
     }, [loadAsistencias]);
 
     // Copy URL handler

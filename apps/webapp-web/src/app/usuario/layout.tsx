@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
 import {
     Dumbbell, LayoutDashboard, CreditCard, Calendar,
     Clipboard, LogOut, User, Bell, Shield
@@ -55,11 +56,14 @@ export default function DashboardLayout({
                                 }`}
                             >
                                 {gymLogoUrl ? (
-                                    <img
+                                    <Image
                                         src={gymLogoUrl}
                                         alt="Logo"
+                                        width={40}
+                                        height={40}
                                         className="w-full h-full object-contain"
                                         onError={() => setGymLogoUrl('')}
+                                        unoptimized
                                     />
                                 ) : (
                                     <Dumbbell className="w-5 h-5 text-white" />

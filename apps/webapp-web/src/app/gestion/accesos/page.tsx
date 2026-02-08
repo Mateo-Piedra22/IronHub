@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { KeyRound, Loader2, Pencil, Plus, RefreshCw, RotateCcw, ShieldAlert, Trash2 } from 'lucide-react';
 import { Button, ConfirmModal, Input, Modal, Select, useToast } from '@/components/ui';
-import { api, type AccessCredential, type AccessDevice, type AccessEvent, type Usuario, type Sucursal } from '@/lib/api';
+import { api, type AccessCommand, type AccessCredential, type AccessDevice, type AccessEvent, type Usuario, type Sucursal } from '@/lib/api';
 
 type Tab = 'devices' | 'credentials' | 'events';
 
@@ -44,6 +44,46 @@ const eventTypeOptions = [
 ];
 
 type AllowedHoursRule = { days: number[]; start: string; end: string };
+
+type UnlockProfile =
+    | { type: 'none' }
+    | { type: 'http_get' | 'http_post_json'; url: string }
+    | { type: 'tcp'; host: string; port: number; payload: string }
+    | { type: 'serial'; serial_port: string; serial_baud: number; payload: string };
+
+type DeviceConfig = {
+    allow_manual_unlock: boolean;
+    manual_hotkey: string;
+    allow_remote_unlock: boolean;
+    station_auto_unlock: boolean;
+    station_unlock_ms: number;
+    unlock_ms: number;
+    unlock_profile: UnlockProfile;
+    timezone?: string;
+    allowed_hours?: AllowedHoursRule[];
+    allowed_event_types?: string[];
+    dni_requires_pin?: boolean;
+    anti_passback_seconds?: number;
+    max_events_per_minute?: number;
+    rate_limit_window_seconds?: number;
+    runtime_status?: unknown;
+    enroll_mode?: unknown;
+};
+
+type EnrollMode = Record<string, unknown> & { enabled: boolean; usuario_id?: number; credential_type?: string };
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+    return v as Record<string, unknown>;
+}
+
+function asString(v: unknown): string {
+    return typeof v === 'string' ? v : '';
+}
+
+function asNumber(v: unknown): number | null {
+    return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
 
 export default function AccesosPage() {
     const { success, error } = useToast();
@@ -173,7 +213,7 @@ export default function AccesosPage() {
     const [remoteUnlockState, setRemoteUnlockState] = useState<{ open: boolean; device?: AccessDevice }>({ open: false });
     const [remoteUnlocking, setRemoteUnlocking] = useState(false);
     const [deviceCommandsState, setDeviceCommandsState] = useState<{ open: boolean; device?: AccessDevice }>({ open: false });
-    const [deviceCommands, setDeviceCommands] = useState<any[]>([]);
+    const [deviceCommands, setDeviceCommands] = useState<AccessCommand[]>([]);
     const [loadingDeviceCommands, setLoadingDeviceCommands] = useState(false);
 
     const filteredDevices = useMemo(() => {
@@ -207,7 +247,7 @@ export default function AccesosPage() {
     }, [pairingInfo, accessTenant, sucursales]);
 
     const isDeviceOnline = useCallback((d: AccessDevice) => {
-        const ls = (d as any).last_seen_at ? String((d as any).last_seen_at) : '';
+        const ls = d.last_seen_at ? String(d.last_seen_at) : '';
         if (!ls) return false;
         const t = Date.parse(ls);
         if (!Number.isFinite(t)) return false;
@@ -215,8 +255,8 @@ export default function AccesosPage() {
     }, []);
 
     const getEnrollMode = useCallback((d: AccessDevice) => {
-        const cfg: any = (d as any).config && typeof (d as any).config === 'object' ? (d as any).config : {};
-        const em = cfg?.enroll_mode && typeof cfg.enroll_mode === 'object' ? cfg.enroll_mode : null;
+        const cfg = asRecord(d.config) as (DeviceConfig & Record<string, unknown>) | null;
+        const em = cfg ? (asRecord(cfg.enroll_mode) as EnrollMode | null) : null;
         return em && em.enabled ? em : null;
     }, []);
 
@@ -277,13 +317,12 @@ export default function AccesosPage() {
         setCreatingDevice(true);
         try {
             const sid = newDeviceSucursalId.trim() ? Number(newDeviceSucursalId.trim()) : null;
-            const payload: any = { name, sucursal_id: Number.isFinite(sid) ? sid : null };
             const ms = Number(newDeviceUnlockMs.trim());
             const stationMs = Number(newDeviceStationUnlockMs.trim());
             const tcpPort = Number(newDeviceUnlockTcpPort.trim());
             const serialBaud = Number(newDeviceUnlockSerialBaud.trim());
             const unlockType = (newDeviceUnlockType || 'http_get').trim().toLowerCase();
-            let unlockProfile: any = { type: 'none' };
+            let unlockProfile: UnlockProfile = { type: 'none' };
             if (unlockType === 'http_get' || unlockType === 'http_post_json') {
                 unlockProfile = newDeviceUnlockUrl.trim() ? { type: unlockType, url: newDeviceUnlockUrl.trim() } : { type: 'none' };
             } else if (unlockType === 'tcp') {
@@ -302,7 +341,7 @@ export default function AccesosPage() {
                 };
             }
 
-            const config: any = {
+            const config: DeviceConfig = {
                 allow_manual_unlock: Boolean(newDeviceAllowManual),
                 manual_hotkey: newDeviceManualHotkey.trim() || 'F10',
                 allow_remote_unlock: Boolean(newDeviceAllowRemoteUnlock),
@@ -343,7 +382,11 @@ export default function AccesosPage() {
                 config.rate_limit_window_seconds = Number.isFinite(win) && win > 0 ? Math.max(5, Math.min(win, 300)) : 60;
             }
 
-            payload.config = config;
+            const payload: { name: string; sucursal_id: number | null; config: DeviceConfig } = {
+                name,
+                sucursal_id: Number.isFinite(sid) ? sid : null,
+                config,
+            };
             const res = await api.createAccessDevice(payload);
             if (!res.ok || !res.data?.ok) throw new Error(res.error || 'No se pudo crear');
             success('Device creado');
@@ -399,39 +442,41 @@ export default function AccesosPage() {
     };
 
     const openEditDevice = (d: AccessDevice) => {
-        const cfg: any = (d as any).config && typeof (d as any).config === 'object' ? (d as any).config : {};
-        const profile = cfg.unlock_profile && typeof cfg.unlock_profile === 'object' ? cfg.unlock_profile : {};
-        const ptype = String(profile.type || 'none').toLowerCase();
+        const cfg = (asRecord(d.config) || {}) as DeviceConfig & Record<string, unknown>;
+        const profile = asRecord(cfg.unlock_profile) || {};
+        const ptype = asString(profile.type || 'none').toLowerCase();
         setEditDevice(d);
         setEditName(String(d.name || ''));
         setEditEnabled(Boolean(d.enabled));
         setEditSucursalId(d.sucursal_id != null ? String(d.sucursal_id) : '');
         setEditUnlockPreset('');
         setEditUnlockType(ptype === 'http_post_json' || ptype === 'tcp' || ptype === 'serial' || ptype === 'none' ? ptype : 'http_get');
-        setEditUnlockUrl(String(profile.url || ''));
-        setEditUnlockTcpHost(String(profile.host || ''));
-        setEditUnlockTcpPort(String(profile.port || 9100));
-        setEditUnlockTcpPayload(String(profile.payload || ''));
-        setEditUnlockSerialPort(String(profile.serial_port || ''));
-        setEditUnlockSerialBaud(String(profile.serial_baud || 9600));
-        setEditUnlockSerialPayload(String(profile.payload || ''));
-        setEditUnlockMs(String(cfg.unlock_ms ?? 2500));
+        setEditUnlockUrl(asString(profile.url));
+        setEditUnlockTcpHost(asString(profile.host));
+        setEditUnlockTcpPort(String(asNumber(profile.port) ?? 9100));
+        setEditUnlockTcpPayload(asString(profile.payload));
+        setEditUnlockSerialPort(asString(profile.serial_port));
+        setEditUnlockSerialBaud(String(asNumber(profile.serial_baud) ?? 9600));
+        setEditUnlockSerialPayload(asString(profile.payload));
+        setEditUnlockMs(String(asNumber(cfg.unlock_ms) ?? 2500));
         setEditAllowManual(Boolean(cfg.allow_manual_unlock ?? true));
         setEditManualHotkey(String(cfg.manual_hotkey || 'F10'));
         setEditAllowRemoteUnlock(Boolean(cfg.allow_remote_unlock ?? false));
         setEditStationAutoUnlock(Boolean(cfg.station_auto_unlock ?? false));
         setEditStationUnlockMs(String(cfg.station_unlock_ms ?? cfg.unlock_ms ?? 2500));
         setEditTimezone(String(cfg.timezone || 'America/Argentina/Buenos_Aires'));
-        const ah: AllowedHoursRule[] = Array.isArray(cfg.allowed_hours)
-            ? (cfg.allowed_hours || []).map((r: any) => ({
-                  days: Array.isArray(r?.days) ? (r.days as any[]).map((x) => Number(x)).filter((x) => Number.isFinite(x) && x >= 1 && x <= 7) : [],
-                  start: String(r?.start || ''),
-                  end: String(r?.end || ''),
-              }))
-            : [];
-        setEditAllowedHours(ah.filter((r) => r.days.length > 0 && r.start && r.end));
+        const ahRaw = Array.isArray(cfg.allowed_hours) ? cfg.allowed_hours : [];
+        const ah: AllowedHoursRule[] = ahRaw
+            .map((r) => {
+                const rr = asRecord(r) || {};
+                const daysRaw = Array.isArray(rr.days) ? rr.days : [];
+                const days = daysRaw.map((x) => Number(x)).filter((x) => Number.isFinite(x) && x >= 1 && x <= 7);
+                return { days, start: asString(rr.start), end: asString(rr.end) };
+            })
+            .filter((r) => r.days.length > 0 && r.start && r.end);
+        setEditAllowedHours(ah);
 
-        const aet: any[] = Array.isArray(cfg.allowed_event_types) ? cfg.allowed_event_types : [];
+        const aet = Array.isArray(cfg.allowed_event_types) ? cfg.allowed_event_types : [];
         if (Array.isArray(aet) && aet.length > 0) {
             setEditRestrictEventTypes(true);
             const map: Record<string, boolean> = {};
@@ -462,7 +507,7 @@ export default function AccesosPage() {
             const tcpPort = Number(editUnlockTcpPort.trim());
             const serialBaud = Number(editUnlockSerialBaud.trim());
             const unlockType = (editUnlockType || 'http_get').trim().toLowerCase();
-            let unlockProfile: any = { type: 'none' };
+            let unlockProfile: UnlockProfile = { type: 'none' };
             if (unlockType === 'http_get' || unlockType === 'http_post_json') {
                 unlockProfile = editUnlockUrl.trim() ? { type: unlockType, url: editUnlockUrl.trim() } : { type: 'none' };
             } else if (unlockType === 'tcp') {
@@ -480,21 +525,15 @@ export default function AccesosPage() {
                     payload: editUnlockSerialPayload,
                 };
             }
-            const payload: any = {
-                name: editName.trim() || editDevice.name,
-                enabled: Boolean(editEnabled),
-                sucursal_id: Number.isFinite(sid) ? sid : null,
-                config: {
-                    allow_manual_unlock: Boolean(editAllowManual),
-                    manual_hotkey: editManualHotkey.trim() || 'F10',
-                    allow_remote_unlock: Boolean(editAllowRemoteUnlock),
-                    station_auto_unlock: Boolean(editStationAutoUnlock),
-                    station_unlock_ms: Number.isFinite(stationMs) ? Math.max(250, Math.min(stationMs, 15000)) : 2500,
-                    unlock_ms: Number.isFinite(ms) ? Math.max(250, Math.min(ms, 15000)) : 2500,
-                    unlock_profile: unlockProfile,
-                },
+            const cfg: DeviceConfig = {
+                allow_manual_unlock: Boolean(editAllowManual),
+                manual_hotkey: editManualHotkey.trim() || 'F10',
+                allow_remote_unlock: Boolean(editAllowRemoteUnlock),
+                station_auto_unlock: Boolean(editStationAutoUnlock),
+                station_unlock_ms: Number.isFinite(stationMs) ? Math.max(250, Math.min(stationMs, 15000)) : 2500,
+                unlock_ms: Number.isFinite(ms) ? Math.max(250, Math.min(ms, 15000)) : 2500,
+                unlock_profile: unlockProfile,
             };
-            const cfg = payload.config;
             const tz = String(editTimezone || '').trim();
             if (tz) cfg.timezone = tz;
 
@@ -506,32 +545,31 @@ export default function AccesosPage() {
                 }))
                 .filter((r) => r.days.length > 0 && r.start && r.end);
             if (ah.length > 0) cfg.allowed_hours = ah;
-            else delete cfg.allowed_hours;
 
             if (editRestrictEventTypes) {
                 const sel = Object.entries(editAllowedEventTypes || {})
                     .filter(([, v]) => Boolean(v))
                     .map(([k]) => String(k));
                 cfg.allowed_event_types = sel;
-            } else {
-                delete cfg.allowed_event_types;
             }
 
             cfg.dni_requires_pin = Boolean(editDniRequiresPin);
 
             const apb = Number(editAntiPassbackSec.trim());
             if (Number.isFinite(apb) && apb > 0) cfg.anti_passback_seconds = Math.max(5, Math.min(apb, 86400));
-            else delete cfg.anti_passback_seconds;
 
             const maxpm = Number(editMaxEventsPerMin.trim());
             const win = Number(editRateLimitWindowSec.trim());
             if (Number.isFinite(maxpm) && maxpm > 0) {
                 cfg.max_events_per_minute = Math.max(1, Math.min(maxpm, 600));
                 cfg.rate_limit_window_seconds = Number.isFinite(win) && win > 0 ? Math.max(5, Math.min(win, 300)) : 60;
-            } else {
-                delete cfg.max_events_per_minute;
-                delete cfg.rate_limit_window_seconds;
             }
+            const payload: Partial<{ name: string; enabled: boolean; sucursal_id: number | null; config: DeviceConfig }> = {
+                name: editName.trim() || editDevice.name,
+                enabled: Boolean(editEnabled),
+                sucursal_id: Number.isFinite(sid) ? sid : null,
+                config: cfg,
+            };
             const res = await api.updateAccessDevice(editDevice.id, payload);
             if (!res.ok || !res.data?.ok) throw new Error(res.error || 'No se pudo guardar');
             success('Device actualizado');
@@ -579,11 +617,11 @@ export default function AccesosPage() {
         if (!d) return;
         setRemoteUnlocking(true);
         try {
-            const cfg: any = (d as any).config && typeof (d as any).config === 'object' ? (d as any).config : {};
-            const unlockMs = Number(cfg.unlock_ms ?? 2500);
+            const cfg = (asRecord(d.config) || {}) as DeviceConfig & Record<string, unknown>;
+            const unlockMs = Number(asNumber(cfg.unlock_ms) ?? 2500);
             const requestId =
-                typeof (globalThis as any)?.crypto?.randomUUID === 'function'
-                    ? (globalThis as any).crypto.randomUUID()
+                typeof crypto?.randomUUID === 'function'
+                    ? crypto.randomUUID()
                     : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
             const res = await api.remoteUnlockAccessDevice(d.id, {
                 unlock_ms: Number.isFinite(unlockMs) ? unlockMs : 2500,
@@ -676,7 +714,7 @@ export default function AccesosPage() {
                 setCredentials([]);
                 return;
             }
-            const params: any = {
+            const params: { usuario_id?: number; q?: string; credential_type?: string; active?: boolean; limit?: number } = {
                 ...(q ? { q } : {}),
                 ...(credListType.trim() ? { credential_type: credListType.trim() } : {}),
                 ...(credListActiveOnly ? { active: true } : {}),
@@ -792,7 +830,7 @@ export default function AccesosPage() {
         if (!cred) return;
         setSavingCredEdit(true);
         try {
-            const payload: any = {
+            const payload: { label?: string | null; active?: boolean; usuario_id?: number } = {
                 label: editCredLabel.trim() ? editCredLabel.trim() : null,
                 active: Boolean(editCredActive),
                 ...(editCredSelectedUser ? { usuario_id: editCredSelectedUser.id } : {}),
@@ -883,21 +921,21 @@ export default function AccesosPage() {
                         {filteredDevices.map((d) => {
                             const online = isDeviceOnline(d);
                             const enroll = getEnrollMode(d);
-                            const cfg: any = (d as any).config && typeof (d as any).config === 'object' ? (d as any).config : {};
-                            const rt = cfg?.runtime_status && typeof cfg.runtime_status === 'object' ? cfg.runtime_status : null;
-                            const rtAt = rt?.updated_at ? Date.parse(String(rt.updated_at)) : NaN;
+                            const cfg = (asRecord(d.config) || {}) as DeviceConfig & Record<string, unknown>;
+                            const rt = asRecord(cfg.runtime_status);
+                            const rtAt = rt?.updated_at ? Date.parse(asString(rt.updated_at)) : NaN;
                             const rtFresh = Number.isFinite(rtAt) ? Date.now() - rtAt < 20_000 : false;
                             const enrollReady = Boolean(rt?.enroll_ready) && rtFresh;
-                            const lt = rt?.last_test && typeof rt.last_test === 'object' ? rt.last_test : null;
-                            const ltAt = lt?.at ? String(lt.at) : '';
-                            const ltLabel = lt?.kind ? String(lt.kind) : '';
+                            const lt = rt ? asRecord(rt.last_test) : null;
+                            const ltAt = lt ? asString(lt.at) : '';
+                            const ltLabel = lt ? asString(lt.kind) : '';
                             const ltOk = lt ? Boolean(lt.ok) : false;
-                            const rtInput = rt ? `${rt.input_source || ''}${rt.input_protocol ? `/${rt.input_protocol}` : ''}`.trim() : '';
-                            const rtSerial = rt?.serial_port ? String(rt.serial_port) : '';
-                            const rtAgent = rt?.agent_version ? String(rt.agent_version) : '';
-                            const rtQ = typeof rt?.offline_queue_lines === 'number' ? Number(rt.offline_queue_lines) : NaN;
-                            const rtQB = typeof rt?.offline_queue_bytes === 'number' ? Number(rt.offline_queue_bytes) : NaN;
-                            const canRemoteUnlock = Boolean(cfg?.allow_remote_unlock);
+                            const rtInput = rt ? `${asString(rt.input_source)}${rt.input_protocol ? `/${asString(rt.input_protocol)}` : ''}`.trim() : '';
+                            const rtSerial = rt ? asString(rt.serial_port) : '';
+                            const rtAgent = rt ? asString(rt.agent_version) : '';
+                            const rtQ = rt ? asNumber(rt.offline_queue_lines) : null;
+                            const rtQB = rt ? asNumber(rt.offline_queue_bytes) : null;
+                            const canRemoteUnlock = Boolean(cfg.allow_remote_unlock);
                             return (
                                 <div key={d.id} className="card p-4 flex items-start justify-between gap-3">
                                     <div className="min-w-0">
@@ -913,12 +951,12 @@ export default function AccesosPage() {
                                         </div>
                                         <div className="text-xs text-slate-500 mt-1">
                                             sucursal_id {d.sucursal_id ?? '—'} • device_id {d.device_public_id} • {d.enabled ? 'enabled' : 'disabled'}
-                                            {(d as any).last_seen_at ? ` • last_seen ${(d as any).last_seen_at}` : ''}
+                                            {d.last_seen_at ? ` • last_seen ${d.last_seen_at}` : ''}
                                             {ltLabel ? ` • last_test ${ltLabel} ${ltOk ? 'ok' : 'fail'} ${ltAt ? `@ ${ltAt}` : ''}` : ''}
                                             {rtInput ? ` • input ${rtInput}` : ''}
                                             {rtSerial ? ` • serial ${rtSerial}` : ''}
                                             {rtAgent ? ` • agent v${rtAgent}` : ''}
-                                            {Number.isFinite(rtQ) ? ` • offline_queue ${rtQ}${Number.isFinite(rtQB) ? ` (${rtQB} bytes)` : ''}` : ''}
+                                            {rtQ != null ? ` • offline_queue ${rtQ}${rtQB != null ? ` (${rtQB} bytes)` : ''}` : ''}
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-2">
@@ -1272,9 +1310,9 @@ export default function AccesosPage() {
                             const d = (devices || []).find((x) => String(x.id) === String(enrollDeviceId));
                             if (!d) return null;
                             const enroll = getEnrollMode(d);
-                            const cfg: any = (d as any).config && typeof (d as any).config === 'object' ? (d as any).config : {};
-                            const rt = cfg?.runtime_status && typeof cfg.runtime_status === 'object' ? cfg.runtime_status : null;
-                            const rtAt = rt?.updated_at ? Date.parse(String(rt.updated_at)) : NaN;
+                            const cfg = (asRecord(d.config) || {}) as DeviceConfig & Record<string, unknown>;
+                            const rt = asRecord(cfg.runtime_status);
+                            const rtAt = rt?.updated_at ? Date.parse(asString(rt.updated_at)) : NaN;
                             const rtFresh = Number.isFinite(rtAt) ? Date.now() - rtAt < 20_000 : false;
                             const enrollReady = Boolean(rt?.enroll_ready) && rtFresh;
                             return (
@@ -1459,28 +1497,29 @@ export default function AccesosPage() {
                 ) : (
                     <div className="space-y-2">
                         {deviceCommands.map((c) => {
-                            const status = String((c as any).status || '');
+                            const status = String(c.status || '');
                             const canCancel = status === 'pending';
-                            const ok = (c as any)?.result && typeof (c as any).result === 'object' ? (c as any).result.ok : undefined;
+                            const result = asRecord(c.result);
+                            const ok = result && typeof result.ok === 'boolean' ? result.ok : undefined;
                             return (
-                                <div key={(c as any).id} className="rounded-xl border border-slate-800/60 bg-slate-900/40 p-3 flex items-start justify-between gap-3">
+                                <div key={c.id} className="rounded-xl border border-slate-800/60 bg-slate-900/40 p-3 flex items-start justify-between gap-3">
                                     <div className="min-w-0">
                                         <div className="text-sm text-white font-semibold">
-                                            #{String((c as any).id)} • {String((c as any).command_type || '')}
+                                            #{String(c.id)} • {String(c.command_type || '')}
                                         </div>
                                         <div className="text-xs text-slate-500 mt-1">
                                             status {status || '—'}
-                                            {(c as any).created_at ? ` • created ${(c as any).created_at}` : ''}
-                                            {(c as any).claimed_at ? ` • claimed ${(c as any).claimed_at}` : ''}
-                                            {(c as any).acked_at ? ` • acked ${(c as any).acked_at}` : ''}
-                                            {(c as any).expires_at ? ` • exp ${(c as any).expires_at}` : ''}
+                                            {c.created_at ? ` • created ${c.created_at}` : ''}
+                                            {c.claimed_at ? ` • claimed ${c.claimed_at}` : ''}
+                                            {c.acked_at ? ` • acked ${c.acked_at}` : ''}
+                                            {c.expires_at ? ` • exp ${c.expires_at}` : ''}
                                             {ok === true ? ' • result ok' : ok === false ? ' • result fail' : ''}
                                         </div>
                                     </div>
                                     {deviceCommandsState.device && canCancel ? (
                                         <Button
                                             variant="secondary"
-                                            onClick={() => cancelCommand(deviceCommandsState.device!.id, Number((c as any).id))}
+                                            onClick={() => cancelCommand(deviceCommandsState.device!.id, Number(c.id))}
                                         >
                                             Cancelar
                                         </Button>

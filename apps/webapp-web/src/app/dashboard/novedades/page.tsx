@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, Megaphone, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui';
 import { api, type ChangelogItem } from '@/lib/api';
@@ -51,7 +51,7 @@ export default function DashboardNovedadesPage() {
     const pageSize = 20;
     const [total, setTotal] = useState(0);
 
-    const load = async () => {
+    const load = useCallback(async () => {
         setLoading(true);
         try {
             const res = await api.listChangelogs({ page, limit: pageSize });
@@ -65,11 +65,11 @@ export default function DashboardNovedadesPage() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [page]);
 
     useEffect(() => {
         load();
-    }, [page]);
+    }, [load]);
 
     useEffect(() => {
         api.markChangelogsRead().catch(() => {});
@@ -135,4 +135,3 @@ export default function DashboardNovedadesPage() {
         </div>
     );
 }
-

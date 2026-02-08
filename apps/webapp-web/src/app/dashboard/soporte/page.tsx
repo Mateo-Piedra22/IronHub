@@ -19,6 +19,18 @@ const PRIORITY_OPTIONS = [
     { value: 'critical', label: 'Critical' },
 ];
 
+function asRecord(v: unknown): Record<string, unknown> | null {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+    return v as Record<string, unknown>;
+}
+
+function getAttachmentLabel(a: unknown): string {
+    const r = asRecord(a);
+    if (!r) return 'adjunto';
+    const f = r.filename ?? r.file_name ?? r.name ?? r.key;
+    return f ? String(f) : 'adjunto';
+}
+
 export default function DashboardSoportePage() {
     const { toast } = useToast();
     const [loading, setLoading] = useState(true);
@@ -31,7 +43,7 @@ export default function DashboardSoportePage() {
     const [openCreate, setOpenCreate] = useState(false);
     const [reply, setReply] = useState('');
     const [replying, setReplying] = useState(false);
-    const [attachments, setAttachments] = useState<any[]>([]);
+    const [attachments, setAttachments] = useState<unknown[]>([]);
     const fileRef = useRef<HTMLInputElement | null>(null);
 
     const [form, setForm] = useState({
@@ -125,7 +137,7 @@ export default function DashboardSoportePage() {
     const uploadSelectedFiles = async (files: FileList | null) => {
         if (!files || files.length === 0) return;
         const arr = Array.from(files).slice(0, 5);
-        const out: any[] = [];
+        const out: unknown[] = [];
         for (const f of arr) {
             const res = await api.uploadSupportAttachment(f);
             if (res.ok && res.data?.ok) {
@@ -222,17 +234,16 @@ export default function DashboardSoportePage() {
                                         <div className="mt-1 text-sm text-slate-100 whitespace-pre-wrap">{m.content}</div>
                                         {Array.isArray(m.attachments) && m.attachments.length > 0 ? (
                                             <div className="mt-2 flex flex-wrap gap-2">
-                                                {m.attachments.slice(0, 6).map((a: any, idx: number) => (
-                                                    <a
-                                                        key={idx}
-                                                        className="text-xs text-primary-300 underline"
-                                                        href={String(a?.url || '#')}
-                                                        target="_blank"
-                                                        rel="noreferrer"
-                                                    >
-                                                        {String(a?.filename || 'adjunto')}
-                                                    </a>
-                                                ))}
+                                                {m.attachments.slice(0, 6).map((a, idx) => {
+                                                    const rec = a && typeof a === 'object' && !Array.isArray(a) ? (a as Record<string, unknown>) : null;
+                                                    const url = rec && typeof rec.url === 'string' ? rec.url : '#';
+                                                    const filename = rec && typeof rec.filename === 'string' ? rec.filename : 'adjunto';
+                                                    return (
+                                                        <a key={idx} className="text-xs text-primary-300 underline" href={url} target="_blank" rel="noreferrer">
+                                                            {filename}
+                                                        </a>
+                                                    );
+                                                })}
                                             </div>
                                         ) : null}
                                     </div>
@@ -304,7 +315,7 @@ export default function DashboardSoportePage() {
                                     <div className="mt-2 flex flex-wrap gap-2">
                                         {attachments.map((a, idx) => (
                                             <div key={idx} className="text-xs text-slate-300 rounded-lg border border-slate-800/60 px-2 py-1">
-                                                {String(a?.filename || 'adjunto')}
+                                                {getAttachmentLabel(a)}
                                             </div>
                                         ))}
                                     </div>
@@ -326,4 +337,3 @@ export default function DashboardSoportePage() {
         </div>
     );
 }
-

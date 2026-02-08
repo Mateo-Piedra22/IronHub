@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Briefcase, Copy, KeyRound, Plus, RefreshCw, Search, Shield } from 'lucide-react';
 import { Button, Input, Modal, useToast } from '@/components/ui';
 import { api, type StaffItem, type Sucursal } from '@/lib/api';
@@ -24,6 +24,17 @@ const permissionModules = [
     { key: 'configuracion', label: 'Configuración', read: 'configuracion:read', write: 'configuracion:write' },
     { key: 'reportes', label: 'Reportes', read: 'reportes:read', write: null },
 ] as const;
+
+type PermissionModule = (typeof permissionModules)[number];
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+    return v as Record<string, unknown>;
+}
+
+function getModuleExtra(m: PermissionModule): readonly string[] | undefined {
+    return 'extra' in m ? m.extra : undefined;
+}
 
 const tipoOptions = [
     { value: 'empleado', label: 'Empleado' },
@@ -82,7 +93,7 @@ export default function EmpleadosPage() {
         });
     }, [items, search]);
 
-    const load = async () => {
+    const load = useCallback(async () => {
         setLoading(true);
         try {
             const [staffRes, sucRes, bootRes] = await Promise.all([
@@ -94,12 +105,16 @@ export default function EmpleadosPage() {
             if (!sucRes.ok) throw new Error(sucRes.error || 'Error cargando sucursales');
             setItems(staffRes.data?.items || []);
             setSucursales((sucRes.data?.items || []).filter((s) => !!s.activa));
-            setSucursalActualId((sucRes.data?.sucursal_actual_id ?? null) as any);
-            if (bootRes.ok && (bootRes.data as any)?.flags?.modules) {
-                setModuleFlags(((bootRes.data as any).flags.modules || null) as any);
-            } else {
-                setModuleFlags(null);
-            }
+            setSucursalActualId(typeof sucRes.data?.sucursal_actual_id === 'number' ? sucRes.data.sucursal_actual_id : null);
+            const flags = bootRes.ok ? asRecord(bootRes.data?.flags) : null;
+            const modules = flags ? asRecord(flags.modules) : null;
+            if (modules) {
+                const out: Record<string, boolean> = {};
+                for (const [k, v] of Object.entries(modules)) {
+                    if (typeof v === 'boolean') out[k] = v;
+                }
+                setModuleFlags(out);
+            } else setModuleFlags(null);
         } catch (e) {
             toast({
                 title: 'No se pudo cargar empleados',
@@ -109,18 +124,19 @@ export default function EmpleadosPage() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [toast]);
 
     useEffect(() => {
-        load();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+        void load();
+    }, [load]);
 
     useEffect(() => {
-        const handler = () => void load();
-        window.addEventListener('ironhub:sucursal-changed', handler as any);
-        return () => window.removeEventListener('ironhub:sucursal-changed', handler as any);
-    }, []);
+        const handler: EventListener = () => {
+            void load();
+        };
+        window.addEventListener('ironhub:sucursal-changed', handler);
+        return () => window.removeEventListener('ironhub:sucursal-changed', handler);
+    }, [load]);
 
     const openEdit = (item: StaffItem) => {
         const r = String(item.rol || '').trim().toLowerCase();
@@ -158,7 +174,7 @@ export default function EmpleadosPage() {
                     scopes: [],
                     tipo: rol,
                     estado: 'activo',
-                } as any);
+                });
                 if (!res.ok) throw new Error(res.error || 'No se pudo asociar');
             } else {
                 const nombre = String(createNombre || '').trim();
@@ -168,7 +184,7 @@ export default function EmpleadosPage() {
                     toast({ title: 'Falta información', description: 'Nombre y DNI son obligatorios', variant: 'error' });
                     return;
                 }
-                const res = await api.createUsuario({ nombre, dni, telefono, rol } as any);
+                const res = await api.createUsuario({ nombre, dni, telefono, rol });
                 if (!res.ok || !res.data?.id) throw new Error(res.error || 'No se pudo crear');
                 const res2 = await api.updateStaff(res.data.id, {
                     rol,
@@ -177,7 +193,7 @@ export default function EmpleadosPage() {
                     scopes: [],
                     tipo: rol,
                     estado: 'activo',
-                } as any);
+                });
                 if (!res2.ok) throw new Error(res2.error || 'No se pudo configurar el staff');
             }
             toast({ title: 'Creado', description: 'Staff creado correctamente', variant: 'success' });
@@ -211,8 +227,8 @@ export default function EmpleadosPage() {
                 const mapped = (res.data.usuarios || []).map((u) => ({
                     id: u.id,
                     nombre: u.nombre,
-                    dni: (u as any).dni,
-                    email: (u as any).email,
+                    dni: u.dni,
+                    email: u.email,
                 }));
                 setExistingUsers(mapped);
             } else {
@@ -277,7 +293,7 @@ export default function EmpleadosPage() {
                 if (!isModuleEnabled(m.key)) {
                     disabled.add(m.read);
                     if (m.write) disabled.add(m.write);
-                    for (const ex of (m as any).extra || []) disabled.add(String(ex));
+                    for (const ex of getModuleExtra(m) || []) disabled.add(String(ex));
                 }
             }
             const scopesSanitized = Array.from(new Set(editScopes)).filter((s) => !disabled.has(String(s)));
@@ -288,7 +304,7 @@ export default function EmpleadosPage() {
                 scopes: scopesSanitized,
                 tipo: editTipo,
                 estado: editEstado,
-            } as any);
+            });
             if (!res.ok) throw new Error(res.error || 'No se pudo guardar');
             toast({ title: 'Guardado', description: 'Cambios aplicados', variant: 'success' });
             setOpen(false);
@@ -666,7 +682,7 @@ export default function EmpleadosPage() {
                                 const enabledByModule = isModuleEnabled(m.key);
                                 const readOn = editScopes.includes(m.read) || (m.write ? editScopes.includes(m.write) : false);
                                 const writeOn = m.write ? editScopes.includes(m.write) : false;
-                                const extra = (m as any).extra as readonly string[] | undefined;
+                                const extra = getModuleExtra(m);
                                 const configOn = extra ? extra.every((s) => editScopes.includes(s)) : false;
                                 return (
                                     <div key={m.key} className={cn('flex items-center justify-between gap-3 p-3 rounded-xl border border-slate-800/60', enabledByModule ? 'bg-slate-950/20' : 'bg-slate-950/10 opacity-60')}>

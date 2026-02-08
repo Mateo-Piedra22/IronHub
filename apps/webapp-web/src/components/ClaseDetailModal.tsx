@@ -110,8 +110,6 @@ export default function ClaseDetailModal({
     const [bloqueNombre, setBloqueNombre] = useState('');
     const [bloqueItems, setBloqueItems] = useState<ClaseBloqueItem[]>([]);
     const [, setBloqueItemsLoading] = useState(false);
-    const [, setNewBloqueOpen] = useState(false);
-    const [newBloqueNombre, setNewBloqueNombre] = useState('');
     const [savingBloque, setSavingBloque] = useState(false);
 
     const loadHorarios = useCallback(async () => {
@@ -248,11 +246,13 @@ export default function ClaseDetailModal({
         }
     }, [clase, selectedBloqueId]);
 
+    const claseId = clase?.id;
+
     const loadBloqueItems = useCallback(async (bloqueId: number) => {
-        if (!clase) return;
+        if (!claseId) return;
         setBloqueItemsLoading(true);
         try {
-            const res = await api.getClaseBloqueItems(clase.id, bloqueId);
+            const res = await api.getClaseBloqueItems(claseId, bloqueId);
             // Race guard
             if (bloqueId !== selectedBloqueIdRef.current) return;
 
@@ -260,7 +260,7 @@ export default function ClaseDetailModal({
         } finally {
             setBloqueItemsLoading(false);
         }
-    }, [clase?.id]);
+    }, [claseId]);
 
     // Race condition guard
     const selectedBloqueIdRef = useRef<number | null>(null);
@@ -899,10 +899,19 @@ export default function ClaseDetailModal({
                                     <Button
                                         size="sm"
                                         leftIcon={<Plus className="w-3 h-3" />}
-                                        onClick={() => {
-                                            if (clase) {
-                                                setNewBloqueNombre('Nuevo Bloque');
-                                                setNewBloqueOpen(true);
+                                        onClick={async () => {
+                                            if (!clase) return;
+                                            const nombre = 'Nuevo Bloque';
+                                            setSavingBloque(true);
+                                            try {
+                                                const res = await api.createClaseBloque(clase.id, { nombre, items: [] });
+                                                if (!res.ok || !res.data?.id) return;
+                                                await loadBloques();
+                                                setSelectedBloqueId(res.data.id);
+                                                setBloqueNombre(nombre);
+                                                setBloqueItems([]);
+                                            } finally {
+                                                setSavingBloque(false);
                                             }
                                         }}
                                     >
