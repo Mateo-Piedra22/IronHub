@@ -88,6 +88,9 @@ def _get_branding_for_tenant(tenant: str) -> Dict[str, Any]:
     gym_name = "Gimnasio"
     logo_url: Optional[str] = None
     theme: Dict[str, Any] = {}
+    portal: Dict[str, Any] = {}
+    support: Dict[str, Any] = {}
+    footer: Dict[str, Any] = {}
     if tenant:
         try:
             ses = AdminSessionLocal()
@@ -102,7 +105,20 @@ def _get_branding_for_tenant(tenant: str) -> Dict[str, Any]:
                                    b.color_primario,
                                    b.color_secundario,
                                    b.color_fondo,
-                                   b.color_texto
+                                   b.color_texto,
+                                   b.portal_tagline,
+                                   b.footer_text,
+                                   b.show_powered_by,
+                                   b.support_whatsapp_enabled,
+                                   b.support_whatsapp,
+                                   b.support_email_enabled,
+                                   b.support_email,
+                                   b.support_url_enabled,
+                                   b.support_url,
+                                   b.portal_enable_checkin,
+                                   b.portal_enable_member,
+                                   b.portal_enable_staff,
+                                   b.portal_enable_owner
                             FROM gyms g
                             LEFT JOIN gym_branding b ON b.gym_id = g.id
                             WHERE g.subdominio = :t
@@ -122,6 +138,35 @@ def _get_branding_for_tenant(tenant: str) -> Dict[str, Any]:
                         "secondary": str(row.get("color_secundario") or "").strip() or None,
                         "background": str(row.get("color_fondo") or "").strip() or None,
                         "text": str(row.get("color_texto") or "").strip() or None,
+                    }
+                    portal = {
+                        "tagline": str(row.get("portal_tagline") or "").strip() or None,
+                        "enable_checkin": True
+                        if row.get("portal_enable_checkin") is None
+                        else bool(row.get("portal_enable_checkin")),
+                        "enable_member": True
+                        if row.get("portal_enable_member") is None
+                        else bool(row.get("portal_enable_member")),
+                        "enable_staff": True
+                        if row.get("portal_enable_staff") is None
+                        else bool(row.get("portal_enable_staff")),
+                        "enable_owner": True
+                        if row.get("portal_enable_owner") is None
+                        else bool(row.get("portal_enable_owner")),
+                    }
+                    support = {
+                        "whatsapp_enabled": bool(row.get("support_whatsapp_enabled") or False),
+                        "whatsapp": str(row.get("support_whatsapp") or "").strip() or None,
+                        "email_enabled": bool(row.get("support_email_enabled") or False),
+                        "email": str(row.get("support_email") or "").strip() or None,
+                        "url_enabled": bool(row.get("support_url_enabled") or False),
+                        "url": str(row.get("support_url") or "").strip() or None,
+                    }
+                    footer = {
+                        "text": str(row.get("footer_text") or "").strip() or None,
+                        "show_powered_by": True
+                        if row.get("show_powered_by") is None
+                        else bool(row.get("show_powered_by")),
                     }
             finally:
                 ses.close()
@@ -159,7 +204,14 @@ def _get_branding_for_tenant(tenant: str) -> Dict[str, Any]:
     if not gym_name:
         gym_name = get_gym_name("Gimnasio")
 
-    payload = {"gym_name": gym_name, "logo_url": logo_url, "theme": theme}
+    payload = {
+        "gym_name": gym_name,
+        "logo_url": logo_url,
+        "theme": theme,
+        "portal": portal,
+        "support": support,
+        "footer": footer,
+    }
     _GYM_DATA_PUBLIC_CACHE[cache_key] = {"ts": now, "data": payload}
     return payload
 

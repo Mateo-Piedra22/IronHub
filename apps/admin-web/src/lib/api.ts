@@ -597,7 +597,7 @@ export const api = {
 
     // Branding
     getGymBranding: (gymId: number) =>
-        request<{ branding: Record<string, string> }>(`/gyms/${gymId}/branding`),
+        request<{ branding: Record<string, any> }>(`/gyms/${gymId}/branding`),
 
     saveGymBranding: (gymId: number, branding: {
         nombre_publico?: string;
@@ -607,6 +607,19 @@ export const api = {
         color_secundario?: string;
         color_fondo?: string;
         color_texto?: string;
+        portal_tagline?: string;
+        footer_text?: string;
+        show_powered_by?: boolean;
+        support_whatsapp_enabled?: boolean;
+        support_whatsapp?: string;
+        support_email_enabled?: boolean;
+        support_email?: string;
+        support_url_enabled?: boolean;
+        support_url?: string;
+        portal_enable_checkin?: boolean;
+        portal_enable_member?: boolean;
+        portal_enable_staff?: boolean;
+        portal_enable_owner?: boolean;
     }) =>
         request<{ ok: boolean }>(`/gyms/${gymId}/branding`, {
             method: 'POST',

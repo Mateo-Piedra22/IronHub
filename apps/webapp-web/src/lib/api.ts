@@ -410,6 +410,25 @@ export interface PublicGymData {
         background?: string | null;
         text?: string | null;
     };
+    portal?: {
+        tagline?: string | null;
+        enable_checkin?: boolean;
+        enable_member?: boolean;
+        enable_staff?: boolean;
+        enable_owner?: boolean;
+    };
+    support?: {
+        whatsapp_enabled?: boolean;
+        whatsapp?: string | null;
+        email_enabled?: boolean;
+        email?: string | null;
+        url_enabled?: boolean;
+        url?: string | null;
+    };
+    footer?: {
+        text?: string | null;
+        show_powered_by?: boolean;
+    };
 }
 
 export interface MaintenanceStatus {

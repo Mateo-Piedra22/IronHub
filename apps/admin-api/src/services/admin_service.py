@@ -619,10 +619,75 @@ class AdminService:
                         color_secundario TEXT NULL,
                         color_fondo TEXT NULL,
                         color_texto TEXT NULL,
+                        portal_tagline TEXT NULL,
+                        footer_text TEXT NULL,
+                        show_powered_by BOOLEAN NOT NULL DEFAULT TRUE,
+                        support_whatsapp_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                        support_whatsapp TEXT NULL,
+                        support_email_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                        support_email TEXT NULL,
+                        support_url_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                        support_url TEXT NULL,
+                        portal_enable_checkin BOOLEAN NOT NULL DEFAULT TRUE,
+                        portal_enable_member BOOLEAN NOT NULL DEFAULT TRUE,
+                        portal_enable_staff BOOLEAN NOT NULL DEFAULT TRUE,
+                        portal_enable_owner BOOLEAN NOT NULL DEFAULT TRUE,
                         updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
                     )
                     """
                 )
+                try:
+                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS portal_tagline TEXT NULL")
+                except Exception:
+                    pass
+                try:
+                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS footer_text TEXT NULL")
+                except Exception:
+                    pass
+                try:
+                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS show_powered_by BOOLEAN NOT NULL DEFAULT TRUE")
+                except Exception:
+                    pass
+                try:
+                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS support_whatsapp_enabled BOOLEAN NOT NULL DEFAULT FALSE")
+                except Exception:
+                    pass
+                try:
+                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS support_whatsapp TEXT NULL")
+                except Exception:
+                    pass
+                try:
+                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS support_email_enabled BOOLEAN NOT NULL DEFAULT FALSE")
+                except Exception:
+                    pass
+                try:
+                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS support_email TEXT NULL")
+                except Exception:
+                    pass
+                try:
+                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS support_url_enabled BOOLEAN NOT NULL DEFAULT FALSE")
+                except Exception:
+                    pass
+                try:
+                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS support_url TEXT NULL")
+                except Exception:
+                    pass
+                try:
+                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS portal_enable_checkin BOOLEAN NOT NULL DEFAULT TRUE")
+                except Exception:
+                    pass
+                try:
+                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS portal_enable_member BOOLEAN NOT NULL DEFAULT TRUE")
+                except Exception:
+                    pass
+                try:
+                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS portal_enable_staff BOOLEAN NOT NULL DEFAULT TRUE")
+                except Exception:
+                    pass
+                try:
+                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS portal_enable_owner BOOLEAN NOT NULL DEFAULT TRUE")
+                except Exception:
+                    pass
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS idx_gym_branding_updated_at ON gym_branding (updated_at)"
                 )
@@ -3753,16 +3818,41 @@ class AdminService:
                         "color_secundario": branding.get("color_secundario"),
                         "color_fondo": branding.get("color_fondo"),
                         "color_texto": branding.get("color_texto"),
+                        "portal_tagline": branding.get("portal_tagline"),
+                        "footer_text": branding.get("footer_text"),
+                        "show_powered_by": branding.get("show_powered_by"),
+                        "support_whatsapp_enabled": branding.get("support_whatsapp_enabled"),
+                        "support_whatsapp": branding.get("support_whatsapp"),
+                        "support_email_enabled": branding.get("support_email_enabled"),
+                        "support_email": branding.get("support_email"),
+                        "support_url_enabled": branding.get("support_url_enabled"),
+                        "support_url": branding.get("support_url"),
+                        "portal_enable_checkin": branding.get("portal_enable_checkin"),
+                        "portal_enable_member": branding.get("portal_enable_member"),
+                        "portal_enable_staff": branding.get("portal_enable_staff"),
+                        "portal_enable_owner": branding.get("portal_enable_owner"),
                     }
                     cur.execute(
                         """
                         INSERT INTO gym_branding (
                             gym_id, nombre_publico, direccion, logo_url,
-                            color_primario, color_secundario, color_fondo, color_texto, updated_at
+                            color_primario, color_secundario, color_fondo, color_texto,
+                            portal_tagline, footer_text, show_powered_by,
+                            support_whatsapp_enabled, support_whatsapp,
+                            support_email_enabled, support_email,
+                            support_url_enabled, support_url,
+                            portal_enable_checkin, portal_enable_member, portal_enable_staff, portal_enable_owner,
+                            updated_at
                         )
                         VALUES (
                             %(gym_id)s, %(nombre_publico)s, %(direccion)s, %(logo_url)s,
-                            %(color_primario)s, %(color_secundario)s, %(color_fondo)s, %(color_texto)s, NOW()
+                            %(color_primario)s, %(color_secundario)s, %(color_fondo)s, %(color_texto)s,
+                            %(portal_tagline)s, %(footer_text)s, %(show_powered_by)s,
+                            %(support_whatsapp_enabled)s, %(support_whatsapp)s,
+                            %(support_email_enabled)s, %(support_email)s,
+                            %(support_url_enabled)s, %(support_url)s,
+                            %(portal_enable_checkin)s, %(portal_enable_member)s, %(portal_enable_staff)s, %(portal_enable_owner)s,
+                            NOW()
                         )
                         ON CONFLICT (gym_id) DO UPDATE SET
                             nombre_publico = COALESCE(EXCLUDED.nombre_publico, gym_branding.nombre_publico),
@@ -3772,6 +3862,19 @@ class AdminService:
                             color_secundario = COALESCE(EXCLUDED.color_secundario, gym_branding.color_secundario),
                             color_fondo = COALESCE(EXCLUDED.color_fondo, gym_branding.color_fondo),
                             color_texto = COALESCE(EXCLUDED.color_texto, gym_branding.color_texto),
+                            portal_tagline = COALESCE(EXCLUDED.portal_tagline, gym_branding.portal_tagline),
+                            footer_text = COALESCE(EXCLUDED.footer_text, gym_branding.footer_text),
+                            show_powered_by = COALESCE(EXCLUDED.show_powered_by, gym_branding.show_powered_by),
+                            support_whatsapp_enabled = COALESCE(EXCLUDED.support_whatsapp_enabled, gym_branding.support_whatsapp_enabled),
+                            support_whatsapp = COALESCE(EXCLUDED.support_whatsapp, gym_branding.support_whatsapp),
+                            support_email_enabled = COALESCE(EXCLUDED.support_email_enabled, gym_branding.support_email_enabled),
+                            support_email = COALESCE(EXCLUDED.support_email, gym_branding.support_email),
+                            support_url_enabled = COALESCE(EXCLUDED.support_url_enabled, gym_branding.support_url_enabled),
+                            support_url = COALESCE(EXCLUDED.support_url, gym_branding.support_url),
+                            portal_enable_checkin = COALESCE(EXCLUDED.portal_enable_checkin, gym_branding.portal_enable_checkin),
+                            portal_enable_member = COALESCE(EXCLUDED.portal_enable_member, gym_branding.portal_enable_member),
+                            portal_enable_staff = COALESCE(EXCLUDED.portal_enable_staff, gym_branding.portal_enable_staff),
+                            portal_enable_owner = COALESCE(EXCLUDED.portal_enable_owner, gym_branding.portal_enable_owner),
                             updated_at = NOW()
                         """,
                         payload,
@@ -3804,7 +3907,12 @@ class AdminService:
                     cur.execute(
                         """
                         SELECT nombre_publico, direccion, logo_url,
-                               color_primario, color_secundario, color_fondo, color_texto
+                               color_primario, color_secundario, color_fondo, color_texto,
+                               portal_tagline, footer_text, show_powered_by,
+                               support_whatsapp_enabled, support_whatsapp,
+                               support_email_enabled, support_email,
+                               support_url_enabled, support_url,
+                               portal_enable_checkin, portal_enable_member, portal_enable_staff, portal_enable_owner
                         FROM gym_branding
                         WHERE gym_id = %s
                         LIMIT 1
@@ -3820,6 +3928,29 @@ class AdminService:
                     "color_secundario": row.get("color_secundario") or "#10b981",
                     "color_fondo": row.get("color_fondo") or "#020617",
                     "color_texto": row.get("color_texto") or "#ffffff",
+                    "portal_tagline": row.get("portal_tagline") or "",
+                    "footer_text": row.get("footer_text") or "",
+                    "show_powered_by": True
+                    if row.get("show_powered_by") is None
+                    else bool(row.get("show_powered_by")),
+                    "support_whatsapp_enabled": bool(row.get("support_whatsapp_enabled") or False),
+                    "support_whatsapp": row.get("support_whatsapp") or "",
+                    "support_email_enabled": bool(row.get("support_email_enabled") or False),
+                    "support_email": row.get("support_email") or "",
+                    "support_url_enabled": bool(row.get("support_url_enabled") or False),
+                    "support_url": row.get("support_url") or "",
+                    "portal_enable_checkin": True
+                    if row.get("portal_enable_checkin") is None
+                    else bool(row.get("portal_enable_checkin")),
+                    "portal_enable_member": True
+                    if row.get("portal_enable_member") is None
+                    else bool(row.get("portal_enable_member")),
+                    "portal_enable_staff": True
+                    if row.get("portal_enable_staff") is None
+                    else bool(row.get("portal_enable_staff")),
+                    "portal_enable_owner": True
+                    if row.get("portal_enable_owner") is None
+                    else bool(row.get("portal_enable_owner")),
                 }
             finally:
                 pass

@@ -19,6 +19,19 @@ interface BrandingConfig {
     color_secundario: string;
     color_fondo: string;
     color_texto: string;
+    portal_tagline: string;
+    footer_text: string;
+    show_powered_by: boolean;
+    support_whatsapp_enabled: boolean;
+    support_whatsapp: string;
+    support_email_enabled: boolean;
+    support_email: string;
+    support_url_enabled: boolean;
+    support_url: string;
+    portal_enable_checkin: boolean;
+    portal_enable_member: boolean;
+    portal_enable_staff: boolean;
+    portal_enable_owner: boolean;
 }
 
 export default function GymDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -167,6 +180,19 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         color_secundario: '#22c55e',
         color_fondo: '#0a0a0a',
         color_texto: '#ffffff',
+        portal_tagline: '',
+        footer_text: '',
+        show_powered_by: true,
+        support_whatsapp_enabled: false,
+        support_whatsapp: '',
+        support_email_enabled: false,
+        support_email: '',
+        support_url_enabled: false,
+        support_url: '',
+        portal_enable_checkin: true,
+        portal_enable_member: true,
+        portal_enable_staff: true,
+        portal_enable_owner: true,
     });
     const [uploading, setUploading] = useState(false);
     const logoInputRef = useRef<HTMLInputElement>(null);
@@ -2376,7 +2402,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl">
                             <div>
                                 <label className="label">Nombre público</label>
                                 <input
@@ -2404,6 +2430,16 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                     placeholder="https://..."
                                     value={branding.logo_url}
                                     onChange={(e) => setBranding(prev => ({ ...prev, logo_url: e.target.value }))}
+                                />
+                            </div>
+                            <div className="md:col-span-2">
+                                <label className="label">Tagline del portal</label>
+                                <input
+                                    type="text"
+                                    className="input"
+                                    placeholder="Ej: Portal de acceso para clientes y equipo."
+                                    value={branding.portal_tagline}
+                                    onChange={(e) => setBranding(prev => ({ ...prev, portal_tagline: e.target.value }))}
                                 />
                             </div>
                             <div className="md:col-span-2">
@@ -2445,6 +2481,128 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                             onChange={(e) => setBranding(prev => ({ ...prev, color_texto: e.target.value }))}
                                         />
                                     </div>
+                                </div>
+                            </div>
+                            <div className="md:col-span-2">
+                                <h3 className="text-sm font-medium text-slate-300 mb-2">Accesos del portal</h3>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <label className="flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={branding.portal_enable_checkin}
+                                            onChange={(e) => setBranding(prev => ({ ...prev, portal_enable_checkin: e.target.checked }))}
+                                        />
+                                        <span className="text-slate-300 text-sm">Check-in</span>
+                                    </label>
+                                    <label className="flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={branding.portal_enable_member}
+                                            onChange={(e) => setBranding(prev => ({ ...prev, portal_enable_member: e.target.checked }))}
+                                        />
+                                        <span className="text-slate-300 text-sm">Usuarios (socio)</span>
+                                    </label>
+                                    <label className="flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={branding.portal_enable_staff}
+                                            onChange={(e) => setBranding(prev => ({ ...prev, portal_enable_staff: e.target.checked }))}
+                                        />
+                                        <span className="text-slate-300 text-sm">Gestión (staff)</span>
+                                    </label>
+                                    <label className="flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={branding.portal_enable_owner}
+                                            onChange={(e) => setBranding(prev => ({ ...prev, portal_enable_owner: e.target.checked }))}
+                                        />
+                                        <span className="text-slate-300 text-sm">Dashboard (dueño)</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div className="md:col-span-2">
+                                <h3 className="text-sm font-medium text-slate-300 mb-2">Soporte</h3>
+                                <div className="space-y-3">
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                                        <label className="flex items-center gap-2 md:col-span-1">
+                                            <input
+                                                type="checkbox"
+                                                checked={branding.support_whatsapp_enabled}
+                                                onChange={(e) => setBranding(prev => ({ ...prev, support_whatsapp_enabled: e.target.checked }))}
+                                            />
+                                            <span className="text-slate-300 text-sm">WhatsApp</span>
+                                        </label>
+                                        <div className="md:col-span-2">
+                                            <input
+                                                type="text"
+                                                className="input"
+                                                placeholder="Ej: 54911XXXXXXXX"
+                                                value={branding.support_whatsapp}
+                                                onChange={(e) => setBranding(prev => ({ ...prev, support_whatsapp: e.target.value }))}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                                        <label className="flex items-center gap-2 md:col-span-1">
+                                            <input
+                                                type="checkbox"
+                                                checked={branding.support_email_enabled}
+                                                onChange={(e) => setBranding(prev => ({ ...prev, support_email_enabled: e.target.checked }))}
+                                            />
+                                            <span className="text-slate-300 text-sm">Email</span>
+                                        </label>
+                                        <div className="md:col-span-2">
+                                            <input
+                                                type="email"
+                                                className="input"
+                                                placeholder="soporte@tugym.com"
+                                                value={branding.support_email}
+                                                onChange={(e) => setBranding(prev => ({ ...prev, support_email: e.target.value }))}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                                        <label className="flex items-center gap-2 md:col-span-1">
+                                            <input
+                                                type="checkbox"
+                                                checked={branding.support_url_enabled}
+                                                onChange={(e) => setBranding(prev => ({ ...prev, support_url_enabled: e.target.checked }))}
+                                            />
+                                            <span className="text-slate-300 text-sm">URL</span>
+                                        </label>
+                                        <div className="md:col-span-2">
+                                            <input
+                                                type="text"
+                                                className="input"
+                                                placeholder="https://..."
+                                                value={branding.support_url}
+                                                onChange={(e) => setBranding(prev => ({ ...prev, support_url: e.target.value }))}
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="md:col-span-2">
+                                <h3 className="text-sm font-medium text-slate-300 mb-2">Footer</h3>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
+                                    <div className="md:col-span-2">
+                                        <label className="label">Texto del footer</label>
+                                        <input
+                                            type="text"
+                                            className="input"
+                                            placeholder="Ej: © {año} Tu Gimnasio. Todos los derechos reservados."
+                                            value={branding.footer_text}
+                                            onChange={(e) => setBranding(prev => ({ ...prev, footer_text: e.target.value }))}
+                                        />
+                                    </div>
+                                    <label className="flex items-center gap-2 md:col-span-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={branding.show_powered_by}
+                                            onChange={(e) => setBranding(prev => ({ ...prev, show_powered_by: e.target.checked }))}
+                                        />
+                                        <span className="text-slate-300 text-sm">Mostrar Powered by IronHub</span>
+                                    </label>
                                 </div>
                             </div>
                         </div>

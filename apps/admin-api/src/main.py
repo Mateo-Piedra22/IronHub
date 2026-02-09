@@ -1667,10 +1667,33 @@ async def save_gym_branding(
     color_secundario: str = Form(None),
     color_fondo: str = Form(None),
     color_texto: str = Form(None),
+    portal_tagline: str = Form(None),
+    footer_text: str = Form(None),
+    show_powered_by: str = Form(None),
+    support_whatsapp_enabled: str = Form(None),
+    support_whatsapp: str = Form(None),
+    support_email_enabled: str = Form(None),
+    support_email: str = Form(None),
+    support_url_enabled: str = Form(None),
+    support_url: str = Form(None),
+    portal_enable_checkin: str = Form(None),
+    portal_enable_member: str = Form(None),
+    portal_enable_staff: str = Form(None),
+    portal_enable_owner: str = Form(None),
 ):
     """Save branding configuration for a gym."""
     require_admin(request)
     adm = get_admin_service()
+
+    def _parse_bool(v: Any) -> Optional[bool]:
+        if v is None:
+            return None
+        s = str(v).strip().lower()
+        if s in ("1", "true", "yes", "y", "on"):
+            return True
+        if s in ("0", "false", "no", "n", "off"):
+            return False
+        return None
 
     branding = {}
     if nombre_publico is not None:
@@ -1687,6 +1710,45 @@ async def save_gym_branding(
         branding["color_fondo"] = color_fondo
     if color_texto is not None:
         branding["color_texto"] = color_texto
+    if portal_tagline is not None:
+        branding["portal_tagline"] = portal_tagline
+    if footer_text is not None:
+        branding["footer_text"] = footer_text
+
+    v_show_powered_by = _parse_bool(show_powered_by)
+    if v_show_powered_by is not None:
+        branding["show_powered_by"] = v_show_powered_by
+
+    v_support_whatsapp_enabled = _parse_bool(support_whatsapp_enabled)
+    if v_support_whatsapp_enabled is not None:
+        branding["support_whatsapp_enabled"] = v_support_whatsapp_enabled
+    if support_whatsapp is not None:
+        branding["support_whatsapp"] = support_whatsapp
+
+    v_support_email_enabled = _parse_bool(support_email_enabled)
+    if v_support_email_enabled is not None:
+        branding["support_email_enabled"] = v_support_email_enabled
+    if support_email is not None:
+        branding["support_email"] = support_email
+
+    v_support_url_enabled = _parse_bool(support_url_enabled)
+    if v_support_url_enabled is not None:
+        branding["support_url_enabled"] = v_support_url_enabled
+    if support_url is not None:
+        branding["support_url"] = support_url
+
+    v_portal_enable_checkin = _parse_bool(portal_enable_checkin)
+    if v_portal_enable_checkin is not None:
+        branding["portal_enable_checkin"] = v_portal_enable_checkin
+    v_portal_enable_member = _parse_bool(portal_enable_member)
+    if v_portal_enable_member is not None:
+        branding["portal_enable_member"] = v_portal_enable_member
+    v_portal_enable_staff = _parse_bool(portal_enable_staff)
+    if v_portal_enable_staff is not None:
+        branding["portal_enable_staff"] = v_portal_enable_staff
+    v_portal_enable_owner = _parse_bool(portal_enable_owner)
+    if v_portal_enable_owner is not None:
+        branding["portal_enable_owner"] = v_portal_enable_owner
 
     result = adm.save_gym_branding(gym_id, branding)
     return result
