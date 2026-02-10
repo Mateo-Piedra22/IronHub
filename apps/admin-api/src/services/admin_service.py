@@ -610,90 +610,6 @@ class AdminService:
 
                 cur.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS gym_branding (
-                        gym_id BIGINT PRIMARY KEY REFERENCES gyms(id) ON DELETE CASCADE,
-                        nombre_publico TEXT NULL,
-                        direccion TEXT NULL,
-                        logo_url TEXT NULL,
-                        color_primario TEXT NULL,
-                        color_secundario TEXT NULL,
-                        color_fondo TEXT NULL,
-                        color_texto TEXT NULL,
-                        portal_tagline TEXT NULL,
-                        footer_text TEXT NULL,
-                        show_powered_by BOOLEAN NOT NULL DEFAULT TRUE,
-                        support_whatsapp_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-                        support_whatsapp TEXT NULL,
-                        support_email_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-                        support_email TEXT NULL,
-                        support_url_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-                        support_url TEXT NULL,
-                        portal_enable_checkin BOOLEAN NOT NULL DEFAULT TRUE,
-                        portal_enable_member BOOLEAN NOT NULL DEFAULT TRUE,
-                        portal_enable_staff BOOLEAN NOT NULL DEFAULT TRUE,
-                        portal_enable_owner BOOLEAN NOT NULL DEFAULT TRUE,
-                        updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
-                    )
-                    """
-                )
-                try:
-                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS portal_tagline TEXT NULL")
-                except Exception:
-                    pass
-                try:
-                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS footer_text TEXT NULL")
-                except Exception:
-                    pass
-                try:
-                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS show_powered_by BOOLEAN NOT NULL DEFAULT TRUE")
-                except Exception:
-                    pass
-                try:
-                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS support_whatsapp_enabled BOOLEAN NOT NULL DEFAULT FALSE")
-                except Exception:
-                    pass
-                try:
-                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS support_whatsapp TEXT NULL")
-                except Exception:
-                    pass
-                try:
-                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS support_email_enabled BOOLEAN NOT NULL DEFAULT FALSE")
-                except Exception:
-                    pass
-                try:
-                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS support_email TEXT NULL")
-                except Exception:
-                    pass
-                try:
-                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS support_url_enabled BOOLEAN NOT NULL DEFAULT FALSE")
-                except Exception:
-                    pass
-                try:
-                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS support_url TEXT NULL")
-                except Exception:
-                    pass
-                try:
-                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS portal_enable_checkin BOOLEAN NOT NULL DEFAULT TRUE")
-                except Exception:
-                    pass
-                try:
-                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS portal_enable_member BOOLEAN NOT NULL DEFAULT TRUE")
-                except Exception:
-                    pass
-                try:
-                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS portal_enable_staff BOOLEAN NOT NULL DEFAULT TRUE")
-                except Exception:
-                    pass
-                try:
-                    cur.execute("ALTER TABLE gym_branding ADD COLUMN IF NOT EXISTS portal_enable_owner BOOLEAN NOT NULL DEFAULT TRUE")
-                except Exception:
-                    pass
-                cur.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_gym_branding_updated_at ON gym_branding (updated_at)"
-                )
-
-                cur.execute(
-                    """
                     CREATE TABLE IF NOT EXISTS rate_limit_buckets (
                         key TEXT PRIMARY KEY,
                         count INTEGER NOT NULL,
@@ -3806,90 +3722,73 @@ class AdminService:
             if not subdominio:
                 return {"ok": False, "error": "invalid_subdomain"}
 
-            try:
-                with self.db.get_connection_context() as conn:
-                    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                    payload = {
-                        "gym_id": int(gym_id),
-                        "nombre_publico": branding.get("nombre_publico"),
-                        "direccion": branding.get("direccion"),
-                        "logo_url": branding.get("logo_url"),
-                        "color_primario": branding.get("color_primario"),
-                        "color_secundario": branding.get("color_secundario"),
-                        "color_fondo": branding.get("color_fondo"),
-                        "color_texto": branding.get("color_texto"),
-                        "portal_tagline": branding.get("portal_tagline"),
-                        "footer_text": branding.get("footer_text"),
-                        "show_powered_by": branding.get("show_powered_by"),
-                        "support_whatsapp_enabled": branding.get("support_whatsapp_enabled"),
-                        "support_whatsapp": branding.get("support_whatsapp"),
-                        "support_email_enabled": branding.get("support_email_enabled"),
-                        "support_email": branding.get("support_email"),
-                        "support_url_enabled": branding.get("support_url_enabled"),
-                        "support_url": branding.get("support_url"),
-                        "portal_enable_checkin": branding.get("portal_enable_checkin"),
-                        "portal_enable_member": branding.get("portal_enable_member"),
-                        "portal_enable_staff": branding.get("portal_enable_staff"),
-                        "portal_enable_owner": branding.get("portal_enable_owner"),
-                    }
-                    cur.execute(
-                        """
-                        INSERT INTO gym_branding (
-                            gym_id, nombre_publico, direccion, logo_url,
-                            color_primario, color_secundario, color_fondo, color_texto,
-                            portal_tagline, footer_text, show_powered_by,
-                            support_whatsapp_enabled, support_whatsapp,
-                            support_email_enabled, support_email,
-                            support_url_enabled, support_url,
-                            portal_enable_checkin, portal_enable_member, portal_enable_staff, portal_enable_owner,
-                            updated_at
-                        )
-                        VALUES (
-                            %(gym_id)s, %(nombre_publico)s, %(direccion)s, %(logo_url)s,
-                            %(color_primario)s, %(color_secundario)s, %(color_fondo)s, %(color_texto)s,
-                            %(portal_tagline)s, %(footer_text)s, %(show_powered_by)s,
-                            %(support_whatsapp_enabled)s, %(support_whatsapp)s,
-                            %(support_email_enabled)s, %(support_email)s,
-                            %(support_url_enabled)s, %(support_url)s,
-                            %(portal_enable_checkin)s, %(portal_enable_member)s, %(portal_enable_staff)s, %(portal_enable_owner)s,
-                            NOW()
-                        )
-                        ON CONFLICT (gym_id) DO UPDATE SET
-                            nombre_publico = COALESCE(EXCLUDED.nombre_publico, gym_branding.nombre_publico),
-                            direccion = COALESCE(EXCLUDED.direccion, gym_branding.direccion),
-                            logo_url = COALESCE(EXCLUDED.logo_url, gym_branding.logo_url),
-                            color_primario = COALESCE(EXCLUDED.color_primario, gym_branding.color_primario),
-                            color_secundario = COALESCE(EXCLUDED.color_secundario, gym_branding.color_secundario),
-                            color_fondo = COALESCE(EXCLUDED.color_fondo, gym_branding.color_fondo),
-                            color_texto = COALESCE(EXCLUDED.color_texto, gym_branding.color_texto),
-                            portal_tagline = COALESCE(EXCLUDED.portal_tagline, gym_branding.portal_tagline),
-                            footer_text = COALESCE(EXCLUDED.footer_text, gym_branding.footer_text),
-                            show_powered_by = COALESCE(EXCLUDED.show_powered_by, gym_branding.show_powered_by),
-                            support_whatsapp_enabled = COALESCE(EXCLUDED.support_whatsapp_enabled, gym_branding.support_whatsapp_enabled),
-                            support_whatsapp = COALESCE(EXCLUDED.support_whatsapp, gym_branding.support_whatsapp),
-                            support_email_enabled = COALESCE(EXCLUDED.support_email_enabled, gym_branding.support_email_enabled),
-                            support_email = COALESCE(EXCLUDED.support_email, gym_branding.support_email),
-                            support_url_enabled = COALESCE(EXCLUDED.support_url_enabled, gym_branding.support_url_enabled),
-                            support_url = COALESCE(EXCLUDED.support_url, gym_branding.support_url),
-                            portal_enable_checkin = COALESCE(EXCLUDED.portal_enable_checkin, gym_branding.portal_enable_checkin),
-                            portal_enable_member = COALESCE(EXCLUDED.portal_enable_member, gym_branding.portal_enable_member),
-                            portal_enable_staff = COALESCE(EXCLUDED.portal_enable_staff, gym_branding.portal_enable_staff),
-                            portal_enable_owner = COALESCE(EXCLUDED.portal_enable_owner, gym_branding.portal_enable_owner),
-                            updated_at = NOW()
-                        """,
-                        payload,
-                    )
-                    conn.commit()
+            db_name = gym.get("db_name")
+            if not db_name:
+                return {"ok": False, "error": "no_tenant_db"}
+            engine = self._get_tenant_engine(db_name)
+            if not engine:
+                return {"ok": False, "error": "could_not_connect_tenant"}
 
+            Session = sessionmaker(bind=engine)
+            session = Session()
+            try:
+                allowed_keys = {
+                    "nombre_publico",
+                    "direccion",
+                    "logo_url",
+                    "color_primario",
+                    "color_secundario",
+                    "color_fondo",
+                    "color_texto",
+                    "portal_tagline",
+                    "footer_text",
+                    "show_powered_by",
+                    "support_whatsapp_enabled",
+                    "support_whatsapp",
+                    "support_email_enabled",
+                    "support_email",
+                    "support_url_enabled",
+                    "support_url",
+                    "portal_enable_checkin",
+                    "portal_enable_member",
+                    "portal_enable_staff",
+                    "portal_enable_owner",
+                }
+                for key, value in (branding or {}).items():
+                    if key not in allowed_keys:
+                        continue
+                    if value is None:
+                        continue
+                    if isinstance(value, bool):
+                        val_str = "true" if value else "false"
+                    else:
+                        val_str = str(value)
+
+                    session.execute(
+                        text(
+                            """
+                            INSERT INTO configuracion (clave, valor)
+                            VALUES (:k, :v)
+                            ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor
+                            """
+                        ),
+                        {"k": str(key), "v": val_str},
+                    )
+                session.commit()
+            finally:
+                session.close()
+                engine.dispose()
+
+            try:
                 self.log_action(
                     "owner",
                     "save_branding",
                     gym_id,
                     f"Updated branding for {subdominio}",
                 )
-                return {"ok": True}
-            finally:
+            except Exception:
                 pass
+            return {"ok": True}
         except Exception as e:
             logger.error(f"Error saving branding for gym {gym_id}: {e}")
             return {"ok": False, "error": str(e)}
@@ -3901,59 +3800,114 @@ class AdminService:
             if not gym:
                 return {}
 
+            db_name = gym.get("db_name")
+            if not db_name:
+                return {}
+            engine = self._get_tenant_engine(db_name)
+            if not engine:
+                return {}
+
+            Session = sessionmaker(bind=engine)
+            session = Session()
             try:
-                with self.db.get_connection_context() as conn:
-                    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                    cur.execute(
-                        """
-                        SELECT nombre_publico, direccion, logo_url,
-                               color_primario, color_secundario, color_fondo, color_texto,
-                               portal_tagline, footer_text, show_powered_by,
-                               support_whatsapp_enabled, support_whatsapp,
-                               support_email_enabled, support_email,
-                               support_url_enabled, support_url,
-                               portal_enable_checkin, portal_enable_member, portal_enable_staff, portal_enable_owner
-                        FROM gym_branding
-                        WHERE gym_id = %s
-                        LIMIT 1
-                        """,
-                        (int(gym_id),),
+                keys = [
+                    "nombre_publico",
+                    "direccion",
+                    "logo_url",
+                    "color_primario",
+                    "color_secundario",
+                    "color_fondo",
+                    "color_texto",
+                    "portal_tagline",
+                    "footer_text",
+                    "show_powered_by",
+                    "support_whatsapp_enabled",
+                    "support_whatsapp",
+                    "support_email_enabled",
+                    "support_email",
+                    "support_url_enabled",
+                    "support_url",
+                    "portal_enable_checkin",
+                    "portal_enable_member",
+                    "portal_enable_staff",
+                    "portal_enable_owner",
+                ]
+                rows = (
+                    session.execute(
+                        text("SELECT clave, valor FROM configuracion WHERE clave = ANY(:keys)"),
+                        {"keys": keys},
                     )
-                    row = cur.fetchone() or {}
+                    .mappings()
+                    .all()
+                )
+                cfg = {str(r.get("clave") or ""): r.get("valor") for r in (rows or []) if r}
+
+                def _s(key: str) -> str:
+                    v = cfg.get(key)
+                    return "" if v is None else str(v)
+
+                def _b(key: str, default: bool) -> bool:
+                    raw = cfg.get(key)
+                    if raw is None:
+                        return bool(default)
+                    v = str(raw).strip().lower()
+                    if v in ("1", "true", "yes", "y", "on"):
+                        return True
+                    if v in ("0", "false", "no", "n", "off"):
+                        return False
+                    return bool(default)
+
+                def _resolve_logo_url(raw: str) -> str:
+                    s = str(raw or "").strip()
+                    if not s:
+                        return ""
+                    if s.startswith("http://") or s.startswith("https://") or s.startswith("/"):
+                        return s
+                    bucket = (os.getenv("B2_BUCKET_NAME") or "").strip()
+                    if not bucket:
+                        return s
+
+                    public_base = (os.getenv("B2_PUBLIC_BASE_URL") or "").strip().rstrip("/")
+                    if public_base:
+                        if not public_base.startswith("http://") and not public_base.startswith("https://"):
+                            public_base = f"https://{public_base.lstrip('/')}"
+                        if public_base.endswith("/file"):
+                            public_base = public_base[:-5]
+                        return f"{public_base}/file/{bucket}/{s}"
+
+                    ep = (os.getenv("B2_ENDPOINT_URL") or "").strip().lower()
+                    ep = ep.replace("https://", "").replace("http://", "")
+                    m = re.search(r"-(\d{3})\.backblazeb2\.com", ep)
+                    base = f"https://f{m.group(1)}.backblazeb2.com" if m else "https://f000.backblazeb2.com"
+                    return f"{base}/file/{bucket}/{s}"
+
+                resolved_logo = _resolve_logo_url(_s("logo_url"))
+
                 return {
-                    "nombre_publico": row.get("nombre_publico") or "",
-                    "direccion": row.get("direccion") or "",
-                    "logo_url": row.get("logo_url") or "",
-                    "color_primario": row.get("color_primario") or "#3b82f6",
-                    "color_secundario": row.get("color_secundario") or "#10b981",
-                    "color_fondo": row.get("color_fondo") or "#020617",
-                    "color_texto": row.get("color_texto") or "#ffffff",
-                    "portal_tagline": row.get("portal_tagline") or "",
-                    "footer_text": row.get("footer_text") or "",
-                    "show_powered_by": True
-                    if row.get("show_powered_by") is None
-                    else bool(row.get("show_powered_by")),
-                    "support_whatsapp_enabled": bool(row.get("support_whatsapp_enabled") or False),
-                    "support_whatsapp": row.get("support_whatsapp") or "",
-                    "support_email_enabled": bool(row.get("support_email_enabled") or False),
-                    "support_email": row.get("support_email") or "",
-                    "support_url_enabled": bool(row.get("support_url_enabled") or False),
-                    "support_url": row.get("support_url") or "",
-                    "portal_enable_checkin": True
-                    if row.get("portal_enable_checkin") is None
-                    else bool(row.get("portal_enable_checkin")),
-                    "portal_enable_member": True
-                    if row.get("portal_enable_member") is None
-                    else bool(row.get("portal_enable_member")),
-                    "portal_enable_staff": True
-                    if row.get("portal_enable_staff") is None
-                    else bool(row.get("portal_enable_staff")),
-                    "portal_enable_owner": True
-                    if row.get("portal_enable_owner") is None
-                    else bool(row.get("portal_enable_owner")),
+                    "nombre_publico": _s("nombre_publico"),
+                    "direccion": _s("direccion"),
+                    "logo_url": resolved_logo,
+                    "color_primario": _s("color_primario") or "#3b82f6",
+                    "color_secundario": _s("color_secundario") or "#10b981",
+                    "color_fondo": _s("color_fondo") or "#020617",
+                    "color_texto": _s("color_texto") or "#ffffff",
+                    "portal_tagline": _s("portal_tagline"),
+                    "footer_text": _s("footer_text"),
+                    "show_powered_by": _b("show_powered_by", True),
+                    "support_whatsapp_enabled": _b("support_whatsapp_enabled", False),
+                    "support_whatsapp": _s("support_whatsapp"),
+                    "support_email_enabled": _b("support_email_enabled", False),
+                    "support_email": _s("support_email"),
+                    "support_url_enabled": _b("support_url_enabled", False),
+                    "support_url": _s("support_url"),
+                    "portal_enable_checkin": _b("portal_enable_checkin", True),
+                    "portal_enable_member": _b("portal_enable_member", True),
+                    "portal_enable_staff": _b("portal_enable_staff", True),
+                    "portal_enable_owner": _b("portal_enable_owner", True),
                 }
             finally:
-                pass
+                session.close()
+                engine.dispose()
         except Exception as e:
             logger.error(f"Error getting branding for gym {gym_id}: {e}")
             return {}
@@ -7213,7 +7167,7 @@ class AdminService:
         """
         Set the owner password for a specific gym.
         Updates both:
-        1. gym_config table in the tenant database (owner_password key)
+        1. configuracion table in the tenant database (owner_password key)
         2. owner_password_hash in the admin gyms table for backup
 
         The password is hashed using bcrypt.
@@ -7259,7 +7213,7 @@ class AdminService:
                     f"Updated owner_password_hash in admin gyms table for gym {gym_id}"
                 )
 
-            # 2. Update the tenant's gym_config table
+            # 2. Update the tenant's configuracion table
             params = self.resolve_admin_db_params()
             params["database"] = db_name
 
@@ -7276,34 +7230,6 @@ class AdminService:
 
             with psycopg2.connect(**pg_params) as t_conn:
                 with t_conn.cursor() as t_cur:
-                    # Try to update gym_config table (new schema)
-                    try:
-                        # Check if gym_config table exists
-                        t_cur.execute("""
-                            SELECT EXISTS (
-                                SELECT FROM information_schema.tables 
-                                WHERE table_name = 'gym_config'
-                            )
-                        """)
-                        gym_config_exists = t_cur.fetchone()[0]
-
-                        if gym_config_exists:
-                            # Upsert into gym_config
-                            t_cur.execute(
-                                """
-                                INSERT INTO gym_config (clave, valor) 
-                                VALUES ('owner_password', %s)
-                                ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor
-                            """,
-                                (password_hash,),
-                            )
-                            logger.info(
-                                f"Updated gym_config.owner_password for gym {gym_id}"
-                            )
-                    except Exception as e:
-                        logger.warning(f"Could not update gym_config: {e}")
-
-                    # Also try configuracion table (legacy schema)
                     try:
                         t_cur.execute("""
                             SELECT EXISTS (

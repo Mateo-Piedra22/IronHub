@@ -1,8 +1,7 @@
 from typing import List, Optional, Dict, Any, Tuple
-from sqlalchemy import select, delete, func
+from sqlalchemy import select, delete, func, text
 from .base import BaseRepository
 from ..orm_models import (
-    GymConfig,
     Configuracion,
     Ejercicio,
     Rutina,
@@ -22,66 +21,102 @@ from datetime import date, time
 class GymRepository(BaseRepository):
     # --- Configuration ---
     def obtener_configuracion_gimnasio(self) -> Dict[str, str]:
-        conf = self.db.scalar(select(GymConfig).order_by(GymConfig.id))
-        if not conf:
-            return {
-                "gym_name": "Gimnasio",
-                "gym_slogan": "",
-                "gym_address": "",
-                "gym_phone": "",
-                "gym_email": "",
-                "gym_website": "",
-                "facebook": "",
-                "instagram": "",
-                "twitter": "",
-                "logo_url": "",
-            }
+        keys = [
+            "gym_name",
+            "gym_slogan",
+            "gym_address",
+            "gym_phone",
+            "gym_email",
+            "gym_website",
+            "facebook",
+            "instagram",
+            "twitter",
+            "logo_url",
+            "gym_logo_url",
+        ]
+        rows = (
+            self.db.execute(
+                text("SELECT clave, valor FROM configuracion WHERE clave = ANY(:keys)"),
+                {"keys": keys},
+            )
+            .mappings()
+            .all()
+        )
+        kv = {str(r.get("clave") or ""): (r.get("valor") or "") for r in (rows or []) if r}
+
+        gym_name = str(kv.get("gym_name") or "").strip() or "Gimnasio"
+        gym_slogan = str(kv.get("gym_slogan") or "").strip()
+        gym_address = str(kv.get("gym_address") or "").strip()
+        gym_phone = str(kv.get("gym_phone") or "").strip()
+        gym_email = str(kv.get("gym_email") or "").strip()
+        gym_website = str(kv.get("gym_website") or "").strip()
+        facebook = str(kv.get("facebook") or "").strip()
+        instagram = str(kv.get("instagram") or "").strip()
+        twitter = str(kv.get("twitter") or "").strip()
+        logo_url = str(kv.get("logo_url") or kv.get("gym_logo_url") or "").strip()
 
         return {
-            "gym_name": conf.gym_name or "",
-            "gym_slogan": conf.gym_slogan or "",
-            "gym_address": conf.gym_address or "",
-            "gym_phone": conf.gym_phone or "",
-            "gym_email": conf.gym_email or "",
-            "gym_website": conf.gym_website or "",
-            "facebook": conf.facebook or "",
-            "instagram": conf.instagram or "",
-            "twitter": conf.twitter or "",
-            "logo_url": conf.logo_url or "",
+            "gym_name": gym_name,
+            "gym_slogan": gym_slogan,
+            "gym_address": gym_address,
+            "gym_phone": gym_phone,
+            "gym_email": gym_email,
+            "gym_website": gym_website,
+            "facebook": facebook,
+            "instagram": instagram,
+            "twitter": twitter,
+            "logo_url": logo_url,
         }
 
     def actualizar_configuracion_gimnasio(self, data: dict) -> bool:
-        conf = self.db.scalar(select(GymConfig).order_by(GymConfig.id))
-        if not conf:
-            conf = GymConfig()
-            self.db.add(conf)
+        try:
+            for key, value in (data or {}).items():
+                if value is None:
+                    continue
+                self.db.execute(
+                    text(
+                        """
+                        INSERT INTO configuracion (clave, valor)
+                        VALUES (:k, :v)
+                        ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor
+                        """
+                    ),
+                    {"k": str(key), "v": str(value)},
+                )
+                if str(key) == "logo_url":
+                    self.db.execute(
+                        text(
+                            """
+                            INSERT INTO configuracion (clave, valor)
+                            VALUES ('gym_logo_url', :v)
+                            ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor
+                            """
+                        ),
+                        {"v": str(value)},
+                    )
 
-        for key, value in data.items():
-            if hasattr(conf, key):
-                setattr(conf, key, value)
-
-        if "logo_url" in data:
-            logo_url = data["logo_url"]
-            existing = self.db.scalar(
-                select(Configuracion).where(Configuracion.clave == "gym_logo_url")
-            )
-            if existing:
-                existing.valor = logo_url
-            else:
-                self.db.add(Configuracion(clave="gym_logo_url", valor=logo_url))
-
-        self.db.commit()
-        self._invalidate_cache("config")
-        return True
+            self.db.commit()
+            self._invalidate_cache("config")
+            return True
+        except Exception:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+            return False
 
     def obtener_logo_url(self) -> Optional[str]:
-        conf = self.db.scalar(select(GymConfig).order_by(GymConfig.id))
-        if conf and conf.logo_url:
-            return conf.logo_url
+        c = self.db.scalar(
+            select(Configuracion).where(Configuracion.clave == "logo_url")
+        )
+        if c and c.valor:
+            return str(c.valor)
         c = self.db.scalar(
             select(Configuracion).where(Configuracion.clave == "gym_logo_url")
         )
-        return c.valor if c else None
+        if c and c.valor:
+            return str(c.valor)
+        return None
 
     def actualizar_logo_url(self, url: str) -> bool:
         return self.actualizar_configuracion_gimnasio({"logo_url": url})

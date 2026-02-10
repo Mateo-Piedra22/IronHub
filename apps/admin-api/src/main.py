@@ -331,22 +331,8 @@ async def list_public_gyms():
                             except Exception:
                                 pass  # Table might not exist or be empty
 
-                            # Fetch branding from Legacy Fixed-Column table (gym_config)
-                            legacy_logo = None
-                            try:
-                                t_cur.execute("SELECT logo_url FROM gym_config LIMIT 1")
-                                row = t_cur.fetchone()
-                                if row and row[0]:
-                                    legacy_logo = str(row[0]).strip()
-                            except Exception:
-                                pass
-
-                            # Strategy: gym_config > configuracion[logo_url] > configuracion[gym_logo_url]
                             logo_url = (
-                                legacy_logo
-                                or str(
-                                    kv.get("logo_url") or kv.get("gym_logo_url") or ""
-                                ).strip()
+                                str(kv.get("logo_url") or kv.get("gym_logo_url") or "").strip()
                             )
                             nombre_publico = str(kv.get("nombre_publico") or "").strip()
 

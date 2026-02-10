@@ -22,6 +22,7 @@ logs/
 
 # Archivos de trazas o dumps
 *.trae
+*.windsurf/
 
 # Carpetas y archivos de editores/IDEs
 .vscode/

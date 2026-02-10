@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 
 from src.services.base import BaseService
-from src.database.orm_models import GymConfig, Configuracion
+from src.database.orm_models import Configuracion
 
 logger = logging.getLogger(__name__)
 
@@ -26,18 +26,12 @@ class GymConfigService(BaseService):
     def __init__(self, db: Session):
         super().__init__(db)
 
-    # =========================================================================
-    # GYM CONFIG (GymConfig & Configuracion tables)
-    # =========================================================================
-
     def obtener_configuracion_gimnasio(self) -> Dict[str, Any]:
         """
-        Get gym configuration merging 'gym_config' table (single row)
-        and 'configuracion' table (key-value pairs).
+        Get gym configuration from 'configuracion' table (key-value pairs).
         """
         config = {}
         try:
-            # 1. Load from Configuracion table (general key-value settings)
             settings = self.db.execute(select(Configuracion)).scalars().all()
             for setting in settings:
                 key = setting.clave
@@ -48,66 +42,15 @@ class GymConfigService(BaseService):
                 except (json.JSONDecodeError, TypeError):
                     config[key] = value
 
-            # 2. Load from GymConfig table (single row for gym details)
-            # GymConfig overrides Configuracion for overlapping keys.
-            gym_info = self.db.execute(select(GymConfig).limit(1)).scalar_one_or_none()
-            if gym_info:
-                config.update(
-                    {
-                        "gym_name": gym_info.gym_name,
-                        "gym_slogan": gym_info.gym_slogan,
-                        "gym_address": gym_info.gym_address,
-                        "gym_phone": gym_info.gym_phone,
-                        "gym_email": gym_info.gym_email,
-                        "gym_website": gym_info.gym_website,
-                        "facebook": gym_info.facebook,
-                        "instagram": gym_info.instagram,
-                        "twitter": gym_info.twitter,
-                        "logo_url": gym_info.logo_url,
-                    }
-                )
-
             return config
         except Exception as e:
             logger.error(f"Error getting gym config: {e}")
             return {}
 
     def actualizar_configuracion_gimnasio(self, updates: Dict[str, Any]) -> bool:
-        """Update gym configuration (handles both GymConfig and Configuracion tables)."""
+        """Update gym configuration."""
         try:
-            # Separate updates for GymConfig vs generic Configuracion
-            gym_config_fields = [
-                "gym_name",
-                "gym_slogan",
-                "gym_address",
-                "gym_phone",
-                "gym_email",
-                "gym_website",
-                "facebook",
-                "instagram",
-                "twitter",
-                "logo_url",
-            ]
-
-            gym_updates = {k: v for k, v in updates.items() if k in gym_config_fields}
-            generic_updates = {
-                k: v for k, v in updates.items() if k not in gym_config_fields
-            }
-
-            # 1. Update GymConfig table
-            if gym_updates:
-                gym_info = self.db.execute(
-                    select(GymConfig).limit(1)
-                ).scalar_one_or_none()
-                if not gym_info:
-                    gym_info = GymConfig()
-                    self.db.add(gym_info)
-
-                for key, value in gym_updates.items():
-                    setattr(gym_info, key, value)
-
-            # 2. Update Configuracion table
-            for key, value in generic_updates.items():
+            for key, value in updates.items():
                 valor = json.dumps(value) if not isinstance(value, str) else value
                 stmt = (
                     insert(Configuracion)
@@ -131,7 +74,6 @@ class GymConfigService(BaseService):
 
     def actualizar_logo_url(self, url: str) -> bool:
         """Update gym logo URL."""
-        # Using the GymConfig field 'logo_url' AND legacy 'gym_logo_url' key for compatibility
         return self.actualizar_configuracion_gimnasio(
             {"logo_url": url, "gym_logo_url": url}
         )

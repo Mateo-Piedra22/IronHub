@@ -13,7 +13,6 @@ from fastapi.templating import Jinja2Templates
 from src.dependencies import CURRENT_TENANT
 from src.database.tenant_connection import get_tenant_session_factory
 from src.database.tenant_connection import validate_tenant_name
-from src.services.gym_config_service import GymConfigService
 from src.services.feature_flags_service import FeatureFlagsService
 from src.services.entitlements_payload_service import EntitlementsPayloadService
 from src.utils import (
@@ -45,7 +44,7 @@ templates_dir = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(templates_dir))
 
 _GYM_DATA_PUBLIC_CACHE: Dict[str, Dict[str, Any]] = {}
-_GYM_DATA_PUBLIC_CACHE_TTL_S = 300
+_GYM_DATA_PUBLIC_CACHE_TTL_S = 5
 _ADMIN_STATUS_CACHE: Dict[str, Dict[str, Any]] = {}
 _ADMIN_STATUS_CACHE_TTL_S = 30
 
@@ -93,103 +92,100 @@ def _get_branding_for_tenant(tenant: str) -> Dict[str, Any]:
     footer: Dict[str, Any] = {}
     if tenant:
         try:
-            ses = AdminSessionLocal()
-            try:
-                row = (
-                    ses.execute(
-                        text(
-                            """
-                            SELECT g.nombre AS gym_name,
-                                   b.nombre_publico,
-                                   b.logo_url,
-                                   b.color_primario,
-                                   b.color_secundario,
-                                   b.color_fondo,
-                                   b.color_texto,
-                                   b.portal_tagline,
-                                   b.footer_text,
-                                   b.show_powered_by,
-                                   b.support_whatsapp_enabled,
-                                   b.support_whatsapp,
-                                   b.support_email_enabled,
-                                   b.support_email,
-                                   b.support_url_enabled,
-                                   b.support_url,
-                                   b.portal_enable_checkin,
-                                   b.portal_enable_member,
-                                   b.portal_enable_staff,
-                                   b.portal_enable_owner
-                            FROM gyms g
-                            LEFT JOIN gym_branding b ON b.gym_id = g.id
-                            WHERE g.subdominio = :t
-                            LIMIT 1
-                            """
-                        ),
-                        {"t": str(tenant).strip().lower()},
+            factory = get_tenant_session_factory(tenant)
+            if factory:
+                session = factory()
+                try:
+                    keys = [
+                        "nombre_publico",
+                        "gym_name",
+                        "direccion",
+                        "logo_url",
+                        "gym_logo_url",
+                        "color_primario",
+                        "color_secundario",
+                        "color_fondo",
+                        "color_texto",
+                        "portal_tagline",
+                        "footer_text",
+                        "show_powered_by",
+                        "support_whatsapp_enabled",
+                        "support_whatsapp",
+                        "support_email_enabled",
+                        "support_email",
+                        "support_url_enabled",
+                        "support_url",
+                        "portal_enable_checkin",
+                        "portal_enable_member",
+                        "portal_enable_staff",
+                        "portal_enable_owner",
+                    ]
+                    rows = (
+                        session.execute(
+                            text(
+                                "SELECT clave, valor FROM configuracion WHERE clave = ANY(:keys)"
+                            ),
+                            {"keys": keys},
+                        )
+                        .mappings()
+                        .all()
                     )
-                    .mappings()
-                    .first()
-                )
-                if row:
-                    gym_name = str(row.get("nombre_publico") or row.get("gym_name") or gym_name)
-                    logo_url = str(row.get("logo_url") or "").strip() or None
+                    cfg = {str(r.get("clave") or ""): r.get("valor") for r in (rows or []) if r}
+
+                    def _s(key: str) -> Optional[str]:
+                        v = cfg.get(key)
+                        if v is None:
+                            return None
+                        s = str(v).strip()
+                        return s if s else None
+
+                    def _b(key: str, default: bool) -> bool:
+                        raw = cfg.get(key)
+                        if raw is None:
+                            return bool(default)
+                        v = str(raw).strip().lower()
+                        if v in ("1", "true", "yes", "y", "on"):
+                            return True
+                        if v in ("0", "false", "no", "n", "off"):
+                            return False
+                        return bool(default)
+
+                    gym_name = _s("nombre_publico") or _s("gym_name") or gym_name
+                    logo_url = (
+                        _s("logo_url")
+                        or _s("gym_logo_url")
+                        or _s("main_logo_url")
+                        or None
+                    )
                     theme = {
-                        "primary": str(row.get("color_primario") or "").strip() or None,
-                        "secondary": str(row.get("color_secundario") or "").strip() or None,
-                        "background": str(row.get("color_fondo") or "").strip() or None,
-                        "text": str(row.get("color_texto") or "").strip() or None,
+                        "primary": _s("color_primario"),
+                        "secondary": _s("color_secundario"),
+                        "background": _s("color_fondo"),
+                        "text": _s("color_texto"),
                     }
                     portal = {
-                        "tagline": str(row.get("portal_tagline") or "").strip() or None,
-                        "enable_checkin": True
-                        if row.get("portal_enable_checkin") is None
-                        else bool(row.get("portal_enable_checkin")),
-                        "enable_member": True
-                        if row.get("portal_enable_member") is None
-                        else bool(row.get("portal_enable_member")),
-                        "enable_staff": True
-                        if row.get("portal_enable_staff") is None
-                        else bool(row.get("portal_enable_staff")),
-                        "enable_owner": True
-                        if row.get("portal_enable_owner") is None
-                        else bool(row.get("portal_enable_owner")),
+                        "tagline": _s("portal_tagline"),
+                        "enable_checkin": _b("portal_enable_checkin", True),
+                        "enable_member": _b("portal_enable_member", True),
+                        "enable_staff": _b("portal_enable_staff", True),
+                        "enable_owner": _b("portal_enable_owner", True),
                     }
                     support = {
-                        "whatsapp_enabled": bool(row.get("support_whatsapp_enabled") or False),
-                        "whatsapp": str(row.get("support_whatsapp") or "").strip() or None,
-                        "email_enabled": bool(row.get("support_email_enabled") or False),
-                        "email": str(row.get("support_email") or "").strip() or None,
-                        "url_enabled": bool(row.get("support_url_enabled") or False),
-                        "url": str(row.get("support_url") or "").strip() or None,
+                        "whatsapp_enabled": _b("support_whatsapp_enabled", False),
+                        "whatsapp": _s("support_whatsapp"),
+                        "email_enabled": _b("support_email_enabled", False),
+                        "email": _s("support_email"),
+                        "url_enabled": _b("support_url_enabled", False),
+                        "url": _s("support_url"),
                     }
                     footer = {
-                        "text": str(row.get("footer_text") or "").strip() or None,
-                        "show_powered_by": True
-                        if row.get("show_powered_by") is None
-                        else bool(row.get("show_powered_by")),
+                        "text": _s("footer_text"),
+                        "show_powered_by": _b("show_powered_by", True),
                     }
-            finally:
-                ses.close()
+                finally:
+                    session.close()
         except Exception:
             pass
-
-        if not logo_url:
-            try:
-                factory = get_tenant_session_factory(tenant)
-                if factory:
-                    session = factory()
-                    try:
-                        cfg = GymConfigService(session).obtener_configuracion_gimnasio() or {}
-                        gym_name = str(cfg.get("gym_name") or cfg.get("nombre") or gym_name)
-                        logo_url = (
-                            cfg.get("logo_url")
-                            or cfg.get("gym_logo_url")
-                            or cfg.get("main_logo_url")
-                        )
-                    finally:
-                        session.close()
-            except Exception:
-                pass
 
     if logo_url:
         try:
@@ -315,7 +311,7 @@ async def gym_data_public(request: Request):
     payload = _get_branding_for_tenant(tenant)
     resp = JSONResponse(payload)
     resp.headers["Cache-Control"] = (
-        "public, max-age=60, s-maxage=300, stale-while-revalidate=600"
+        "public, max-age=5, s-maxage=30, stale-while-revalidate=60"
     )
     resp.headers["Vary"] = "X-Tenant, Origin"
     return resp

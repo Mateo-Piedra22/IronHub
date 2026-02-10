@@ -376,18 +376,15 @@ def _normalize_public_url(url: str) -> str:
 
 
 def _resolve_logo_url() -> str:
-    # Primero intentar obtener URL desde gym_config; luego desde configuracion
     try:
         db = get_db()
         if db is not None:
-            # Prioridad: gym_config
             if hasattr(db, "obtener_configuracion_gimnasio"):
                 try:
                     cfg = db.obtener_configuracion_gimnasio()  # type: ignore
                 except Exception:
                     cfg = {}
                 if isinstance(cfg, dict):
-                    # En gym_config la clave se almacena como 'logo_url'
                     u1 = str(cfg.get("logo_url") or "").strip()
                     if u1:
                         return _normalize_public_url(u1)

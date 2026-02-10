@@ -1220,7 +1220,7 @@ class PaymentService(BaseService):
                     # Get gym name
                     result = self.db.execute(
                         text(
-                            "SELECT valor FROM gym_config WHERE clave = 'gym_name' LIMIT 1"
+                            "SELECT valor FROM configuracion WHERE clave = 'gym_name' LIMIT 1"
                         )
                     )
                     row = result.fetchone()
