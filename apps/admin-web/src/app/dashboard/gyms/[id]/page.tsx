@@ -1,15 +1,19 @@
 'use client';
 
-import { useState, useEffect, use, useMemo, useRef } from 'react';
+import { useState, useEffect, use, useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Loader2, ArrowLeft, MessageSquare, Wrench, Palette, CreditCard,
     Key, Activity, FileText, Save, Send, Check, X, AlertCircle, Upload, Trash2, MapPin, Plus, Pencil, ListChecks
 } from 'lucide-react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { api, type Gym, type WhatsAppConfig, type Payment, type WhatsAppTemplateCatalogItem, type FeatureFlags, type GymBranch, type GymTipoClaseItem, type GymTipoCuotaItem, type TipoCuotaEntitlementsUpdate, type GymBranchCreateInput, type GymBranchUpdateInput, type GymOnboardingStatus, type TenantMigrationStatus } from '@/lib/api';
 
 type Section = 'onboarding' | 'subscription' | 'branches' | 'payments' | 'whatsapp' | 'maintenance' | 'attendance' | 'modules' | 'entitlements' | 'branding' | 'health' | 'password';
+
+const BRANCH_CODE_RE = /^[a-z0-9][a-z0-9_-]{1,39}$/;
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
 interface BrandingConfig {
     nombre_publico: string;
@@ -34,6 +38,16 @@ interface BrandingConfig {
     portal_enable_owner: boolean;
 }
 
+interface AdminPlan {
+    id: number;
+    name: string;
+    amount: number;
+    currency?: string;
+    period_days?: number;
+}
+
+type AuditItem = Record<string, unknown>;
+
 export default function GymDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const resolvedParams = use(params);
     const gymId = Number(resolvedParams.id);
@@ -55,10 +69,9 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
             .toLowerCase()
             .replace(/[^a-z0-9_-]/g, '')
             .slice(0, 40);
-    const branchCodeRe = /^[a-z0-9][a-z0-9_-]{1,39}$/;
 
     // Plans & Subscription Manual Assignment
-    const [plans, setPlans] = useState<any[]>([]);
+    const [plans, setPlans] = useState<AdminPlan[]>([]);
     const [assignSubOpen, setAssignSubOpen] = useState(false);
     const [assignSubParams, setAssignSubParams] = useState({ plan_id: 0, start_date: '', end_date: '' });
     const [assignSubLoading, setAssignSubLoading] = useState(false);
@@ -79,7 +92,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     const [attendanceAllowMultiple, setAttendanceAllowMultiple] = useState(false);
     const [attendancePolicyLoading, setAttendancePolicyLoading] = useState(false);
     const [attendancePolicySaving, setAttendancePolicySaving] = useState(false);
-    const [auditItems, setAuditItems] = useState<any[]>([]);
+    const [auditItems, setAuditItems] = useState<AuditItem[]>([]);
     const [auditLoading, setAuditLoading] = useState(false);
 
     const [branches, setBranches] = useState<GymBranch[]>([]);
@@ -114,7 +127,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         const nameOk = String(branchDraft.name || '').trim().length > 0;
         const codeRaw = String(branchDraft.code || '').trim();
         if (!nameOk || !codeRaw) return '';
-        if (!branchCodeRe.test(branchDraftCodeNorm)) return 'Formato inválido (2-40, minúsculas, números, _ o -)';
+        if (!BRANCH_CODE_RE.test(branchDraftCodeNorm)) return 'Formato inválido (2-40, minúsculas, números, _ o -)';
         const exists = branches.some(
             (b) => String(b.code || '').toLowerCase() === branchDraftCodeNorm.toLowerCase()
         );
@@ -160,7 +173,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     const [savingWaAction, setSavingWaAction] = useState<string>('');
     const [savingAllWaActions, setSavingAllWaActions] = useState(false);
     const [waEventsLoading, setWaEventsLoading] = useState(false);
-    const [waEvents, setWaEvents] = useState<Array<{ event_type: string; severity: string; message: string; details: any; created_at: string }>>([]);
+    const [waEvents, setWaEvents] = useState<Array<{ event_type: string; severity: string; message: string; details: unknown; created_at: string }>>([]);
 
     // Payment form
     const [paymentAmount, setPaymentAmount] = useState('');
@@ -205,26 +218,25 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                 try {
                     const pRes = await api.getAdminPlans();
                     if (pRes.ok && pRes.data?.plans) {
-                        setPlans(pRes.data.plans);
+                        setPlans(pRes.data.plans as AdminPlan[]);
                     }
                 } catch { }
 
                 const res = await api.getGym(gymId);
                 if (res.ok && res.data) {
                     setGym(res.data);
-                    const g: any = res.data;
                     setWaConfig({
-                        phone_id: g.whatsapp_phone_id || '',
-                        access_token: g.whatsapp_access_token || '',
-                        business_account_id: g.whatsapp_business_account_id || '',
-                        verify_token: g.whatsapp_verify_token || '',
-                        app_secret: g.whatsapp_app_secret || '',
-                        nonblocking: Boolean(g.whatsapp_nonblocking || false),
-                        send_timeout_seconds: g.whatsapp_send_timeout_seconds ? Number(g.whatsapp_send_timeout_seconds) : 25,
+                        phone_id: res.data.whatsapp_phone_id || '',
+                        access_token: res.data.whatsapp_access_token || '',
+                        business_account_id: res.data.whatsapp_business_account_id || '',
+                        verify_token: res.data.whatsapp_verify_token || '',
+                        app_secret: res.data.whatsapp_app_secret || '',
+                        nonblocking: Boolean(res.data.whatsapp_nonblocking || false),
+                        send_timeout_seconds: res.data.whatsapp_send_timeout_seconds ? Number(res.data.whatsapp_send_timeout_seconds) : 25,
                     });
-                    if (g.status === 'maintenance') {
-                        setMaintMessage(String(g.suspended_reason || ''));
-                        setMaintUntil(g.suspended_until ? String(g.suspended_until).slice(0, 16) : '');
+                    if (res.data.status === 'maintenance') {
+                        setMaintMessage(String(res.data.suspended_reason || ''));
+                        setMaintUntil(res.data.suspended_until ? String(res.data.suspended_until).slice(0, 16) : '');
                     }
                 }
                 setTenantMigrationLoading(true);
@@ -248,7 +260,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                 }
                 const auditRes = await api.getGymAudit(gymId, 80);
                 if (auditRes.ok && auditRes.data?.ok) {
-                    setAuditItems((auditRes.data.items || []) as any[]);
+                    setAuditItems((auditRes.data.items || []) as AuditItem[]);
                 }
                 const brRes = await api.listGymBranches(gymId);
                 if (brRes.ok && brRes.data?.ok) {
@@ -274,14 +286,14 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                 }
                 const tcRes = await api.listGymTiposCuota(gymId);
                 if (tcRes.ok && tcRes.data?.ok) {
-                    const items = (tcRes.data.items || []) as any[];
-                    setEntTiposCuota(items as any);
-                    const first = items.find((x) => x && x.activo)?.id || items[0]?.id || 0;
+                    const items = (tcRes.data.items || []) as GymTipoCuotaItem[];
+                    setEntTiposCuota(items);
+                    const first = items.find((x) => x && (x as GymTipoCuotaItem).activo)?.id || items[0]?.id || 0;
                     if (first) setEntTipoCuotaId(Number(first));
                 }
                 const tclRes = await api.listGymTiposClases(gymId);
                 if (tclRes.ok && tclRes.data?.ok) {
-                    setEntTiposClases((tclRes.data.items || []) as any[]);
+                    setEntTiposClases((tclRes.data.items || []) as GymTipoClaseItem[]);
                 }
                 // Load branding
                 const brandRes = await api.getGymBranding(gymId);
@@ -307,8 +319,21 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                 }
                 try {
                     const hRes = await api.getGymWhatsAppHealth(gymId);
-                    if (hRes.ok && hRes.data?.templates_list) {
-                        setWaMetaTemplates(hRes.data.templates_list || []);
+                    if (hRes.ok && isRecord(hRes.data) && Array.isArray(hRes.data.templates_list)) {
+                        const mapped = hRes.data.templates_list
+                            .map((t) => {
+                                if (!isRecord(t)) return null;
+                                const name = String(t.name || '').trim();
+                                if (!name) return null;
+                                return {
+                                    name,
+                                    status: String(t.status || ''),
+                                    category: String(t.category || ''),
+                                    language: String(t.language || ''),
+                                };
+                            })
+                            .filter(Boolean) as Array<{ name: string; status: string; category: string; language: string }>;
+                        setWaMetaTemplates(mapped);
                     }
                 } catch {
                     // Ignore
@@ -351,12 +376,6 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
             setTenantProvisioning(false);
         }
     }
-
-    useEffect(() => {
-        if (activeSection !== 'entitlements') return;
-        if (!entTipoCuotaId) return;
-        void loadTipoCuotaEntitlements(entTipoCuotaId);
-    }, [activeSection, entTipoCuotaId]);
 
     const refresh = async () => {
         setLoading(true);
@@ -483,7 +502,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         setBranchSaving(true);
         try {
             const codeNorm = normalizeBranchCode(String(branchDraft.code || ''));
-            if (!branchCodeRe.test(codeNorm)) {
+            if (!BRANCH_CODE_RE.test(codeNorm)) {
                 showMessage('Código inválido (min 2, max 40; minúsculas/números/_/-)');
                 return;
             }
@@ -545,7 +564,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         const next = String(b.status || '').toLowerCase() === 'inactive' ? 'active' : 'inactive';
         setBranchSaving(true);
         try {
-            const res = await api.updateGymBranch(gymId, Number(b.id), { status: next as any });
+            const res = await api.updateGymBranch(gymId, Number(b.id), { status: next as GymBranchUpdateInput['status'] });
             if (res.ok && res.data?.ok) {
                 showMessage(next === 'active' ? 'Sucursal activada' : 'Sucursal desactivada');
                 await reloadBranches();
@@ -635,8 +654,8 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         setBranchSyncing(true);
         try {
             const res = await api.syncGymBranches(gymId);
-            if (res.ok && res.data?.ok && res.data.items) {
-                setBranches(res.data.items as any);
+            if (res.ok && res.data?.ok && Array.isArray(res.data.items)) {
+                setBranches(res.data.items as GymBranch[]);
                 showMessage('Sucursales sincronizadas');
             } else {
                 showMessage(res.data?.error || res.error || 'Error');
@@ -676,7 +695,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         }
     };
 
-    const loadTipoCuotaEntitlements = async (tipoCuotaId: number) => {
+    const loadTipoCuotaEntitlements = useCallback(async (tipoCuotaId: number) => {
         if (!tipoCuotaId) return;
         setEntLoading(true);
         try {
@@ -708,7 +727,13 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         } finally {
             setEntLoading(false);
         }
-    };
+    }, [gymId]);
+
+    useEffect(() => {
+        if (activeSection !== 'entitlements') return;
+        if (!entTipoCuotaId) return;
+        void loadTipoCuotaEntitlements(entTipoCuotaId);
+    }, [activeSection, entTipoCuotaId, loadTipoCuotaEntitlements]);
 
     const saveTipoCuotaEntitlements = async () => {
         if (!entTipoCuotaId) return;
@@ -716,9 +741,10 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         try {
             const class_rules: TipoCuotaEntitlementsUpdate['class_rules'] = [];
             Object.entries(entRulesByScope || {}).forEach(([k, ids]) => {
-                const sid = k === '0' ? null : Number(k);
+                const sidRaw = k === '0' ? null : Number(k);
+                const sid = sidRaw !== null && Number.isFinite(sidRaw) ? sidRaw : null;
                 (ids || []).forEach((id) => {
-                    class_rules.push({ sucursal_id: Number.isFinite(sid as any) ? (sid as any) : null, target_type: 'tipo_clase', target_id: Number(id), allow: true });
+                    class_rules.push({ sucursal_id: sid, target_type: 'tipo_clase', target_id: Number(id), allow: true });
                 });
             });
             const payload: TipoCuotaEntitlementsUpdate = {
@@ -766,9 +792,9 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
             if (!n) continue;
             m.set(n, {
                 name: n,
-                status: String((t as any)?.status || ''),
-                category: String((t as any)?.category || ''),
-                language: String((t as any)?.language || ''),
+                status: String(t?.status || ''),
+                category: String(t?.category || ''),
+                language: String(t?.language || ''),
             });
         }
         return m;
@@ -777,9 +803,9 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     const waCatalogActiveByName = useMemo(() => {
         const m = new Map<string, WhatsAppTemplateCatalogItem>();
         for (const t of waCatalog || []) {
-            const n = String((t as any)?.template_name || '').trim();
+            const n = String(t?.template_name || '').trim();
             if (!n) continue;
-            if ((t as any)?.active) {
+            if (t?.active) {
                 m.set(n, t);
             }
         }
@@ -789,9 +815,9 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     const buildActionTemplateOptions = (action: { required_params: number; template_name: string; default_template_name?: string }) => {
         const required = Number(action?.required_params || 0);
         const catalogCandidates = (waCatalog || [])
-            .filter((t) => Boolean((t as any)?.active))
-            .filter((t) => countMetaParams(String((t as any)?.body_text || '')) === required)
-            .map((t) => String((t as any)?.template_name || '').trim())
+            .filter((t) => Boolean(t?.active))
+            .filter((t) => countMetaParams(String(t?.body_text || '')) === required)
+            .map((t) => String(t?.template_name || '').trim())
             .filter(Boolean);
 
         const bases = new Set<string>();
@@ -800,7 +826,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         }
 
         const metaCandidates = (waMetaTemplates || [])
-            .map((t) => String((t as any)?.name || '').trim())
+            .map((t) => String(t?.name || '').trim())
             .filter(Boolean)
             .filter((n) => bases.has(splitTemplateVersion(n).base));
 
@@ -920,8 +946,12 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                     } else {
                         failed.push({ action_key: a.action_key, error: res.error || 'Error' });
                     }
-                } catch (e: any) {
-                    failed.push({ action_key: a.action_key, error: e?.message || 'Error' });
+                } catch (e: unknown) {
+                    const msg =
+                        typeof e === 'object' && e !== null && 'message' in e
+                            ? String((e as Record<string, unknown>).message || 'Error')
+                            : 'Error';
+                    failed.push({ action_key: a.action_key, error: msg });
                 }
             }
         } finally {
@@ -1184,8 +1214,21 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                     setWaActions(actRes.data.actions || []);
                 }
                 const hRes = await api.getGymWhatsAppHealth(gymId);
-                if (hRes.ok && hRes.data?.templates_list) {
-                    setWaMetaTemplates(hRes.data.templates_list || []);
+                if (hRes.ok && isRecord(hRes.data) && Array.isArray(hRes.data.templates_list)) {
+                    const mapped = hRes.data.templates_list
+                        .map((t) => {
+                            if (!isRecord(t)) return null;
+                            const name = String(t.name || '').trim();
+                            if (!name) return null;
+                            return {
+                                name,
+                                status: String(t.status || ''),
+                                category: String(t.category || ''),
+                                language: String(t.language || ''),
+                            };
+                        })
+                        .filter(Boolean) as Array<{ name: string; status: string; category: string; language: string }>;
+                    setWaMetaTemplates(mapped);
                 }
             } catch {
                 // Ignore
@@ -1210,21 +1253,36 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         try {
             const res = await api.getGymWhatsAppHealth(gymId);
             const data = res.data;
-            if (res.ok && data && data.ok) {
-                const t = res.data.templates || {};
-                const phone = res.data.phone || {};
-                const sub = res.data.subscribed_apps || {};
-                if (data.templates_list) {
-                    setWaMetaTemplates(data.templates_list || []);
-                }
+            const d = isRecord(data) ? data : {};
+            const templates = isRecord(d.templates) ? d.templates : {};
+            const phone = isRecord(d.phone) ? d.phone : {};
+            const sub = isRecord(d.subscribed_apps) ? d.subscribed_apps : {};
+            const templatesList = Array.isArray(d.templates_list) ? d.templates_list : null;
+
+            if (templatesList) {
+                const mapped = templatesList
+                    .map((t) => {
+                        if (!isRecord(t)) return null;
+                        const name = String(t.name || '').trim();
+                        if (!name) return null;
+                        return {
+                            name,
+                            status: String(t.status || ''),
+                            category: String(t.category || ''),
+                            language: String(t.language || ''),
+                        };
+                    })
+                    .filter(Boolean) as Array<{ name: string; status: string; category: string; language: string }>;
+                setWaMetaTemplates(mapped);
+            }
+
+            if (res.ok && d.ok === true) {
                 setWaHealthMsg(
-                    `OK: phone=${phone.display_phone_number || '—'} quality=${phone.quality_rating || '—'} templates=${t.count || 0} approved=${t.approved || 0} pending=${t.pending || 0} subscribed=${String(sub.subscribed)}`
+                    `OK: phone=${String(phone.display_phone_number || '—')} quality=${String(phone.quality_rating || '—')} templates=${Number(templates.count || 0)} approved=${Number(templates.approved || 0)} pending=${Number(templates.pending || 0)} subscribed=${String(sub.subscribed)}`
                 );
             } else {
-                if (res.ok && data?.templates_list) {
-                    setWaMetaTemplates(data.templates_list || []);
-                }
-                setWaHealthMsg(data?.error || res.error || 'Error en health-check');
+                const err = d.error ? String(d.error) : res.error || 'Error en health-check';
+                setWaHealthMsg(err);
             }
         } finally {
             setWaHealthLoading(false);
@@ -1876,7 +1934,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                             </div>
                                             <div>
                                                 <label className="text-xs text-slate-400 block mb-1">Estado</label>
-                                                <select className="input w-full" value={String(editBranchDraft.status || 'active')} onChange={(e) => setEditBranchDraft({ ...editBranchDraft, status: e.target.value as any })}>
+                                                <select className="input w-full" value={String(editBranchDraft.status || 'active')} onChange={(e) => setEditBranchDraft({ ...editBranchDraft, status: e.target.value as GymBranchUpdateInput['status'] })}>
                                                     <option value="active">active</option>
                                                     <option value="inactive">inactive</option>
                                                 </select>
@@ -2097,15 +2155,15 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
                                 <div>
                                     <div className="text-slate-500">Phone ID</div>
-                                    <div className="text-white break-all">{(gym as any)?.tenant_whatsapp_phone_id || '—'}</div>
+                                    <div className="text-white break-all">{gym?.tenant_whatsapp_phone_id || '—'}</div>
                                 </div>
                                 <div>
                                     <div className="text-slate-500">WABA ID</div>
-                                    <div className="text-white break-all">{(gym as any)?.tenant_whatsapp_waba_id || '—'}</div>
+                                    <div className="text-white break-all">{gym?.tenant_whatsapp_waba_id || '—'}</div>
                                 </div>
                                 <div>
                                     <div className="text-slate-500">Token</div>
-                                    <div className="text-white">{(gym as any)?.tenant_whatsapp_access_token_present ? 'presente' : '—'}</div>
+                                    <div className="text-white">{gym?.tenant_whatsapp_access_token_present ? 'presente' : '—'}</div>
                                 </div>
                             </div>
                         </div>
@@ -2370,9 +2428,12 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                         <div className="flex items-start gap-6">
                             <div className="flex-shrink-0">
                                 {branding.logo_url ? (
-                                    <img
+                                    <Image
                                         src={branding.logo_url}
                                         alt="Logo"
+                                        width={96}
+                                        height={96}
+                                        unoptimized
                                         className="w-24 h-24 rounded-xl object-cover border border-slate-700"
                                     />
                                 ) : (
@@ -2692,7 +2753,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                         try {
                                             const res = await api.getGymAudit(gymId, 200);
                                             if (res.ok && res.data?.ok) {
-                                                setAuditItems((res.data.items || []) as any[]);
+                                                setAuditItems((res.data.items || []) as AuditItem[]);
                                             }
                                         } finally {
                                             setAuditLoading(false);
@@ -2723,12 +2784,12 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                                 </td>
                                             </tr>
                                         ) : (
-                                            auditItems.slice(0, 50).map((it: any) => (
+                                            auditItems.slice(0, 50).map((it) => (
                                                 <tr key={String(it.id)} className="text-slate-200">
                                                     <td className="px-4 py-3 text-slate-300">{String(it.created_at || '').slice(0, 19).replace('T', ' ')}</td>
-                                                    <td className="px-4 py-3">{it.actor_username || '—'}</td>
-                                                    <td className="px-4 py-3">{it.action || '—'}</td>
-                                                    <td className="px-4 py-3 text-slate-400 max-w-xl truncate">{it.details || '—'}</td>
+                                                    <td className="px-4 py-3">{String(it.actor_username || '—')}</td>
+                                                    <td className="px-4 py-3">{String(it.action || '—')}</td>
+                                                    <td className="px-4 py-3 text-slate-400 max-w-xl truncate">{String(it.details || '—')}</td>
                                                 </tr>
                                             ))
                                         )}
@@ -2806,7 +2867,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                         ) : (
                             <div className="space-y-2">
                                 {moduleOptions.map((m) => {
-                                    const v = (featureFlags.modules as any)?.[m.key];
+                                    const v = featureFlags.modules ? (featureFlags.modules as Record<string, unknown>)[m.key] : undefined;
                                     const checked = typeof v === 'boolean' ? v : Boolean(moduleDefaults[m.key]);
                                     return (
                                         <label key={m.key} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-slate-800/40 border border-slate-700">

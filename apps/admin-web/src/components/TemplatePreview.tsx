@@ -1,13 +1,25 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type ChangeEvent } from "react";
+import NextImage from "next/image";
 import { 
-  Eye, Download, Share2, Settings, ZoomIn, ZoomOut, Maximize2, 
-  RotateCw, Loader2, FileText, ChevronLeft, ChevronRight, 
-  Grid, List, RefreshCw, Fullscreen, ExitFullscreen, Camera,
-  Palette, FileImage, Info, Check, AlertTriangle
+  Eye,
+  Download,
+  Share2,
+  Settings,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  Loader2,
+  FileText,
+  ChevronLeft,
+  ChevronRight,
+  Grid,
+  RefreshCw,
+  Minimize2,
+  Camera,
 } from "lucide-react";
-import { Button, Modal, useToast, Badge, Toggle, Slider } from "@/components/ui";
+import { Button, Modal, useToast, Badge, Toggle, Select } from "@/components/ui";
 import { api, type Template, type TemplatePreviewRequest, type Rutina } from "@/lib/api";
 
 interface TemplatePreviewProps {
@@ -17,9 +29,8 @@ interface TemplatePreviewProps {
   onClose: () => void;
 }
 
-type PreviewMode = "single" | "comparison" | "grid";
 type PreviewQuality = "low" | "medium" | "high";
-type PreviewFormat = "pdf" | "png" | "jpg";
+type PreviewFormat = "pdf" | "image" | "thumbnail" | "html" | "json";
 
 export function TemplatePreview({ template, rutina, isOpen, onClose }: TemplatePreviewProps) {
   const [loading, setLoading] = useState(false);
@@ -27,7 +38,6 @@ export function TemplatePreview({ template, rutina, isOpen, onClose }: TemplateP
   const [previewPages, setPreviewPages] = useState<string[]>([]);
   const [currentPage, setCurrentPage] = useState(0);
   const [scale, setScale] = useState(1);
-  const [previewMode, setPreviewMode] = useState<PreviewMode>("single");
   const [previewQuality, setPreviewQuality] = useState<PreviewQuality>("medium");
   const [previewFormat, setPreviewFormat] = useState<PreviewFormat>("pdf");
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -36,20 +46,51 @@ export function TemplatePreview({ template, rutina, isOpen, onClose }: TemplateP
   const [showRulers, setShowRulers] = useState(false);
   
   // Preview settings
-  const [qrMode, setQrMode] = useState<"inline" | "sheet" | "none">("inline");
-  const [showWatermark, setShowWatermark] = useState(true);
-  const [showMetadata, setShowMetadata] = useState(true);
+  const [qrMode, setQrMode] = useState<"header" | "footer" | "inline" | "sheet" | "none">("inline");
   
   const previewRef = useRef<HTMLDivElement>(null);
   const autoRefreshTimerRef = useRef<NodeJS.Timeout | null>(null);
   const { success, error } = useToast();
 
+  const loadPreview = useCallback(async () => {
+    if (!template) return;
+
+    setLoading(true);
+    try {
+      const request: TemplatePreviewRequest = {
+        format: previewFormat,
+        quality: previewQuality,
+        page_number: currentPage + 1,
+        sample_data: null,
+      };
+      if (rutina) request.qr_mode = qrMode;
+
+      const response = rutina
+        ? await api.getRutinaPreviewWithTemplate(rutina.id, template.id, request)
+        : await api.getTemplatePreview(template.id, request);
+
+      if (response.ok && response.data?.success) {
+        const url = response.data.preview_url;
+        if (url) {
+          setPreviewUrl(url);
+          setPreviewPages([url]);
+        } else {
+          error("Error al generar vista previa");
+        }
+      } else {
+        error("Error al generar vista previa");
+      }
+    } catch {
+      error("Error al generar vista previa");
+    } finally {
+      setLoading(false);
+    }
+  }, [currentPage, error, previewFormat, previewQuality, qrMode, rutina, template]);
+
   // Load preview when modal opens or settings change
   useEffect(() => {
-    if (isOpen && template) {
-      loadPreview();
-    }
-  }, [isOpen, template, previewQuality, qrMode, showWatermark, showMetadata]);
+    if (isOpen) loadPreview();
+  }, [isOpen, loadPreview]);
 
   // Auto-refresh functionality
   useEffect(() => {
@@ -64,47 +105,7 @@ export function TemplatePreview({ template, rutina, isOpen, onClose }: TemplateP
         clearInterval(autoRefreshTimerRef.current);
       }
     };
-  }, [autoRefresh, isOpen]);
-
-  const loadPreview = useCallback(async () => {
-    if (!template) return;
-
-    setLoading(true);
-    try {
-      const request: TemplatePreviewRequest = {
-        format: previewFormat,
-        quality: previewQuality,
-        qr_mode: qrMode,
-        show_watermark: showWatermark,
-        show_metadata: showMetadata,
-        page_number: currentPage + 1,
-        multi_page: previewMode === "grid"
-      };
-
-      let response;
-      if (rutina) {
-        response = await api.getRutinaPreviewWithTemplate(rutina.id, template.id, request);
-      } else {
-        response = await api.getTemplatePreview(template.id, request);
-      }
-
-      if (response.ok && response.data?.success) {
-        if (previewMode === "grid" && response.data.pages) {
-          setPreviewPages(response.data.pages);
-        } else {
-          setPreviewUrl(response.data.preview_url);
-          setPreviewPages([response.data.preview_url]);
-        }
-      } else {
-        error("Error al generar vista previa");
-      }
-    } catch (err) {
-      console.error("Preview generation failed:", err);
-      error("Error al generar vista previa");
-    } finally {
-      setLoading(false);
-    }
-  }, [template, rutina, previewQuality, previewFormat, qrMode, showWatermark, showMetadata, currentPage, previewMode, error]);
+  }, [autoRefresh, isOpen, loadPreview]);
 
   const handleDownload = async () => {
     if (!previewUrl) return;
@@ -222,8 +223,10 @@ export function TemplatePreview({ template, rutina, isOpen, onClose }: TemplateP
   const getFormatLabel = (format: PreviewFormat) => {
     switch (format) {
       case "pdf": return "PDF";
-      case "png": return "PNG";
-      case "jpg": return "JPG";
+      case "image": return "Imagen";
+      case "thumbnail": return "Miniatura";
+      case "html": return "HTML";
+      case "json": return "JSON";
     }
   };
 
@@ -269,29 +272,11 @@ export function TemplatePreview({ template, rutina, isOpen, onClose }: TemplateP
         {/* Toolbar */}
         <div className="flex items-center justify-between p-4 border-b border-slate-700">
           <div className="flex gap-3">
-            {/* Preview Mode */}
-            <div className="flex gap-2">
-              <Button
-                variant={previewMode === "single" ? "primary" : "secondary"}
-                size="sm"
-                onClick={() => setPreviewMode("single")}
-              >
-                <FileText className="w-4 h-4" />
-              </Button>
-              <Button
-                variant={previewMode === "grid" ? "primary" : "secondary"}
-                size="sm"
-                onClick={() => setPreviewMode("grid")}
-              >
-                <Grid className="w-4 h-4" />
-              </Button>
-            </div>
-
             {/* Settings */}
             <div className="flex items-center gap-3 px-3 border-l border-r border-slate-700">
               <Select
                 value={previewQuality}
-                onChange={(e) => setPreviewQuality(e.target.value as PreviewQuality)}
+                onChange={(e: ChangeEvent<HTMLSelectElement>) => setPreviewQuality(e.target.value as PreviewQuality)}
                 className="w-24"
                 options={[
                   { value: "low", label: "Baja" },
@@ -302,20 +287,22 @@ export function TemplatePreview({ template, rutina, isOpen, onClose }: TemplateP
 
               <Select
                 value={previewFormat}
-                onChange={(e) => setPreviewFormat(e.target.value as PreviewFormat)}
+                onChange={(e: ChangeEvent<HTMLSelectElement>) => setPreviewFormat(e.target.value as PreviewFormat)}
                 className="w-20"
                 options={[
                   { value: "pdf", label: "PDF" },
-                  { value: "png", label: "PNG" },
-                  { value: "jpg", label: "JPG" }
+                  { value: "image", label: "Imagen" },
+                  { value: "thumbnail", label: "Miniatura" }
                 ]}
               />
 
               <Select
                 value={qrMode}
-                onChange={(e) => setQrMode(e.target.value as "inline" | "sheet" | "none")}
+                onChange={(e: ChangeEvent<HTMLSelectElement>) => setQrMode(e.target.value as "header" | "footer" | "inline" | "sheet" | "none")}
                 className="w-32"
                 options={[
+                  { value: "header", label: "QR Header" },
+                  { value: "footer", label: "QR Footer" },
                   { value: "inline", label: "QR Inline" },
                   { value: "sheet", label: "QR Hoja" },
                   { value: "none", label: "Sin QR" }
@@ -329,16 +316,6 @@ export function TemplatePreview({ template, rutina, isOpen, onClose }: TemplateP
                 checked={autoRefresh}
                 onChange={setAutoRefresh}
                 label="Auto"
-              />
-              <Toggle
-                checked={showWatermark}
-                onChange={setShowWatermark}
-                label="Marca"
-              />
-              <Toggle
-                checked={showMetadata}
-                onChange={setShowMetadata}
-                label="Metadata"
               />
               <Toggle
                 checked={showGrid}
@@ -379,7 +356,7 @@ export function TemplatePreview({ template, rutina, isOpen, onClose }: TemplateP
               size="sm"
               onClick={toggleFullscreen}
             >
-              {isFullscreen ? <ExitFullscreen className="w-4 h-4" /> : <Fullscreen className="w-4 h-4" />}
+              {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
             </Button>
 
             <Button
@@ -511,48 +488,31 @@ export function TemplatePreview({ template, rutina, isOpen, onClose }: TemplateP
                 )}
 
                 {/* Preview Content */}
-                {previewMode === "single" ? (
-                  <img
+                {previewPages[currentPage]?.startsWith("data:application/pdf") ? (
+                  <iframe
                     src={previewPages[currentPage]}
-                    alt={`Preview page ${currentPage + 1}`}
-                    className="max-w-none"
+                    title={`Preview page ${currentPage + 1}`}
+                    className="w-[900px] h-[1100px]"
                   />
                 ) : (
-                  <div className="grid grid-cols-2 gap-4 p-4">
-                    {previewPages.map((page, index) => (
-                      <div key={index} className="relative">
-                        <img
-                          src={page}
-                          alt={`Preview page ${index + 1}`}
-                          className="max-w-none"
-                        />
-                        <div className="absolute top-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-xs">
-                          Página {index + 1}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Watermark */}
-                {showWatermark && (
-                  <div className="absolute top-4 right-4 opacity-30">
-                    <div className="text-xs text-gray-600">Vista Previa</div>
-                  </div>
+                  <NextImage
+                    src={previewPages[currentPage]}
+                    alt={`Preview page ${currentPage + 1}`}
+                    width={900}
+                    height={1100}
+                    unoptimized
+                    className="max-w-none"
+                  />
                 )}
               </div>
 
               {/* Metadata */}
-              {showMetadata && (
-                <div className="mt-6 text-center text-sm text-slate-400">
-                  <div>Plantilla: {template.nombre}</div>
-                  <div>Versión: {template.version_actual}</div>
-                  <div>Categoría: {template.categoria}</div>
-                  {rutina && (
-                    <div>Rutina: {rutina.nombre}</div>
-                  )}
-                </div>
-              )}
+              <div className="mt-6 text-center text-sm text-slate-400">
+                <div>Plantilla: {template.nombre}</div>
+                <div>Versión: {template.version_actual}</div>
+                <div>Categoría: {template.categoria}</div>
+                {rutina && <div>Rutina: {rutina.nombre}</div>}
+              </div>
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center h-full">

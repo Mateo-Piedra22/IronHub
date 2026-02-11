@@ -3,11 +3,15 @@ import os
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from sqlalchemy import text
 
 from src.database.connection import AdminSessionLocal
-from src.database.tenant_connection import _build_tenant_db_url
 from src.database.migration_runner import upgrade_head
+from src.database.tenant_connection import _build_tenant_db_url
 
 
 @dataclass(frozen=True)

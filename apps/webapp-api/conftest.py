@@ -7,8 +7,9 @@ import pytest
 import sys
 from pathlib import Path
 
-# Add the src directory to Python path
-src_path = Path(__file__).parent / "src"
+project_path = Path(__file__).parent
+src_path = project_path / "src"
+sys.path.insert(0, str(project_path))
 sys.path.insert(0, str(src_path))
 
 # Test configuration

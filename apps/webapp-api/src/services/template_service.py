@@ -5,27 +5,26 @@ This module provides business logic for template management,
 including template operations, versioning, validation, and analytics.
 """
 
-from typing import List, Optional, Dict, Any, Tuple, BinaryIO
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 import json
 import logging
 import base64
-import os
-from pathlib import Path
 
 from sqlalchemy.orm import joinedload
 from sqlalchemy import desc, func
 
 from ..repositories.template_repository import TemplateRepository
+from ..database.tenant_connection import get_current_tenant_gym_id
 from ..models.orm_models import (
     PlantillaRutina, PlantillaRutinaVersion, GimnasioPlantilla,
-    PlantillaAnalitica, Usuario
+    PlantillaAnalitica,
 )
 from ..services.template_validator import TemplateValidator, ValidationResult
 from ..services.pdf_engine import PDFEngine
-from ..services.variable_resolver import VariableResolver, VariableContext
-from ..services.exercise_table_builder import ExerciseTableBuilder, TableConfig, TableFormat
-from ..services.qr_code_manager import QRCodeManager, QRConfig, QRContext
+from ..services.variable_resolver import VariableResolver
+from ..services.exercise_table_builder import ExerciseTableBuilder
+from ..services.qr_code_manager import QRCodeManager
 from ..services.preview_engine import PreviewEngine, PreviewConfig, PreviewFormat, PreviewQuality
 from ..services.template_analytics import TemplateAnalyticsService
 
@@ -171,10 +170,13 @@ class TemplateService:
         try:
             # Validate new configuration if provided
             if "configuracion" in updates:
-                validation_result = self.validator.validate_template(updates["configuracion"])
-                if not validation_result.is_valid:
-                    error_messages = [error["message"] for error in validation_result.errors]
-                    return None, f"Template validation failed: {'; '.join(error_messages)}"
+                if self.validator:
+                    validation_result = self.validator.validate_template(updates["configuracion"])
+                    if not validation_result.is_valid:
+                        error_messages = [error["message"] for error in validation_result.errors]
+                        return None, f"Template validation failed: {'; '.join(error_messages)}"
+                else:
+                    logger.warning("TemplateValidator not available, skipping validation")
             
             # Update template
             template, error = self.repository.update_template(
@@ -272,9 +274,22 @@ class TemplateService:
         if template.creada_por == user_id or template.publica:
             return True
         
-        # Check gym assignment
-        # This would require getting user's gym ID - simplified for now
-        return True  # Simplified - implement proper gym checking
+        gym_id = get_current_tenant_gym_id()
+        if not gym_id:
+            return False
+        try:
+            assignment = (
+                self.db.query(GimnasioPlantilla)
+                .filter(
+                    GimnasioPlantilla.gimnasio_id == int(gym_id),
+                    GimnasioPlantilla.plantilla_id == int(template.id),
+                    GimnasioPlantilla.activa == True,
+                )
+                .first()
+            )
+            return bool(assignment)
+        except Exception:
+            return False
     
     # === Template Search and Discovery ===
     
@@ -448,18 +463,27 @@ class TemplateService:
             
             if not result.success:
                 return None, result.error_message
-            
-            # Save preview to file if PDF
+
             if result.format == PreviewFormat.PDF:
-                preview_path = f"previews/template_{template_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-                os.makedirs("previews", exist_ok=True)
-                
-                with open(preview_path, "wb") as f:
-                    f.write(result.data)
-                
-                preview_url = f"/{preview_path}"
+                mime = "application/pdf"
+            elif result.format in (PreviewFormat.IMAGE, PreviewFormat.THUMBNAIL):
+                mime = "image/png"
+            elif result.format == PreviewFormat.HTML:
+                mime = "text/html"
+            elif result.format == PreviewFormat.JSON:
+                mime = "application/json"
             else:
-                preview_url = f"data:{result.format.value};base64,{base64.b64encode(result.data).decode()}"
+                mime = "application/octet-stream"
+
+            raw: bytes
+            if isinstance(result.data, (bytes, bytearray)):
+                raw = bytes(result.data)
+            elif isinstance(result.data, str):
+                raw = result.data.encode("utf-8")
+            else:
+                raw = json.dumps(result.data, ensure_ascii=False).encode("utf-8")
+
+            preview_url = f"data:{mime};base64,{base64.b64encode(raw).decode()}"
             
             # Log preview generation
             self.repository._log_analytics(
@@ -655,14 +679,9 @@ class TemplateService:
                 logger.warning(f"Preview generation failed: {result.error_message}")
                 return ""
             
-            # Save preview to file
-            preview_path = f"previews/template_{template.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-            os.makedirs("previews", exist_ok=True)
-            
-            with open(preview_path, "wb") as f:
-                f.write(result.data)
-            
-            return f"/{preview_path}"
+            if not isinstance(result.data, (bytes, bytearray)):
+                return ""
+            return f"data:application/pdf;base64,{base64.b64encode(bytes(result.data)).decode()}"
             
         except Exception as e:
             logger.warning(f"Failed to generate preview for template {template.id}: {e}")

@@ -16,7 +16,6 @@ import {
     QrCode,
     Settings2,
     FileDown,
-    FileSpreadsheet,
     Power,
 } from 'lucide-react';
 import {
@@ -30,11 +29,11 @@ import {
 } from '@/components/ui';
 import { api, type Rutina, type Ejercicio, type Usuario } from '@/lib/api';
 import { formatDate, cn } from '@/lib/utils';
+import { useAuth } from '@/lib/auth';
 import { RoutineExerciseEditor } from '@/components/RoutineExerciseEditor';
 import { UnifiedRutinaEditor } from '@/components/UnifiedRutinaEditor';
 import { RutinaCreationWizard } from '@/components/RutinaCreationWizard';
 import { AssignRutinaModal } from '@/components/AssignRutinaModal';
-import { ExcelPreviewViewer } from '@/components/ExcelPreviewViewer';
 import { GymTemplateManager } from '@/components/GymTemplateManager';
 
 // Sidebar navigation
@@ -157,6 +156,19 @@ function RutinaPreviewModal({ isOpen, onClose, rutina }: RutinaPreviewModalProps
 
 export default function RutinasPage() {
     const { success, error } = useToast();
+    const { user } = useAuth();
+
+    // Gym context
+    const gymId = user?.sucursal_id ?? 0;
+    const [gymName, setGymName] = useState('Mi Gimnasio');
+
+    useEffect(() => {
+        api.getBootstrap('gestion').then(res => {
+            if (res.ok && res.data?.gym?.gym_name) {
+                setGymName(res.data.gym.gym_name);
+            }
+        }).catch(() => { });
+    }, []);
 
     // State
     const [activeTab, setActiveTab] = useState<'plantillas' | 'asignadas'>('plantillas');
@@ -183,10 +195,6 @@ export default function RutinasPage() {
     const [rutinaToDelete, setRutinaToDelete] = useState<Rutina | null>(null);
     const [exerciseEditorOpen, setExerciseEditorOpen] = useState(false);
     const [rutinaForExercises, setRutinaForExercises] = useState<Rutina | null>(null);
-
-    // Excel Preview
-    const [excelPreviewOpen, setExcelPreviewOpen] = useState(false);
-    const [excelPreviewUrl, setExcelPreviewUrl] = useState<string | null>(null);
 
     const openRutinaPreview = useCallback(async (r: Rutina) => {
         setLoading(true);
@@ -408,21 +416,6 @@ export default function RutinasPage() {
         }
     };
 
-    // Open Excel preview with Office Online Viewer
-    const handleOpenExcelPreview = async (rutina: Rutina) => {
-        try {
-            const res = await api.getRutinaPdfViewUrl(rutina.id, { weeks: 4 });
-            if (res.ok && res.data?.url) {
-                setExcelPreviewUrl(res.data.url);
-                setExcelPreviewOpen(true);
-            } else {
-                error('Error obteniendo URL de preview');
-            }
-        } catch {
-            error('Error al abrir preview de Excel');
-        }
-    };
-
     // Table columns
     const columns: Column<Rutina>[] = [
         {
@@ -511,22 +504,6 @@ export default function RutinasPage() {
                     >
                         <Power className="w-4 h-4" />
                     </button>
-                    <button
-                        onClick={() => handleOpenExcelPreview(row)}
-                        className="p-2 rounded-lg text-slate-400 hover:text-green-400 hover:bg-green-500/10 transition-colors"
-                        title="Ver Excel"
-                    >
-                        <FileSpreadsheet className="w-4 h-4" />
-                    </button>
-                    <a
-                        href={api.getRutinaExcelUrl(row.id, { weeks: 4 })}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-                        title="Descargar Excel"
-                    >
-                        <Download className="w-4 h-4" />
-                    </a>
                     <a
                         href={api.getRutinaPdfUrl(row.id)}
                         target="_blank"
@@ -690,9 +667,9 @@ export default function RutinasPage() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.3 }}
                 >
-                    <GymTemplateManager 
-                        gymId={1} // TODO: Obtener el ID del gimnasio actual
-                        gymName="Mi Gimnasio" // TODO: Obtener el nombre del gimnasio actual
+                    <GymTemplateManager
+                        gymId={gymId}
+                        gymName={gymName}
                     />
                 </motion.div>
             )}
@@ -812,16 +789,6 @@ export default function RutinasPage() {
                     />
                 </Modal>
             )}
-
-            {/* Excel Preview Viewer - Floating Panel */}
-            <ExcelPreviewViewer
-                excelUrl={excelPreviewUrl}
-                isOpen={excelPreviewOpen}
-                onMinimize={() => {
-                    setExcelPreviewOpen(false);
-                    setExcelPreviewUrl(null);
-                }}
-            />
         </div>
     );
 }

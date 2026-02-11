@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 
 interface SliderProps {
   min: number;
@@ -103,28 +103,19 @@ export function Slider({
     updateValue(e);
   };
 
-  const handleMouseMove = (e: MouseEvent) => {
-    if (!isDragging || disabled) return;
-    updateValue(e);
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-  };
-
-  const updateValue = (e: React.MouseEvent | MouseEvent) => {
+  const updateValue = useCallback((e: React.MouseEvent | MouseEvent) => {
     if (!sliderRef.current) return;
 
     const rect = sliderRef.current.getBoundingClientRect();
     let newValue: number;
 
     if (orientation === "horizontal") {
-      const clientX = 'clientX' in e ? e.clientX : (e as MouseEvent).clientX;
+      const clientX = e.clientX;
       const x = clientX - rect.left;
       const percentage = Math.max(0, Math.min(1, x / rect.width));
       newValue = min + percentage * (max - min);
     } else {
-      const clientY = 'clientY' in e ? e.clientY : (e as MouseEvent).clientY;
+      const clientY = e.clientY;
       const y = clientY - rect.top;
       const percentage = Math.max(0, Math.min(1, 1 - (y / rect.height)));
       newValue = min + percentage * (max - min);
@@ -136,7 +127,7 @@ export function Slider({
 
     setCurrentValue(newValue);
     onChange(newValue);
-  };
+  }, [max, min, onChange, orientation, step]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (disabled) return;
@@ -167,15 +158,21 @@ export function Slider({
   };
 
   useEffect(() => {
-    if (isDragging) {
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
-      return () => {
-        document.removeEventListener("mousemove", handleMouseMove);
-        document.removeEventListener("mouseup", handleMouseUp);
-      };
-    }
-  }, [isDragging]);
+    if (!isDragging) return;
+    const onMove = (e: MouseEvent) => {
+      if (disabled) return;
+      updateValue(e);
+    };
+    const onUp = () => {
+      setIsDragging(false);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+  }, [disabled, isDragging, updateValue]);
 
   const containerClasses = `
     relative ${sizeClasses.container} ${className}
@@ -201,9 +198,10 @@ export function Slider({
     ${disabled ? "cursor-not-allowed" : "cursor-grab active:cursor-grabbing"}
   `;
 
-  const thumbPosition = orientation === "vertical" 
-    ? `bottom: ${percentage}%; left: 50%; transform: translateX(-50%) translateY(50%);`
-    : `left: ${percentage}%; top: 50%; transform: translateX(-50%) translateY(-50%);`;
+  const thumbStyle =
+    orientation === "vertical"
+      ? { bottom: `${percentage}%`, left: "50%", transform: "translateX(-50%) translateY(50%)" }
+      : { left: `${percentage}%`, top: "50%", transform: "translateX(-50%) translateY(-50%)" };
 
   return (
     <div className={orientation === "horizontal" ? "w-full" : "h-full"}>
@@ -240,7 +238,7 @@ export function Slider({
           <div
             className={thumbClasses}
             style={{ 
-              ...thumbPosition,
+              ...thumbStyle,
               cursor: disabled ? "not-allowed" : isDragging ? "grabbing" : "grab"
             }}
           />
@@ -310,7 +308,7 @@ export function RangeSlider({
   const percentageMin = ((currentValue[0] - min) / (max - min)) * 100;
   const percentageMax = ((currentValue[1] - min) / (max - min)) * 100;
 
-  const updateValue = (clientX: number, isMin: boolean) => {
+  const updateValue = useCallback((clientX: number, isMin: boolean) => {
     if (!sliderRef.current) return;
 
     const rect = sliderRef.current.getBoundingClientRect();
@@ -322,16 +320,14 @@ export function RangeSlider({
     const steppedValue = Math.round(newValue / step) * step;
     const clampedValue = Math.max(min, Math.min(max, steppedValue));
 
-    let newRange: [number, number];
-    if (isMin) {
-      newRange = [Math.min(clampedValue, currentValue[1]), currentValue[1]];
-    } else {
-      newRange = [currentValue[0], Math.max(clampedValue, currentValue[0])];
-    }
-
-    setCurrentValue(newRange);
-    onChange(newRange);
-  };
+    setCurrentValue((prev) => {
+      const newRange: [number, number] = isMin
+        ? [Math.min(clampedValue, prev[1]), prev[1]]
+        : [prev[0], Math.max(clampedValue, prev[0])];
+      onChange(newRange);
+      return newRange;
+    });
+  }, [max, min, onChange, step]);
 
   const handleMouseDown = (e: React.MouseEvent, isMin: boolean) => {
     if (disabled) return;
@@ -343,26 +339,22 @@ export function RangeSlider({
     updateValue(e.clientX, isMin);
   };
 
-  const handleMouseMove = (e: MouseEvent) => {
-    if (!isDraggingMin && !isDraggingMax) return;
-    updateValue(e.clientX, isDraggingMin);
-  };
-
-  const handleMouseUp = () => {
-    setIsDraggingMin(false);
-    setIsDraggingMax(false);
-  };
-
   useEffect(() => {
-    if (isDraggingMin || isDraggingMax) {
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
-      return () => {
-        document.removeEventListener("mousemove", handleMouseMove);
-        document.removeEventListener("mouseup", handleMouseUp);
-      };
-    }
-  }, [isDraggingMin, isDraggingMax]);
+    if (!isDraggingMin && !isDraggingMax) return;
+    const onMove = (e: MouseEvent) => {
+      updateValue(e.clientX, isDraggingMin);
+    };
+    const onUp = () => {
+      setIsDraggingMin(false);
+      setIsDraggingMax(false);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+  }, [isDraggingMax, isDraggingMin, updateValue]);
 
   return (
     <div className={`w-full ${className}`}>

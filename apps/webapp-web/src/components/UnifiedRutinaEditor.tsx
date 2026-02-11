@@ -29,19 +29,14 @@ import {
     Trash2,
     ChevronDown,
     ChevronRight,
-    FileSpreadsheet,
     Save,
     X,
     Search,
     Copy,
     ArrowUp,
     ArrowDown,
-    Minimize2,
-    Maximize2,
-    RefreshCw,
 } from 'lucide-react';
 import { Button, Modal, Select, Input, Textarea, useToast } from '@/components/ui';
-import { ExcelPreviewViewer } from './ExcelPreviewViewer';
 import { api, type Ejercicio, type EjercicioRutina, type Rutina } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -62,27 +57,6 @@ interface DayWithIds {
     dayName: string;
     exercises: DraggableExercise[];
 }
-
-type DraftRutinaExportPayload = {
-    rutina: {
-        nombre: string;
-        descripcion: string;
-        dias_semana: number;
-        objetivo: string;
-        notas: string;
-    };
-    usuario: { nombre: string };
-    ejercicios: Array<{
-        dia: number;
-        orden: number;
-        nombre_ejercicio?: string;
-        series?: EjercicioRutina['series'];
-        repeticiones?: EjercicioRutina['repeticiones'];
-        descanso?: EjercicioRutina['descanso'];
-        notas?: EjercicioRutina['notas'];
-    }>;
-    weeks: number;
-};
 
 interface UnifiedRutinaEditorProps {
     isOpen: boolean;
@@ -409,141 +383,6 @@ function ExerciseEditorPanel({
     );
 }
 
-// Excel Preview Panel
-interface ExcelPreviewPanelProps {
-    rutinaId: number | null;
-    isVisible: boolean;
-    draftData: DraftRutinaExportPayload | null;
-    weeks: number;
-}
-
-function ExcelPreviewPanel({ rutinaId, isVisible, draftData, weeks }: ExcelPreviewPanelProps) {
-    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-    const [isMaximized, setIsMaximized] = useState(false);
-    const [refreshKey, setRefreshKey] = useState(0);
-    const [isLoading, setIsLoading] = useState(false);
-
-    // Export Options
-    const [qrMode, setQrMode] = useState<'inline' | 'sheet' | 'none'>('sheet');
-    const [sheetName] = useState('');
-
-    useEffect(() => {
-        if (!isVisible) return;
-
-        const loadUrl = async () => {
-            setIsLoading(true);
-            try {
-                let url: string | null = null;
-
-                if (draftData) {
-                    // Draft mode
-                    const res = await api.getRutinaDraftPdfViewUrl({
-                        ...draftData,
-                        weeks, // Ensure weeks is explicit in draft data (though already in draftData object)
-                        qr_mode: qrMode,
-                        sheet_name: sheetName
-                    });
-                    if (res.ok && res.data) {
-                        url = res.data.url;
-                    }
-                } else if (rutinaId) {
-                    // Saved mode
-                    const res = await api.getRutinaPdfViewUrl(rutinaId, {
-                        weeks,
-                        qr_mode: qrMode,
-                        sheet_name: sheetName || undefined
-                    });
-                    if (res.ok && res.data) {
-                        url = res.data.url;
-                    }
-                }
-                setPreviewUrl(url);
-            } catch (error) {
-                console.error("Error loading preview:", error);
-            } finally {
-                setIsLoading(false);
-            }
-        };
-
-        const timer = setTimeout(loadUrl, 500); // Debounce
-        return () => clearTimeout(timer);
-    }, [isVisible, rutinaId, draftData, weeks, refreshKey, qrMode, sheetName]);
-
-
-    if (!isVisible) {
-        return (
-            <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-3 p-6">
-                <FileSpreadsheet className="w-12 h-12 text-slate-600" />
-                <p className="text-sm text-center">
-                    Abre la vista previa para ver el Excel en tiempo real
-                </p>
-            </div>
-        );
-    }
-
-    return (
-        <div className={cn(
-            "flex flex-col h-full relative",
-            isMaximized && "fixed inset-4 z-50 bg-slate-900 rounded-xl border border-slate-700 shadow-2xl"
-        )}>
-            {/* Controls */}
-            <div className="flex items-center justify-between px-3 py-2 bg-slate-800/50 border-b border-slate-700">
-                <span className="text-xs text-slate-400">Vista previa Excel</span>
-                <div className="flex items-center gap-1">
-                    <button
-                        onClick={() => { setRefreshKey(k => k + 1); setIsLoading(true); }}
-                        className="p-1.5 text-slate-400 hover:text-white"
-                        title="Actualizar"
-                    >
-                        <RefreshCw className={cn("w-3.5 h-3.5", isLoading && "animate-spin")} />
-                    </button>
-                    <button
-                        onClick={() => setIsMaximized(!isMaximized)}
-                        className="p-1.5 text-slate-400 hover:text-white"
-                        title="Maximizar"
-                    >
-                        {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
-                    </button>
-                </div>
-            </div>
-
-            {/* Export Settings */}
-            <div className="px-3 py-2 bg-slate-900 border-b border-slate-800 flex flex-wrap gap-3 items-center text-xs">
-                <div className="flex items-center gap-2">
-                    <span className="text-slate-500">QR:</span>
-                    <select
-                        value={qrMode}
-                        onChange={(e) => setQrMode(e.target.value as 'inline' | 'sheet' | 'none')}
-                        className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-300 focus:outline-none focus:border-primary-500"
-                    >
-                        <option value="inline">Incluido</option>
-                        <option value="sheet">Hoja aparte</option>
-                        <option value="none">Sin QR</option>
-                    </select>
-                </div>
-                <Button
-                    size="sm"
-                    variant="ghost"
-                    className="ml-auto h-7 px-2 text-xs"
-                    onClick={() => { setRefreshKey(k => k + 1); setIsLoading(true); }}
-                >
-                    Actualizar
-                </Button>
-            </div>
-
-            {/* Viewer */}
-            <div className="flex-1 relative bg-slate-950 overflow-hidden">
-                <ExcelPreviewViewer
-                    excelUrl={previewUrl}
-                    isOpen={true}
-                    onMinimize={() => { }}
-                    className="absolute inset-0 w-full h-full border-0 shadow-none rounded-none"
-                />
-            </div>
-        </div>
-    );
-}
-
 // ============================
 // Main Component
 // ============================
@@ -584,45 +423,12 @@ export function UnifiedRutinaEditor({
 
     // State
     const [saving, setSaving] = useState(false);
-    const [showPreview, setShowPreview] = useState(true);
 
     // Sensors for drag & drop
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
         useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
     );
-
-    // Calc draft data for preview
-    const draftData = useMemo(() => {
-        const flatExercises: DraftRutinaExportPayload["ejercicios"] = [];
-        days.forEach(d => {
-            d.exercises.forEach(e => {
-                flatExercises.push({
-                    dia: d.dayNumber,
-                    orden: e.orden || 0,
-                    nombre_ejercicio: e.ejercicio_nombre,
-                    series: e.series,
-                    repeticiones: e.repeticiones,
-                    descanso: e.descanso,
-                    notas: e.notas,
-                    // Additional fields if available
-                });
-            });
-        });
-
-        return {
-            rutina: {
-                nombre,
-                descripcion,
-                dias_semana: diasSemana,
-                objetivo: categoria,
-                notas: ''
-            },
-            usuario: { nombre: 'Vista Previa' },
-            ejercicios: flatExercises,
-            weeks: semanas // Include weeks for template generation
-        };
-    }, [days, nombre, descripcion, diasSemana, categoria, semanas]);
 
     const loadEjercicios = useCallback(async () => {
         const res = await api.getEjercicios({ search: ejercicioSearch, grupo: grupoFilter, objetivo: objetivoFilter });
@@ -973,29 +779,20 @@ export function UnifiedRutinaEditor({
                 size="xl"
                 className="!max-w-[95vw] !max-h-[95vh]"
                 footer={
-                    <div className="flex items-center justify-between w-full">
-                        <Button
-                            variant="secondary"
-                            leftIcon={<FileSpreadsheet className="w-4 h-4" />}
-                            onClick={() => setShowPreview(!showPreview)}
-                        >
-                            {showPreview ? 'Ocultar Preview' : 'Ver Preview'}
+                    <div className="flex items-center justify-end w-full gap-2">
+                        <Button variant="secondary" onClick={onClose} disabled={saving}>
+                            Cancelar
                         </Button>
-                        <div className="flex gap-2">
-                            <Button variant="secondary" onClick={onClose} disabled={saving}>
-                                Cancelar
-                            </Button>
-                            <Button onClick={handleSave} isLoading={saving}>
-                                <Save className="w-4 h-4 mr-2" />
-                                Guardar
-                            </Button>
-                        </div>
+                        <Button onClick={handleSave} isLoading={saving}>
+                            <Save className="w-4 h-4 mr-2" />
+                            Guardar
+                        </Button>
                     </div>
                 }
             >
                 <div className="flex gap-4 h-[calc(90vh-160px)] overflow-hidden min-h-0">
                     {/* Left: Editor */}
-                    <div className={cn("flex flex-col gap-4 min-h-0 overflow-y-auto", showPreview ? "w-2/3" : "w-full")}>
+                    <div className="flex flex-col gap-4 min-h-0 overflow-y-auto w-full">
                         {/* Metadata */}
                         <div className="card p-4 space-y-3">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1183,18 +980,6 @@ export function UnifiedRutinaEditor({
                             </DragOverlay>
                         </DndContext>
                     </div>
-
-                    {/* Right: Preview */}
-                    {showPreview && (
-                        <div className="w-1/3 card overflow-hidden flex flex-col min-h-0">
-                            <ExcelPreviewPanel
-                                rutinaId={rutina?.id || null}
-                                isVisible={showPreview}
-                                draftData={draftData}
-                                weeks={semanas}
-                            />
-                        </div>
-                    )}
                 </div>
             </Modal>
 

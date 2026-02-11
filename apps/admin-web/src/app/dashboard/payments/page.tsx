@@ -1,14 +1,22 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Loader2, DollarSign, Plus, X, Pencil, Trash2 } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Loader2, Plus, X, Pencil, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api, type Payment, type Gym } from '@/lib/api';
+
+interface AdminPlan {
+    id: number;
+    name: string;
+    amount: number;
+    currency?: string;
+    period_days?: number;
+}
 
 export default function PaymentsPage() {
     const [payments, setPayments] = useState<Payment[]>([]);
     const [gyms, setGyms] = useState<Gym[]>([]);
-    const [plans, setPlans] = useState<any[]>([]);
+    const [plans, setPlans] = useState<AdminPlan[]>([]);
     const [loading, setLoading] = useState(true);
     const [createOpen, setCreateOpen] = useState(false);
     const [editOpen, setEditOpen] = useState(false);
@@ -29,7 +37,7 @@ export default function PaymentsPage() {
     });
     const [formLoading, setFormLoading] = useState(false);
 
-    const loadData = async () => {
+    const loadData = useCallback(async () => {
         setLoading(true);
         try {
             const gymId = filters.gym_id ? Number(filters.gym_id) : undefined;
@@ -46,28 +54,25 @@ export default function PaymentsPage() {
             ]);
             if (paymentsRes.ok && paymentsRes.data) {
                 setPayments(paymentsRes.data.items || []);
-                setTotal(Number((paymentsRes.data as any).total || 0));
+                setTotal(Number(paymentsRes.data.total || 0));
             }
             if (gymsRes.ok && gymsRes.data) {
                 setGyms(gymsRes.data.gyms || []);
             }
-            console.log('Plans Response:', plansRes);
-            if (plansRes && plansRes.data && plansRes.data.plans) {
-                console.log('Plans found:', plansRes.data.plans);
-                setPlans(plansRes.data.plans);
-            } else {
-                console.error('No plans found in response');
+            if (plansRes.ok && plansRes.data?.plans) {
+                setPlans(plansRes.data.plans as AdminPlan[]);
             }
-        } catch (err) {
-            console.error('Error loading data:', err);
+        } catch {
+            setPayments([]);
+            setTotal(0);
         } finally {
             setLoading(false);
         }
-    };
+    }, [filters.gym_id, filters.q, filters.status, page]);
 
     useEffect(() => {
         loadData();
-    }, [page, filters.gym_id, filters.status, filters.q]);
+    }, [loadData]);
 
     const handleCreate = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -107,7 +112,7 @@ export default function PaymentsPage() {
                 status: formData.status || 'paid',
                 valid_until: formData.valid_until || undefined,
                 notes: formData.notes || undefined,
-            } as any);
+            });
             if (res.ok) {
                 setEditOpen(false);
                 setEditing(null);
@@ -123,7 +128,7 @@ export default function PaymentsPage() {
         setFormData({
             gym_id: String(p.gym_id),
             amount: String(p.amount ?? ''),
-            plan: String((p as any).plan || ''),
+            plan: String(p.plan || ''),
             plan_id: '',
             valid_until: p.valid_until ? String(p.valid_until).slice(0, 10) : '',
             notes: String(p.notes || ''),
@@ -324,14 +329,14 @@ export default function PaymentsPage() {
                                             // Auto-select plan if gym has one assigned
                                             if (newGymId) {
                                                 const g = gyms.find(x => x.id === Number(newGymId));
-                                                if (g && (g as any).subscription_plan_id) {
-                                                    const pid = (g as any).subscription_plan_id;
+                                                if (g && g.subscription_plan_id) {
+                                                    const pid = g.subscription_plan_id;
                                                     const p = plans.find(x => x.id === pid);
                                                     if (p) {
                                                         newPlanId = String(pid);
                                                         newPlanName = p.name;
                                                         newAmount = String(p.amount);
-                                                        newCurrency = p.currency;
+                                                        newCurrency = p.currency || newCurrency;
                                                         // Calculate valid until
                                                         const d = new Date();
                                                         d.setDate(d.getDate() + (p.period_days || 30));
@@ -378,7 +383,7 @@ export default function PaymentsPage() {
                                                     if (p) {
                                                         newPlanName = p.name;
                                                         newAmount = String(p.amount);
-                                                        newCurrency = p.currency;
+                                                        newCurrency = p.currency || newCurrency;
                                                         const d = new Date();
                                                         d.setDate(d.getDate() + (p.period_days || 30));
                                                         newValidUntil = d.toISOString().slice(0, 10);

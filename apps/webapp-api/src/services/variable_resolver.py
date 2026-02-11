@@ -6,9 +6,9 @@ including calculated variables, user data access, gym data, and custom expressio
 """
 
 import re
-import json
-from typing import Dict, Any, List, Optional, Union, Callable
-from datetime import datetime, date, timedelta
+import ast
+from typing import Dict, Any, List, Optional, Callable
+from datetime import datetime, date
 from dataclasses import dataclass
 from enum import Enum
 import logging
@@ -348,45 +348,177 @@ class VariableResolver:
     
     def _compile_expression(self, expression: str) -> Callable:
         """Compile expression for evaluation"""
-        # This is a simplified expression compiler
-        # In production, you might want to use a more sophisticated parser
-        
+        parsed = ast.parse(expression, mode="eval")
+
+        allowed_names_base = {
+            "len": len,
+            "sum": sum,
+            "max": max,
+            "min": min,
+            "abs": abs,
+            "round": round,
+            "True": True,
+            "False": False,
+            "None": None,
+        }
+
+        def _eval_node(node: ast.AST, env: Dict[str, Any]) -> Any:
+            if isinstance(node, ast.Expression):
+                return _eval_node(node.body, env)
+
+            if isinstance(node, ast.Constant):
+                return node.value
+
+            if isinstance(node, ast.Name):
+                if node.id.startswith("__"):
+                    return 0
+                if node.id in env:
+                    return env[node.id]
+                if node.id in allowed_names_base:
+                    return allowed_names_base[node.id]
+                return 0
+
+            if isinstance(node, ast.BinOp):
+                left = _eval_node(node.left, env)
+                right = _eval_node(node.right, env)
+                if isinstance(node.op, ast.Add):
+                    return left + right
+                if isinstance(node.op, ast.Sub):
+                    return left - right
+                if isinstance(node.op, ast.Mult):
+                    return left * right
+                if isinstance(node.op, ast.Div):
+                    return left / right
+                if isinstance(node.op, ast.FloorDiv):
+                    return left // right
+                if isinstance(node.op, ast.Mod):
+                    return left % right
+                if isinstance(node.op, ast.Pow):
+                    return left ** right
+                return 0
+
+            if isinstance(node, ast.UnaryOp):
+                operand = _eval_node(node.operand, env)
+                if isinstance(node.op, ast.UAdd):
+                    return +operand
+                if isinstance(node.op, ast.USub):
+                    return -operand
+                if isinstance(node.op, ast.Not):
+                    return not operand
+                return 0
+
+            if isinstance(node, ast.BoolOp):
+                if isinstance(node.op, ast.And):
+                    for v in node.values:
+                        if not _eval_node(v, env):
+                            return False
+                    return True
+                if isinstance(node.op, ast.Or):
+                    for v in node.values:
+                        if _eval_node(v, env):
+                            return True
+                    return False
+                return False
+
+            if isinstance(node, ast.Compare):
+                left = _eval_node(node.left, env)
+                for op, comparator in zip(node.ops, node.comparators):
+                    right = _eval_node(comparator, env)
+                    ok = False
+                    if isinstance(op, ast.Eq):
+                        ok = left == right
+                    elif isinstance(op, ast.NotEq):
+                        ok = left != right
+                    elif isinstance(op, ast.Lt):
+                        ok = left < right
+                    elif isinstance(op, ast.LtE):
+                        ok = left <= right
+                    elif isinstance(op, ast.Gt):
+                        ok = left > right
+                    elif isinstance(op, ast.GtE):
+                        ok = left >= right
+                    elif isinstance(op, ast.In):
+                        ok = left in right
+                    elif isinstance(op, ast.NotIn):
+                        ok = left not in right
+                    else:
+                        return False
+                    if not ok:
+                        return False
+                    left = right
+                return True
+
+            if isinstance(node, ast.IfExp):
+                return _eval_node(node.body, env) if _eval_node(node.test, env) else _eval_node(node.orelse, env)
+
+            if isinstance(node, ast.Subscript):
+                base = _eval_node(node.value, env)
+                if isinstance(node.slice, ast.Slice):
+                    lower = _eval_node(node.slice.lower, env) if node.slice.lower else None
+                    upper = _eval_node(node.slice.upper, env) if node.slice.upper else None
+                    step = _eval_node(node.slice.step, env) if node.slice.step else None
+                    return base[slice(lower, upper, step)]
+                key = _eval_node(node.slice, env)
+                return base[key]
+
+            if isinstance(node, ast.Attribute):
+                if node.attr.startswith("_"):
+                    return 0
+                base = _eval_node(node.value, env)
+                if isinstance(base, dict):
+                    return base.get(node.attr, 0)
+                return getattr(base, node.attr, 0)
+
+            if isinstance(node, ast.Call):
+                func = _eval_node(node.func, env)
+                allowed_callables = env.get("__allowed_callables__")
+                if not isinstance(allowed_callables, set) or func not in allowed_callables:
+                    return 0
+                args = [_eval_node(a, env) for a in node.args]
+                kwargs = {kw.arg: _eval_node(kw.value, env) for kw in node.keywords if kw.arg}
+                return func(*args, **kwargs)
+
+            if isinstance(node, ast.List):
+                return [_eval_node(elt, env) for elt in node.elts]
+
+            if isinstance(node, ast.Tuple):
+                return tuple(_eval_node(elt, env) for elt in node.elts)
+
+            if isinstance(node, ast.Dict):
+                return {_eval_node(k, env): _eval_node(v, env) for k, v in zip(node.keys, node.values)}
+
+            return 0
+
         def compiled_func(context: VariableContext) -> Any:
-            # Replace variables in expression
-            processed_expr = expression
-            
-            # Find and replace variables
-            var_pattern = r'\b([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\b'
-            
-            def replace_var(match):
-                var_path = match.group(1)
-                value = self._resolve_nested_property(var_path, context)
-                return str(value)
-            
-            processed_expr = re.sub(var_pattern, replace_var, processed_expr)
-            
-            # Evaluate expression (simplified - in production use proper expression parser)
             try:
-                # Safe evaluation with limited context
-                allowed_names = {
-                    "len": len,
-                    "sum": sum,
-                    "max": max,
-                    "min": min,
-                    "abs": abs,
-                    "round": round,
-                    "True": True,
-                    "False": False,
-                    "None": None,
-                }
-                
-                # Add built-in functions
+                env: Dict[str, Any] = {}
+                if isinstance(context.template_data, dict):
+                    for k, v in context.template_data.items():
+                        if isinstance(k, str) and k.startswith("__"):
+                            continue
+                        if callable(v):
+                            continue
+                        env[k] = v
+                env["usuario"] = context.user_data or {}
+                env["gimnasio"] = context.gym_data or {}
+                env["rutina"] = context.routine_data or {}
+                env["ejercicios"] = context.exercise_data or []
+                if context.global_vars:
+                    for k, v in context.global_vars.items():
+                        if isinstance(k, str) and k.startswith("__"):
+                            continue
+                        if callable(v):
+                            continue
+                        env[k] = v
                 if context.functions:
-                    allowed_names.update(context.functions)
-                
-                return eval(processed_expr, {"__builtins__": {}}, allowed_names)
-            except:
-                logger.warning(f"Error evaluating expression: {processed_expr}")
+                    env.update(context.functions)
+                allowed_callables = set(allowed_names_base.values())
+                if context.functions:
+                    allowed_callables.update(v for v in context.functions.values() if callable(v))
+                env["__allowed_callables__"] = allowed_callables
+                return _eval_node(parsed, env)
+            except Exception:
+                logger.warning(f"Error evaluating expression: {expression}")
                 return 0
         
         return compiled_func

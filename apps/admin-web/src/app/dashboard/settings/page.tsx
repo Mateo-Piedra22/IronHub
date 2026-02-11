@@ -8,6 +8,25 @@ import {
 } from 'lucide-react';
 import { api } from '@/lib/api';
 
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+
+interface SettingRow {
+    key: string;
+    value: unknown;
+}
+
+interface JobRun {
+    id?: number;
+    run_id?: string;
+    job_name?: string;
+    status?: string;
+    started_at?: string;
+    finished_at?: string;
+    ended_at?: string;
+    error?: string;
+    output?: unknown;
+}
+
 export default function SettingsPage() {
     const [activeTab, setActiveTab] = useState('security');
 
@@ -30,7 +49,7 @@ export default function SettingsPage() {
         default_message: 'Gimnasio en mantenimiento. Volvemos pronto.',
     });
     const [jobRunsLoading, setJobRunsLoading] = useState(true);
-    const [jobRuns, setJobRuns] = useState<any[]>([]);
+    const [jobRuns, setJobRuns] = useState<JobRun[]>([]);
     const [maintenanceRunning, setMaintenanceRunning] = useState(false);
 
     const tabs = [
@@ -81,10 +100,10 @@ export default function SettingsPage() {
             setSettingsLoading(true);
             try {
                 const res = await api.getSettings();
-                if (res.ok && res.data?.ok && Array.isArray((res.data as any).settings)) {
-                    const rows = (res.data as any).settings as Array<{ key: string; value: any }>;
+                if (res.ok && res.data?.ok && Array.isArray(res.data.settings)) {
+                    const rows = res.data.settings as SettingRow[];
                     const subs = rows.find((r) => r.key === 'subscriptions')?.value;
-                    if (subs && typeof subs === 'object') {
+                    if (isRecord(subs)) {
                         setSubscriptionSettings({
                             reminder_days_before: Number(subs.reminder_days_before ?? 7),
                             grace_days: Number(subs.grace_days ?? 0),
@@ -93,15 +112,15 @@ export default function SettingsPage() {
                         });
                     }
                     const maint = rows.find((r) => r.key === 'maintenance')?.value;
-                    if (maint && typeof maint === 'object') {
+                    if (isRecord(maint)) {
                         setMaintenanceSettings({
                             default_message: String(maint.default_message || 'Gimnasio en mantenimiento. Volvemos pronto.'),
                         });
                     }
                 }
                 const jr = await api.listJobRuns('subscriptions_maintenance', 20);
-                if (jr.ok && jr.data?.ok && Array.isArray((jr.data as any).items)) {
-                    setJobRuns((jr.data as any).items || []);
+                if (jr.ok && jr.data?.ok && Array.isArray(jr.data.items)) {
+                    setJobRuns(jr.data.items as JobRun[]);
                 }
             } finally {
                 setSettingsLoading(false);
@@ -127,8 +146,8 @@ export default function SettingsPage() {
         setJobRunsLoading(true);
         try {
             const jr = await api.listJobRuns('subscriptions_maintenance', 20);
-            if (jr.ok && jr.data?.ok && Array.isArray((jr.data as any).items)) {
-                setJobRuns((jr.data as any).items || []);
+            if (jr.ok && jr.data?.ok && Array.isArray(jr.data.items)) {
+                setJobRuns(jr.data.items as JobRun[]);
             }
         } finally {
             setJobRunsLoading(false);

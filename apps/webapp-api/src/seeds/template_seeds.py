@@ -3,14 +3,10 @@ Seed script para crear plantillas base personalizables
 para el nuevo sistema de templates dinámicos
 """
 
-import json
 import logging
-from datetime import datetime
 from sqlalchemy.orm import Session
 
-from ..database import get_db
 from ..models.orm_models import PlantillaRutina, PlantillaRutinaVersion
-from ..services.template_service import TemplateService
 
 logger = logging.getLogger(__name__)
 

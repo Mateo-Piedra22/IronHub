@@ -5,7 +5,7 @@ This module contains Pydantic models for template admin API responses,
 ensuring proper data validation and serialization.
 """
 
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field, validator
 from enum import Enum

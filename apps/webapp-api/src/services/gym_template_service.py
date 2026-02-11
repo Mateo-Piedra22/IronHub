@@ -6,11 +6,11 @@ Servicio especializado para la gestión de asignación de plantillas a gimnasios
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import desc, and_, or_
+from sqlalchemy import and_, or_
 
 from ..models.orm_models import (
     PlantillaRutina, GimnasioPlantilla, Gimnasio, 
-    PlantillaAnalitica, Usuario
+    PlantillaAnalitica
 )
 from ..repositories.template_repository import TemplateRepository
 from ..services.template_analytics import TemplateAnalyticsService

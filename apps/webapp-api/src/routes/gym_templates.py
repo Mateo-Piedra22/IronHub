@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, joinedload
 from src.dependencies import (
     get_db_session as get_db,
     require_gestion_access,
+    require_gym_access,
 )
 from src.database.orm_models import PlantillaRutina, GimnasioPlantilla
 
@@ -67,6 +68,7 @@ async def assign_template_to_gym(
     notes: Optional[str] = None,
     db: Session = Depends(get_db),
     _=Depends(require_gestion_access),
+    __=Depends(require_gym_access),
 ):
     """Assign a template to a specific gym."""
     try:
@@ -114,6 +116,7 @@ async def get_gym_templates(
     include_analytics: bool = Query(False, description="Include analytics data"),
     db: Session = Depends(get_db),
     _=Depends(require_gestion_access),
+    __=Depends(require_gym_access),
 ):
     """Get all templates assigned to a gym."""
     try:
@@ -149,6 +152,7 @@ async def update_gym_template_assignment(
     updates: Dict[str, Any],
     db: Session = Depends(get_db),
     _=Depends(require_gestion_access),
+    __=Depends(require_gym_access),
 ):
     """Update a gym template assignment."""
     try:
@@ -196,6 +200,7 @@ async def remove_template_from_gym(
     soft_delete: bool = Query(True, description="Soft delete (deactivate) instead of hard delete"),
     db: Session = Depends(get_db),
     _=Depends(require_gestion_access),
+    __=Depends(require_gym_access),
 ):
     """Remove a template assignment from a gym."""
     try:
@@ -238,6 +243,7 @@ async def get_available_templates_for_gym(
     limit: int = Query(50, ge=1, le=100, description="Limit results"),
     db: Session = Depends(get_db),
     _=Depends(require_gestion_access),
+    __=Depends(require_gym_access),
 ):
     """Get templates available for assignment to a gym."""
     try:
@@ -271,6 +277,7 @@ async def get_recommended_templates_for_gym(
     limit: int = Query(10, ge=1, le=20, description="Number of recommendations"),
     db: Session = Depends(get_db),
     _=Depends(require_gestion_access),
+    __=Depends(require_gym_access),
 ):
     """Get recommended templates for a gym based on usage patterns."""
     try:
@@ -307,6 +314,7 @@ async def bulk_assign_templates_to_gym(
     priority_start: int = Query(0, description="Starting priority"),
     db: Session = Depends(get_db),
     _=Depends(require_gestion_access),
+    __=Depends(require_gym_access),
 ):
     """Assign multiple templates to a gym."""
     try:
@@ -354,6 +362,7 @@ async def bulk_remove_templates_from_gym(
     soft_delete: bool = Query(True, description="Soft delete (deactivate) instead of hard delete"),
     db: Session = Depends(get_db),
     _=Depends(require_gestion_access),
+    __=Depends(require_gym_access),
 ):
     """Remove multiple template assignments from a gym."""
     try:

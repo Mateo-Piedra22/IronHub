@@ -31,14 +31,14 @@ import {
     RefreshCw
 } from 'lucide-react';
 import { api, type Template, type GymTemplateAssignment } from '@/lib/api';
-import { 
-    Button, 
-    Card, 
-    Badge, 
-    Input, 
-    Select, 
-    Modal, 
-    useToast, 
+import {
+    Button,
+    Card,
+    Badge,
+    Input,
+    Select,
+    Modal,
+    useToast,
     Tabs,
     TabsList,
     TabsTrigger,
@@ -68,18 +68,18 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
     const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
     const [viewMode, setViewMode] = useState<ViewMode>("grid");
     const [categories, setCategories] = useState<string[]>([]);
-    
+
     // Modal states
     const [showAssignModal, setShowAssignModal] = useState(false);
     const [showCustomizeModal, setShowCustomizeModal] = useState(false);
     const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
     const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
     const [selectedAssignment, setSelectedAssignment] = useState<GymTemplateAssignment | null>(null);
-    
+
     // Analytics data
     const [analytics, setAnalytics] = useState<any>(null);
     const [popularTemplates, setPopularTemplates] = useState<any[]>([]);
-    
+
     const { success, error } = useToast();
 
     // Load data on mount and tab change
@@ -271,7 +271,7 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
                                 {gymName} - Administra las plantillas disponibles para este gimnasio
                             </p>
                         </div>
-                        
+
                         <div className="flex items-center gap-3">
                             <Button
                                 variant="secondary"
@@ -296,8 +296,8 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
                 <div className="bg-slate-900/30 border-b border-slate-800">
                     <div className="px-6">
                         <TabsList className="bg-transparent border-0">
-                            <TabsTrigger 
-                                value="assigned" 
+                            <TabsTrigger
+                                value="assigned"
                                 className="data-[state=active]:bg-primary-500 data-[state=active]:text-white"
                             >
                                 <div className="flex items-center gap-2">
@@ -305,7 +305,7 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
                                     Asignadas ({assignedTemplates.length})
                                 </div>
                             </TabsTrigger>
-                            <TabsTrigger 
+                            <TabsTrigger
                                 value="available"
                                 className="data-[state=active]:bg-primary-500 data-[state=active]:text-white"
                             >
@@ -314,7 +314,7 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
                                     Disponibles
                                 </div>
                             </TabsTrigger>
-                            <TabsTrigger 
+                            <TabsTrigger
                                 value="recommended"
                                 className="data-[state=active]:bg-primary-500 data-[state=active]:text-white"
                             >
@@ -377,11 +377,11 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
                                                                     </span>
                                                                 </div>
                                                             </div>
-                                                            
+
                                                             <p className="text-slate-400 mb-4">
                                                                 {assignment.template_description}
                                                             </p>
-                                                            
+
                                                             <div className="flex flex-wrap items-center gap-4 text-sm text-slate-400">
                                                                 <div className="flex items-center gap-1">
                                                                     <Users className="w-4 h-4" />
@@ -404,7 +404,7 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
                                                                     </div>
                                                                 )}
                                                             </div>
-                                                            
+
                                                             {assignment.custom_config && (
                                                                 <div className="mt-4 p-3 bg-slate-800 rounded-lg">
                                                                     <div className="flex items-center gap-2 mb-2">
@@ -417,7 +417,7 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
                                                                 </div>
                                                             )}
                                                         </div>
-                                                        
+
                                                         <div className="flex items-center gap-2">
                                                             <Button
                                                                 variant="ghost"
@@ -472,7 +472,7 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
                                         className="pl-10"
                                     />
                                 </div>
-                                
+
                                 <Select
                                     value={selectedCategory}
                                     onChange={(e) => setSelectedCategory(e.target.value)}
@@ -487,7 +487,7 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
                                         { value: "rehab", label: "Rehabilitación" }
                                     ]}
                                 />
-                                
+
                                 <Button onClick={loadAvailableTemplates} leftIcon={<RefreshCw className="w-4 h-4" />}>
                                     Actualizar
                                 </Button>
@@ -524,7 +524,7 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
                                                                 {template.descripcion}
                                                             </p>
                                                         </div>
-                                                        
+
                                                         <div className="flex flex-wrap gap-2">
                                                             <Badge variant="outline">{template.categoria}</Badge>
                                                             {template.dias_semana && (
@@ -533,7 +533,7 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
                                                                 </Badge>
                                                             )}
                                                         </div>
-                                                        
+
                                                         <div className="flex items-center justify-between text-sm text-slate-400">
                                                             <div className="flex items-center gap-1">
                                                                 <Download className="w-4 h-4" />
@@ -546,7 +546,7 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
                                                                 </div>
                                                             )}
                                                         </div>
-                                                        
+
                                                         <Button
                                                             onClick={() => handleAssignTemplate(template)}
                                                             className="w-full"
@@ -603,7 +603,7 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
                                                                 Recomendada
                                                             </Badge>
                                                         </div>
-                                                        
+
                                                         {template.recommendation_reason && (
                                                             <div className="p-2 bg-yellow-500/10 rounded-lg">
                                                                 <p className="text-xs text-yellow-400">
@@ -611,7 +611,7 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
                                                                 </p>
                                                             </div>
                                                         )}
-                                                        
+
                                                         <div className="flex flex-wrap gap-2">
                                                             <Badge variant="outline">{template.categoria}</Badge>
                                                             {template.dias_semana && (
@@ -620,7 +620,7 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
                                                                 </Badge>
                                                             )}
                                                         </div>
-                                                        
+
                                                         <Button
                                                             onClick={() => handleAssignTemplate(template)}
                                                             className="w-full"
@@ -641,32 +641,16 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
             </Tabs>
 
             {/* Assign Template Modal */}
-            <Modal
+            <AssignTemplateModal
                 isOpen={showAssignModal}
                 onClose={() => setShowAssignModal(false)}
-                title="Asignar Nueva Plantilla"
-                size="lg"
-            >
-                <div className="space-y-4">
-                    <p className="text-slate-400">
-                        Selecciona una plantilla de la biblioteca para asignarla a {gymName}
-                    </p>
-                    
-                    {/* Template selection would go here */}
-                    <div className="text-center py-8">
-                        <AlertCircle className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-                        <p className="text-slate-400">
-                            Usa la pestaña "Disponibles" para explorar y asignar plantillas
-                        </p>
-                    </div>
-                    
-                    <div className="flex justify-end">
-                        <Button onClick={() => setShowAssignModal(false)}>
-                            Cerrar
-                        </Button>
-                    </div>
-                </div>
-            </Modal>
+                gymId={gymId}
+                gymName={gymName}
+                onAssign={async (template) => {
+                    await handleAssignTemplate(template);
+                    setShowAssignModal(false);
+                }}
+            />
 
             {/* Customize Template Modal */}
             <Modal
@@ -676,32 +660,14 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
                 size="xl"
             >
                 {selectedAssignment && (
-                    <div className="space-y-6">
-                        <div>
-                            <h3 className="font-semibold text-white mb-2">
-                                {selectedAssignment.template_name}
-                            </h3>
-                            <p className="text-slate-400">
-                                Ajusta la configuración para adaptarla mejor a las necesidades de {gymName}
-                            </p>
-                        </div>
-                        
-                        {/* Customization form would go here */}
-                        <div className="p-4 bg-slate-800 rounded-lg">
-                            <p className="text-slate-400 text-center">
-                                Formulario de personalización en desarrollo...
-                            </p>
-                        </div>
-                        
-                        <div className="flex justify-end gap-3">
-                            <Button variant="secondary" onClick={() => setShowCustomizeModal(false)}>
-                                Cancelar
-                            </Button>
-                            <Button onClick={() => setShowCustomizeModal(false)}>
-                                Guardar Cambios
-                            </Button>
-                        </div>
-                    </div>
+                    <CustomizeTemplateForm
+                        assignment={selectedAssignment}
+                        gymName={gymName}
+                        onSave={async (customConfig) => {
+                            await handleCustomizeTemplate(selectedAssignment, customConfig);
+                        }}
+                        onCancel={() => setShowCustomizeModal(false)}
+                    />
                 )}
             </Modal>
 
@@ -735,7 +701,7 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
                                     </div>
                                 </Card>
                             </div>
-                            
+
                             <div>
                                 <h4 className="font-semibold text-white mb-3">Plantillas Populares</h4>
                                 <div className="space-y-2">
@@ -760,7 +726,7 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
                             <p className="text-slate-400">Cargando analytics...</p>
                         </div>
                     )}
-                    
+
                     <div className="flex justify-end">
                         <Button onClick={() => setShowAnalyticsModal(false)}>
                             Cerrar
@@ -773,3 +739,275 @@ export function GymTemplateManager({ gymId, gymName }: GymTemplateManagerProps) 
 }
 
 export default GymTemplateManager;
+
+// ─── Sub-components ────────────────────────────────────────
+
+interface AssignTemplateModalProps {
+    isOpen: boolean;
+    onClose: () => void;
+    gymId: number;
+    gymName: string;
+    onAssign: (template: Template) => Promise<void>;
+}
+
+function AssignTemplateModal({ isOpen, onClose, gymId, gymName, onAssign }: AssignTemplateModalProps) {
+    const [templates, setTemplates] = useState<Template[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [assigning, setAssigning] = useState<number | null>(null);
+    const [search, setSearch] = useState('');
+    const [category, setCategory] = useState('all');
+
+    useEffect(() => {
+        if (isOpen && gymId) {
+            loadTemplates();
+        }
+    }, [isOpen, gymId]);
+
+    const loadTemplates = async () => {
+        setLoading(true);
+        try {
+            const response = await api.get(`/api/v1/gyms/${gymId}/templates/available`, {
+                params: {
+                    category: category === 'all' ? undefined : category,
+                    search_query: search || undefined,
+                },
+            });
+            if (response.ok && (response.data as any)?.success) {
+                setTemplates((response.data as any).templates || []);
+            }
+        } catch {
+            setTemplates([]);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (isOpen) loadTemplates();
+    }, [search, category]);
+
+    const handleAssign = async (template: Template) => {
+        setAssigning(template.id);
+        try {
+            await onAssign(template);
+        } finally {
+            setAssigning(null);
+        }
+    };
+
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title="Asignar Nueva Plantilla" size="xl">
+            <div className="space-y-4">
+                <p className="text-slate-400">
+                    Selecciona una plantilla de la biblioteca para asignarla a <span className="text-white font-medium">{gymName}</span>
+                </p>
+
+                {/* Search and filter */}
+                <div className="flex gap-3">
+                    <div className="flex-1 relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <Input
+                            placeholder="Buscar plantillas..."
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            className="pl-10"
+                        />
+                    </div>
+                    <Select
+                        value={category}
+                        onChange={(e) => setCategory(e.target.value)}
+                        className="w-48"
+                        options={[
+                            { value: 'all', label: 'Todas' },
+                            { value: 'fuerza', label: 'Fuerza' },
+                            { value: 'hipertrofia', label: 'Hipertrofia' },
+                            { value: 'funcional', label: 'Funcional' },
+                            { value: 'cardio', label: 'Cardio' },
+                            { value: 'rehab', label: 'Rehabilitación' },
+                        ]}
+                    />
+                </div>
+
+                {/* Template list */}
+                <div className="max-h-[400px] overflow-y-auto space-y-3 pr-1">
+                    {loading ? (
+                        <div className="flex justify-center py-8">
+                            <div className="w-6 h-6 border-3 border-primary-500 border-t-transparent rounded-full animate-spin" />
+                        </div>
+                    ) : templates.length === 0 ? (
+                        <div className="text-center py-8">
+                            <Grid className="w-10 h-10 text-slate-600 mx-auto mb-2" />
+                            <p className="text-slate-400 text-sm">No se encontraron plantillas disponibles</p>
+                        </div>
+                    ) : (
+                        templates.map((template) => (
+                            <div
+                                key={template.id}
+                                className="flex items-center justify-between p-4 bg-slate-800/80 rounded-lg border border-slate-700 hover:border-slate-600 transition-colors"
+                            >
+                                <div className="flex-1 min-w-0 mr-4">
+                                    <h4 className="font-medium text-white truncate">{template.nombre}</h4>
+                                    {template.descripcion && (
+                                        <p className="text-sm text-slate-400 line-clamp-1 mt-0.5">{template.descripcion}</p>
+                                    )}
+                                    <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
+                                        {template.categoria && (
+                                            <Badge variant="outline">{template.categoria}</Badge>
+                                        )}
+                                        {template.dias_semana && (
+                                            <span>{template.dias_semana} días</span>
+                                        )}
+                                        <span className="flex items-center gap-1">
+                                            <Download className="w-3 h-3" />
+                                            {template.uso_count ?? 0}
+                                        </span>
+                                        {template.rating_promedio != null && (
+                                            <span className="flex items-center gap-1">
+                                                <Star className="w-3 h-3 text-yellow-400" />
+                                                {Number(template.rating_promedio).toFixed(1)}
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <Button
+                                    size="sm"
+                                    onClick={() => handleAssign(template)}
+                                    disabled={assigning === template.id}
+                                    leftIcon={
+                                        assigning === template.id
+                                            ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                            : <Plus className="w-4 h-4" />
+                                    }
+                                >
+                                    {assigning === template.id ? 'Asignando…' : 'Asignar'}
+                                </Button>
+                            </div>
+                        ))
+                    )}
+                </div>
+
+                <div className="flex justify-end pt-2">
+                    <Button variant="secondary" onClick={onClose}>Cerrar</Button>
+                </div>
+            </div>
+        </Modal>
+    );
+}
+
+// ─── Customize Form ────────────────────────────────────────
+
+interface CustomizeTemplateFormProps {
+    assignment: GymTemplateAssignment;
+    gymName: string;
+    onSave: (customConfig: Record<string, any>) => Promise<void>;
+    onCancel: () => void;
+}
+
+function CustomizeTemplateForm({ assignment, gymName, onSave, onCancel }: CustomizeTemplateFormProps) {
+    const [saving, setSaving] = useState(false);
+    const [priority, setPriority] = useState(assignment.priority);
+    const [notes, setNotes] = useState(assignment.notes || '');
+    const [configJson, setConfigJson] = useState(
+        assignment.custom_config ? JSON.stringify(assignment.custom_config, null, 2) : ''
+    );
+    const [jsonError, setJsonError] = useState('');
+
+    const handleSave = async () => {
+        let parsed: Record<string, any> = {};
+        if (configJson.trim()) {
+            try {
+                parsed = JSON.parse(configJson);
+                setJsonError('');
+            } catch {
+                setJsonError('JSON inválido. Revisa la sintaxis.');
+                return;
+            }
+        }
+
+        setSaving(true);
+        try {
+            await onSave({ ...parsed, _priority: priority, _notes: notes });
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div className="space-y-6">
+            <div>
+                <h3 className="font-semibold text-white mb-1">{assignment.template_name}</h3>
+                <p className="text-sm text-slate-400">
+                    Ajusta la configuración de esta plantilla para <span className="text-white">{gymName}</span>
+                </p>
+            </div>
+
+            {/* Priority */}
+            <div className="space-y-2">
+                <label className="block text-sm font-medium text-slate-300">Prioridad</label>
+                <div className="flex items-center gap-3">
+                    {[0, 1, 2, 3, 4].map((p) => (
+                        <button
+                            key={p}
+                            onClick={() => setPriority(p)}
+                            className={`w-10 h-10 rounded-lg font-medium text-sm transition-colors ${priority === p
+                                    ? 'bg-primary-500 text-white'
+                                    : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                                }`}
+                        >
+                            {p}
+                        </button>
+                    ))}
+                    <span className="text-xs text-slate-500 ml-2">
+                        {priority === 0 ? 'Alta' : priority <= 2 ? 'Media' : 'Baja'}
+                    </span>
+                </div>
+            </div>
+
+            {/* Notes */}
+            <div className="space-y-2">
+                <label className="block text-sm font-medium text-slate-300">Notas</label>
+                <textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Notas sobre la personalización para este gimnasio..."
+                    className="w-full h-20 rounded-lg bg-slate-800 border border-slate-700 text-white text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500/50 resize-none"
+                />
+            </div>
+
+            {/* Custom Config JSON */}
+            <div className="space-y-2">
+                <label className="block text-sm font-medium text-slate-300">Configuración personalizada (JSON)</label>
+                <textarea
+                    value={configJson}
+                    onChange={(e) => {
+                        setConfigJson(e.target.value);
+                        setJsonError('');
+                    }}
+                    placeholder='{"colores": {"primary": "#3B82F6"}, "logo_position": "left"}'
+                    className={`w-full h-32 rounded-lg bg-slate-900 border text-sm px-3 py-2 font-mono focus:outline-none focus:ring-2 focus:ring-primary-500/50 resize-none ${jsonError ? 'border-red-500 text-red-300' : 'border-slate-700 text-slate-300'
+                        }`}
+                />
+                {jsonError && <p className="text-xs text-red-400">{jsonError}</p>}
+                {!jsonError && configJson.trim() && (
+                    <p className="text-xs text-slate-500">Este JSON se fusionará con la configuración base de la plantilla</p>
+                )}
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+                <Button variant="secondary" onClick={onCancel}>Cancelar</Button>
+                <Button
+                    onClick={handleSave}
+                    disabled={saving}
+                    leftIcon={
+                        saving
+                            ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            : <Save className="w-4 h-4" />
+                    }
+                >
+                    {saving ? 'Guardando…' : 'Guardar Cambios'}
+                </Button>
+            </div>
+        </div>
+    );
+}

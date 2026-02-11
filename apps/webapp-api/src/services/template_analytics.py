@@ -5,17 +5,19 @@ This module provides comprehensive analytics and reporting for the template syst
 including usage metrics, performance data, and dashboard analytics.
 """
 
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, or_, desc, asc
+from sqlalchemy import func, and_, desc
 import json
 import logging
 
 from ..repositories.template_repository import TemplateRepository
 from ..models.orm_models import (
-    PlantillaRutina, PlantillaAnalitica, GimnasioPlantilla,
-    Usuario
+    GymConfig,
+    GimnasioPlantilla,
+    PlantillaAnalitica,
+    PlantillaRutina,
 )
 
 logger = logging.getLogger(__name__)
@@ -361,11 +363,11 @@ class TemplateAnalyticsService:
             # Get gym details
             gym_details = {}
             for usage in gym_usage:
-                gym = self.db.query(Gimnasio).filter(Gimnasio.id == usage.gimnasio_id).first()
+                gym = self.db.query(GymConfig).filter(GymConfig.id == usage.gimnasio_id).first()
                 if gym:
                     gym_details[usage.gimnasio_id] = {
                         "id": gym.id,
-                        "nombre": gym.nombre,
+                        "nombre": gym.gym_name,
                         "usage_count": usage.usage_count
                     }
             

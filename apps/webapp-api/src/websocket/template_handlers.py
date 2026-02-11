@@ -13,10 +13,8 @@ import asyncio
 from fastapi import WebSocket, WebSocketDisconnect, Depends
 from sqlalchemy.orm import Session
 
-from ...core.deps import get_db, require_gestion_access
+from ...core.deps import get_db
 from ...core.auth import get_current_user_ws
-from ...models.orm_models import Usuario
-from ...services.template_service import TemplateService
 from ...models.template_responses import (
     PreviewProgressMessage,
     TemplateUpdateMessage,

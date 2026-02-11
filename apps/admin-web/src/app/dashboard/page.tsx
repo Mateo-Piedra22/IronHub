@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
-    Building2, Users, CreditCard, TrendingUp,
+    Building2, Users, CreditCard,
     ArrowUpRight, ArrowDownRight, Clock, AlertCircle, Loader2
 } from 'lucide-react';
 import Link from 'next/link';
@@ -86,11 +86,14 @@ export default function DashboardPage() {
             const expRes = await api.getExpirations(30);
             if (expRes.ok && expRes.data) {
                 setExpirations(
-                    (expRes.data.expirations || []).slice(0, 5).map((e: any) => ({
-                        gym: e.gym_name || e.nombre || 'Gym',
-                        days: e.days_remaining ?? e.days_until ?? 0,
-                        type: 'subscription'
-                    }))
+                    (Array.isArray(expRes.data.expirations) ? expRes.data.expirations : [])
+                        .slice(0, 5)
+                        .map((e: unknown) => {
+                            const obj = (typeof e === 'object' && e !== null ? (e as Record<string, unknown>) : {}) as Record<string, unknown>;
+                            const gym = String(obj.gym_name ?? obj.nombre ?? 'Gym');
+                            const days = Number(obj.days_remaining ?? obj.days_until ?? 0) || 0;
+                            return { gym, days, type: 'subscription' };
+                        })
                 );
             }
         } catch (error) {

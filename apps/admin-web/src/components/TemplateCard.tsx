@@ -1,13 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
+import Image from "next/image";
 import { 
-  Star, Download, Users, Calendar, Eye, Edit, Trash2, Copy, 
-  Heart, Share2, MoreVertical, ChevronRight, TrendingUp,
-  Award, Zap, Clock, CheckCircle, AlertCircle, Play
+  AlertCircle,
+  Award,
+  CheckCircle,
+  ChevronRight,
+  Clock,
+  Copy,
+  Download,
+  Edit,
+  Eye,
+  Heart,
+  MoreVertical,
+  Share2,
+  Star,
+  Trash2,
+  TrendingUp,
+  Users,
 } from "lucide-react";
 import { Button, Badge, Dropdown, useToast } from "@/components/ui";
-import { api, type Template, type TemplateAnalytics } from "@/lib/api";
+import { type Template, type TemplateAnalytics } from "@/lib/api";
 
 interface TemplateCardProps {
   template: Template;
@@ -44,7 +58,6 @@ export function TemplateCard({
 }: TemplateCardProps) {
   const [isFavorite, setIsFavorite] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
-  const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
   const { success, error } = useToast();
 
@@ -53,13 +66,7 @@ export function TemplateCard({
     setIsFavorite(!isFavorite);
     onFavorite?.();
     
-    // Here you would typically call an API to update favorite status
-    try {
-      await api.toggleTemplateFavorite(template.id);
-      success(isFavorite ? "Eliminado de favoritos" : "Añadido a favoritos");
-    } catch (err) {
-      console.error("Failed to toggle favorite:", err);
-    }
+    success(isFavorite ? "Eliminado de favoritos" : "Añadido a favoritos");
   };
 
   const handleShare = async (e: React.MouseEvent) => {
@@ -78,8 +85,7 @@ export function TemplateCard({
         await navigator.clipboard.writeText(shareUrl);
         success("Enlace copiado al portapapeles");
       }
-    } catch (err) {
-      console.error("Share failed:", err);
+    } catch {
       error("Error al compartir plantilla");
     }
   };
@@ -100,7 +106,7 @@ export function TemplateCard({
     ));
   };
 
-  getUsageLevel = (usos: number) => {
+  const getUsageLevel = (usos: number) => {
     if (usos > 100) return { level: "Alto", color: "text-green-400", icon: TrendingUp };
     if (usos > 50) return { level: "Medio", color: "text-yellow-400", icon: Users };
     return { level: "Bajo", color: "text-slate-400", icon: Clock };
@@ -122,11 +128,13 @@ export function TemplateCard({
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 bg-slate-900 rounded-lg overflow-hidden flex-shrink-0">
             {template.preview_url && !imageError ? (
-              <img
+              <Image
                 src={template.preview_url}
                 alt={template.nombre}
+                width={48}
+                height={48}
+                unoptimized
                 className="w-full h-full object-cover"
-                onLoad={() => setImageLoaded(true)}
                 onError={() => setImageError(true)}
               />
             ) : (
@@ -209,13 +217,15 @@ export function TemplateCard({
         <div className="relative h-48 bg-slate-900 overflow-hidden">
           {template.preview_url && !imageError ? (
             <>
-              <img
+              <Image
                 src={template.preview_url}
                 alt={template.nombre}
-                className={`w-full h-full object-cover transition-transform duration-300 ${
+                fill
+                unoptimized
+                className={`object-cover transition-transform duration-300 ${
                   isHovered ? 'scale-105' : 'scale-100'
                 }`}
-                onLoad={() => setImageLoaded(true)}
+                sizes="(max-width: 1024px) 100vw, 50vw"
                 onError={() => setImageError(true)}
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
@@ -246,7 +256,7 @@ export function TemplateCard({
               <Button
                 variant="primary"
                 size="sm"
-                onClick={(e) => {
+                onClick={(e: MouseEvent<HTMLElement>) => {
                   e.stopPropagation();
                   onEdit?.();
                 }}
@@ -347,7 +357,7 @@ export function TemplateCard({
                   <Button
                     variant="secondary"
                     size="sm"
-                    onClick={(e) => {
+                    onClick={(e: MouseEvent<HTMLElement>) => {
                       e.stopPropagation();
                       onDuplicate?.();
                     }}
@@ -357,7 +367,7 @@ export function TemplateCard({
                   <Button
                     variant="primary"
                     size="sm"
-                    onClick={(e) => {
+                    onClick={(e: MouseEvent<HTMLElement>) => {
                       e.stopPropagation();
                       onView?.();
                     }}
@@ -400,13 +410,15 @@ export function TemplateCard({
       <div className="relative h-32 bg-slate-900">
         {template.preview_url && !imageError ? (
           <>
-            <img
+            <Image
               src={template.preview_url}
               alt={template.nombre}
-              className={`w-full h-full object-cover transition-transform duration-200 ${
+              fill
+              unoptimized
+              className={`object-cover transition-transform duration-200 ${
                 isHovered ? 'scale-105' : 'scale-100'
               }`}
-              onLoad={() => setImageLoaded(true)}
+              sizes="(max-width: 1024px) 100vw, 33vw"
               onError={() => setImageError(true)}
             />
             
@@ -496,7 +508,7 @@ export function TemplateCard({
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={(e) => {
+                onClick={(e: MouseEvent<HTMLElement>) => {
                   e.stopPropagation();
                   onView?.();
                 }}
@@ -511,7 +523,7 @@ export function TemplateCard({
                   <Button
                     variant="secondary"
                     size="sm"
-                    onClick={(e) => {
+                    onClick={(e: MouseEvent<HTMLElement>) => {
                       e.stopPropagation();
                       onEdit?.();
                     }}
@@ -522,7 +534,7 @@ export function TemplateCard({
                   <Button
                     variant="secondary"
                     size="sm"
-                    onClick={(e) => {
+                    onClick={(e: MouseEvent<HTMLElement>) => {
                       e.stopPropagation();
                       onDuplicate?.();
                     }}
@@ -533,7 +545,7 @@ export function TemplateCard({
                   <Button
                     variant="danger"
                     size="sm"
-                    onClick={(e) => {
+                    onClick={(e: MouseEvent<HTMLElement>) => {
                       e.stopPropagation();
                       onDelete?.();
                     }}

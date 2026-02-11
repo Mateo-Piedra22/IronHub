@@ -32,7 +32,7 @@ export default function LoginPage() {
             } else {
                 setError(data.error || 'Credenciales incorrectas');
             }
-        } catch (err) {
+        } catch {
             setError('Error de conexión');
         } finally {
             setLoading(false);

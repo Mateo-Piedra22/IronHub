@@ -1,8 +1,12 @@
 import argparse
 import os
 
-from src.database.tenant_connection import _build_tenant_db_url
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from src.database.migration_runner import upgrade_head
+from src.database.tenant_connection import _build_tenant_db_url
 
 
 def main() -> None:

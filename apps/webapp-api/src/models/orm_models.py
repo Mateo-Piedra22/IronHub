@@ -19,7 +19,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import JSONB, INET
+from sqlalchemy.dialects.postgresql import JSONB, INET, ARRAY
 
 
 class Base(DeclarativeBase):
@@ -1979,7 +1979,7 @@ class PlantillaRutina(Base):
     version_actual: Mapped[Optional[str]] = mapped_column(
         String(50), server_default="1.0.0"
     )
-    tags: Mapped[Optional[list]] = mapped_column(JSONB)
+    tags: Mapped[List[str]] = mapped_column(ARRAY(String), server_default="{}", default=list)
     preview_url: Mapped[Optional[str]] = mapped_column(String(500))
     uso_count: Mapped[int] = mapped_column(Integer, server_default="0")
     rating_promedio: Mapped[Optional[float]] = mapped_column(Numeric(3, 2))
@@ -2002,7 +2002,7 @@ class PlantillaRutina(Base):
         "PlantillaMercado", back_populates="plantilla", uselist=False, cascade="all, delete-orphan"
     )
     rutinas: Mapped[List["Rutina"]] = relationship(
-        "Rutina", back_populates="plantilla", cascade="all, delete-orphan"
+        "Rutina", back_populates="plantilla", passive_deletes=True
     )
 
     __table_args__ = (
@@ -2053,7 +2053,7 @@ class GimnasioPlantilla(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     gimnasio_id: Mapped[int] = mapped_column(
-        ForeignKey("gimnasios.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("gym_config.id", ondelete="CASCADE"), nullable=False
     )
     plantilla_id: Mapped[int] = mapped_column(
         ForeignKey("plantillas_rutina.id", ondelete="CASCADE"), nullable=False
@@ -2097,7 +2097,7 @@ class PlantillaAnalitica(Base):
         ForeignKey("plantillas_rutina.id", ondelete="CASCADE"), nullable=False
     )
     gimnasio_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("gimnasios.id", ondelete="SET NULL")
+        ForeignKey("gym_config.id", ondelete="SET NULL")
     )
     usuario_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("usuarios.id", ondelete="SET NULL")

@@ -1,5 +1,9 @@
 import argparse
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from src.cli.migrate import main as migrate_tenants_main
 from src.cli.migrate_admin import main as migrate_admin_main
 
@@ -20,4 +24,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

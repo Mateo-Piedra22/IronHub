@@ -67,7 +67,7 @@ def main() -> int:
         if "EntitlementsService" not in attendance_py:
             return 28
         branches_py = (_root / "src" / "routers" / "branches.py").read_text(encoding="utf-8", errors="ignore")
-        if "EntitlementsService" not in branches_py:
+        if "BranchAccessService" not in branches_py:
             return 29
         payments_py = (_root / "src" / "services" / "payment_service.py").read_text(encoding="utf-8", errors="ignore")
         if "sucursal_id" not in payments_py or "tipo_cuota_id" not in payments_py:

@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from src.dependencies import (
     get_db_session as get_db,
     require_gestion_access,
+    require_gym_access_gimnasio,
     require_owner,
 )
 from src.services.template_service import TemplateService
@@ -63,6 +64,7 @@ async def create_template(
     generate_preview: bool = Query(True, description="Generate preview after creation"),
     db: Session = Depends(get_db),
     _=Depends(require_gestion_access),
+    __=Depends(require_gym_access_gimnasio),
 ):
     """Create a new template with validation and optional preview generation."""
     try:
@@ -114,6 +116,7 @@ async def get_template(
     include_analytics: bool = Query(False, description="Include analytics data"),
     db: Session = Depends(get_db),
     _=Depends(require_gestion_access),
+    __=Depends(require_gym_access_gimnasio),
 ):
     """Get template by ID with optional additional data."""
     try:
@@ -144,6 +147,7 @@ async def update_template(
     generate_preview: bool = Query(True, description="Generate preview after update"),
     db: Session = Depends(get_db),
     _=Depends(require_gestion_access),
+    __=Depends(require_gym_access_gimnasio),
 ):
     """Update template with validation, versioning, and preview generation."""
     try:

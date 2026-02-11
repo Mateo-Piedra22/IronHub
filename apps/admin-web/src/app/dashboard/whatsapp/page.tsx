@@ -5,6 +5,8 @@ import { Loader2, Send, Check, X, ExternalLink, Save, Trash2, RefreshCw, ArrowUp
 import { api, type Gym, type WhatsAppTemplateCatalogItem } from '@/lib/api';
 import Link from 'next/link';
 
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+
 export default function WhatsAppPage() {
     const [gyms, setGyms] = useState<Gym[]>([]);
     const [loading, setLoading] = useState(true);
@@ -36,7 +38,7 @@ export default function WhatsAppPage() {
     >([]);
     const [actionSpecsLoading, setActionSpecsLoading] = useState(true);
     const [selectedGymId, setSelectedGymId] = useState<number | null>(null);
-    const [gymHealth, setGymHealth] = useState<any>(null);
+    const [gymHealth, setGymHealth] = useState<unknown>(null);
     const [gymActions, setGymActions] = useState<
         Array<{
             action_key: string;
@@ -47,7 +49,7 @@ export default function WhatsAppPage() {
             default_template_name?: string;
         }>
     >([]);
-    const [gymEvents, setGymEvents] = useState<any[]>([]);
+    const [gymEvents, setGymEvents] = useState<Array<{ event_type: string; severity: string; message: string; details: unknown; created_at: string }>>([]);
     const [gymLoading, setGymLoading] = useState(false);
     const [provisioning, setProvisioning] = useState(false);
     const [savingGymAction, setSavingGymAction] = useState('');
@@ -187,28 +189,30 @@ export default function WhatsAppPage() {
     const activeCatalogByName = useMemo(() => {
         const m = new Map<string, WhatsAppTemplateCatalogItem>();
         for (const t of templates || []) {
-            const name = String((t as any)?.template_name || '').trim();
+            const name = String(t?.template_name || '').trim();
             if (!name) continue;
-            if ((t as any)?.active) m.set(name, t);
+            if (t?.active) m.set(name, t);
         }
         return m;
     }, [templates]);
 
     const gymMetaTemplates = useMemo(() => {
-        const list = (gymHealth as any)?.templates_list;
+        const rec = isRecord(gymHealth) ? gymHealth : {};
+        const list = rec.templates_list;
         return Array.isArray(list) ? list : [];
     }, [gymHealth]);
 
     const gymMetaByName = useMemo(() => {
         const m = new Map<string, { name: string; status: string; category: string; language: string }>();
         for (const t of gymMetaTemplates) {
-            const n = String((t as any)?.name || '').trim();
+            const rec = isRecord(t) ? t : {};
+            const n = String(rec.name || '').trim();
             if (!n) continue;
             m.set(n, {
                 name: n,
-                status: String((t as any)?.status || ''),
-                category: String((t as any)?.category || ''),
-                language: String((t as any)?.language || ''),
+                status: String(rec.status || ''),
+                category: String(rec.category || ''),
+                language: String(rec.language || ''),
             });
         }
         return m;
@@ -218,9 +222,9 @@ export default function WhatsAppPage() {
         (action: { required_params: number; template_name: string; default_template_name?: string }) => {
             const required = Number(action?.required_params || 0);
             const catalogCandidates = (templates || [])
-                .filter((t) => Boolean((t as any)?.active))
-                .filter((t) => countMetaParams(String((t as any)?.body_text || '')) === required)
-                .map((t) => String((t as any)?.template_name || '').trim())
+                .filter((t) => Boolean(t?.active))
+                .filter((t) => countMetaParams(String(t?.body_text || '')) === required)
+                .map((t) => String(t?.template_name || '').trim())
                 .filter(Boolean);
 
             const bases = new Set<string>();
@@ -229,7 +233,7 @@ export default function WhatsAppPage() {
             }
 
             const metaCandidates = (gymMetaTemplates || [])
-                .map((t) => String((t as any)?.name || '').trim())
+                .map((t) => (isRecord(t) ? String(t.name || '').trim() : ''))
                 .filter(Boolean)
                 .filter((n) => bases.has(splitTemplateVersion(n).base));
 
@@ -281,13 +285,13 @@ export default function WhatsAppPage() {
     const buildBindingTemplateOptions = useCallback(
         (spec: { action_key: string; required_params: number; default_template_name?: string }) => {
             const required = Number(spec?.required_params || 0);
-            const current = String((bindings as any)?.[spec.action_key] || '').trim();
+            const current = String(bindings?.[spec.action_key] || '').trim();
             const fallback = String(spec?.default_template_name || '').trim();
 
             const catalogCandidates = (templates || [])
-                .filter((t) => Boolean((t as any)?.active))
-                .filter((t) => countMetaParams(String((t as any)?.body_text || '')) === required)
-                .map((t) => String((t as any)?.template_name || '').trim())
+                .filter((t) => Boolean(t?.active))
+                .filter((t) => countMetaParams(String(t?.body_text || '')) === required)
+                .map((t) => String(t?.template_name || '').trim())
                 .filter(Boolean);
 
             const names = Array.from(new Set<string>([...catalogCandidates, current, fallback].filter(Boolean)));
@@ -295,7 +299,7 @@ export default function WhatsAppPage() {
             const scored = names.map((name) => {
                 const cat = activeCatalogByName.get(name);
                 const inCatalog = Boolean(cat);
-                const paramsOk = inCatalog ? countMetaParams(String((cat as any)?.body_text || '')) === required : false;
+                const paramsOk = inCatalog ? countMetaParams(String(cat?.body_text || '')) === required : false;
                 const disabled = !inCatalog || !paramsOk;
                 const notes = [
                     !inCatalog ? 'NO_CATÁLOGO' : null,
@@ -323,24 +327,24 @@ export default function WhatsAppPage() {
                     api.getGymWhatsAppOnboardingEvents(gymId, 50),
                 ]);
 
-                if (aRes.ok && aRes.data && (aRes.data as any).ok) {
-                    setGymActions((aRes.data as any).actions || []);
+                if (aRes.ok && aRes.data?.ok) {
+                    setGymActions(aRes.data.actions || []);
                 } else {
                     setGymActions([]);
-                    setUiMsg({ type: 'error', text: aRes.error || (aRes.data as any)?.error || 'Error cargando acciones' });
+                    setUiMsg({ type: 'error', text: aRes.error || 'Error cargando acciones' });
                 }
 
                 if (hRes.ok && hRes.data) {
                     setGymHealth(hRes.data);
-                    if ((hRes.data as any)?.ok === false) {
-                        setUiMsg({ type: 'error', text: (hRes.data as any)?.error || 'Health check falló' });
+                    if (isRecord(hRes.data) && hRes.data.ok === false) {
+                        setUiMsg({ type: 'error', text: String(hRes.data.error || 'Health check falló') });
                     }
                 } else {
                     setGymHealth(null);
                 }
 
-                if (eRes.ok && eRes.data && (eRes.data as any).ok) {
-                    setGymEvents((eRes.data as any).events || []);
+                if (eRes.ok && eRes.data?.ok) {
+                    setGymEvents(eRes.data.events || []);
                 } else {
                     setGymEvents([]);
                 }
@@ -412,8 +416,12 @@ export default function WhatsAppPage() {
                     } else {
                         failed.push({ action_key: a.action_key, error: res.error || 'Error' });
                     }
-                } catch (e: any) {
-                    failed.push({ action_key: a.action_key, error: e?.message || 'Error' });
+                } catch (e: unknown) {
+                    const msg =
+                        typeof e === 'object' && e !== null && 'message' in e
+                            ? String((e as Record<string, unknown>).message || 'Error')
+                            : 'Error';
+                    failed.push({ action_key: a.action_key, error: msg });
                 }
             }
         } finally {
@@ -436,11 +444,11 @@ export default function WhatsAppPage() {
                 setUiMsg({ type: 'error', text: res.error || 'Error provisionando templates' });
                 return;
             }
-            const failed = (res.data as any).failed || [];
+            const failed = res.data.failed || [];
             if (Array.isArray(failed) && failed.length) {
                 setUiMsg({ type: 'error', text: `Provisionado con fallas: ${failed.length}` });
             } else {
-                setUiMsg({ type: 'ok', text: `Provisionado OK: created=${(res.data as any).created?.length || 0}` });
+                setUiMsg({ type: 'ok', text: `Provisionado OK: created=${(res.data.created || []).length}` });
             }
             await loadTemplates();
             await loadBindings();
@@ -456,19 +464,29 @@ export default function WhatsAppPage() {
         const q = String(gymSearch || '').trim().toLowerCase();
         if (!q) return true;
         const name = String(g.nombre || '').toLowerCase();
-        const sub = String((g as any).subdominio || '').toLowerCase();
+        const sub = String(g.subdominio || '').toLowerCase();
         return name.includes(q) || sub.includes(q);
     });
     const configuredGymsFiltered = configuredGyms.filter((g) => filteredGyms.some((x) => x.id === g.id));
     const actionLabelByKey = useMemo(() => {
         const out: Record<string, string> = {};
         for (const s of actionSpecs) {
-            const k = String((s as any)?.action_key || '').trim();
+            const k = String(s?.action_key || '').trim();
             if (!k) continue;
-            out[k] = String((s as any)?.label || k);
+            out[k] = String(s?.label || k);
         }
         return out;
     }, [actionSpecs]);
+
+    const gymHealthInfo = useMemo(() => {
+        const rec = isRecord(gymHealth) ? gymHealth : {};
+        const ok = Boolean(rec.ok);
+        const templatesRec = isRecord(rec.templates) ? rec.templates : {};
+        const templatesCount = Number(templatesRec.count ?? rec.templates_count ?? gymMetaTemplates.length) || 0;
+        const approved = Number(templatesRec.approved ?? 0) || 0;
+        const err = rec.error ? String(rec.error) : null;
+        return { ok, templatesCount, approved, error: err };
+    }, [gymHealth, gymMetaTemplates.length]);
 
     const handleSendTest = async () => {
         if (!testGymId || !testNumber.trim()) return;
@@ -659,17 +677,17 @@ export default function WhatsAppPage() {
                                 </span>
                             ) : gymHealth ? (
                                 <div className="flex flex-wrap items-center gap-3">
-                                    <span className={(gymHealth as any)?.ok ? 'text-emerald-300' : 'text-red-300'}>
-                                        {(gymHealth as any)?.ok ? 'OK' : 'ERROR'}
+                                    <span className={gymHealthInfo.ok ? 'text-emerald-300' : 'text-red-300'}>
+                                        {gymHealthInfo.ok ? 'OK' : 'ERROR'}
                                     </span>
                                     <span className="text-slate-400">
-                                        templates={(gymHealth as any)?.templates?.count ?? (gymHealth as any)?.templates_count ?? (gymMetaTemplates?.length || 0)}
+                                        templates={gymHealthInfo.templatesCount}
                                     </span>
                                     <span className="text-slate-400">
-                                        approved={(gymHealth as any)?.templates?.approved ?? 0}
+                                        approved={gymHealthInfo.approved}
                                     </span>
-                                    {(gymHealth as any)?.error ? (
-                                        <span className="text-red-200">{String((gymHealth as any)?.error)}</span>
+                                    {gymHealthInfo.error ? (
+                                        <span className="text-red-200">{gymHealthInfo.error}</span>
                                     ) : null}
                                 </div>
                             ) : (
@@ -781,15 +799,15 @@ export default function WhatsAppPage() {
                         </div>
                         {gymEvents.length ? (
                             <div className="mt-3 space-y-2">
-                                {gymEvents.slice(0, 15).map((ev: any, idx: number) => (
-                                    <div key={`${idx}-${String(ev?.event_type || '')}`} className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                                {gymEvents.slice(0, 15).map((ev, idx) => (
+                                    <div key={`${idx}-${String(ev.event_type || '')}`} className="rounded-lg border border-slate-800 bg-slate-950/40 p-3">
                                         <div className="flex items-center justify-between gap-3">
-                                            <div className="text-sm text-white">{String(ev?.event_type || 'event')}</div>
-                                            <div className="text-xs text-slate-500">{String(ev?.created_at || '')}</div>
+                                            <div className="text-sm text-white">{String(ev.event_type || 'event')}</div>
+                                            <div className="text-xs text-slate-500">{String(ev.created_at || '')}</div>
                                         </div>
                                         <div className="text-xs mt-1">
-                                            <span className="text-slate-400">{String(ev?.severity || '')}</span>
-                                            {ev?.message ? <span className="text-slate-300"> · {String(ev.message)}</span> : null}
+                                            <span className="text-slate-400">{String(ev.severity || '')}</span>
+                                            {ev.message ? <span className="text-slate-300"> · {String(ev.message)}</span> : null}
                                         </div>
                                     </div>
                                 ))}
@@ -958,9 +976,9 @@ export default function WhatsAppPage() {
                     ) : (
                         <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
                             {(actionSpecs.length ? actionSpecs : Object.entries(bindings).map(([k]) => ({ action_key: k, label: k, required_params: 0 }))).map(
-                                (s: any) => {
+                                (s) => {
                                     const k = String(s?.action_key || '').trim();
-                                    const v = String((bindings as any)?.[k] || '').trim();
+                                    const v = String(bindings?.[k] || '').trim();
                                     const opts = buildBindingTemplateOptions(s);
                                     return (
                                         <div key={k} className="flex items-center gap-2">
@@ -981,8 +999,8 @@ export default function WhatsAppPage() {
                                             </select>
                                             <button
                                                 className="btn-primary"
-                                                disabled={savingBindingKey === k || !String((bindings as any)?.[k] || '').trim()}
-                                                onClick={() => handleSaveBinding(k, String((bindings as any)?.[k] || ''))}
+                                                disabled={savingBindingKey === k || !String(bindings?.[k] || '').trim()}
+                                                onClick={() => handleSaveBinding(k, String(bindings?.[k] || ''))}
                                             >
                                                 {savingBindingKey === k ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Guardar'}
                                             </button>

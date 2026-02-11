@@ -1,11 +1,12 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import {
-    Dumbbell, LayoutDashboard, Building2, Users, CreditCard,
+    LayoutDashboard, Building2, CreditCard,
     MessageSquare, Settings, LogOut, ChevronRight, LifeBuoy, Megaphone, ShieldAlert
 } from 'lucide-react';
 
@@ -67,9 +68,11 @@ export default function DashboardLayout({
                 {/* Logo */}
                 <div className="p-6 border-b border-slate-800/50">
                     <Link href="/dashboard" className="flex items-center gap-3">
-                        <img
+                        <Image
                             src="/images/logo-ironhub.png"
                             alt="IronHub"
+                            width={40}
+                            height={40}
                             className="w-10 h-10 rounded-xl shadow-sm"
                         />
                         <div>
@@ -128,9 +131,11 @@ export default function DashboardLayout({
                         rel="noopener noreferrer"
                         className="flex items-center justify-center gap-2 py-2 text-slate-500 hover:text-slate-300 transition-colors text-xs"
                     >
-                        <img
+                        <Image
                             src="/images/logo-motiona.png"
                             alt="MotionA"
+                            width={20}
+                            height={20}
                             className="w-5 h-5 rounded"
                         />
                         <span>by MotionA</span>

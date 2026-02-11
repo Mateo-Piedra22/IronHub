@@ -180,7 +180,7 @@ class TemplateValidator:
                         "enabled": {"type": "boolean"},
                         "position": {
                             "type": "string",
-                            "enum": ["header", "footer", "inline", "separate", "none"]
+                            "enum": ["header", "footer", "inline", "separate", "sheet", "none"]
                         },
                         "size": {
                             "type": "object",
@@ -335,7 +335,20 @@ class TemplateValidator:
         errors = []
         
         try:
-            jsonschema.validate(template_config, self.schema)
+            schema_errors = sorted(
+                self.validator.iter_errors(template_config),
+                key=lambda e: (list(e.absolute_path), str(e.message)),
+            )
+            for e in schema_errors:
+                errors.append(
+                    {
+                        "severity": ValidationSeverity.ERROR.value,
+                        "type": "schema_validation",
+                        "message": f"Schema validation failed: {e.message}",
+                        "path": list(e.absolute_path),
+                        "schema_path": list(e.schema_path),
+                    }
+                )
         except jsonschema.ValidationError as e:
             errors.append({
                 "severity": ValidationSeverity.ERROR.value,
@@ -380,6 +393,10 @@ class TemplateValidator:
                 }
                 for var in undefined_vars
             ])
+
+        forbidden = self._find_forbidden_template_expressions(template_config)
+        if forbidden:
+            errors.extend(forbidden)
         
         # Check page count limits
         page_count = len(template_config.get("pages", []))
@@ -403,6 +420,52 @@ class TemplateValidator:
                 })
         
         return errors, warnings
+
+    def _find_forbidden_template_expressions(self, template_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+        errors: List[Dict[str, Any]] = []
+        for s, path in self._iter_template_strings(template_config):
+            lowered = s.lower()
+            if "{%" in s or "{#" in s:
+                errors.append(
+                    {
+                        "severity": ValidationSeverity.ERROR.value,
+                        "type": "security",
+                        "message": "Solo se permiten expresiones {{ ... }} (bloques/statement no permitidos)",
+                        "path": path,
+                    }
+                )
+            if "__" in s or "import" in lowered:
+                errors.append(
+                    {
+                        "severity": ValidationSeverity.ERROR.value,
+                        "type": "security",
+                        "message": "Expresión de template no permitida",
+                        "path": path,
+                    }
+                )
+            for token in ("cycler", "joiner", "namespace", "self", "globals", "builtins"):
+                if token in lowered:
+                    errors.append(
+                        {
+                            "severity": ValidationSeverity.WARNING.value,
+                            "type": "security",
+                            "message": f"Uso potencialmente riesgoso en template: {token}",
+                            "path": path,
+                        }
+                    )
+        return errors
+
+    def _iter_template_strings(self, obj: Any, path: Optional[List[Any]] = None):
+        p = list(path or [])
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                yield from self._iter_template_strings(v, p + [k])
+        elif isinstance(obj, list):
+            for i, v in enumerate(obj):
+                yield from self._iter_template_strings(v, p + [i])
+        elif isinstance(obj, str):
+            if "{{" in obj:
+                yield (obj, p)
     
     def _assess_performance(self, template_config: Dict[str, Any]) -> Tuple[float, List[Dict[str, Any]]]:
         """Assess template performance impact"""

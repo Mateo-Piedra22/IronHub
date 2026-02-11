@@ -728,6 +728,8 @@ class TrainingService(BaseService):
                 rutina.creada_por_usuario_id = data.get("creada_por_usuario_id")
             if hasattr(Rutina, "sucursal_id") and "sucursal_id" in data:
                 rutina.sucursal_id = data.get("sucursal_id")
+            if hasattr(Rutina, "plantilla_id") and "plantilla_id" in data:
+                rutina.plantilla_id = data.get("plantilla_id")
             # Add uuid if model supports it
             if hasattr(Rutina, "uuid_rutina"):
                 import uuid
@@ -910,6 +912,9 @@ class TrainingService(BaseService):
             "dias_semana": rutina.dias_semana,
             "activa": rutina.activa,
             "uuid_rutina": getattr(rutina, "uuid_rutina", None),
+            "plantilla_id": getattr(rutina, "plantilla_id", None)
+            if hasattr(rutina, "plantilla_id")
+            else None,
             "es_plantilla": (rutina.usuario_id is None),
             "fecha_creacion": fecha_creacion,
             "sucursal_id": int(sucursal_id) if sucursal_id is not None else None,
@@ -956,6 +961,8 @@ class TrainingService(BaseService):
                 rutina.dias_semana = data["dias_semana"]
             if "activa" in data:
                 rutina.activa = data["activa"]
+            if hasattr(rutina, "plantilla_id") and "plantilla_id" in data:
+                rutina.plantilla_id = data.get("plantilla_id")
             if hasattr(rutina, "sucursal_id"):
                 if "shared" in data:
                     try:

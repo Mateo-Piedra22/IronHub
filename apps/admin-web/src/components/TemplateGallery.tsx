@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Image from "next/image";
 import { 
-  Plus, Search, Filter, Download, Eye, Edit, Trash2, 
-  Star, Users, Calendar, TrendingUp, Copy, Settings,
-  ChevronDown, Grid, List, Loader2, Check, X, RefreshCw
+  Plus, Search, Download, Eye, Edit, Trash2, 
+  Star, Users, Copy,
+  ChevronDown, Grid, List, Loader2, Check, X, RefreshCw, FileText
 } from "lucide-react";
-import { Button, Input, Select, Modal, useToast, Badge } from "@/components/ui";
+import { Button, Input, Select, useToast, Badge } from "@/components/ui";
 import { api, type Template, type TemplateAnalytics } from "@/lib/api";
 
 interface TemplateGalleryProps {
@@ -38,19 +39,7 @@ export function TemplateGallery({ onTemplateSelect, onTemplateEdit, onTemplateCr
   
   const { success, error } = useToast();
 
-  // Load categories on mount
-  useEffect(() => {
-    loadCategories();
-    loadTemplates();
-  }, []);
-
-  // Reset and load templates when filters change
-  useEffect(() => {
-    setPage(0);
-    loadTemplates(true);
-  }, [searchQuery, selectedCategory, selectedStatus, sortBy, sortOrder]);
-
-  const loadCategories = async () => {
+  const loadCategories = useCallback(async () => {
     try {
       const response = await api.getTemplateCategories();
       if (response.ok && response.data?.success && response.data.categories) {
@@ -59,7 +48,7 @@ export function TemplateGallery({ onTemplateSelect, onTemplateEdit, onTemplateCr
     } catch (err) {
       console.error("Error loading categories:", err);
     }
-  };
+  }, []);
 
   const loadTemplates = useCallback(async (resetPage = false) => {
     setLoading(true);
@@ -97,6 +86,18 @@ export function TemplateGallery({ onTemplateSelect, onTemplateEdit, onTemplateCr
       setLoading(false);
     }
   }, [searchQuery, selectedCategory, selectedStatus, sortBy, sortOrder, page, error]);
+
+  // Load categories on mount
+  useEffect(() => {
+    loadCategories();
+    loadTemplates();
+  }, [loadCategories, loadTemplates]);
+
+  // Reset and load templates when filters change
+  useEffect(() => {
+    setPage(0);
+    loadTemplates(true);
+  }, [searchQuery, selectedCategory, selectedStatus, sortBy, sortOrder, loadTemplates]);
 
   const loadAnalytics = async (templateList: Template[]) => {
     try {
@@ -484,10 +485,13 @@ function TemplateCard({
       {/* Preview Image */}
       <div className="relative h-32 bg-slate-900">
         {template.preview_url ? (
-          <img
+          <Image
             src={template.preview_url}
             alt={template.nombre}
-            className="w-full h-full object-cover"
+            fill
+            unoptimized
+            className="object-cover"
+            sizes="(max-width: 1024px) 100vw, 33vw"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
@@ -618,9 +622,12 @@ function TemplateListItem({
         {/* Preview Thumbnail */}
         <div className="w-16 h-16 bg-slate-900 rounded-lg overflow-hidden flex-shrink-0">
           {template.preview_url ? (
-            <img
+            <Image
               src={template.preview_url}
               alt={template.nombre}
+              width={64}
+              height={64}
+              unoptimized
               className="w-full h-full object-cover"
             />
           ) : (

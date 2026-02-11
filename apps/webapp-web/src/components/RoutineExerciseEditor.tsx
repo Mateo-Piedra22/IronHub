@@ -22,11 +22,10 @@ import {
     verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Plus, Trash2, FileSpreadsheet } from 'lucide-react';
+import { GripVertical, Plus, Trash2 } from 'lucide-react';
 import { Button, Modal, Select, Input, useToast } from '@/components/ui';
 import { api, type Ejercicio, type EjercicioRutina } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { ExcelPreviewViewer } from '@/components/ExcelPreviewViewer';
 
 // Types
 type DraggableExercise = EjercicioRutina & { dragId: string };
@@ -286,7 +285,6 @@ export function RoutineExerciseEditor({
     const [targetDayNumber, setTargetDayNumber] = useState<number>(1);
 
     // Excel preview state
-    const [showPreview, setShowPreview] = useState(false);
 
     const sensors = useSensors(
         useSensor(PointerSensor, {
@@ -515,13 +513,6 @@ export function RoutineExerciseEditor({
                     Configurar Ejercicios
                 </h2>
                 <div className="flex items-center gap-2">
-                    <Button
-                        variant={showPreview ? 'primary' : 'secondary'}
-                        leftIcon={<FileSpreadsheet className="w-4 h-4" />}
-                        onClick={() => setShowPreview(!showPreview)}
-                    >
-                        {showPreview ? 'Ocultar Preview' : 'Ver Excel'}
-                    </Button>
                     <Button variant="secondary" onClick={onClose} disabled={saving}>
                         Cancelar
                     </Button>
@@ -590,13 +581,6 @@ export function RoutineExerciseEditor({
                 exercise={editingExercise}
                 availableExercises={availableExercises}
                 onSave={handleSaveExercise}
-            />
-
-            {/* Excel Preview */}
-            <ExcelPreviewViewer
-                excelUrl={api.getRutinaExcelUrl(rutinaId)}
-                isOpen={showPreview}
-                onMinimize={() => setShowPreview(false)}
             />
         </div>
     );

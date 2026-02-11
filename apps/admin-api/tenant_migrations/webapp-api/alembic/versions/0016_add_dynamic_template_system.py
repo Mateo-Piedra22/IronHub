@@ -17,8 +17,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers
-revision = '001_add_dynamic_template_system'
-down_revision = None
+revision = "0016_add_dynamic_template_system"
+down_revision = "0015_asistencias_tipo"
 branch_labels = None
 depends_on = None
 
@@ -93,7 +93,7 @@ def upgrade():
         sa.Column('fecha_ultima_uso', sa.DateTime(), nullable=True),
         sa.Column('uso_count', sa.Integer(), nullable=True, server_default='0'),
         sa.Column('notas', sa.Text(), nullable=True),
-        sa.ForeignKeyConstraint(['gimnasio_id'], ['gimnasios.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['gimnasio_id'], ['gym_config.id'], ondelete='CASCADE'),
         sa.ForeignKeyConstraint(['plantilla_id'], ['plantillas_rutina.id'], ondelete='CASCADE'),
         sa.ForeignKeyConstraint(['asignada_por'], ['usuarios.id'], ondelete='SET NULL'),
         sa.PrimaryKeyConstraint('id'),
@@ -120,7 +120,7 @@ def upgrade():
         sa.Column('exitoso', sa.Boolean(), nullable=True, server_default='true'),
         sa.Column('error_message', sa.Text(), nullable=True),
         sa.ForeignKeyConstraint(['plantilla_id'], ['plantillas_rutina.id'], ondelete='CASCADE'),
-        sa.ForeignKeyConstraint(['gimnasio_id'], ['gimnasios.id'], ondelete='SET NULL'),
+        sa.ForeignKeyConstraint(['gimnasio_id'], ['gym_config.id'], ondelete='SET NULL'),
         sa.ForeignKeyConstraint(['usuario_id'], ['usuarios.id'], ondelete='SET NULL'),
         sa.PrimaryKeyConstraint('id')
     )

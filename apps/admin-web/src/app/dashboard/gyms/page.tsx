@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-    Plus, Search, ExternalLink, Trash2, Power, Loader2, X, Check, AlertCircle,
+    Plus, Search, ExternalLink, Trash2, Power, Loader2, X, Check,
     Grid3X3, List, ChevronLeft, ChevronRight, RefreshCw, Send, Bell, CheckSquare, Square, Settings
 } from 'lucide-react';
 import Link from 'next/link';
@@ -22,7 +22,7 @@ export default function GymsPage() {
 
     // Pagination
     const [page, setPage] = useState(1);
-    const [pageSize, setPageSize] = useState(20);
+    const pageSize = 20;
     const [total, setTotal] = useState(0);
 
     // Selection
@@ -97,11 +97,13 @@ export default function GymsPage() {
     const handleDelete = async () => {
         if (!selectedGym) return;
         setFormLoading(true);
+        setFormError('');
         try {
             const res = await api.deleteGym(selectedGym.id);
             if (res.ok) {
                 setDeleteOpen(false);
                 setSelectedGym(null);
+                setFormError('');
                 loadGyms();
             } else {
                 setFormError(res.error || 'Error al eliminar');
@@ -585,6 +587,7 @@ export default function GymsPage() {
                             <p className="text-slate-400 mb-4">
                                 ¿Eliminar <strong>{selectedGym.nombre}</strong>? Esta acción eliminará también su base de datos.
                             </p>
+                            {formError ? <div className="text-sm text-red-300 mb-4">{formError}</div> : null}
                             <div className="flex items-center justify-end gap-3">
                                 <button onClick={() => setDeleteOpen(false)} className="btn-secondary">
                                     Cancelar

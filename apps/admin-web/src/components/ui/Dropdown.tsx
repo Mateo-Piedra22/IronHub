@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { ChevronDown, MoreVertical } from "lucide-react";
+import { MoreVertical } from "lucide-react";
 import { Button } from "./Button";
 
 interface DropdownItem {
   label: string;
-  onClick: () => void;
+  onClick?: () => void;
   icon?: React.ComponentType<{ className?: string }>;
   variant?: "default" | "danger";
   disabled?: boolean;
@@ -38,7 +38,7 @@ export function Dropdown({ trigger, items, align = "left", width = "auto", class
   }, []);
 
   const handleItemClick = (item: DropdownItem) => {
-    if (!item.disabled) {
+    if (!item.disabled && item.onClick) {
       item.onClick();
       setIsOpen(false);
     }
@@ -102,7 +102,7 @@ interface QuickDropdownProps {
   items: DropdownItem[];
   className?: string;
   icon?: React.ComponentType<{ className?: string }>;
-  variant?: "default" | "ghost" | "secondary";
+  variant?: "ghost" | "secondary" | "primary" | "danger" | "success" | "warning" | "outline";
   size?: "sm" | "md" | "lg";
 }
 

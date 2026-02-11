@@ -7,13 +7,13 @@ including CRUD operations, versioning, and analytics.
 
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta
-from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy import and_, or_, desc, asc, func, text
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_, desc, asc, func
 from sqlalchemy.exc import SQLAlchemyError
 
 from ..models.orm_models import (
     PlantillaRutina, PlantillaRutinaVersion, GimnasioPlantilla,
-    PlantillaAnalitica, PlantillaMercado, Usuario
+    PlantillaAnalitica
 )
 from ..services.template_validator import TemplateValidator, ValidationResult
 

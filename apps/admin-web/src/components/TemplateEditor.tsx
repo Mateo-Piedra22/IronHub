@@ -1,25 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type ChangeEvent } from "react";
+import Image from "next/image";
 import { 
-  Save, Eye, Download, Upload, Settings, RefreshCw, 
-  FileText, Code, Check, X, AlertTriangle, Info,
-  Play, Pause, RotateCcw, ZoomIn, ZoomOut, Maximize2
+  Save, Eye, Download, Upload, RefreshCw, 
+  FileText, Code, Check, AlertTriangle,
+  RotateCcw, ZoomIn, ZoomOut, Maximize2
 } from "lucide-react";
-import { Button, Input, Select, Modal, useToast, Badge, Toggle } from "@/components/ui";
+import { Badge, Button, Input, Modal, Select, Toggle, useToast } from "@/components/ui";
 import { api, type Template, type TemplateConfig, type TemplateValidation } from "@/lib/api";
-
-// Monaco Editor import (will be loaded dynamically)
-interface MonacoEditorProps {
-  value: string;
-  onChange: (value: string) => void;
-  language?: string;
-  theme?: string;
-  onMount?: (editor: any) => void;
-}
-
-// Dynamic import for Monaco Editor to avoid SSR issues
-const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
 
 interface TemplateEditorProps {
   template?: Template;
@@ -31,7 +20,6 @@ interface TemplateEditorProps {
 
 export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = false }: TemplateEditorProps) {
   const [activeTab, setActiveTab] = useState<"config" | "preview" | "validation">("config");
-  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [validation, setValidation] = useState<TemplateValidation | null>(null);
@@ -43,7 +31,7 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
     nombre: "",
     descripcion: "",
     categoria: "general",
-    dias_semana: null,
+    dias_semana: undefined,
     configuracion: getDefaultTemplateConfig(),
     activa: true,
     publica: false,
@@ -52,12 +40,9 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
 
   // Editor states
   const [configJson, setConfigJson] = useState<string>("");
-  const [editorTheme, setEditorTheme] = useState<"vs-dark" | "light">("vs-dark");
   const [autoSave, setAutoSave] = useState(false);
-  const [showLineNumbers, setShowLineNumbers] = useState(true);
-  const [wordWrap, setWordWrap] = useState(true);
+  const wordWrap = true;
   
-  const editorRef = useRef<any>(null);
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const { success, error } = useToast();
 
@@ -82,6 +67,24 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
     }
   }, [template, isNew]);
 
+  const handleAutoSave = useCallback(async () => {
+    if (!template || isNew) return;
+
+    try {
+      const updatedConfig = JSON.parse(configJson);
+      const response = await api.updateTemplate(template.id, {
+        ...templateData,
+        configuracion: updatedConfig
+      });
+
+      if (response.ok && response.data?.success) {
+        return;
+      }
+    } catch {
+      return;
+    }
+  }, [configJson, isNew, template, templateData]);
+
   // Auto-save functionality
   useEffect(() => {
     if (autoSave && !isNew && configJson) {
@@ -99,39 +102,7 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
         clearTimeout(autoSaveTimerRef.current);
       }
     };
-  }, [configJson, autoSave, templateData, isNew]);
-
-  const handleAutoSave = async () => {
-    if (!template || isNew) return;
-
-    try {
-      const updatedConfig = JSON.parse(configJson);
-      const response = await api.updateTemplate(template.id, {
-        ...templateData,
-        configuracion: updatedConfig
-      });
-
-      if (response.ok && response.data?.success) {
-        // Silent auto-save success
-        console.log("Template auto-saved");
-      }
-    } catch (err) {
-      console.error("Auto-save failed:", err);
-    }
-  };
-
-  const handleConfigChange = useCallback((value: string | undefined) => {
-    if (value !== undefined) {
-      setConfigJson(value);
-      try {
-        const parsed = JSON.parse(value);
-        setTemplateData(prev => ({ ...prev, configuracion: parsed }));
-        validateTemplate(parsed);
-      } catch (err) {
-        // Invalid JSON, don't update template data
-      }
-    }
-  }, []);
+  }, [autoSave, configJson, handleAutoSave, isNew]);
 
   const validateTemplate = useCallback(async (config?: TemplateConfig) => {
     const configToValidate = config || templateData.configuracion;
@@ -142,10 +113,19 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
       if (response.ok && response.data?.success) {
         setValidation(response.data.validation);
       }
-    } catch (err) {
-      console.error("Template validation failed:", err);
-    }
+    } catch {}
   }, [templateData.configuracion]);
+
+  const handleConfigChange = useCallback((value: string | undefined) => {
+    if (value !== undefined) {
+      setConfigJson(value);
+      try {
+        const parsed = JSON.parse(value);
+        setTemplateData(prev => ({ ...prev, configuracion: parsed }));
+        validateTemplate(parsed);
+      } catch {}
+    }
+  }, [validateTemplate]);
 
   const handleSave = async () => {
     if (!templateData.nombre?.trim()) {
@@ -189,10 +169,19 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
 
     try {
       setPreviewLoading(true);
-      const response = await api.generateTemplatePreview(templateData.configuracion);
+      if (!template || isNew) {
+        error("Guardá la plantilla para generar vista previa");
+        return;
+      }
+
+      const response = await api.getTemplatePreview(template.id, {
+        format: "pdf",
+        quality: "medium",
+        page_number: 1,
+      });
       
       if (response.ok && response.data?.success) {
-        setPreviewUrl(response.data.preview_url);
+        setPreviewUrl(response.data.preview_url || "");
         setActiveTab("preview");
       } else {
         error("Error al generar vista previa");
@@ -231,7 +220,7 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
           nombre: imported.nombre || "",
           descripcion: imported.descripcion || "",
           categoria: imported.categoria || "general",
-          dias_semana: imported.dias_semana || null,
+          dias_semana: imported.dias_semana || undefined,
           configuracion: imported.configuracion || getDefaultTemplateConfig(),
           activa: imported.activa !== false,
           publica: imported.publica || false,
@@ -240,7 +229,7 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
         
         setConfigJson(JSON.stringify(imported.configuracion || getDefaultTemplateConfig(), null, 2));
         success("Plantilla importada exitosamente");
-      } catch (err) {
+      } catch {
         error("Error al importar plantilla: formato inválido");
       }
     };
@@ -257,26 +246,6 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
     setTemplateData(prev => ({ ...prev, configuracion: defaultConfig }));
   };
 
-  const handleEditorDidMount = (editor: any, monaco: any) => {
-    editorRef.current = editor;
-    
-    // Configure editor options
-    editor.updateOptions({
-      minimap: { enabled: false },
-      scrollBeyondLastLine: false,
-      fontSize: 14,
-      lineNumbers: showLineNumbers ? 'on' : 'off',
-      wordWrap: wordWrap ? 'on' : 'off',
-      automaticLayout: true,
-    });
-
-    // Add custom validation
-    editor.onDidChangeModelContent(() => {
-      const value = editor.getValue();
-      handleConfigChange(value);
-    });
-  };
-
   const getCategoryOptions = () => [
     { value: "general", label: "General" },
     { value: "fuerza", label: "Fuerza" },
@@ -290,7 +259,7 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
     { value: "deportivo", label: "Deportivo" }
   ];
 
-  const getValidationStatus = () => {
+  const getValidationStatus = (): { type: "error" | "warning" | "success"; message: string } | null => {
     if (!validation) return null;
     
     if (validation.errors.length > 0) {
@@ -315,7 +284,7 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
         <div className="flex justify-between items-center w-full">
           <div className="flex gap-3">
             {validationStatus && (
-              <Badge variant={validationStatus.type as any}>
+              <Badge variant={validationStatus.type}>
                 {validationStatus.type === "error" && <AlertTriangle className="w-3 h-3 mr-1" />}
                 {validationStatus.type === "warning" && <AlertTriangle className="w-3 h-3 mr-1" />}
                 {validationStatus.type === "success" && <Check className="w-3 h-3 mr-1" />}
@@ -384,16 +353,6 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
                 disabled={isNew}
                 label="Auto-guardar"
               />
-              
-              <Select
-                value={editorTheme}
-                onChange={(e) => setEditorTheme(e.target.value as "vs-dark" | "light")}
-                className="w-32"
-                options={[
-                  { value: "vs-dark", label: "Oscuro" },
-                  { value: "light", label: "Claro" }
-                ]}
-              />
             </div>
 
             {/* Template Actions */}
@@ -453,7 +412,7 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
                   </label>
                   <Input
                     value={templateData.nombre || ""}
-                    onChange={(e) => setTemplateData(prev => ({ ...prev, nombre: e.target.value }))}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => setTemplateData(prev => ({ ...prev, nombre: e.target.value }))}
                     placeholder="Nombre de la plantilla"
                   />
                 </div>
@@ -466,7 +425,7 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
                     className="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 resize-none"
                     rows={3}
                     value={templateData.descripcion || ""}
-                    onChange={(e) => setTemplateData(prev => ({ ...prev, descripcion: e.target.value }))}
+                    onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setTemplateData(prev => ({ ...prev, descripcion: e.target.value }))}
                     placeholder="Descripción de la plantilla"
                   />
                 </div>
@@ -477,7 +436,7 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
                   </label>
                   <Select
                     value={templateData.categoria || "general"}
-                    onChange={(e) => setTemplateData(prev => ({ ...prev, categoria: e.target.value }))}
+                    onChange={(e: ChangeEvent<HTMLSelectElement>) => setTemplateData(prev => ({ ...prev, categoria: e.target.value }))}
                     options={getCategoryOptions()}
                   />
                 </div>
@@ -488,9 +447,9 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
                   </label>
                   <Select
                     value={templateData.dias_semana?.toString() || ""}
-                    onChange={(e) => setTemplateData(prev => ({ 
+                    onChange={(e: ChangeEvent<HTMLSelectElement>) => setTemplateData(prev => ({ 
                       ...prev, 
-                      dias_semana: e.target.value ? parseInt(e.target.value) : null 
+                      dias_semana: e.target.value ? parseInt(e.target.value) : undefined 
                     }))}
                     placeholder="Opcional"
                     options={[
@@ -508,14 +467,14 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
 
                 <div className="space-y-3">
                   <Toggle
-                    checked={templateData.activa}
-                    onChange={(checked) => setTemplateData(prev => ({ ...prev, activa: checked }))}
+                    checked={Boolean(templateData.activa)}
+                    onChange={(checked: boolean) => setTemplateData(prev => ({ ...prev, activa: checked }))}
                     label="Plantilla activa"
                   />
                   
                   <Toggle
-                    checked={templateData.publica}
-                    onChange={(checked) => setTemplateData(prev => ({ ...prev, publica: checked }))}
+                    checked={Boolean(templateData.publica)}
+                    onChange={(checked: boolean) => setTemplateData(prev => ({ ...prev, publica: checked }))}
                     label="Plantilla pública"
                   />
                 </div>
@@ -527,9 +486,9 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
                   </label>
                   <Input
                     value={templateData.tags?.join(", ") || ""}
-                    onChange={(e) => setTemplateData(prev => ({ 
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => setTemplateData(prev => ({ 
                       ...prev, 
-                      tags: e.target.value.split(",").map(tag => tag.trim()).filter(Boolean)
+                      tags: e.target.value.split(",").map((tag: string) => tag.trim()).filter(Boolean)
                     }))}
                     placeholder="etiqueta1, etiqueta2, etiqueta3"
                   />
@@ -539,23 +498,12 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
               {/* JSON Editor */}
               <div className="lg:col-span-3 flex flex-col">
                 <div className="flex-1 relative">
-                  <MonacoEditor
-                    height="100%"
-                    language="json"
-                    theme={editorTheme}
+                  <textarea
                     value={configJson}
-                    onChange={handleConfigChange}
-                    onMount={handleEditorDidMount}
-                    options={{
-                      minimap: { enabled: false },
-                      scrollBeyondLastLine: false,
-                      fontSize: 14,
-                      lineNumbers: showLineNumbers ? 'on' : 'off',
-                      wordWrap: wordWrap ? 'on' : 'off',
-                      automaticLayout: true,
-                      formatOnPaste: true,
-                      formatOnType: true,
-                    }}
+                    onChange={(e: ChangeEvent<HTMLTextAreaElement>) => handleConfigChange(e.target.value)}
+                    className="absolute inset-0 w-full h-full p-4 font-mono text-sm bg-slate-900 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 resize-none"
+                    style={{ whiteSpace: wordWrap ? "pre-wrap" : "pre" }}
+                    spellCheck={false}
                   />
                 </div>
               </div>
@@ -615,11 +563,22 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
                     className="bg-white shadow-2xl transition-transform duration-200"
                     style={{ transform: `scale(${previewScale})` }}
                   >
-                    <img
-                      src={previewUrl}
-                      alt="Template Preview"
-                      className="max-w-none"
-                    />
+                    {previewUrl.startsWith("data:application/pdf") ? (
+                      <iframe
+                        src={previewUrl}
+                        title="Template Preview PDF"
+                        className="w-[900px] h-[1100px]"
+                      />
+                    ) : (
+                      <Image
+                        src={previewUrl}
+                        alt="Template Preview"
+                        width={900}
+                        height={1100}
+                        unoptimized
+                        className="max-w-none"
+                      />
+                    )}
                   </div>
                 ) : (
                   <div className="text-center">
@@ -645,11 +604,11 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="text-center">
                         <div className={`text-2xl font-bold ${
-                          validation.errors.length > 0 ? 'text-red-400' : 
+                          validation.errors.length > 0 ? 'text-red-400' :
                           validation.warnings.length > 0 ? 'text-yellow-400' : 
                           'text-green-400'
                         }`}>
-                          {validation.errors.length === 0 && validation.warnings.length === 0 ? '✓' : 
+                          {validation.errors.length === 0 && validation.warnings.length === 0 ? '✓' :
                            validation.errors.length > 0 ? validation.errors.length : 
                            validation.warnings.length}
                         </div>
@@ -662,14 +621,14 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
                       
                       <div className="text-center">
                         <div className="text-2xl font-bold text-blue-400">
-                          {validation.sections?.length || 0}
+                          {templateData.configuracion?.pages?.reduce((acc, p) => acc + (p.sections?.length || 0), 0) || 0}
                         </div>
                         <div className="text-sm text-slate-400">Secciones</div>
                       </div>
                       
                       <div className="text-center">
                         <div className="text-2xl font-bold text-purple-400">
-                          {validation.variables?.length || 0}
+                          {Object.keys(templateData.configuracion?.variables || {}).length}
                         </div>
                         <div className="text-sm text-slate-400">Variables</div>
                       </div>
@@ -721,40 +680,6 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
                       </div>
                     </div>
                   )}
-
-                  {/* Sections */}
-                  {validation.sections && validation.sections.length > 0 && (
-                    <div className="bg-slate-800 rounded-xl p-6 border border-slate-700">
-                      <h4 className="text-white font-semibold mb-4">Secciones Detectadas</h4>
-                      <div className="space-y-3">
-                        {validation.sections.map((section, index) => (
-                          <div key={index} className="bg-slate-900 rounded-lg p-4">
-                            <div className="font-medium text-white">{section.name}</div>
-                            <div className="text-sm text-slate-400 mt-1">
-                              Tipo: {section.type} | Ejercicios: {section.exercises?.length || 0}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Variables */}
-                  {validation.variables && validation.variables.length > 0 && (
-                    <div className="bg-slate-800 rounded-xl p-6 border border-slate-700">
-                      <h4 className="text-white font-semibold mb-4">Variables Detectadas</h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {validation.variables.map((variable, index) => (
-                          <div key={index} className="bg-slate-900 rounded-lg p-3">
-                            <div className="font-medium text-white">{variable.name}</div>
-                            <div className="text-sm text-slate-400">
-                              Tipo: {variable.type} {variable.required && "| Requerido"}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full">
@@ -776,13 +701,15 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
 // Helper function to get default template configuration
 function getDefaultTemplateConfig(): TemplateConfig {
   return {
-    version: "1.0.0",
     metadata: {
       name: "Plantilla Básica",
-      description: "Plantilla de rutina básica",
-      author: "System",
-      created_at: new Date().toISOString(),
-      tags: []
+      version: "1.0.0",
+      description: "Plantilla pública por defecto para exportar rutinas en PDF",
+      author: "system",
+      category: "general",
+      difficulty: "beginner",
+      tags: ["classic", "system"],
+      estimated_duration: 45,
     },
     layout: {
       page_size: "A4",
@@ -794,26 +721,23 @@ function getDefaultTemplateConfig(): TemplateConfig {
         left: 20
       }
     },
-    sections: [
+    pages: [
       {
-        id: "header",
-        type: "header",
-        content: {
-          title: "{{gym_name}}",
-          subtitle: "Rutina de Entrenamiento",
-          show_logo: true,
-          show_date: true
-        }
+        name: "Rutina",
+        sections: [
+          {
+            type: "header",
+            content: {
+              title: "{{gym_name}}",
+              subtitle: "{{nombre_rutina}} - {{usuario_nombre}}",
+            },
+          },
+          { type: "spacing", content: { height: 8 } },
+          { type: "exercise_table", content: {} },
+          { type: "spacing", content: { height: 12 } },
+          { type: "qr_code", content: { size: 90 } },
+        ],
       },
-      {
-        id: "exercises",
-        type: "exercise_table",
-        content: {
-          columns: ["dia", "ejercicio", "series", "repeticiones", "descanso"],
-          show_day_separator: true,
-          group_by_day: true
-        }
-      }
     ],
     variables: {
       gym_name: {
@@ -825,16 +749,25 @@ function getDefaultTemplateConfig(): TemplateConfig {
         type: "string", 
         default: "Cliente",
         description: "Nombre del cliente"
+      },
+      nombre_rutina: {
+        type: "string",
+        default: "Rutina",
+        description: "Nombre de la rutina"
+      },
+      usuario_nombre: {
+        type: "string",
+        default: "Usuario",
+        description: "Nombre del usuario"
       }
     },
+    qr_code: { enabled: true, position: "inline", data_source: "routine_uuid" },
     styling: {
-      primary_color: "#000000",
-      secondary_color: "#666666",
-      font_family: "Arial",
-      font_size: 12
-    }
+      fonts: {
+        title: { family: "Helvetica-Bold", size: 18, color: "#000000" },
+        body: { family: "Helvetica", size: 10, color: "#111827" }
+      },
+      colors: { primary: "#111827", accent: "#3B82F6" }
+    },
   };
 }
-
-// Dynamic import fix for Next.js
-import dynamic from 'next/dynamic';

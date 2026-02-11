@@ -30,6 +30,12 @@ from src.models.orm_models import (
     EjercicioGrupoItem,
     # Profesores
     Profesor,
+    # Dynamic Template System
+    PlantillaRutina,
+    PlantillaRutinaVersion,
+    GimnasioPlantilla,
+    PlantillaAnalitica,
+    PlantillaMercado,
 )
 
 __all__ = [
@@ -56,4 +62,9 @@ __all__ = [
     "EjercicioGrupo",
     "EjercicioGrupoItem",
     "Profesor",
+    "PlantillaRutina",
+    "PlantillaRutinaVersion",
+    "GimnasioPlantilla",
+    "PlantillaAnalitica",
+    "PlantillaMercado",
 ]

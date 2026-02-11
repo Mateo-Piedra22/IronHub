@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { FileSpreadsheet, Download, QrCode, Loader2, FileText, Palette } from "lucide-react";
+import { Download, QrCode, Loader2, FileText, Palette } from "lucide-react";
 import { Modal, Button, Input, Select, useToast, Toggle } from "@/components/ui";
 import { api, type Rutina, type Template } from "@/lib/api";
 import TemplateSelectionModal from "./TemplateSelectionModal";
@@ -22,25 +22,16 @@ export function RutinaExportModal({ isOpen, onClose, rutina }: RutinaExportModal
     const [useTemplate, setUseTemplate] = useState(false);
     const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
     const [showTemplateSelection, setShowTemplateSelection] = useState(false);
-    const [exportFormat, setExportFormat] = useState<"excel" | "pdf">("excel");
     const { success, error } = useToast();
 
     // Set default filename when modal opens
     useEffect(() => {
         if (!isOpen) return;
         if (!rutina) return;
-        const extension = exportFormat === "pdf" ? "pdf" : "xlsx";
+        const extension = "pdf";
         const safeName = (rutina.nombre || "rutina").replace(/[^a-zA-Z0-9]/g, "_");
         setFilename((prev) => prev || `${safeName}.${extension}`);
-    }, [isOpen, rutina, exportFormat]);
-
-    // Reset template selection when format changes
-    useEffect(() => {
-        if (exportFormat === "excel") {
-            setUseTemplate(false);
-            setSelectedTemplate(null);
-        }
-    }, [exportFormat]);
+    }, [isOpen, rutina]);
 
     const handleExport = useCallback(async () => {
         if (!rutina) return;
@@ -49,7 +40,7 @@ export function RutinaExportModal({ isOpen, onClose, rutina }: RutinaExportModal
         try {
             let url: string;
             
-            if (exportFormat === "pdf" && useTemplate && selectedTemplate) {
+            if (useTemplate && selectedTemplate) {
                 // Export with template
                 url = api.getRutinaPdfUrlWithTemplate(rutina.id, selectedTemplate.id, {
                     weeks: Number.parseInt(weeks, 10) || 1,
@@ -57,16 +48,7 @@ export function RutinaExportModal({ isOpen, onClose, rutina }: RutinaExportModal
                     user_override: rutina.usuario_nombre || undefined,
                     filename: filename || undefined,
                 });
-            } else if (exportFormat === "excel") {
-                // Traditional Excel export
-                url = api.getRutinaExcelUrl(rutina.id, {
-                    weeks: Number.parseInt(weeks, 10) || 1,
-                    qr_mode: qrPlacement,
-                    user_override: rutina.usuario_nombre || undefined,
-                    filename: filename || undefined,
-                });
             } else {
-                // PDF without template
                 url = api.getRutinaPdfUrl(rutina.id, {
                     weeks: Number.parseInt(weeks, 10) || 1,
                     qr_mode: qrPlacement,
@@ -83,7 +65,7 @@ export function RutinaExportModal({ isOpen, onClose, rutina }: RutinaExportModal
         } finally {
             setLoading(false);
         }
-    }, [rutina, filename, weeks, qrPlacement, exportFormat, useTemplate, selectedTemplate, success, error, onClose]);
+    }, [rutina, filename, weeks, qrPlacement, useTemplate, selectedTemplate, success, error, onClose]);
 
     const handleTemplateSelect = (template: Template) => {
         setSelectedTemplate(template);
@@ -97,7 +79,7 @@ export function RutinaExportModal({ isOpen, onClose, rutina }: RutinaExportModal
             <Modal
                 isOpen={isOpen}
                 onClose={onClose}
-                title={`Exportar Rutina a ${exportFormat === "excel" ? "Excel" : "PDF"}`}
+                title="Exportar Rutina a PDF"
                 size="md"
                 footer={
                     <>
@@ -107,9 +89,9 @@ export function RutinaExportModal({ isOpen, onClose, rutina }: RutinaExportModal
                         <Button
                             leftIcon={loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                             onClick={handleExport}
-                            disabled={loading || (exportFormat === "pdf" && useTemplate && !selectedTemplate)}
+                            disabled={loading || (useTemplate && !selectedTemplate)}
                         >
-                            Descargar {exportFormat === "excel" ? "Excel" : "PDF"}
+                            Descargar PDF
                         </Button>
                     </>
                 }
@@ -118,11 +100,7 @@ export function RutinaExportModal({ isOpen, onClose, rutina }: RutinaExportModal
                     {/* Preview info */}
                     <div className="p-4 bg-slate-900 rounded-xl border border-slate-800">
                         <div className="flex items-center gap-3">
-                            {exportFormat === "excel" ? (
-                                <FileSpreadsheet className="w-10 h-10 text-success-400" />
-                            ) : (
-                                <FileText className="w-10 h-10 text-blue-400" />
-                            )}
+                            <FileText className="w-10 h-10 text-blue-400" />
                             <div>
                                 <div className="font-medium text-white">{rutina.nombre}</div>
                                 <div className="text-sm text-slate-400">
@@ -131,43 +109,7 @@ export function RutinaExportModal({ isOpen, onClose, rutina }: RutinaExportModal
                             </div>
                         </div>
                     </div>
-
-                    {/* Export Format */}
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-2">
-                            Formato de exportación
-                        </label>
-                        <div className="grid grid-cols-2 gap-2">
-                            <button
-                                onClick={() => setExportFormat("excel")}
-                                className={`p-3 rounded-lg border-2 transition-all ${
-                                    exportFormat === "excel"
-                                        ? "border-blue-500 bg-blue-500/10 text-blue-400"
-                                        : "border-slate-700 text-slate-400 hover:border-slate-600"
-                                }`}
-                            >
-                                <FileSpreadsheet className="w-5 h-5 mx-auto mb-1" />
-                                <div className="text-sm font-medium">Excel</div>
-                                <div className="text-xs opacity-75">Tradicional</div>
-                            </button>
-                            <button
-                                onClick={() => setExportFormat("pdf")}
-                                className={`p-3 rounded-lg border-2 transition-all ${
-                                    exportFormat === "pdf"
-                                        ? "border-blue-500 bg-blue-500/10 text-blue-400"
-                                        : "border-slate-700 text-slate-400 hover:border-slate-600"
-                                }`}
-                            >
-                                <FileText className="w-5 h-5 mx-auto mb-1" />
-                                <div className="text-sm font-medium">PDF</div>
-                                <div className="text-xs opacity-75">Con plantillas</div>
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Template Selection (PDF only) */}
-                    {exportFormat === "pdf" && (
-                        <div className="space-y-3">
+                    <div className="space-y-3">
                             <div className="flex items-center justify-between">
                                 <label className="text-sm font-medium text-slate-300">
                                     <Palette className="w-4 h-4 inline mr-2" />
@@ -226,15 +168,14 @@ export function RutinaExportModal({ isOpen, onClose, rutina }: RutinaExportModal
                                     )}
                                 </div>
                             )}
-                        </div>
-                    )}
+                    </div>
 
                     {/* Filename */}
                     <Input
                         label="Nombre del archivo"
                         value={filename}
                         onChange={(e) => setFilename(e.target.value)}
-                        placeholder={`rutina.${exportFormat === "excel" ? "xlsx" : "pdf"}`}
+                        placeholder="rutina.pdf"
                     />
 
                     {/* Weeks */}

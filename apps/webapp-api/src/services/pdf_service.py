@@ -6,14 +6,13 @@ Integrates with the dynamic template system to produce professional PDFs
 import logging
 import io
 import base64
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, List
 from datetime import datetime
 from pathlib import Path
 from PIL import Image
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.backends.backend_pdf import PdfPages
-import pandas as pd
 
 logger = logging.getLogger(__name__)
 

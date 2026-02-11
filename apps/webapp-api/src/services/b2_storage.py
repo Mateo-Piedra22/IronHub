@@ -206,7 +206,7 @@ def upload_file(
         return False, "Invalid file", None
 
     # Generate unique filename with hash to avoid collisions
-    file_hash = hashlib.md5(file_content).hexdigest()[:8]
+    file_hash = hashlib.sha256(file_content).hexdigest()[:10]
     tenant_safe = _sanitize_tenant(tenant)
     folder_safe = _sanitize_folder(folder)
 

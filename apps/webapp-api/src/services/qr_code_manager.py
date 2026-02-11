@@ -12,18 +12,15 @@ from typing import Dict, Any, Optional, Union, Tuple, List
 from dataclasses import dataclass
 from enum import Enum
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from reportlab.lib.units import inch, cm, mm
-from reportlab.platypus import Image, Spacer, Table, TableStyle
-from reportlab.lib.colors import Color, black, white, lightgrey
+from reportlab.lib.units import inch
+from reportlab.platypus import Image, Table, TableStyle
+from reportlab.lib.colors import Color
 from reportlab.graphics.shapes import Drawing
-from reportlab.graphics.barcode.qr import QrCodeWidget, QrCode
-from reportlab.graphics.renderPDF import Drawing
 
 import qrcode
 from PIL import Image as PILImage
-import base64
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +31,7 @@ class QRPosition(Enum):
     FOOTER = "footer"
     INLINE = "inline"
     SEPARATE = "separate"
+    SHEET = "sheet"
     OVERLAY = "overlay"
     WATERMARK = "watermark"
     NONE = "none"
@@ -126,7 +124,7 @@ class QRCodeManager:
             # Position QR code based on configuration
             if config.position == QRPosition.INLINE:
                 return self._create_inline_qr(qr_image, config), None
-            elif config.position == QRPosition.SEPARATE:
+            elif config.position in (QRPosition.SEPARATE, QRPosition.SHEET):
                 return self._create_separate_qr(qr_image, config), None
             elif config.position == QRPosition.HEADER:
                 return self._create_header_qr(qr_image, config, context), None
@@ -601,12 +599,12 @@ class QRCodeManager:
     def _generate_qr_id(self, context: QRContext) -> str:
         """Generate unique QR ID"""
         data = f"{context.routine_data.get('id', '')}{datetime.now().isoformat()}"
-        return hashlib.md5(data.encode()).hexdigest()[:16]
+        return hashlib.sha256(data.encode()).hexdigest()[:16]
     
     def _get_cache_key(self, data: str, config: QRConfig) -> str:
         """Generate cache key for QR code"""
         config_str = f"{config.size}{config.error_correction}{config.foreground_color}{config.background_color}"
-        return hashlib.md5(f"{data}{config_str}".encode()).hexdigest()
+        return hashlib.sha256(f"{data}{config_str}".encode()).hexdigest()
     
     def clear_cache(self):
         """Clear QR code cache"""

@@ -6,11 +6,9 @@ including sample data generation, caching, and performance optimization.
 """
 
 import io
-import os
 import hashlib
-import tempfile
 from collections import OrderedDict
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 from dataclasses import dataclass
 from enum import Enum
 import logging
@@ -22,8 +20,8 @@ import time
 
 from .pdf_engine import PDFEngine
 from .variable_resolver import VariableResolver, VariableContext
-from .exercise_table_builder import ExerciseTableBuilder, TableConfig, TableFormat
-from .qr_code_manager import QRCodeManager, QRConfig, QRContext
+from .exercise_table_builder import ExerciseTableBuilder
+from .qr_code_manager import QRCodeManager
 
 logger = logging.getLogger(__name__)
 
@@ -486,14 +484,13 @@ class PreviewEngine:
         
         # Generate sample data based on template requirements
         variables = template_config.get("variables", {})
-        pages = template_config.get("pages", [])
         
         sample_data = {
             "nombre_rutina": "Rutina de Ejemplo Premium",
             "descripcion": "Esta es una rutina de ejemplo generada automáticamente para previsualización",
             "dias_semana": 4,
             "current_week": 1,
-            "uuid_rutina": "preview-" + hashlib.md5(template_hash.encode()).hexdigest()[:12],
+            "uuid_rutina": "preview-" + hashlib.sha256(template_hash.encode()).hexdigest()[:12],
             "fecha_creacion": datetime.now(),
             "categoria": template_config.get("metadata", {}).get("category", "general"),
         }
@@ -686,12 +683,14 @@ class PreviewEngine:
     ) -> str:
         """Generate cache key"""
         template_hash = self._get_template_hash(template_config)
-        config_hash = hashlib.md5(
+        config_hash = hashlib.sha256(
             f"{config.format.value}{config.quality.value}{config.page_number}{config.dpi}".encode()
         ).hexdigest()
         
         if custom_data:
-            data_hash = hashlib.md5(json.dumps(custom_data, sort_keys=True, default=str).encode()).hexdigest()
+            data_hash = hashlib.sha256(
+                json.dumps(custom_data, sort_keys=True, default=str).encode()
+            ).hexdigest()
             return f"{template_hash}:{config_hash}:{data_hash}"
         else:
             return f"{template_hash}:{config_hash}"
@@ -699,7 +698,7 @@ class PreviewEngine:
     def _get_template_hash(self, template_config: Dict[str, Any]) -> str:
         """Get template hash for caching"""
         template_str = json.dumps(template_config, sort_keys=True, default=str)
-        return hashlib.md5(template_str.encode()).hexdigest()
+        return hashlib.sha256(template_str.encode()).hexdigest()
     
     # === Utility Methods ===
     
@@ -758,10 +757,36 @@ class PreviewEngine:
         height: Optional[int]
     ) -> bytes:
         """Convert PDF page to image"""
-        # This is a simplified implementation
-        # In production, you'd use a library like pdf2image
-        # For now, return placeholder
-        return b"image_placeholder"
+        try:
+            import pypdfium2 as pdfium
+        except Exception as e:
+            raise RuntimeError("pypdfium2 no está disponible para convertir PDF a imagen") from e
+
+        if not isinstance(pdf_bytes, (bytes, bytearray)):
+            raise TypeError("pdf_bytes debe ser bytes")
+
+        page_idx = max(0, int(page_number) - 1)
+        pdf = pdfium.PdfDocument(pdf_bytes)
+        if page_idx >= len(pdf):
+            page_idx = 0
+
+        page = pdf.get_page(page_idx)
+        try:
+            scale = max(0.5, float(dpi) / 72.0)
+        except Exception:
+            scale = 2.0
+        bitmap = page.render(scale=scale)
+        pil_image = bitmap.to_pil()
+
+        if width and height:
+            try:
+                pil_image = pil_image.resize((int(width), int(height)))
+            except Exception:
+                pass
+
+        out = io.BytesIO()
+        pil_image.save(out, format="PNG")
+        return out.getvalue()
     
     def _create_html_representation(
         self,

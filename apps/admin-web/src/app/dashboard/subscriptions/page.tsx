@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Fragment } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Loader2, CreditCard, Plus, Edit2, Trash2, ToggleLeft, ToggleRight,
@@ -14,6 +14,15 @@ interface Expiration {
     subdominio: string;
     valid_until: string;
     days_remaining: number;
+}
+
+interface SubscriptionRow {
+    gym_id: number;
+    nombre: string;
+    subdominio: string;
+    plan_id?: number | null;
+    next_due_date?: string | null;
+    subscription_status?: string | null;
 }
 
 // ===== Plan Form Modal =====
@@ -66,7 +75,7 @@ function PlanFormModal({
             }
             onSaved();
             onClose();
-        } catch (err) {
+        } catch {
             setError('Error al guardar el plan');
         } finally {
             setLoading(false);
@@ -189,7 +198,7 @@ export default function SubscriptionsPage() {
 
     // Subscriptions by gym state
     const [subsLoading, setSubsLoading] = useState(false);
-    const [subsItems, setSubsItems] = useState<any[]>([]);
+    const [subsItems, setSubsItems] = useState<SubscriptionRow[]>([]);
     const [subsTotal, setSubsTotal] = useState(0);
     const [subsPage, setSubsPage] = useState(1);
     const subsPageSize = 50;
@@ -200,7 +209,7 @@ export default function SubscriptionsPage() {
     const [rowSaving, setRowSaving] = useState<Record<number, boolean>>({});
 
     // Load Plans
-    const loadPlans = async () => {
+    const loadPlans = useCallback(async () => {
         setPlansLoading(true);
         try {
             const res = await api.getPlans();
@@ -212,10 +221,10 @@ export default function SubscriptionsPage() {
         } finally {
             setPlansLoading(false);
         }
-    };
+    }, []);
 
     // Load Expirations
-    const loadExpirations = async () => {
+    const loadExpirations = useCallback(async () => {
         setExpirationsLoading(true);
         try {
             const res = await api.getExpirations(days);
@@ -227,9 +236,9 @@ export default function SubscriptionsPage() {
         } finally {
             setExpirationsLoading(false);
         }
-    };
+    }, [days]);
 
-    const loadSubs = async () => {
+    const loadSubs = useCallback(async () => {
         setSubsLoading(true);
         try {
             const res = await api.listSubscriptions({
@@ -239,23 +248,23 @@ export default function SubscriptionsPage() {
                 page: subsPage,
                 page_size: subsPageSize,
             });
-            if (res.ok && res.data) {
-                setSubsItems((res.data as any).items || []);
-                setSubsTotal(Number((res.data as any).total || 0));
-            }
+            if (!res.ok || !res.data) return;
+            const data = res.data;
+            setSubsItems(Array.isArray(data.items) ? data.items : []);
+            setSubsTotal(Number(data.total || 0));
         } finally {
             setSubsLoading(false);
         }
-    };
+    }, [subsDueBeforeDays, subsPage, subsQ, subsStatus]);
 
     useEffect(() => {
         loadPlans();
-    }, []);
+    }, [loadPlans]);
 
     useEffect(() => {
         if (activeTab === 'expirations') loadExpirations();
         if (activeTab === 'gyms') loadSubs();
-    }, [activeTab, days, subsQ, subsStatus, subsDueBeforeDays, subsPage]);
+    }, [activeTab, loadExpirations, loadSubs]);
 
     const handleTogglePlan = async (plan: Plan) => {
         try {

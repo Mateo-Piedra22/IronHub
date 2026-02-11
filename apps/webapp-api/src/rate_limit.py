@@ -1,6 +1,5 @@
 """
 Rate limiting module for authentication endpoints.
-Ported from legacy Gym Management System server.py (lines 270-337).
 
 Provides thread-safe rate limiting by IP and DNI to prevent brute-force attacks.
 """

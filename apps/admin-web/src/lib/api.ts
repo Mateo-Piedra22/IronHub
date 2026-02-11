@@ -5,6 +5,8 @@
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+
 // Template Types
 export interface Template {
     id: number;
@@ -27,16 +29,18 @@ export interface Template {
 }
 
 export interface TemplateConfig {
-    version: string;
     metadata: {
         name: string;
-        description?: string;
+        version: string;
+        description: string;
         author?: string;
-        created_at?: string;
+        category?: string;
+        difficulty?: string;
         tags?: string[];
+        estimated_duration?: number;
     };
     layout: {
-        page_size: 'A4' | 'A3' | 'Letter';
+        page_size: 'A4' | 'Letter' | 'Legal';
         orientation: 'portrait' | 'landscape';
         margins: {
             top: number;
@@ -45,31 +49,54 @@ export interface TemplateConfig {
             left: number;
         };
     };
-    sections: TemplateSection[];
+    pages: TemplatePage[];
     variables: { [key: string]: TemplateVariable };
-    styling: {
-        primary_color: string;
-        secondary_color: string;
-        font_family: string;
-        font_size: number;
+    qr_code?: {
+        enabled?: boolean;
+        position?: 'header' | 'footer' | 'inline' | 'separate' | 'sheet' | 'none';
+        size?: { width: number; height: number } | number;
+        data_source?: 'routine_uuid' | 'custom_url' | 'user_data';
+        custom_data?: string;
+    };
+    styling?: {
+        fonts?: {
+            [key: string]: {
+                family?: string;
+                size?: number;
+                bold?: boolean;
+                italic?: boolean;
+                color?: string;
+            };
+        };
+        colors?: { [key: string]: string };
     };
 }
 
-export interface TemplateSection {
-    id: string;
-    type: 'header' | 'footer' | 'exercise_table' | 'info_box' | 'image' | 'text';
-    content: any;
-    position?: {
-        x: number;
-        y: number;
-        width: number;
-        height: number;
-    };
+export interface TemplatePage {
+    name: string;
+    description?: string;
+    sections: TemplatePageSection[];
+}
+
+export interface TemplatePageSection {
+    type:
+        | 'header'
+        | 'text'
+        | 'table'
+        | 'image'
+        | 'qr_code'
+        | 'exercise_table'
+        | 'progress_chart'
+        | 'spacing';
+    name?: string;
+    position?: { x?: number; y?: number; width?: number; height?: number };
+    content?: unknown;
+    conditional?: { if?: string; show?: boolean };
 }
 
 export interface TemplateVariable {
     type: 'string' | 'number' | 'boolean' | 'date' | 'image';
-    default?: any;
+    default?: unknown;
     description?: string;
     required?: boolean;
 }
@@ -103,21 +130,19 @@ export interface TemplateStats {
 }
 
 export interface TemplatePreviewRequest {
-    format: 'pdf' | 'png' | 'jpg';
-    quality: 'low' | 'medium' | 'high';
-    qr_mode?: 'inline' | 'sheet' | 'none';
-    show_watermark?: boolean;
-    show_metadata?: boolean;
+    format: 'pdf' | 'image' | 'thumbnail' | 'html' | 'json';
+    quality: 'low' | 'medium' | 'high' | 'ultra';
+    qr_mode?: 'header' | 'footer' | 'inline' | 'sheet' | 'none';
     page_number?: number;
-    multi_page?: boolean;
+    sample_data?: Record<string, unknown> | null;
 }
 
 export interface TemplateValidation {
-    valid: boolean;
+    is_valid: boolean;
     errors: TemplateValidationError[];
     warnings: TemplateValidationWarning[];
-    sections?: TemplateSection[];
-    variables?: TemplateVariable[];
+    performance_score?: number | null;
+    security_score?: number | null;
 }
 
 export interface TemplateValidationError {
@@ -144,7 +169,7 @@ export interface TemplateRating {
 export interface Rutina {
     id: number;
     nombre: string;
-    dias?: any[];
+    dias?: unknown[];
     usuario_nombre?: string;
 }
 
@@ -168,6 +193,18 @@ export interface Gym {
     subscription_plan_amount?: number;
     subscription_next_due_date?: string;
     subscription_start_date?: string;
+    suspended_reason?: string | null;
+    suspended_until?: string | null;
+    whatsapp_phone_id?: string;
+    whatsapp_access_token?: string;
+    whatsapp_business_account_id?: string;
+    whatsapp_verify_token?: string;
+    whatsapp_app_secret?: string;
+    whatsapp_nonblocking?: boolean;
+    whatsapp_send_timeout_seconds?: number | null;
+    tenant_whatsapp_phone_id?: string | null;
+    tenant_whatsapp_waba_id?: string | null;
+    tenant_whatsapp_access_token_present?: boolean;
 }
 
 export interface GymCreateInput {
@@ -200,13 +237,13 @@ export interface GymCreateV2Input {
 
 export interface GymCreateV2Response {
     ok: boolean;
-    gym: any;
+    gym: Gym;
     tenant_url?: string | null;
     branches?: GymBranch[];
     owner_password_generated?: boolean;
     owner_password_set?: boolean;
     owner_password?: string;
-    bulk_branches?: any;
+    bulk_branches?: unknown;
     error?: string;
 }
 
@@ -226,6 +263,14 @@ export interface Metrics {
     suspended_gyms: number;
     total_members?: number;
     total_revenue?: number;
+}
+
+export interface SubscriptionExpiration {
+    gym_id: number;
+    nombre: string;
+    subdominio: string;
+    valid_until: string;
+    days_remaining: number;
 }
 
 export interface Payment {
@@ -354,7 +399,7 @@ export interface WhatsAppTemplateCatalogItem {
     category: 'UTILITY' | 'AUTHENTICATION' | 'MARKETING' | string;
     language: string;
     body_text: string;
-    example_params?: any;
+    example_params?: unknown;
     active: boolean;
     version: number;
     created_at?: string;
@@ -417,7 +462,7 @@ export interface GymBranchUpdateInput {
 
 export interface FeatureFlags {
     modules: Record<string, boolean>;
-    features?: Record<string, any>;
+    features?: Record<string, unknown>;
 }
 
 export interface SupportTicketAdmin {
@@ -439,7 +484,7 @@ export interface SupportTicketAdmin {
     unread_by_admin?: boolean;
     unread_by_client?: boolean;
     assigned_to?: string | null;
-    tags?: any;
+    tags?: unknown;
     first_response_due_at?: string | null;
     next_response_due_at?: string | null;
     first_response_at?: string | null;
@@ -455,7 +500,7 @@ export interface SupportTicketMessageAdmin {
     sender_type: string;
     sender_id?: number | null;
     content: string;
-    attachments?: any;
+    attachments?: unknown;
     created_at?: string;
 }
 
@@ -470,9 +515,9 @@ export interface ChangelogAdminItem {
     published_at?: string | null;
     pinned?: boolean;
     min_app_version?: string | null;
-    audience_roles?: any;
-    audience_tenants?: any;
-    audience_modules?: any;
+    audience_roles?: unknown;
+    audience_tenants?: unknown;
+    audience_modules?: unknown;
     created_at?: string;
     updated_at?: string;
 }
@@ -524,7 +569,7 @@ async function request<T>(
         }
 
         return { ok: true, data };
-    } catch (error) {
+    } catch {
         return { ok: false, error: 'Network error' };
     }
 }
@@ -634,38 +679,36 @@ export const api = {
 
     // Metrics
     getMetrics: async () => {
-        const res = await request<any>('/metrics');
+        const res = await request<unknown>('/metrics');
         if (!res.ok || !res.data) return res as ApiResponse<Metrics>;
-        const d = res.data as any;
+        const d: unknown = res.data;
 
         // admin-api returns nested metrics; admin-web expects a flat shape
-        const gyms = d.gyms || {};
-        const payments = d.payments || {};
+        const drec = isRecord(d) ? d : {};
+        const gyms = isRecord(drec.gyms) ? drec.gyms : {};
+        const payments = isRecord(drec.payments) ? drec.payments : {};
 
         const mapped: Metrics = {
-            total_gyms: Number(gyms.total ?? d.total_gyms ?? 0),
-            active_gyms: Number(gyms.active ?? d.active_gyms ?? 0),
-            suspended_gyms: Number(gyms.suspended ?? d.suspended_gyms ?? 0),
-            total_members: d.total_members ?? undefined,
-            total_revenue: Number(payments.last_30_sum ?? d.total_revenue ?? 0) || undefined,
+            total_gyms: Number(gyms.total ?? drec.total_gyms ?? 0),
+            active_gyms: Number(gyms.active ?? drec.active_gyms ?? 0),
+            suspended_gyms: Number(gyms.suspended ?? drec.suspended_gyms ?? 0),
+            total_members: typeof drec.total_members === 'number' ? drec.total_members : undefined,
+            total_revenue: Number(payments.last_30_sum ?? drec.total_revenue ?? 0) || undefined,
         };
 
         return { ok: true, data: mapped };
     },
 
-    getWarnings: () => request<{ warnings: any[] }>('/metrics/warnings'),
+    getWarnings: () => request<{ warnings: unknown[] }>('/metrics/warnings'),
 
     getExpirations: (days = 30) =>
-        request<{ expirations: any[] }>(`/metrics/expirations?days=${days}`),
+        request<{ expirations: SubscriptionExpiration[] }>(`/metrics/expirations?days=${days}`),
 
     // Payments
     getGymPayments: async (gymId: number) => {
-        const res = await request<{ payments: any[] }>(`/gyms/${gymId}/payments`);
+        const res = await request<{ payments: Payment[] }>(`/gyms/${gymId}/payments`);
         if (!res.ok || !res.data) return res as ApiResponse<{ payments: Payment[] }>;
-        const payments = (res.data.payments || []).map((p: any) => ({
-            ...p,
-            created_at: p.created_at || p.paid_at,
-        }));
+        const payments = (res.data.payments || []).map((p) => ({ ...p, created_at: p.created_at || p.paid_at }));
         return { ok: true, data: { payments } };
     },
 
@@ -698,19 +741,16 @@ export const api = {
             body: new URLSearchParams(bodyPairs),
         });
         if (!res.ok) return res;
-        if (res.data && (res.data as any).ok === false) {
-            return { ok: false, error: (res.data as any).error || 'Payment failed' };
+        if (res.data && res.data.ok === false) {
+            return { ok: false, error: res.data.error || 'Payment failed' };
         }
         return res;
     },
 
     getRecentPayments: async (limit = 10) => {
-        const res = await request<{ payments: any[] }>(`/payments/recent?limit=${limit}`);
+        const res = await request<{ payments: Payment[] }>(`/payments/recent?limit=${limit}`);
         if (!res.ok || !res.data) return res as ApiResponse<{ payments: Payment[] }>;
-        const payments = (res.data.payments || []).map((p: any) => ({
-            ...p,
-            created_at: p.created_at || p.paid_at,
-        }));
+        const payments = (res.data.payments || []).map((p) => ({ ...p, created_at: p.created_at || p.paid_at }));
         return { ok: true, data: { payments } };
     },
 
@@ -720,9 +760,9 @@ export const api = {
             if (v === undefined || v === null || String(v).trim() === '') continue;
             qs.set(k, String(v));
         }
-        const res = await request<any>(`/payments?${qs.toString()}`);
+        const res = await request<{ items: Payment[]; total: number; page: number; page_size: number }>(`/payments?${qs.toString()}`);
         if (!res.ok || !res.data) return res as ApiResponse<{ items: Payment[]; total: number; page: number; page_size: number }>;
-        const items = (res.data.items || []).map((p: any) => ({ ...p, created_at: p.created_at || p.paid_at }));
+        const items = (res.data.items || []).map((p) => ({ ...p, created_at: p.created_at || p.paid_at }));
         return { ok: true, data: { ...res.data, items } };
     },
 
@@ -740,7 +780,7 @@ export const api = {
 
     // Branding
     getGymBranding: (gymId: number) =>
-        request<{ branding: Record<string, any> }>(`/gyms/${gymId}/branding`),
+        request<{ branding: Record<string, unknown> }>(`/gyms/${gymId}/branding`),
 
     saveGymBranding: (gymId: number, branding: {
         nombre_publico?: string;
@@ -787,7 +827,7 @@ export const api = {
                 return { ok: false, error: data.error || data.detail || 'Upload failed' };
             }
             return { ok: true, data };
-        } catch (error) {
+        } catch {
             return { ok: false, error: 'Network error' };
         }
     },
@@ -828,9 +868,9 @@ export const api = {
         request<{ ok: boolean }>(`/plans/${id}`, { method: 'DELETE' }),
 
     // Settings
-    getSettings: () => request<{ ok: boolean; settings: Array<{ key: string; value: any; updated_at?: string; updated_by?: string }> }>('/settings'),
+    getSettings: () => request<{ ok: boolean; settings: Array<{ key: string; value: unknown; updated_at?: string; updated_by?: string }> }>('/settings'),
 
-    updateSettings: (updates: Record<string, any>) =>
+    updateSettings: (updates: Record<string, unknown>) =>
         request<{ ok: boolean; error?: string }>('/settings', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -838,17 +878,17 @@ export const api = {
         }),
 
     // Subscriptions
-    getGymSubscription: (gymId: number) => request<any>(`/gyms/${gymId}/subscription`),
+    getGymSubscription: (gymId: number) => request<unknown>(`/gyms/${gymId}/subscription`),
 
     upsertGymSubscription: (gymId: number, payload: { plan_id: number; start_date?: string; next_due_date?: string; status?: string }) =>
-        request<any>(`/gyms/${gymId}/subscription`, {
+        request<unknown>(`/gyms/${gymId}/subscription`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
         }),
 
     renewGymSubscription: (gymId: number, periods = 1) =>
-        request<any>(`/gyms/${gymId}/subscription/renew`, {
+        request<unknown>(`/gyms/${gymId}/subscription/renew`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({ periods: String(periods) }),
@@ -868,7 +908,7 @@ export const api = {
     },
 
     // Plans List for Admin (New)
-    getAdminPlans: () => request<{ plans: Array<{ id: number; name: string; amount: number; period_days: number }> }>('/admin/plans'),
+    getAdminPlans: () => request<{ plans: Plan[] }>('/admin/plans'),
 
     listSubscriptions: async (params: { q?: string; status?: string; due_before_days?: number; page?: number; page_size?: number }) => {
         const qs = new URLSearchParams();
@@ -876,22 +916,25 @@ export const api = {
             if (v === undefined || v === null || String(v).trim() === '') continue;
             qs.set(k, String(v));
         }
-        return request<any>(`/subscriptions?${qs.toString()}`);
+        return request<{ items: Array<{ gym_id: number; nombre: string; subdominio: string; plan_id?: number | null; next_due_date?: string | null; subscription_status?: string | null }>; total: number }>(`/subscriptions?${qs.toString()}`);
     },
 
     runSubscriptionsMaintenance: (params: { days?: number; grace_days?: number } = {}) =>
-        request<any>('/subscriptions/maintenance/run', {
+        request<{ ok: boolean; error?: string }>(
+            '/subscriptions/maintenance/run',
+            {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams(
                 Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]))
             ),
-        }),
+            }
+        ),
 
     listJobRuns: (job_key: string, limit = 25) =>
-        request<any>(`/jobs/runs?job_key=${encodeURIComponent(job_key)}&limit=${encodeURIComponent(String(limit))}`),
+        request<{ ok: boolean; items?: unknown[]; error?: string }>(`/jobs/runs?job_key=${encodeURIComponent(job_key)}&limit=${encodeURIComponent(String(limit))}`),
 
-    getJobRun: (run_id: string) => request<any>(`/jobs/runs/${encodeURIComponent(run_id)}`),
+    getJobRun: (run_id: string) => request<{ ok: boolean; run?: unknown; error?: string }>(`/jobs/runs/${encodeURIComponent(run_id)}`),
 
     // Subdomain
     checkSubdomain: (subdomain: string) =>
@@ -902,10 +945,10 @@ export const api = {
 
     // Audit
     getAuditSummary: (days = 7) =>
-        request<any>(`/audit?days=${days}`),
+        request<unknown>(`/audit?days=${days}`),
 
     getGymAudit: (gymId: number, limit = 50) =>
-        request<{ ok: boolean; items?: any[]; error?: string }>(`/gyms/${gymId}/audit?limit=${encodeURIComponent(String(limit))}`),
+        request<{ ok: boolean; items?: unknown[]; error?: string }>(`/gyms/${gymId}/audit?limit=${encodeURIComponent(String(limit))}`),
 
     // Batch Operations
     batchProvision: (ids: number[]) =>
@@ -997,7 +1040,7 @@ export const api = {
         }),
 
     bulkCreateGymBranches: (gymId: number, items: GymBranchCreateInput[]) =>
-        request<{ ok: boolean; created: number; failed: number; results: any[]; error?: string }>(`/gyms/${gymId}/branches/bulk`, {
+        request<{ ok: boolean; created: number; failed: number; results: unknown[]; error?: string }>(`/gyms/${gymId}/branches/bulk`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ items }),
@@ -1117,7 +1160,7 @@ export const api = {
         }),
 
     syncWhatsAppTemplateBindings: (overwrite = true) =>
-        request<{ ok: boolean; overwrite: boolean; created: number; updated: number; failed: any[] }>(
+        request<{ ok: boolean; overwrite: boolean; created: number; updated: number; failed: Array<{ name: string; error: string }> }>(
             `/whatsapp/bindings/sync-defaults?overwrite=${overwrite ? '1' : '0'}`,
             { method: 'POST' }
         ),
@@ -1169,10 +1212,10 @@ export const api = {
         }),
 
     getGymWhatsAppHealth: (gymId: number) =>
-        request<any>(`/gyms/${gymId}/whatsapp/health`),
+        request<unknown>(`/gyms/${gymId}/whatsapp/health`),
 
     getGymWhatsAppOnboardingEvents: (gymId: number, limit = 30) =>
-        request<{ ok: boolean; events: Array<{ event_type: string; severity: string; message: string; details: any; created_at: string }> }>(
+        request<{ ok: boolean; events: Array<{ event_type: string; severity: string; message: string; details: unknown; created_at: string }> }>(
             `/gyms/${gymId}/whatsapp/onboarding-events?limit=${limit}`
         ),
 
@@ -1200,14 +1243,14 @@ export const api = {
             body: JSON.stringify({ status }),
         }),
 
-    patchSupportTicket: (ticketId: number, data: { status?: string; priority?: string; assigned_to?: string | null; tags?: any }) =>
+    patchSupportTicket: (ticketId: number, data: { status?: string; priority?: string; assigned_to?: string | null; tags?: unknown }) =>
         request<{ ok: boolean }>(`/support/tickets/${ticketId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
         }),
 
-    replySupportTicket: (ticketId: number, message: string, attachments: any[] = []) =>
+    replySupportTicket: (ticketId: number, message: string, attachments: unknown[] = []) =>
         request<{ ok: boolean }>(`/support/tickets/${ticketId}/reply`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1222,9 +1265,9 @@ export const api = {
         }),
 
     getSupportOpsSummary: () =>
-        request<{ ok: boolean; totals: any; by_assignee: any[]; by_tenant: any[] }>(`/support/ops/summary`),
+        request<{ ok: boolean; totals: Record<string, unknown>; by_assignee: Array<{ assignee: string | null; total: number; overdue: number }>; by_tenant: Array<{ tenant: string; total: number; overdue: number }> }>(`/support/ops/summary`),
 
-    batchUpdateSupportTickets: (ticketIds: number[], data: any) =>
+    batchUpdateSupportTickets: (ticketIds: number[], data: Record<string, unknown>) =>
         request<{ ok: boolean; updated: number }>(`/support/tickets/batch`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1232,10 +1275,10 @@ export const api = {
         }),
 
     getSupportTenantSettings: (tenant: string) =>
-        request<{ ok: boolean; settings: any }>(`/support/tenants/${encodeURIComponent(tenant)}/settings`),
+        request<{ ok: boolean; settings: Record<string, unknown> }>(`/support/tenants/${encodeURIComponent(tenant)}/settings`),
 
-    setSupportTenantSettings: (tenant: string, payload: any) =>
-        request<{ ok: boolean; settings: any }>(`/support/tenants/${encodeURIComponent(tenant)}/settings`, {
+    setSupportTenantSettings: (tenant: string, payload: Record<string, unknown>) =>
+        request<{ ok: boolean; settings: Record<string, unknown> }>(`/support/tenants/${encodeURIComponent(tenant)}/settings`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -1399,135 +1442,229 @@ export const api = {
         if (params?.offset) qp.set('offset', String(params.offset));
         const q = qp.toString() ? `?${qp.toString()}` : '';
         return request<{
-            ok: boolean;
+            success: boolean;
             templates: Template[];
             total: number;
             has_more: boolean;
-        }>(`/api/templates${q}`);
+            limit?: number;
+            offset?: number;
+        }>(`/api/v1/templates${q}`);
     },
 
     getTemplate: (id: number) =>
-        request<{ ok: boolean; template: Template }>(`/api/templates/${id}`),
+        request<{ success: boolean; template: Template }>(`/api/v1/templates/${id}`),
 
     createTemplate: (data: Partial<Template>) =>
-        request<{ ok: boolean; template: Template }>('/api/templates', {
+        request<{ success: boolean; template: Template }>('/api/v1/templates', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
         }),
 
     updateTemplate: (id: number, data: Partial<Template>) =>
-        request<{ ok: boolean; template: Template }>(`/api/templates/${id}`, {
+        request<{ success: boolean; template: Template }>(`/api/v1/templates/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data),
         }),
 
     deleteTemplate: (id: number) =>
-        request<{ ok: boolean }>(`/api/templates/${id}`, { method: 'DELETE' }),
+        request<{ success: boolean }>(`/api/v1/templates/${id}`, { method: 'DELETE' }),
 
-    duplicateTemplate: (id: number) =>
-        request<{ ok: boolean; template: Template }>(`/api/templates/${id}/duplicate`, {
-            method: 'POST',
-        }),
+    duplicateTemplate: async (id: number) => {
+        const srcRes = await request<{ success: boolean; template: Template }>(`/api/v1/templates/${id}`);
+        if (!srcRes.ok || !srcRes.data?.success) return { ok: false, error: srcRes.error };
+        const src = srcRes.data.template;
 
-    // Template Categories
-    getTemplateCategories: () =>
-        request<{ ok: boolean; categories: string[] }>('/api/templates/categories'),
+        const payload: Partial<Template> = {
+            nombre: `${src.nombre || 'Plantilla'} (copia)`,
+            categoria: src.categoria,
+            descripcion: src.descripcion,
+            configuracion: src.configuracion,
+            publica: src.publica,
+            activa: false,
+            tags: src.tags,
+        };
 
-    // Template Analytics
-    getTemplateAnalytics: (id: number) =>
-        request<{ ok: boolean; analytics: TemplateAnalytics }>(`/api/templates/${id}/analytics`),
-
-    getTemplateStats: (timeRange?: '7d' | '30d' | '90d' | '1y' | 'all') => {
-        const qp = new URLSearchParams();
-        if (timeRange) qp.set('time_range', timeRange);
-        const q = qp.toString() ? `?${qp.toString()}` : '';
-        return request<{ ok: boolean; stats: TemplateStats }>(`/api/templates/stats${q}`);
-    },
-
-    // Template Preview
-    getTemplatePreview: (id: number, request: TemplatePreviewRequest) =>
-        request<{ ok: boolean; preview_url: string; pages?: string[] }>(`/api/templates/${id}/preview`, {
+        return request<{ success: boolean; template: Template }>('/api/v1/templates', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(request),
-        }),
-
-    generateTemplatePreview: (config: TemplateConfig) =>
-        request<{ ok: boolean; preview_url: string }>('/api/templates/preview', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ configuracion: config }),
-        }),
-
-    // Template Validation
-    validateTemplate: (config: TemplateConfig) =>
-        request<{ ok: boolean; validation: TemplateValidation }>('/api/templates/validate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ configuracion: config }),
-        }),
-
-    // Template Bulk Operations
-    bulkUpdateTemplates: (templateIds: number[], data: Partial<Template>) =>
-        request<{ ok: boolean; updated: number }>('/api/templates/bulk', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ template_ids: templateIds, data }),
-        }),
-
-    bulkDeleteTemplates: (templateIds: number[]) =>
-        request<{ ok: boolean; deleted: number }>('/api/templates/bulk', {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ template_ids: templateIds }),
-        }),
-
-    // Template Export/Import
-    exportTemplates: (templateIds?: number[]) => {
-        const qp = new URLSearchParams();
-        if (templateIds) qp.set('template_ids', templateIds.join(','));
-        const q = qp.toString() ? `?${qp.toString()}` : '';
-        return request<{ ok: boolean; download_url: string }>(`/api/templates/export${q}`);
-    },
-
-    importTemplates: (file: File) => {
-        const formData = new FormData();
-        formData.append('file', file);
-        return request<{ ok: boolean; imported: number; errors: string[] }>('/api/templates/import', {
-            method: 'POST',
-            body: formData,
+            body: JSON.stringify(payload),
         });
     },
 
-    // Template Favorites
-    toggleTemplateFavorite: (id: number) =>
-        request<{ ok: boolean; favorite: boolean }>(`/api/templates/${id}/favorite`, {
-            method: 'POST',
-        }),
+    // Template Categories
+    getTemplateCategories: () =>
+        request<{ success: boolean; categories: string[] }>('/api/v1/templates/categories'),
 
-    getTemplateFavorites: () =>
-        request<{ ok: boolean; templates: Template[] }>('/api/templates/favorites'),
+    // Template Analytics
+    getTemplateAnalytics: (id: number, days: number = 30) =>
+        request<{ success: boolean; analytics: TemplateAnalytics }>(`/api/v1/templates/${id}/analytics?days=${days}`),
 
-    // Template Rating
-    rateTemplate: (id: number, rating: number, comment?: string) =>
-        request<{ ok: boolean; rating: number }>(`/api/templates/${id}/rating`, {
+    getTemplateStats: async (timeRange?: '7d' | '30d' | '90d' | '1y' | 'all') => {
+        const qp = new URLSearchParams();
+        const days =
+            timeRange === '7d'
+                ? 7
+                : timeRange === '30d'
+                  ? 30
+                  : timeRange === '90d'
+                    ? 90
+                    : timeRange === '1y'
+                      ? 365
+                      : 30;
+        qp.set('days', String(days));
+        const q = qp.toString() ? `?${qp.toString()}` : '';
+        const res = await request<{ success: boolean; dashboard: Record<string, unknown>; period_days: number }>(
+            `/api/v1/templates/analytics/dashboard${q}`
+        );
+        if (!res.ok || !res.data?.success) return { ok: false, error: res.error || 'Error' };
+
+        const dash = isRecord(res.data.dashboard) ? res.data.dashboard : {};
+        const overview = isRecord(dash.overview) ? dash.overview : {};
+        const popularTemplates = Array.isArray(dash.popular_templates) ? dash.popular_templates : [];
+        const categoryAnalytics = Array.isArray(dash.category_analytics) ? dash.category_analytics : [];
+
+        const emptyConfig: TemplateConfig = {
+            metadata: { name: '', version: 'v1', description: '' },
+            layout: {
+                page_size: 'A4',
+                orientation: 'portrait',
+                margins: { top: 12, right: 12, bottom: 12, left: 12 },
+            },
+            pages: [],
+            variables: {},
+        };
+
+        const stats: TemplateStats = {
+            total_templates: Number(overview.total_templates || 0),
+            active_templates: Number(overview.total_templates || 0),
+            total_usos: Number(overview.total_events || 0),
+            usuarios_unicos: Number(overview.unique_users || 0),
+            rating_promedio: 0,
+            total_ratings: 0,
+            categorias_populares: Array.isArray(categoryAnalytics)
+                ? categoryAnalytics.map((c) => {
+                      const rec = isRecord(c) ? c : {};
+                      return {
+                          categoria: String(rec.categoria ?? rec.category ?? ''),
+                          count: Number(rec.count ?? rec.total ?? 0),
+                      };
+                  })
+                : [],
+            plantillas_top: Array.isArray(popularTemplates)
+                ? popularTemplates.map((t) => {
+                      const rec = isRecord(t) ? t : {};
+                      const id = Number(rec.template_id ?? rec.id ?? 0) || 0;
+                      const nombre = String(rec.nombre ?? '');
+                      const categoria = String(rec.categoria ?? '');
+                      return {
+                          id,
+                          nombre,
+                          descripcion: undefined,
+                          configuracion: emptyConfig,
+                          categoria,
+                          dias_semana: undefined,
+                          activa: true,
+                          publica: true,
+                          creada_por: undefined,
+                          fecha_creacion: new Date().toISOString(),
+                          fecha_actualizacion: new Date().toISOString(),
+                          version_actual: 'v1',
+                          tags: undefined,
+                          preview_url: undefined,
+                          uso_count: 0,
+                          rating_promedio: undefined,
+                          rating_count: 0,
+                      };
+                  })
+                : [],
+        };
+
+        return { ok: true, data: { success: true, stats } };
+    },
+
+    // Template Preview
+    getTemplatePreview: (id: number, previewRequest: TemplatePreviewRequest) =>
+        request<{ success: boolean; preview_url?: string; format: string; quality: string; page_number: number }>(
+            `/api/v1/templates/${id}/preview?format=${encodeURIComponent(previewRequest.format)}&quality=${encodeURIComponent(previewRequest.quality)}&page_number=${encodeURIComponent(String(previewRequest.page_number || 1))}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(previewRequest.sample_data ?? null),
+            }
+        ),
+
+    getRutinaPreviewWithTemplate: async (rutinaId: number, templateId: number, previewRequest: TemplatePreviewRequest) => {
+        try {
+            const qp = new URLSearchParams();
+            qp.set('template_id', String(templateId));
+            if (previewRequest.qr_mode) qp.set('qr_mode', previewRequest.qr_mode);
+
+            const res = await fetch(`${API_URL}/api/rutinas/${rutinaId}/export/pdf?${qp.toString()}`, {
+                method: 'GET',
+                credentials: 'include',
+            });
+
+            if (!res.ok) {
+                let msg = 'Request failed';
+                try {
+                    const data = await res.json();
+                    msg = isRecord(data) ? String(data.error ?? data.detail ?? msg) : msg;
+                } catch {
+                    try {
+                        msg = await res.text();
+                    } catch {
+                    }
+                }
+                return { ok: false, error: msg };
+            }
+
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            return { ok: true, data: { success: true, preview_url: url } };
+        } catch {
+            return { ok: false, error: 'Network error' };
+        }
+    },
+
+    // Template Validation
+    validateTemplate: (config: TemplateConfig) =>
+        request<{ success: boolean; validation: TemplateValidation }>('/api/v1/templates/validate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ rating, comment }),
+            body: JSON.stringify(config),
         }),
 
-    getTemplateRatings: (id: number) =>
-        request<{ ok: boolean; ratings: TemplateRating[] }>(`/api/templates/${id}/ratings`),
+    bulkUpdateTemplates: async (templateIds: number[], data: Partial<Template>) => {
+        const ids = Array.from(new Set(templateIds)).filter((id) => Number.isFinite(id));
+        let updated = 0;
+        for (const id of ids) {
+            const res = await request<{ success: boolean; template: Template }>(`/api/v1/templates/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data),
+            });
+            if (res.ok && res.data?.success) updated += 1;
+        }
+        return { ok: true, data: { success: true, updated } };
+    },
 
-    // Rutina Preview with Template
-    getRutinaPreviewWithTemplate: (rutinaId: number, templateId: number, request: TemplatePreviewRequest) =>
-        request<{ ok: boolean; preview_url: string; pages?: string[] }>(`/api/rutinas/${rutinaId}/preview/template/${templateId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(request),
-        }),
+    exportTemplates: async (templateIds: number[]) => {
+        const ids = Array.from(new Set(templateIds)).filter((id) => Number.isFinite(id));
+        const exports: Array<{ id: number; export_data: unknown }> = [];
+        for (const id of ids) {
+            const res = await request<{ success: boolean; export_data: unknown; filename?: string }>(
+                `/api/v1/templates/${id}/export`
+            );
+            if (res.ok && res.data?.success) exports.push({ id, export_data: res.data.export_data });
+        }
+        const blob = new Blob([JSON.stringify({ templates: exports }, null, 2)], {
+            type: 'application/json',
+        });
+        const url = URL.createObjectURL(blob);
+        return { ok: true, data: { success: true, download_url: url } };
+    },
 };
 
 export default api;

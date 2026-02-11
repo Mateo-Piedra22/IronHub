@@ -50,7 +50,14 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
             setSelectedCategory("");
             setSelectedDays("");
             setPreviewTemplate(null);
-            setPreviewUrl("");
+            setPreviewUrl((prev) => {
+                if (prev?.startsWith("blob:")) {
+                    try {
+                        URL.revokeObjectURL(prev);
+                    } catch { }
+                }
+                return "";
+            });
             setPage(0);
         }
     }, [isOpen]);
@@ -132,17 +139,16 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
                 page_number: 1
             };
 
-            const response = await api.getRutinaPreviewWithTemplate(rutina.id, template.id, request);
-            
-            if (response.ok && response.data?.success && response.data.preview_url) {
-                setPreviewUrl(response.data.preview_url);
-            } else {
-                // Fallback to template preview
-                const templateResponse = await api.getTemplatePreview(template.id, request);
-                if (templateResponse.ok && templateResponse.data?.success && templateResponse.data.preview_url) {
-                    setPreviewUrl(templateResponse.data.preview_url);
+            const blob = await api.getTemplatePreviewBytes(template.id, request);
+            const nextUrl = URL.createObjectURL(blob);
+            setPreviewUrl((prev) => {
+                if (prev?.startsWith("blob:")) {
+                    try {
+                        URL.revokeObjectURL(prev);
+                    } catch { }
                 }
-            }
+                return nextUrl;
+            });
         } catch (err) {
             console.error("Error generating preview:", err);
             error("Error al generar vista previa");

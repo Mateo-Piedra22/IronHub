@@ -16,7 +16,7 @@ def run_command(cmd, cwd=None):
     try:
         result = subprocess.run(
             cmd,
-            shell=True,
+            shell=False,
             cwd=cwd,
             capture_output=True,
             text=True,
@@ -40,16 +40,16 @@ def install_dependencies():
         "pytest-asyncio>=0.21.0",
         "pytest-xdist>=3.0.0",
         "coverage>=7.0.0",
-        "openpyxl>=3.1.0",
-        "pandas>=2.0.0",
-        "matplotlib>=3.6.0",
-        "Pillow>=10.0.0",
         "fastapi>=0.100.0",
-        "sqlalchemy>=2.0.0"
+        "sqlalchemy>=2.0.0",
+        "reportlab>=4.0.0",
+        "qrcode>=7.4.0",
+        "jinja2>=3.1.0",
+        "jsonschema>=4.0.0",
     ]
     
     for dep in dependencies:
-        success, stdout, stderr = run_command(f"pip install {dep}")
+        success, stdout, stderr = run_command([sys.executable, "-m", "pip", "install", dep])
         if not success:
             print(f"❌ Failed to install {dep}: {stderr}")
             return False
@@ -61,16 +61,7 @@ def run_unit_tests(verbose=False, coverage=False):
     """Run unit tests"""
     print("\n🧪 Running Unit Tests...")
     
-    cmd = ["python", "-m", "pytest"]
-    
-    # Test files
-    test_files = [
-        "tests/test_template_service.py",
-        "tests/test_pdf_service.py",
-        "tests/test_migration_api.py"
-    ]
-    
-    cmd.extend(test_files)
+    cmd = [sys.executable, "-m", "pytest", "tests"]
     
     # Options
     if verbose:
@@ -87,10 +78,9 @@ def run_unit_tests(verbose=False, coverage=False):
     cmd.extend([
         "--html=reports/unit_tests.html",
         "--self-contained-html",
-        "-m", "not integration and not api"
     ])
     
-    success, stdout, stderr = run_command(" ".join(cmd))
+    success, stdout, stderr = run_command(cmd)
     
     if success:
         print("✅ Unit tests passed")
@@ -104,107 +94,17 @@ def run_unit_tests(verbose=False, coverage=False):
 def run_integration_tests(verbose=False):
     """Run integration tests"""
     print("\n🔗 Running Integration Tests...")
-    
-    cmd = ["python", "-m", "pytest"]
-    
-    # Test files
-    test_files = [
-        "tests/test_template_service.py::TestTemplateIntegration",
-        "tests/test_pdf_service.py::TestPDFServiceIntegration",
-        "tests/test_migration_api.py::TestMigrationIntegration"
-    ]
-    
-    cmd.extend(test_files)
-    
-    # Options
-    if verbose:
-        cmd.append("-v")
-    
-    cmd.extend([
-        "--html=reports/integration_tests.html",
-        "--self-contained-html",
-        "-m", "integration"
-    ])
-    
-    success, stdout, stderr = run_command(" ".join(cmd))
-    
-    if success:
-        print("✅ Integration tests passed")
-        return True
-    else:
-        print("❌ Integration tests failed")
-        print(stdout)
-        print(stderr)
-        return False
+    return run_unit_tests(verbose=verbose, coverage=False)
 
 def run_api_tests(verbose=False):
     """Run API tests"""
     print("\n🌐 Running API Tests...")
-    
-    cmd = ["python", "-m", "pytest"]
-    
-    # Test files
-    test_files = [
-        "tests/test_template_service.py::TestTemplateAPI",
-        "tests/test_migration_api.py::TestMigrationAPI"
-    ]
-    
-    cmd.extend(test_files)
-    
-    # Options
-    if verbose:
-        cmd.append("-v")
-    
-    cmd.extend([
-        "--html=reports/api_tests.html",
-        "--self-contained-html",
-        "-m", "api"
-    ])
-    
-    success, stdout, stderr = run_command(" ".join(cmd))
-    
-    if success:
-        print("✅ API tests passed")
-        return True
-    else:
-        print("❌ API tests failed")
-        print(stdout)
-        print(stderr)
-        return False
+    return run_unit_tests(verbose=verbose, coverage=False)
 
 def run_migration_tests(verbose=False):
     """Run migration-specific tests"""
     print("\n📊 Running Migration Tests...")
-    
-    cmd = ["python", "-m", "pytest"]
-    
-    # Test files
-    test_files = [
-        "tests/test_migration_api.py"
-    ]
-    
-    cmd.extend(test_files)
-    
-    # Options
-    if verbose:
-        cmd.append("-v")
-    
-    cmd.extend([
-        "--html=reports/migration_tests.html",
-        "--self-contained-html",
-        "-k", "migration or ExcelTemplateMigrator"
-    ])
-    
-    success, stdout, stderr = run_command(" ".join(cmd))
-    
-    if success:
-        print("✅ Migration tests passed")
-        return True
-    else:
-        print("❌ Migration tests failed")
-        print(stdout)
-        print(stderr)
-        return False
+    return run_unit_tests(verbose=verbose, coverage=False)
 
 def run_all_tests(verbose=False, coverage=False):
     """Run all tests"""
@@ -214,10 +114,7 @@ def run_all_tests(verbose=False, coverage=False):
     Path("reports").mkdir(exist_ok=True)
     
     results = {
-        "unit": run_unit_tests(verbose, coverage),
-        "integration": run_integration_tests(verbose),
-        "api": run_api_tests(verbose),
-        "migration": run_migration_tests(verbose)
+        "tests": run_unit_tests(verbose, coverage),
     }
     
     # Summary
@@ -240,7 +137,7 @@ def run_specific_test(test_path, verbose=False):
     """Run specific test file or test"""
     print(f"\n🎯 Running Specific Test: {test_path}")
     
-    cmd = ["python", "-m", "pytest", test_path]
+    cmd = [sys.executable, "-m", "pytest", test_path]
     
     if verbose:
         cmd.append("-v")
@@ -250,7 +147,7 @@ def run_specific_test(test_path, verbose=False):
         "--self-contained-html"
     ])
     
-    success, stdout, stderr = run_command(" ".join(cmd))
+    success, stdout, stderr = run_command(cmd)
     
     if success:
         print("✅ Test passed")
@@ -266,7 +163,7 @@ def generate_coverage_report():
     print("\n📈 Generating Coverage Report...")
     
     cmd = [
-        "python", "-m", "pytest",
+        sys.executable, "-m", "pytest",
         "--cov=src",
         "--cov-report=html",
         "--cov-report=xml",
@@ -274,7 +171,7 @@ def generate_coverage_report():
         "tests/"
     ]
     
-    success, stdout, stderr = run_command(" ".join(cmd))
+    success, stdout, stderr = run_command(cmd)
     
     if success:
         print("✅ Coverage report generated")
@@ -292,28 +189,28 @@ def lint_code():
     # Install linting dependencies if not present
     linting_deps = ["flake8", "black", "isort", "mypy"]
     for dep in linting_deps:
-        success, _, _ = run_command(f"pip show {dep}")
+        success, _, _ = run_command([sys.executable, "-m", "pip", "show", dep])
         if not success:
             print(f"Installing {dep}...")
-            run_command(f"pip install {dep}")
+            run_command([sys.executable, "-m", "pip", "install", dep])
     
     # Run flake8
     print("Running flake8...")
-    success, stdout, stderr = run_command("flake8 src/ tests/ --max-line-length=100 --ignore=E203,W503")
+    success, stdout, stderr = run_command(["flake8", "src/", "tests/", "--max-line-length=100", "--ignore=E203,W503"])
     if not success:
         print("⚠️ Flake8 issues found:")
         print(stdout)
     
     # Run black check
     print("Running black check...")
-    success, stdout, stderr = run_command("black --check src/ tests/")
+    success, stdout, stderr = run_command(["black", "--check", "src/", "tests/"])
     if not success:
         print("⚠️ Black formatting issues found:")
         print(stdout)
     
     # Run isort check
     print("Running isort check...")
-    success, stdout, stderr = run_command("isort --check-only src/ tests/")
+    success, stdout, stderr = run_command(["isort", "--check-only", "src/", "tests/"])
     if not success:
         print("⚠️ Import sorting issues found:")
         print(stdout)
@@ -328,15 +225,16 @@ def check_dependencies():
         "pytest",
         "fastapi",
         "sqlalchemy",
-        "openpyxl",
-        "matplotlib",
-        "Pillow"
+        "reportlab",
+        "qrcode",
+        "jinja2",
+        "jsonschema",
     ]
     
     missing_packages = []
     
     for package in required_packages:
-        success, _, _ = run_command(f"pip show {package}")
+        success, _, _ = run_command([sys.executable, "-m", "pip", "show", package])
         if not success:
             missing_packages.append(package)
     

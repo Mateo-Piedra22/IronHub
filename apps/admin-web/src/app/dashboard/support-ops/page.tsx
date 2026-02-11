@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { LifeBuoy, Loader2, RefreshCw, X, Save } from 'lucide-react';
 import { api } from '@/lib/api';
 
-function num(v: any) {
+function num(v: unknown) {
     try {
         return Number(v || 0) || 0;
     } catch {
@@ -12,9 +12,29 @@ function num(v: any) {
     }
 }
 
+type SupportOpsTotals = Record<string, unknown>;
+
+interface SupportOpsAssigneeRow {
+    assignee: string | null;
+    total: number;
+    overdue: number;
+}
+
+interface SupportOpsTenantRow {
+    tenant: string;
+    total: number;
+    overdue: number;
+}
+
+interface SupportOpsSummaryData {
+    totals: SupportOpsTotals;
+    by_assignee: SupportOpsAssigneeRow[];
+    by_tenant: SupportOpsTenantRow[];
+}
+
 export default function SupportOpsPage() {
     const [loading, setLoading] = useState(true);
-    const [data, setData] = useState<{ totals: any; by_assignee: any[]; by_tenant: any[] } | null>(null);
+    const [data, setData] = useState<SupportOpsSummaryData | null>(null);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [settingsTenant, setSettingsTenant] = useState('');
     const [settingsTimezone, setSettingsTimezone] = useState('');
@@ -22,23 +42,27 @@ export default function SupportOpsPage() {
     const [settingsLoading, setSettingsLoading] = useState(false);
     const [settingsSaving, setSettingsSaving] = useState(false);
 
-    const load = async () => {
+    const load = useCallback(async () => {
         setLoading(true);
         try {
             const res = await api.getSupportOpsSummary();
             if (res.ok && res.data?.ok) {
-                setData({ totals: res.data.totals, by_assignee: res.data.by_assignee || [], by_tenant: res.data.by_tenant || [] });
+                setData({
+                    totals: (res.data.totals || {}) as SupportOpsTotals,
+                    by_assignee: Array.isArray(res.data.by_assignee) ? (res.data.by_assignee as SupportOpsAssigneeRow[]) : [],
+                    by_tenant: Array.isArray(res.data.by_tenant) ? (res.data.by_tenant as SupportOpsTenantRow[]) : [],
+                });
             } else {
                 setData(null);
             }
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
 
     useEffect(() => {
         load();
-    }, []);
+    }, [load]);
 
     const totals = useMemo(() => data?.totals || {}, [data]);
 
@@ -80,7 +104,7 @@ export default function SupportOpsPage() {
     const saveTenantSettings = async () => {
         const tn = String(settingsTenant || '').trim();
         if (!tn) return;
-        let obj: any = {};
+        let obj: unknown = {};
         try {
             obj = JSON.parse(settingsSlaJson || '{}');
         } catch {

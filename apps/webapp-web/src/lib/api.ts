@@ -272,11 +272,13 @@ export interface Rutina {
     nombre: string;
     descripcion?: string;
     categoria?: string;
+    dias_semana?: number;
     activa: boolean;
     es_plantilla: boolean;
     usuario_id?: number;
     usuario_nombre?: string;
     uuid_rutina?: string;
+    plantilla_id?: number | null;
     dias: DiasRutina[];
     fecha_creacion?: string;
     sucursal_id?: number | null;
@@ -1173,21 +1175,8 @@ class ApiClient {
         });
     }
 
-    // === Template Methods ===
-    async getTemplateFavorites() {
-        return this.get<{ templates: Template[] }>('/api/v1/templates/favorites');
-    }
-
-    async toggleTemplateFavorite(templateId: number) {
-        return this.post(`/api/v1/templates/${templateId}/favorite`);
-    }
-
-    async rateTemplate(templateId: number, rating: number) {
-        return this.post(`/api/v1/templates/${templateId}/rate`, { rating });
-    }
-
     async getTemplateCategories() {
-        return this.get<{ categories: string[] }>('/api/v1/templates/categories');
+        return this.get<{ success: boolean; categories: string[] }>('/api/v1/templates/categories');
     }
 
     async uploadGymLogo(file: File): Promise<ApiResponse<{ ok: boolean; logo_url?: string; error?: string }>> {
@@ -1994,83 +1983,6 @@ class ApiClient {
 
         const query = p.toString();
         return `${this.baseUrl}/api/rutinas/${id}/export/pdf${query ? `?${query}` : ''}`;
-    }
-
-    getRutinaExcelUrl(id: number, params?: {
-        weeks?: number;
-        qr_mode?: 'inline' | 'sheet' | 'none';
-        sheet_name?: string;
-        user_override?: string;
-        filename?: string;
-    }): string {
-        const p = new URLSearchParams();
-        if (params?.weeks) p.set('weeks', String(params.weeks));
-        if (params?.qr_mode) p.set('qr_mode', params.qr_mode);
-        if (params?.sheet_name) p.set('sheet', params.sheet_name);
-        if (params?.user_override) p.set('user_override', params.user_override);
-        if (params?.filename) p.set('filename', params.filename);
-
-        const t = typeof window !== 'undefined' ? getCurrentTenant() : '';
-        if (t) p.set('tenant', t);
-
-        const query = p.toString();
-        return `${this.baseUrl}/api/rutinas/${id}/export/excel${query ? `?${query}` : ''}`;
-    }
-
-    /**
-     * Get a signed URL for Excel preview in Office Online Viewer.
-     * This URL can be embedded in an iframe to display the Excel file inline.
-     */
-    async getRutinaExcelViewUrl(id: number, params?: {
-        weeks?: number;
-        qr_mode?: 'inline' | 'sheet' | 'none';
-        sheet_name?: string;
-    }): Promise<ApiResponse<{ url: string }>> {
-        const p = new URLSearchParams();
-        if (params?.weeks) p.set('weeks', String(params.weeks));
-        if (params?.qr_mode) p.set('qr_mode', params.qr_mode);
-        if (params?.sheet_name) p.set('sheet', params.sheet_name);
-
-        const t = typeof window !== 'undefined' ? getCurrentTenant() : '';
-        if (t) p.set('tenant', t);
-
-        const query = p.toString();
-        return this.request<{ url: string }>(`/api/rutinas/${id}/export/excel_view_url${query ? `?${query}` : ''}`);
-    }
-
-    /**
-     * Get a signed URL for a robust in-app preview (PDF rendered server-side).
-     * This is intended to be embedded in an iframe and does not rely on Office Online.
-     */
-    async getRutinaPdfViewUrl(id: number, params?: {
-        weeks?: number;
-        qr_mode?: 'inline' | 'sheet' | 'none';
-        sheet_name?: string;
-    }): Promise<ApiResponse<{ url: string }>> {
-        const p = new URLSearchParams();
-        if (params?.weeks) p.set('weeks', String(params.weeks));
-        if (params?.qr_mode) p.set('qr_mode', params.qr_mode);
-        if (params?.sheet_name) p.set('sheet', params.sheet_name);
-
-        const t = typeof window !== 'undefined' ? getCurrentTenant() : '';
-        if (t) p.set('tenant', t);
-
-        const query = p.toString();
-        return this.request<{ url: string }>(`/api/rutinas/${id}/export/pdf_view_url${query ? `?${query}` : ''}`);
-    }
-
-    async getRutinaDraftExcelViewUrl(data: unknown) {
-        return this.request<{ url: string }>('/api/rutinas/export/draft_url', {
-            method: 'POST',
-            body: JSON.stringify(data)
-        });
-    }
-
-    async getRutinaDraftPdfViewUrl(data: unknown) {
-        return this.request<{ url: string }>('/api/rutinas/export/draft_pdf_url', {
-            method: 'POST',
-            body: JSON.stringify(data)
-        });
     }
 
     async verifyRoutineQR(uuid: string): Promise<ApiResponse<{
@@ -3266,28 +3178,38 @@ class ApiClient {
         if (params?.sort_by) q.set('sort_by', params.sort_by);
         if (params?.sort_order) q.set('sort_order', params.sort_order);
 
-        return this.request<{ success: boolean; templates: Template[]; total: number; limit: number; offset: number; has_more: boolean }>(`/api/templates${q.toString() ? `?${q.toString()}` : ''}`);
+        return this.request<{ success: boolean; templates: Template[]; total: number; limit: number; offset: number; has_more: boolean }>(`/api/v1/templates${q.toString() ? `?${q.toString()}` : ''}`);
     }
 
     async getTemplate(id: number) {
-        return this.request<{ success: boolean; template: Template }>(`/api/templates/${id}`);
+        return this.request<{ success: boolean; template: Template }>(`/api/v1/templates/${id}`);
     }
 
     async getTemplatePreview(id: number, request: TemplatePreviewRequest) {
-        return this.request<{ success: boolean; preview_url?: string; format: string; quality: string; page_number: number; generation_time?: number; cache_hit?: boolean }>(`/api/templates/${id}/preview`, {
+        const q = new URLSearchParams();
+        q.set('format', request.format);
+        q.set('quality', request.quality);
+        if (request.page_number) q.set('page_number', String(request.page_number));
+        if (request.background) q.set('background', 'true');
+
+        return this.request<{ success: boolean; preview_url?: string; format: string; quality: string; page_number: number; generation_time?: number; cache_hit?: boolean }>(`/api/v1/templates/${id}/preview?${q.toString()}`, {
             method: 'POST',
-            body: JSON.stringify(request)
+            body: JSON.stringify(request.sample_data ?? null)
         });
     }
 
     async getTemplatePreviewBytes(id: number, request: TemplatePreviewRequest): Promise<Blob> {
-        const response = await fetch(`${this.baseUrl}/api/templates/${id}/preview/bytes`, {
-            method: 'POST',
+        const q = new URLSearchParams();
+        q.set('format', request.format);
+        q.set('quality', request.quality);
+        if (request.page_number) q.set('page_number', String(request.page_number));
+
+        const response = await fetch(`${this.baseUrl}/api/v1/templates/${id}/preview/stream?${q.toString()}`, {
+            method: 'GET',
             headers: {
-                'Content-Type': 'application/json',
                 'X-Tenant': typeof window !== 'undefined' ? getCurrentTenant() : '',
             },
-            body: JSON.stringify(request)
+            credentials: 'include',
         });
 
         if (!response.ok) {
@@ -3298,34 +3220,34 @@ class ApiClient {
     }
 
     async getTemplateTags() {
-        return this.request<{ success: boolean; tags: string[] }>('/api/templates/tags');
+        return this.request<{ success: boolean; tags: string[] }>('/api/v1/templates/tags');
     }
 
     async validateTemplate(configuracion: Record<string, any>) {
-        return this.request<{ success: boolean; validation: TemplateValidationResponse }>(`/api/templates/validate`, {
+        return this.request<{ success: boolean; validation: TemplateValidationResponse }>(`/api/v1/templates/validate`, {
             method: 'POST',
-            body: JSON.stringify({ configuracion })
+            body: JSON.stringify(configuracion)
         });
     }
 
     async getTemplateAnalytics(id: number, days: number = 30) {
-        return this.request<{ success: boolean; analytics: TemplateAnalytics }>(`/api/templates/${id}/analytics?days=${days}`);
+        return this.request<{ success: boolean; analytics: TemplateAnalytics }>(`/api/v1/templates/${id}/analytics?days=${days}`);
     }
 
     async getAnalyticsDashboard(gimnasio_id?: number, days: number = 30) {
         const q = new URLSearchParams();
-        q.set('days', String(days));
+        q.set('period_days', String(days));
         if (gimnasio_id) q.set('gimnasio_id', String(gimnasio_id));
 
-        return this.request<{ success: boolean; dashboard: Record<string, any>; period_days: number; gimnasio_id?: number }>(`/api/templates/analytics/dashboard${q.toString() ? `?${q.toString()}` : ''}`);
+        return this.request<{ success: boolean; dashboard: Record<string, any>; period_days: number; gimnasio_id?: number }>(`/api/v1/templates/analytics/dashboard${q.toString() ? `?${q.toString()}` : ''}`);
     }
 
     async getGymTemplates(gimnasio_id: number) {
-        return this.request<{ success: boolean; templates: Template[]; gimnasio_id: number }>(`/api/gyms/${gimnasio_id}/templates`);
+        return this.request<{ success: boolean; templates: Template[]; gym_id: number }>(`/api/v1/gyms/${gimnasio_id}/templates`);
     }
 
     async getTemplateVersions(id: number) {
-        return this.request<{ success: boolean; versions: TemplateVersion[]; total: number }>(`/api/templates/${id}/versions`);
+        return this.request<{ success: boolean; versions: TemplateVersion[]; total: number }>(`/api/v1/templates/${id}/versions`);
     }
 
     // Enhanced rutina export with template support
@@ -3350,35 +3272,6 @@ class ApiClient {
         const query = p.toString();
         return `${this.baseUrl}/api/rutinas/${id}/export/pdf${query ? `?${query}` : ''}`;
     }
-
-    async getRutinaPreviewWithTemplate(id: number, templateId: number, request: TemplatePreviewRequest) {
-        return this.request<{ success: boolean; preview_url?: string; format: string; quality: string; page_number: number; generation_time?: number; cache_hit?: boolean }>(`/api/rutinas/${id}/preview`, {
-            method: 'POST',
-            body: JSON.stringify({ template_id: templateId, ...request })
-        });
-    }
-
-    async getRutinaPreviewBytesWithTemplate(id: number, templateId: number, request: TemplatePreviewRequest): Promise<Blob> {
-        const response = await fetch(`${this.baseUrl}/api/rutinas/${id}/preview/bytes`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Tenant': typeof window !== 'undefined' ? getCurrentTenant() : '',
-            },
-            body: JSON.stringify({ template_id: templateId, ...request })
-        });
-
-        if (!response.ok) {
-            throw new Error(`Failed to generate routine preview: ${response.statusText}`);
-        }
-
-        return response.blob();
-    }
-
-    async getAvailableTemplatesForRutina(rutinaId: number) {
-        return this.request<{ success: boolean; templates: Template[]; rutina_id: number }>(`/api/rutinas/${rutinaId}/templates`);
-    }
-
 }
 
 // Singleton instance

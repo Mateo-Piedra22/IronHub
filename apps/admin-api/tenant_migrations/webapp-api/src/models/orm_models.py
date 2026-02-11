@@ -8,7 +8,7 @@ to support the dynamic template system migrations.
 from sqlalchemy.orm import declarative_base
 from sqlalchemy import (
     Integer, String, Text, Boolean, DateTime, ForeignKey,
-    Numeric, Index, func, Column, JSON
+    Numeric, Index, func, Column, JSON, ARRAY
 )
 
 Base = declarative_base()
@@ -27,7 +27,7 @@ class PlantillaRutina(Base):
     creada_por = Column(Integer, ForeignKey("usuarios.id"))
     fecha_creacion = Column(DateTime, server_default=func.current_timestamp())
     version_actual = Column(String(50), default="1.0.0")
-    tags = Column(JSON)  # This would be JSONB in PostgreSQL
+    tags = Column(ARRAY(String), server_default="{}")
     uso_count = Column(Integer, default=0)
 
 class PlantillaRutinaVersion(Base):

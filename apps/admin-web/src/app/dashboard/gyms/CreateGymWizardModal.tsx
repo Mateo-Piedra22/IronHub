@@ -7,6 +7,8 @@ import { api, type GymBranchCreateInput, type GymCreateV2Input } from '@/lib/api
 
 type Step = 1 | 2 | 3 | 4;
 
+const BRANCH_CODE_RE = /^[a-z0-9][a-z0-9_-]{1,39}$/;
+
 export function CreateGymWizardModal({
     open,
     onClose,
@@ -57,8 +59,6 @@ export function CreateGymWizardModal({
             .replace(/[^a-z0-9_-]/g, '')
             .slice(0, 40);
 
-    const branchCodeRe = /^[a-z0-9][a-z0-9_-]{1,39}$/;
-
     const branchIssues = useMemo(() => {
         const normalizedCodes = branches.map((b) => normalizeBranchCode(String(b.code || '')));
         const counts = new Map<string, number>();
@@ -73,7 +73,7 @@ export function CreateGymWizardModal({
             if (!name && !rawCode.trim()) return null;
             if (!name.trim()) return 'Nombre requerido';
             if (!code) return 'Código requerido';
-            if (!branchCodeRe.test(code)) return 'Formato inválido (2-40, minúsculas, números, _ o -)';
+            if (!BRANCH_CODE_RE.test(code)) return 'Formato inválido (2-40, minúsculas, números, _ o -)';
             if ((counts.get(code) || 0) > 1) return 'Código duplicado (debe ser único)';
             return null;
         });
@@ -207,7 +207,11 @@ export function CreateGymWizardModal({
                 setError(res.data?.error || res.error || 'Error al crear');
                 return;
             }
-            const gymId = Number((res.data.gym as any)?.id || 0);
+            const gymRaw: unknown = res.data.gym;
+            const gymId =
+                typeof gymRaw === 'object' && gymRaw !== null
+                    ? Number((gymRaw as Record<string, unknown>).id || 0)
+                    : 0;
             if (!gymId) {
                 setError('Creado pero sin ID válido');
                 return;

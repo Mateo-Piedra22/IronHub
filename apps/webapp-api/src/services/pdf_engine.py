@@ -7,35 +7,33 @@ including variable resolution, exercise table building, QR code management, and 
 
 import io
 import os
-import tempfile
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from datetime import datetime
-from pathlib import Path
 import logging
-import json
 
 # PDF generation libraries
 from reportlab.lib.pagesizes import letter, A4, legal, landscape
-from reportlab.lib.units import inch, cm, mm
-from reportlab.lib.colors import Color, black, white, grey, lightgrey
+from reportlab.lib.units import inch, mm
+from reportlab.lib.colors import black, grey, lightgrey, white
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT, TA_JUSTIFY
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
 from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
-    PageBreak, KeepTogether, Frame, PageTemplate, BaseDocTemplate
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+    PageBreak,
+    Image,
 )
-from reportlab.platypus.tableofcontents import TableOfContents
 from reportlab.lib.utils import ImageReader
-from reportlab.graphics.shapes import Drawing
-from reportlab.graphics.barcode.qr import QrCodeWidget
-from reportlab.graphics.renderPDF import Drawing
 
 # Image processing
-from PIL import Image as PILImage
 import qrcode
 
 # Template processing
-from jinja2 import Environment, BaseLoader, TemplateError
+from jinja2 import BaseLoader, StrictUndefined, TemplateError
+from jinja2.sandbox import SandboxedEnvironment
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +44,12 @@ class PDFEngine:
     def __init__(self):
         self.styles = getSampleStyleSheet()
         self.custom_styles = self._create_custom_styles()
-        self.jinja_env = Environment(loader=BaseLoader())
+        self.jinja_env = SandboxedEnvironment(
+            loader=BaseLoader(),
+            undefined=StrictUndefined,
+            autoescape=False,
+        )
+        self._compiled_templates: Dict[str, Any] = {}
         
     def generate_pdf(
         self,
@@ -66,23 +69,82 @@ class PDFEngine:
             
             # Resolve variables
             resolved_data = self._resolve_variables(data, variables)
+
+            page_size = self._get_page_size(layout.get("page_size", "A4"))
+            if str(layout.get("orientation", "portrait")).strip().lower() == "landscape":
+                page_size = landscape(page_size)
+
+            margins = layout.get("margins", {}) or {}
+            right_margin = self._to_points(margins.get("right", 20))
+            left_margin = self._to_points(margins.get("left", 20))
+            top_margin = self._to_points(margins.get("top", 20))
+            bottom_margin = self._to_points(margins.get("bottom", 20))
             
+            qr_position = str((qr_config or {}).get("position") or "inline").strip().lower()
+            if qr_position in ("separate_sheet", "sheet"):
+                qr_position = "separate"
+
+            qr_overlay_reader: Optional[ImageReader] = None
+            qr_overlay_w = 0.0
+            qr_overlay_h = 0.0
+            if (qr_config or {}).get("enabled", False) and qr_position in ("header", "footer"):
+                qr_data = self._get_qr_code_data(resolved_data, qr_config or {})
+                if qr_data:
+                    try:
+                        size_cfg = (qr_config or {}).get("size") or {}
+                        if not isinstance(size_cfg, dict):
+                            size_cfg = {}
+                        qr_overlay_w = self._to_points(size_cfg.get("width", 40))
+                        qr_overlay_h = self._to_points(size_cfg.get("height", 40))
+                        qr_overlay_reader = self._build_qr_image_reader(qr_data)
+                    except Exception:
+                        qr_overlay_reader = None
+
+            def _draw_qr_overlay(canvas, doc) -> None:
+                try:
+                    if qr_overlay_reader is None:
+                        return
+                    if qr_position not in ("header", "footer"):
+                        return
+                    if qr_overlay_w <= 0 or qr_overlay_h <= 0:
+                        return
+                    x = float(doc.pagesize[0]) - float(doc.rightMargin) - float(qr_overlay_w)
+                    if qr_position == "header":
+                        y = float(doc.height) + float(doc.bottomMargin) + max(
+                            0.0, (float(doc.topMargin) - float(qr_overlay_h)) / 2.0
+                        )
+                    else:
+                        y = max(0.0, (float(doc.bottomMargin) - float(qr_overlay_h)) / 2.0)
+                    canvas.drawImage(
+                        qr_overlay_reader,
+                        x,
+                        y,
+                        width=qr_overlay_w,
+                        height=qr_overlay_h,
+                        preserveAspectRatio=True,
+                        mask="auto",
+                    )
+                except Exception:
+                    return
+
             # Create PDF document
             if output_path:
                 # Save to file
                 doc = SimpleDocTemplate(
                     output_path,
-                    pagesize=self._get_page_size(layout.get("page_size", "A4")),
-                    orientation=layout.get("orientation", "portrait"),
-                    rightMargin=layout.get("margins", {}).get("right", 72),
-                    leftMargin=layout.get("margins", {}).get("left", 72),
-                    topMargin=layout.get("margins", {}).get("top", 72),
-                    bottomMargin=layout.get("margins", {}).get("bottom", 72)
+                    pagesize=page_size,
+                    rightMargin=right_margin,
+                    leftMargin=left_margin,
+                    topMargin=top_margin,
+                    bottomMargin=bottom_margin,
                 )
                 
                 # Build document
                 story = self._build_story(pages, resolved_data, qr_config, styling)
-                doc.build(story)
+                if qr_overlay_reader is not None:
+                    doc.build(story, onFirstPage=_draw_qr_overlay, onLaterPages=_draw_qr_overlay)
+                else:
+                    doc.build(story)
                 
                 return output_path
             else:
@@ -90,16 +152,18 @@ class PDFEngine:
                 buffer = io.BytesIO()
                 doc = SimpleDocTemplate(
                     buffer,
-                    pagesize=self._get_page_size(layout.get("page_size", "A4")),
-                    orientation=layout.get("orientation", "portrait"),
-                    rightMargin=layout.get("margins", {}).get("right", 72),
-                    leftMargin=layout.get("margins", {}).get("left", 72),
-                    topMargin=layout.get("margins", {}).get("top", 72),
-                    bottomMargin=layout.get("margins", {}).get("bottom", 72)
+                    pagesize=page_size,
+                    rightMargin=right_margin,
+                    leftMargin=left_margin,
+                    topMargin=top_margin,
+                    bottomMargin=bottom_margin,
                 )
                 
                 story = self._build_story(pages, resolved_data, qr_config, styling)
-                doc.build(story)
+                if qr_overlay_reader is not None:
+                    doc.build(story, onFirstPage=_draw_qr_overlay, onLaterPages=_draw_qr_overlay)
+                else:
+                    doc.build(story)
                 
                 buffer.seek(0)
                 return buffer.getvalue()
@@ -229,6 +293,15 @@ class PDFEngine:
             "Legal": legal
         }
         return sizes.get(size_name, A4)
+
+    def _to_points(self, v: Any) -> float:
+        try:
+            num = float(v)
+        except Exception:
+            return float(20 * mm)
+        if 0 <= num <= 50:
+            return float(num * mm)
+        return float(num)
     
     def _resolve_variables(
         self,
@@ -597,6 +670,14 @@ class PDFEngine:
     ) -> List[Any]:
         """Build QR code section"""
         elements = []
+
+        pos = str((qr_config or {}).get("position") or "inline").strip().lower()
+        if pos in ("separate_sheet", "sheet"):
+            pos = "separate"
+        if pos == "none":
+            return elements
+        if pos in ("header", "footer"):
+            return elements
         
         # Get QR code data
         qr_data = self._get_qr_code_data(data, qr_config)
@@ -607,7 +688,7 @@ class PDFEngine:
         # QR code size
         size = content.get("size", 1.5*inch)
         
-        # Generate QR code
+        # Add to document
         try:
             qr = qrcode.QRCode(
                 version=1,
@@ -628,6 +709,8 @@ class PDFEngine:
             
             # Add to document
             qr_image = Image(buffer, width=size, height=size)
+            if pos == "separate":
+                elements.append(PageBreak())
             elements.append(qr_image)
             elements.append(Spacer(1, 12))
             
@@ -635,6 +718,21 @@ class PDFEngine:
             logger.warning(f"Could not generate QR code: {e}")
         
         return elements
+
+    def _build_qr_image_reader(self, qr_data: str) -> ImageReader:
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(qr_data)
+        qr.make(fit=True)
+        qr_img = qr.make_image(fill_color="black", back_color="white")
+        buffer = io.BytesIO()
+        qr_img.save(buffer, format="PNG")
+        buffer.seek(0)
+        return ImageReader(buffer)
     
     def _build_spacing_section(self, content: Dict[str, Any]) -> List[Any]:
         """Build spacing section"""
@@ -647,8 +745,16 @@ class PDFEngine:
             return ""
         
         try:
-            template = self.jinja_env.from_string(template_str)
-            return template.render(**data)
+            s = str(template_str)
+            if "{%" in s or "{#" in s:
+                raise TemplateError("Solo se permiten expresiones {{ ... }}")
+            if "__" in s or "import" in s.lower():
+                raise TemplateError("Expresión no permitida")
+            template = self._compiled_templates.get(s)
+            if template is None:
+                template = self.jinja_env.from_string(s)
+                self._compiled_templates[s] = template
+            return str(template.render(**data))
         except TemplateError:
             # Fallback to simple variable replacement
             result = template_str

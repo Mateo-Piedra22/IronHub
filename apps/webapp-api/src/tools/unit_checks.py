@@ -64,4 +64,59 @@ def run() -> int:
     except Exception:
         ok = False
 
+    try:
+        from src.services.pdf_engine import PDFEngine
+        from src.services.template_validator import TemplateValidator
+
+        cfg = {
+            "metadata": {
+                "name": "UnitCheck",
+                "version": "1.0.0",
+                "description": "Unit check template",
+                "category": "general",
+                "difficulty": "beginner",
+            },
+            "layout": {
+                "page_size": "A4",
+                "orientation": "portrait",
+                "margins": {"top": 20, "bottom": 20, "left": 20, "right": 20},
+            },
+            "pages": [
+                {
+                    "name": "Rutina",
+                    "sections": [
+                        {"type": "header", "content": {"title": "{{gym_name}}", "subtitle": "{{nombre_rutina}}"}},
+                        {"type": "exercise_table", "content": {}},
+                        {"type": "qr_code", "content": {"size": 80}},
+                    ],
+                }
+            ],
+            "variables": {
+                "gym_name": {"type": "string", "default": "Gimnasio"},
+                "nombre_rutina": {"type": "string", "default": "Rutina"},
+            },
+            "qr_code": {"enabled": True, "position": "separate", "data_source": "routine_uuid"},
+        }
+        v = TemplateValidator().validate_template(cfg)
+        assert v.is_valid is True
+        data = {
+            "gym_name": "Gym",
+            "nombre_rutina": "Rutina",
+            "uuid_rutina": "unit-check-uuid",
+            "dias": [
+                {
+                    "numero": 1,
+                    "nombre": "Día 1",
+                    "ejercicios": [
+                        {"nombre": "Sentadillas", "series": 3, "repeticiones": "10", "descanso": "60s", "notas": ""},
+                    ],
+                }
+            ],
+        }
+        pdf = PDFEngine().generate_pdf(template_config=cfg, data=data, output_path=None)
+        assert isinstance(pdf, (bytes, bytearray))
+        assert len(pdf) > 1000
+    except Exception:
+        ok = False
+
     return 0 if ok else 21

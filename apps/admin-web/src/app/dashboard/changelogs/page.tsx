@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Megaphone, Loader2, Plus, X, Save, Trash2, RefreshCw } from 'lucide-react';
 import { api, type ChangelogAdminItem } from '@/lib/api';
@@ -56,7 +56,7 @@ export default function AdminChangelogsPage() {
         updated_at: undefined,
     });
 
-    const load = async () => {
+    const load = useCallback(async () => {
         setLoading(true);
         try {
             const res = await api.listChangelogs({ include_drafts: includeDrafts, page, page_size: pageSize });
@@ -70,13 +70,13 @@ export default function AdminChangelogsPage() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [includeDrafts, page]);
 
     useEffect(() => {
         load();
-    }, [includeDrafts, page]);
+    }, [load]);
 
-    const totalPages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [total]);
+    const totalPages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [pageSize, total]);
 
     const openCreate = () => {
         setEditing(null);
@@ -110,21 +110,22 @@ export default function AdminChangelogsPage() {
         setPinned(!!it.pinned);
         setMinAppVersion(String(it.min_app_version || ''));
         try {
-            const rr = (it.audience_roles as any) || [];
-            setRolesText(Array.isArray(rr) ? rr.join(', ') : String(rr || ''));
+            const rr: unknown = it.audience_roles;
+            setRolesText(Array.isArray(rr) ? rr.map(String).join(', ') : String(rr || ''));
         } catch {
             setRolesText('');
         }
         try {
-            const mm = (it.audience_modules as any) || [];
-            setModulesText(Array.isArray(mm) ? mm.join(', ') : String(mm || ''));
+            const mm: unknown = it.audience_modules;
+            setModulesText(Array.isArray(mm) ? mm.map(String).join(', ') : String(mm || ''));
         } catch {
             setModulesText('');
         }
         try {
-            const tt = (it.audience_tenants as any) || {};
-            const inc = Array.isArray(tt?.include) ? tt.include : [];
-            const exc = Array.isArray(tt?.exclude) ? tt.exclude : [];
+            const tt: unknown = it.audience_tenants;
+            const rec = (tt && typeof tt === 'object' ? (tt as Record<string, unknown>) : {}) as Record<string, unknown>;
+            const inc = Array.isArray(rec.include) ? rec.include.map(String) : [];
+            const exc = Array.isArray(rec.exclude) ? rec.exclude.map(String) : [];
             setTenantsIncludeText(inc.join(', '));
             setTenantsExcludeText(exc.join(', '));
         } catch {
@@ -151,7 +152,7 @@ export default function AdminChangelogsPage() {
     };
 
     const save = async () => {
-        const payload = {
+        const payload: Omit<ChangelogAdminItem, 'id'> = {
             version: String(form.version || '').trim(),
             title: String(form.title || '').trim(),
             body_markdown: String(form.body_markdown || '').trim(),
@@ -169,7 +170,7 @@ export default function AdminChangelogsPage() {
             published_at: null,
             created_at: undefined,
             updated_at: undefined,
-        } as any;
+        };
         if (!payload.version || !payload.title || !payload.body_markdown) return;
         setSaving(true);
         try {

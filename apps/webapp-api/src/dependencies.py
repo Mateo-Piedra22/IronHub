@@ -823,6 +823,7 @@ from src.database.tenant_connection import (
     get_tenant_session_factory,
     set_current_tenant,
     get_current_tenant,
+    get_current_tenant_gym_id,
     validate_tenant_name,
 )
 
@@ -1070,16 +1071,6 @@ def get_user_service(session: Session = Depends(get_db_session)) -> UserService:
 get_db = get_db_session
 
 
-def get_rm():
-    """Get RoutineTemplateManager instance for PDF/Excel generation."""
-    try:
-        from src.routine_manager import RoutineTemplateManager
-
-        return RoutineTemplateManager()
-    except Exception:
-        return None
-
-
 def get_payment_service(session: Session = Depends(get_db_session)) -> PaymentService:
     """Get PaymentService instance with current session."""
     return PaymentService(session)
@@ -1287,6 +1278,36 @@ async def require_gestion_access(request: Request):
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized"
         )
     return RedirectResponse(url="/gestion/login", status_code=303)
+
+
+def _resolve_current_gym_id(request: Request) -> Optional[int]:
+    if not get_current_tenant():
+        _try_set_tenant_from_request(request)
+    gym_id = get_current_tenant_gym_id()
+    if gym_id is None:
+        return None
+    try:
+        return int(gym_id)
+    except Exception:
+        return None
+
+
+async def require_gym_access(request: Request, gym_id: int):
+    current_gym_id = _resolve_current_gym_id(request)
+    if not current_gym_id:
+        raise HTTPException(status_code=400, detail="Gym not found")
+    if int(gym_id) != int(current_gym_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    return int(gym_id)
+
+
+async def require_gym_access_gimnasio(request: Request, gimnasio_id: int):
+    current_gym_id = _resolve_current_gym_id(request)
+    if not current_gym_id:
+        raise HTTPException(status_code=400, detail="Gym not found")
+    if int(gimnasio_id) != int(current_gym_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    return int(gimnasio_id)
 
 
 async def require_owner(request: Request):

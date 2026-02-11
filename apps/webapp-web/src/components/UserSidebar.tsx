@@ -938,10 +938,10 @@ export default function UserSidebar({
                                 <Button
                                     size="sm"
                                     variant="secondary"
-                                    onClick={() => window.open(api.getRutinaExcelUrl(rutinaActiva.id), '_blank')}
+                                    onClick={() => window.open(api.getRutinaPdfUrl(rutinaActiva.id), '_blank')}
                                 >
                                     <FileDown className="w-3 h-3 mr-1" />
-                                    Excel
+                                    PDF
                                 </Button>
                             </div>
                         </div>
@@ -1037,10 +1037,10 @@ export default function UserSidebar({
                                         <Button
                                             size="sm"
                                             variant="secondary"
-                                            onClick={() => window.open(api.getRutinaExcelUrl(rutinaActiva.id), '_blank')}
+                                            onClick={() => window.open(api.getRutinaPdfUrl(rutinaActiva.id), '_blank')}
                                         >
                                             <FileDown className="w-3 h-3 mr-1" />
-                                            Rutina Excel
+                                            Rutina PDF
                                         </Button>
                                     )}
                                 </div>

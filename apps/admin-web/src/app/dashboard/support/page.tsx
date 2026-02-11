@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { LifeBuoy, Loader2, RefreshCw, Search, X, Send, Tag, AlertTriangle, User } from 'lucide-react';
 import { api, type SupportTicketAdmin, type SupportTicketMessageAdmin } from '@/lib/api';
@@ -69,7 +69,7 @@ export default function SupportTicketsPage() {
     const [sendingInternal, setSendingInternal] = useState(false);
     const [internalNote, setInternalNote] = useState('');
 
-    const load = async () => {
+    const load = useCallback(async () => {
         setLoading(true);
         try {
             const res = await api.listSupportTickets({
@@ -91,13 +91,13 @@ export default function SupportTicketsPage() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [filters.assignee, filters.priority, filters.q, filters.status, filters.tenant, page]);
 
     useEffect(() => {
         load();
-    }, [page, filters.status, filters.priority, filters.tenant, filters.assignee, filters.q]);
+    }, [load]);
 
-    const totalPages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [total]);
+    const totalPages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [pageSize, total]);
 
     const openTicket = async (t: SupportTicketAdmin) => {
         setSelected(t);
@@ -108,9 +108,9 @@ export default function SupportTicketsPage() {
         setPriorityDraft(String(t.priority || ''));
         setAssigneeDraft(String(t.assigned_to || ''));
         try {
-            const tags = (t.tags as any) || [];
-            if (Array.isArray(tags)) setTagsDraft(tags.join(', '));
-            else if (typeof tags === 'string') setTagsDraft(tags);
+            const tagsValue: unknown = t.tags;
+            if (Array.isArray(tagsValue)) setTagsDraft(tagsValue.map(String).join(', '));
+            else if (typeof tagsValue === 'string') setTagsDraft(tagsValue);
             else setTagsDraft('');
         } catch {
             setTagsDraft('');
@@ -126,9 +126,9 @@ export default function SupportTicketsPage() {
                 setPriorityDraft(String(res.data.ticket.priority || ''));
                 setAssigneeDraft(String(res.data.ticket.assigned_to || ''));
                 try {
-                    const tags = (res.data.ticket as any).tags || [];
-                    if (Array.isArray(tags)) setTagsDraft(tags.join(', '));
-                    else if (typeof tags === 'string') setTagsDraft(tags);
+                    const tagsValue: unknown = res.data.ticket.tags;
+                    if (Array.isArray(tagsValue)) setTagsDraft(tagsValue.map(String).join(', '));
+                    else if (typeof tagsValue === 'string') setTagsDraft(tagsValue);
                     else setTagsDraft('');
                 } catch {
                     setTagsDraft('');

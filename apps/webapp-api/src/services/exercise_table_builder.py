@@ -5,17 +5,15 @@ This module provides advanced exercise table building for dynamic routine templa
 including weekly progression, exercise variations, supersets, and custom formatting.
 """
 
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Dict, Any, List, Optional, Union
 from dataclasses import dataclass
 from enum import Enum
 import logging
-from datetime import datetime
 
 from reportlab.lib import colors
-from reportlab.lib.units import inch, cm, mm
+from reportlab.lib.units import inch
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT, TA_JUSTIFY
 
 logger = logging.getLogger(__name__)
 
