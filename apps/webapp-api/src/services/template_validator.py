@@ -7,10 +7,14 @@ impact assessment.
 """
 
 import json
-import jsonschema
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
+
+try:
+    import jsonschema  # type: ignore
+except Exception:  # pragma: no cover
+    jsonschema = None
 
 
 class ValidationSeverity(Enum):
@@ -36,7 +40,11 @@ class TemplateValidator:
     
     def __init__(self):
         self.schema = self._get_template_schema()
-        self.validator = jsonschema.Draft7Validator(self.schema)
+        self.validator = (
+            jsonschema.Draft7Validator(self.schema)
+            if jsonschema is not None
+            else None
+        )
     
     def _get_template_schema(self) -> Dict[str, Any]:
         """JSON Schema for template validation"""
@@ -333,6 +341,16 @@ class TemplateValidator:
     def _validate_schema(self, template_config: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Validate against JSON schema"""
         errors = []
+
+        if jsonschema is None or self.validator is None:
+            return [
+                {
+                    "severity": ValidationSeverity.WARNING.value,
+                    "type": "schema_unavailable",
+                    "message": "JSON schema validation skipped: 'jsonschema' dependency not installed",
+                    "path": [],
+                }
+            ]
         
         try:
             schema_errors = sorted(
@@ -349,20 +367,13 @@ class TemplateValidator:
                         "schema_path": list(e.schema_path),
                     }
                 )
-        except jsonschema.ValidationError as e:
+        except Exception as e:
             errors.append({
                 "severity": ValidationSeverity.ERROR.value,
                 "type": "schema_validation",
                 "message": f"Schema validation failed: {e.message}",
-                "path": list(e.absolute_path),
-                "schema_path": list(e.schema_path)
-            })
-        except jsonschema.SchemaError as e:
-            errors.append({
-                "severity": ValidationSeverity.ERROR.value,
-                "type": "schema_error",
-                "message": f"Schema error: {e.message}",
-                "path": []
+                "path": [],
+                "schema_path": [],
             })
         
         return errors
