@@ -216,7 +216,16 @@ class AdminService(BaseService):
                     "SELECT valor FROM configuracion WHERE clave = 'system_reminder' AND activo = TRUE LIMIT 1"
                 )
             ).fetchone()
-            return {"active": bool(row), "message": row[0] if row else None}
+            if row and row[0]:
+                return {"active": True, "message": row[0]}
+
+            row2 = self.db.execute(
+                text("SELECT valor FROM configuracion WHERE clave = 'reminder_message' LIMIT 1")
+            ).fetchone()
+            msg = row2[0] if row2 and row2[0] is not None else None
+            if isinstance(msg, str) and msg.strip():
+                return {"active": True, "message": msg.strip()}
+            return {"active": False, "message": None}
         except:
             return {"active": False, "message": None}
 
@@ -224,6 +233,7 @@ class AdminService(BaseService):
         """Set system reminder."""
         try:
             updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            effective_msg = message if active else ""
             self.db.execute(
                 text(
                     "INSERT INTO configuracion (clave, valor, activo, updated_at) "
@@ -231,7 +241,16 @@ class AdminService(BaseService):
                     "ON CONFLICT (clave) DO UPDATE "
                     "SET valor = EXCLUDED.valor, activo = EXCLUDED.activo, updated_at = EXCLUDED.updated_at"
                 ),
-                {"msg": message, "act": active, "updated_at": updated_at},
+                {"msg": effective_msg, "act": active, "updated_at": updated_at},
+            )
+            self.db.execute(
+                text(
+                    "INSERT INTO configuracion (clave, valor, activo, updated_at) "
+                    "VALUES ('reminder_message', :msg, TRUE, :updated_at) "
+                    "ON CONFLICT (clave) DO UPDATE "
+                    "SET valor = EXCLUDED.valor, activo = TRUE, updated_at = EXCLUDED.updated_at"
+                ),
+                {"msg": effective_msg, "updated_at": updated_at},
             )
             self.db.commit()
             return True

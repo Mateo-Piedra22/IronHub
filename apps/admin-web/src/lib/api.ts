@@ -166,6 +166,17 @@ export interface TemplateRating {
     fecha: string;
 }
 
+export interface TemplateVersion {
+    id: number;
+    plantilla_id: number;
+    version: string;
+    configuracion: Record<string, unknown>;
+    descripcion?: string | null;
+    creada_por?: number | null;
+    fecha_creacion: string;
+    es_actual: boolean;
+}
+
 export interface Rutina {
     id: number;
     nombre: string;
@@ -205,6 +216,37 @@ export interface Gym {
     tenant_whatsapp_phone_id?: string | null;
     tenant_whatsapp_waba_id?: string | null;
     tenant_whatsapp_access_token_present?: boolean;
+}
+
+export interface TenantRoutineTemplate {
+    id: number;
+    nombre: string;
+    descripcion?: string | null;
+    categoria?: string | null;
+    dias_semana?: number | null;
+    activa: boolean;
+    publica: boolean;
+    version_actual?: string | null;
+    tags?: string[] | null;
+    fecha_creacion?: string | null;
+    fecha_actualizacion?: string | null;
+}
+
+export interface TenantRoutineTemplateAssignment {
+    assignment_id: number;
+    gimnasio_id: number;
+    plantilla_id: number;
+    activa: boolean;
+    prioridad: number;
+    notas?: string | null;
+    fecha_asignacion?: string | null;
+    nombre: string;
+    descripcion?: string | null;
+    categoria?: string | null;
+    dias_semana?: number | null;
+    publica: boolean;
+    version_actual?: string | null;
+    tags?: string[] | null;
 }
 
 export interface GymCreateInput {
@@ -553,24 +595,43 @@ async function request<T>(
     endpoint: string,
     options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
+    const timeoutMs = 15_000;
+    const controller = options.signal ? null : new AbortController();
+    const signal = options.signal ?? controller?.signal;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
     try {
         const res = await fetch(`${API_URL}${endpoint}`, {
             ...options,
             credentials: 'include',
+            signal,
             headers: {
                 ...options.headers,
             },
         });
 
-        const data = await res.json();
+        let data: any = null;
+        try {
+            data = await res.json();
+        } catch {
+            data = null;
+        }
 
         if (!res.ok) {
-            return { ok: false, error: data.error || data.detail || 'Request failed' };
+            const msg =
+                (data && (data.error || data.detail || data.message)) ||
+                `Request failed (${res.status})`;
+            return { ok: false, error: String(msg) };
         }
 
         return { ok: true, data };
-    } catch {
+    } catch (e) {
+        const msg = String(e || '');
+        if (msg.toLowerCase().includes('aborted')) {
+            return { ok: false, error: 'Request timeout' };
+        }
         return { ok: false, error: 'Network error' };
+    } finally {
+        if (timer) clearTimeout(timer);
     }
 }
 
@@ -615,6 +676,49 @@ export const api = {
     },
 
     getGym: (id: number) => request<Gym>(`/gyms/${id}`),
+
+    getGymRoutineTemplateCatalog: (gymId: number) =>
+        request<{ ok: boolean; gym_id: number; templates: TenantRoutineTemplate[]; error?: string }>(
+            `/api/gyms/${gymId}/routine-templates/catalog`
+        ),
+
+    getGymRoutineTemplateAssignments: (gymId: number) =>
+        request<{ ok: boolean; gym_id: number; assignments: TenantRoutineTemplateAssignment[]; error?: string }>(
+            `/api/gyms/${gymId}/routine-templates/assignments`
+        ),
+
+    assignGymRoutineTemplate: (
+        gymId: number,
+        payload: { template_id: number; activa?: boolean; prioridad?: number; notas?: string | null }
+    ) =>
+        request<{ ok: boolean; gym_id: number; assignment_id?: number; error?: string }>(
+            `/api/gyms/${gymId}/routine-templates/assign`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            }
+        ),
+
+    updateGymRoutineTemplateAssignment: (
+        gymId: number,
+        assignmentId: number,
+        payload: { activa?: boolean; prioridad?: number; notas?: string | null }
+    ) =>
+        request<{ ok: boolean; gym_id: number; assignment_id?: number; updated?: boolean; error?: string }>(
+            `/api/gyms/${gymId}/routine-templates/assignments/${assignmentId}`,
+            {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            }
+        ),
+
+    deleteGymRoutineTemplateAssignment: (gymId: number, assignmentId: number) =>
+        request<{ ok: boolean; gym_id: number; assignment_id?: number; deleted?: boolean; error?: string }>(
+            `/api/gyms/${gymId}/routine-templates/assignments/${assignmentId}`,
+            { method: 'DELETE' }
+        ),
 
     createGym: (data: GymCreateInput) => {
         const params = new URLSearchParams();
@@ -1634,6 +1738,22 @@ export const api = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config),
+        }),
+
+    // Template Versions
+    getTemplateVersions: (id: number) =>
+        request<{ success: boolean; versions: TemplateVersion[]; total: number }>(`/api/v1/templates/${id}/versions`),
+
+    createTemplateVersion: (id: number, data: { version?: string; descripcion?: string; configuracion: TemplateConfig }) =>
+        request<{ success: boolean; version: TemplateVersion; message?: string }>(`/api/v1/templates/${id}/versions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        }),
+
+    restoreTemplateVersion: (id: number, version: string) =>
+        request<{ success: boolean; message?: string }>(`/api/v1/templates/${id}/versions/${encodeURIComponent(version)}/restore`, {
+            method: 'POST',
         }),
 
     bulkUpdateTemplates: async (templateIds: number[], data: Partial<Template>) => {

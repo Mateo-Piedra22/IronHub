@@ -14,7 +14,6 @@ import {
     ChevronDown,
     ChevronRight,
     QrCode,
-    Settings2,
     FileDown,
     Power,
 } from 'lucide-react';
@@ -30,11 +29,10 @@ import {
 import { api, type Rutina, type Ejercicio, type Usuario } from '@/lib/api';
 import { formatDate, cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
-import { RoutineExerciseEditor } from '@/components/RoutineExerciseEditor';
 import { UnifiedRutinaEditor } from '@/components/UnifiedRutinaEditor';
 import { RutinaCreationWizard } from '@/components/RutinaCreationWizard';
 import { AssignRutinaModal } from '@/components/AssignRutinaModal';
-import { GymTemplateManager } from '@/components/GymTemplateManager';
+import { RutinaExportModal } from '@/components/RutinaExportModal';
 
 // Sidebar navigation
 const subtabs = [
@@ -157,18 +155,7 @@ function RutinaPreviewModal({ isOpen, onClose, rutina }: RutinaPreviewModalProps
 export default function RutinasPage() {
     const { success, error } = useToast();
     const { user } = useAuth();
-
-    // Gym context
-    const gymId = user?.sucursal_id ?? 0;
-    const [gymName, setGymName] = useState('Mi Gimnasio');
-
-    useEffect(() => {
-        api.getBootstrap('gestion').then(res => {
-            if (res.ok && res.data?.gym?.gym_name) {
-                setGymName(res.data.gym.gym_name);
-            }
-        }).catch(() => { });
-    }, []);
+    const gymId = 1;
 
     // State
     const [activeTab, setActiveTab] = useState<'plantillas' | 'asignadas'>('plantillas');
@@ -191,10 +178,10 @@ export default function RutinasPage() {
     // Preview
     const [previewOpen, setPreviewOpen] = useState(false);
     const [rutinaToPreview, setRutinaToPreview] = useState<Rutina | null>(null);
+    const [exportOpen, setExportOpen] = useState(false);
+    const [rutinaToExport, setRutinaToExport] = useState<Rutina | null>(null);
     const [deleteOpen, setDeleteOpen] = useState(false);
     const [rutinaToDelete, setRutinaToDelete] = useState<Rutina | null>(null);
-    const [exerciseEditorOpen, setExerciseEditorOpen] = useState(false);
-    const [rutinaForExercises, setRutinaForExercises] = useState<Rutina | null>(null);
 
     const openRutinaPreview = useCallback(async (r: Rutina) => {
         setLoading(true);
@@ -233,47 +220,41 @@ export default function RutinasPage() {
         }
     }, []);
 
-    const openExerciseEditor = useCallback(async (r: Rutina) => {
+    const openRutinaExport = useCallback(async (r: Rutina) => {
         setLoading(true);
         try {
             const resDetails = await api.getRutina(r.id);
             if (resDetails.ok && resDetails.data) {
-                setRutinaForExercises(resDetails.data);
+                setRutinaToExport(resDetails.data);
             } else {
-                setRutinaForExercises(r);
+                setRutinaToExport(r);
             }
-            setExerciseEditorOpen(true);
+            setExportOpen(true);
         } catch {
-            setRutinaForExercises(r);
-            setExerciseEditorOpen(true);
+            setRutinaToExport(r);
+            setExportOpen(true);
         } finally {
             setLoading(false);
         }
     }, []);
 
     // Load rutinas
-    const loadRutinas = useCallback(async () => {
+    const loadRutinas = useCallback(async (searchTerm?: string) => {
         setLoading(true);
         try {
             const res = await api.getRutinas({
                 plantillas: activeTab === 'plantillas',
+                search: (searchTerm || '').trim() || undefined,
             });
             if (res.ok && res.data) {
-                let items = res.data.rutinas;
-                if (search) {
-                    items = items.filter((r) =>
-                        r.nombre.toLowerCase().includes(search.toLowerCase()) ||
-                        r.categoria?.toLowerCase().includes(search.toLowerCase())
-                    );
-                }
-                setRutinas(items);
+                setRutinas(res.data.rutinas);
             }
         } catch {
             error('Error al cargar rutinas');
         } finally {
             setLoading(false);
         }
-    }, [activeTab, search, error]);
+    }, [activeTab, error]);
 
     // Load ejercicios
     useEffect(() => {
@@ -286,8 +267,11 @@ export default function RutinasPage() {
     }, []);
 
     useEffect(() => {
-        loadRutinas();
-    }, [loadRutinas]);
+        const t = setTimeout(() => {
+            void loadRutinas(search);
+        }, 250);
+        return () => clearTimeout(t);
+    }, [loadRutinas, search]);
 
     // CSV Export
     const exportToCSV = () => {
@@ -324,7 +308,7 @@ export default function RutinasPage() {
             const res = await api.deleteRutina(rutinaToDelete.id);
             if (res.ok) {
                 success('Rutina eliminada');
-                loadRutinas();
+                loadRutinas(search);
             } else {
                 error(res.error || 'Error al eliminar');
             }
@@ -347,7 +331,7 @@ export default function RutinasPage() {
             const res = await api.duplicateRutina(rutina.id);
             if (res.ok) {
                 success('Rutina duplicada');
-                loadRutinas();
+                loadRutinas(search);
             } else {
                 error(res.error || 'Error al duplicar');
             }
@@ -364,7 +348,7 @@ export default function RutinasPage() {
             const res = await api.toggleRutinaActiva(rutina.id);
             if (res.ok && res.data) {
                 success(res.data.activa ? 'Rutina activada' : 'Rutina desactivada');
-                loadRutinas();
+                loadRutinas(search);
             } else {
                 error('Error al cambiar estado');
             }
@@ -391,22 +375,20 @@ export default function RutinasPage() {
         setAssignModalOpen(false);
         setLoading(true);
         try {
-            // Get full template details first
-            const resDetails = await api.getRutina(template.id);
-            if (!resDetails.ok || !resDetails.data) throw new Error('Error cargando plantilla');
-
-            const fullTemplate = resDetails.data;
-
-            setRutinaToEdit({
-                ...fullTemplate,
-                id: 0,
-                usuario_id: user.id,
-                usuario_nombre: user.nombre,
-                es_plantilla: false,
-                activa: true,
-            });
+            const assigned = await api.assignRutina(template.id, user.id);
+            const newId = assigned.ok ? assigned.data?.id : null;
+            if (!newId) {
+                error(assigned.error || 'No se pudo asignar');
+                return;
+            }
+            const resDetails = await api.getRutina(newId);
+            if (resDetails.ok && resDetails.data) {
+                setRutinaToEdit(resDetails.data);
+            } else {
+                setRutinaToEdit({ id: newId } as Rutina);
+            }
             setEditorOpen(true);
-            success(`Completa la asignación para ${user.nombre}`);
+            success(`Rutina asignada a ${user.nombre}`);
 
         } catch (e) {
             error('Error preparando asignación');
@@ -504,23 +486,12 @@ export default function RutinasPage() {
                     >
                         <Power className="w-4 h-4" />
                     </button>
-                    <a
-                        href={api.getRutinaPdfUrl(row.id)}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                    <button
+                        onClick={() => openRutinaExport(row)}
                         className="p-2 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                        title="Descargar PDF"
+                        title="Exportar PDF"
                     >
                         <FileDown className="w-4 h-4" />
-                    </a>
-                    <button
-                        onClick={() => {
-                            openExerciseEditor(row);
-                        }}
-                        className="p-2 rounded-lg text-slate-400 hover:text-primary-400 hover:bg-primary-500/10 transition-colors"
-                        title="Configurar Ejercicios"
-                    >
-                        <Settings2 className="w-4 h-4" />
                     </button>
                     <button
                         onClick={() => openRutinaPreview(row)}
@@ -599,7 +570,7 @@ export default function RutinasPage() {
                         leftIcon={<Plus className="w-4 h-4" />}
                         onClick={handleNewRutina}
                     >
-                        Nueva Plantilla
+                        {activeTab === 'plantillas' ? 'Nueva Plantilla' : 'Nueva Rutina'}
                     </Button>
                 </div>
             </motion.div>
@@ -660,20 +631,6 @@ export default function RutinasPage() {
                 />
             </motion.div>
 
-            {/* Gym Template Manager - Solo para plantillas */}
-            {activeTab === 'plantillas' && (
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.3 }}
-                >
-                    <GymTemplateManager
-                        gymId={gymId}
-                        gymName={gymName}
-                    />
-                </motion.div>
-            )}
-
             {/* Unified Editor Modal */}
             <UnifiedRutinaEditor
                 isOpen={editorOpen}
@@ -685,8 +642,9 @@ export default function RutinasPage() {
                 }}
                 rutina={rutinaToEdit}
                 isPlantilla={rutinaToEdit?.es_plantilla || activeTab === 'plantillas'}
+                gymId={gymId}
                 onSuccess={() => {
-                    loadRutinas();
+                    loadRutinas(search);
                     setWizardOpen(false);
                 }}
             />
@@ -695,9 +653,37 @@ export default function RutinasPage() {
             <RutinaCreationWizard
                 isOpen={wizardOpen}
                 onClose={() => setWizardOpen(false)}
-                onProceed={(data) => {
-                    setRutinaToEdit(data as Rutina);
-                    setEditorOpen(true);
+                onProceed={async (data) => {
+                    setWizardOpen(false);
+                    setLoading(true);
+                    try {
+                        if (data.template_id) {
+                            const assigned = await api.assignRutina(Number(data.template_id), Number(data.usuario_id));
+                            const newId = assigned.ok ? assigned.data?.id : null;
+                            if (!newId) {
+                                error(assigned.error || 'No se pudo asignar');
+                                return;
+                            }
+                            const resDetails = await api.getRutina(newId);
+                            if (resDetails.ok && resDetails.data) {
+                                setRutinaToEdit(resDetails.data);
+                            } else {
+                                setRutinaToEdit({ id: newId } as Rutina);
+                            }
+                            setEditorOpen(true);
+                            return;
+                        }
+
+                        setRutinaToEdit({
+                            usuario_id: data.usuario_id,
+                            usuario_nombre: data.usuario_nombre || undefined,
+                            es_plantilla: false,
+                            activa: true,
+                        } as Rutina);
+                        setEditorOpen(true);
+                    } finally {
+                        setLoading(false);
+                    }
                 }}
             />
 
@@ -722,6 +708,16 @@ export default function RutinasPage() {
                 rutina={rutinaToPreview}
             />
 
+            <RutinaExportModal
+                isOpen={exportOpen}
+                onClose={() => {
+                    setExportOpen(false);
+                    setRutinaToExport(null);
+                }}
+                rutina={rutinaToExport}
+                gymId={gymId}
+            />
+
             {/* Delete Confirm */}
             <ConfirmModal
                 isOpen={deleteOpen}
@@ -735,60 +731,6 @@ export default function RutinasPage() {
                 confirmText="Eliminar"
                 variant="danger"
             />
-
-            {/* Exercise Editor Modal */}
-            {exerciseEditorOpen && rutinaForExercises && (
-                <Modal
-                    isOpen={exerciseEditorOpen}
-                    onClose={() => {
-                        setExerciseEditorOpen(false);
-                        setRutinaForExercises(null);
-                    }}
-                    title={`Ejercicios: ${rutinaForExercises.nombre}`}
-                    size="full"
-                >
-                    <RoutineExerciseEditor
-                        rutinaId={rutinaForExercises.id}
-                        initialDays={
-                            (rutinaForExercises.dias?.length || 0) > 0
-                                ? rutinaForExercises.dias.map((d) => ({
-                                    dayNumber: d.numero,
-                                    dayName: d.nombre || '',
-                                    exercises: d.ejercicios,
-                                }))
-                                : [1, 2, 3, 4, 5].map((n) => ({
-                                    dayNumber: n,
-                                    dayName: `Día ${n}`,
-                                    exercises: [],
-                                }))
-                        }
-                        availableExercises={ejercicios}
-                        onSave={async (days) => {
-                            // Convert back to API format and save
-                            const diasPayload = days.map((d) => ({
-                                numero: d.dayNumber,
-                                nombre: d.dayName,
-                                ejercicios: d.exercises.map((e, idx) => ({
-                                    ejercicio_id: e.ejercicio_id,
-                                    series: e.series,
-                                    repeticiones: e.repeticiones,
-                                    descanso: e.descanso,
-                                    notas: e.notas,
-                                    orden: idx,
-                                })),
-                            }));
-                            await api.updateRutina(rutinaForExercises.id, { dias: diasPayload });
-                            loadRutinas();
-                            setExerciseEditorOpen(false);
-                            setRutinaForExercises(null);
-                        }}
-                        onClose={() => {
-                            setExerciseEditorOpen(false);
-                            setRutinaForExercises(null);
-                        }}
-                    />
-                </Modal>
-            )}
         </div>
     );
 }

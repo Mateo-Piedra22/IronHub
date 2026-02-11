@@ -10,13 +10,14 @@ interface RutinaExportModalProps {
     isOpen: boolean;
     onClose: () => void;
     rutina: Rutina | null;
+    gymId?: number;
 }
 
 type QRPlacement = "inline" | "sheet" | "none";
 
-export function RutinaExportModal({ isOpen, onClose, rutina }: RutinaExportModalProps) {
+export function RutinaExportModal({ isOpen, onClose, rutina, gymId }: RutinaExportModalProps) {
     const [filename, setFilename] = useState("");
-    const [weeks, setWeeks] = useState("4");
+    const [weeks, setWeeks] = useState("1");
     const [qrPlacement, setQrPlacement] = useState<QRPlacement>("inline");
     const [loading, setLoading] = useState(false);
     const [useTemplate, setUseTemplate] = useState(false);
@@ -31,6 +32,25 @@ export function RutinaExportModal({ isOpen, onClose, rutina }: RutinaExportModal
         const extension = "pdf";
         const safeName = (rutina.nombre || "rutina").replace(/[^a-zA-Z0-9]/g, "_");
         setFilename((prev) => prev || `${safeName}.${extension}`);
+        setWeeks("1");
+    }, [isOpen, rutina]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        if (!rutina) return;
+        const pid = Number((rutina as unknown as Record<string, unknown>).plantilla_id ?? (rutina as any).plantilla_id ?? 0);
+        if (!pid) {
+            setSelectedTemplate(null);
+            setUseTemplate(false);
+            return;
+        }
+        (async () => {
+            const res = await api.getTemplate(pid);
+            if (res.ok && res.data?.success && res.data.template) {
+                setSelectedTemplate(res.data.template);
+                setUseTemplate(true);
+            }
+        })();
     }, [isOpen, rutina]);
 
     const handleExport = useCallback(async () => {
@@ -181,17 +201,18 @@ export function RutinaExportModal({ isOpen, onClose, rutina }: RutinaExportModal
                     {/* Weeks */}
                     <div>
                         <label className="block text-sm font-medium text-slate-300 mb-2">
-                            Semanas a exportar
+                            Semana a exportar
                         </label>
                         <Select
                             value={weeks}
                             onChange={(e) => setWeeks(e.target.value)}
-                            options={[
-                                { value: "1", label: "1 semana" },
-                                { value: "2", label: "2 semanas" },
-                                { value: "3", label: "3 semanas" },
-                                { value: "4", label: "4 semanas" },
-                            ]}
+                            options={Array.from(
+                                { length: Math.max(1, Math.min(Number(rutina.semanas || 4) || 4, 12)) },
+                                (_, i) => {
+                                    const n = i + 1;
+                                    return { value: String(n), label: `Semana ${n}` };
+                                }
+                            )}
                         />
                     </div>
 
@@ -223,6 +244,7 @@ export function RutinaExportModal({ isOpen, onClose, rutina }: RutinaExportModal
                 onClose={() => setShowTemplateSelection(false)}
                 onTemplateSelect={handleTemplateSelect}
                 rutina={rutina}
+                gymId={gymId}
             />
         </>
     );

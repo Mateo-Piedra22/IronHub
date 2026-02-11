@@ -9,6 +9,7 @@ import uuid
 import threading
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+from datetime import datetime
 
 from fastapi import (
     APIRouter,
@@ -21,11 +22,14 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 
 # Services
 from src.dependencies import (
+    get_admin_db,
+    get_claims,
     require_gestion_access,
     require_owner,
     require_sucursal_selected,
@@ -110,7 +114,11 @@ def _cleanup_file(path: str) -> None:
         pass
 
 
-def _build_rutina_pdf_data(rutina_data: Dict[str, Any], user_override: Optional[str] = None) -> Dict[str, Any]:
+def _build_rutina_pdf_data(
+    rutina_data: Dict[str, Any],
+    user_override: Optional[str] = None,
+    current_week: int = 1,
+) -> Dict[str, Any]:
     try:
         usuario_nombre = str(user_override or rutina_data.get("usuario_nombre") or "").strip() or "Usuario"
     except Exception:
@@ -158,7 +166,7 @@ def _build_rutina_pdf_data(rutina_data: Dict[str, Any], user_override: Optional[
         },
         "usuario_nombre": usuario_nombre,
         "dias": dias_out,
-        "current_week": 1,
+        "current_week": int(current_week or 1),
     }
     try:
         out["gym_name"] = get_gym_name()
@@ -2239,10 +2247,12 @@ async def api_rutinas_create(
                 "descripcion": payload.get("descripcion"),
                 "usuario_id": usuario_id,
                 "dias_semana": payload.get("dias_semana") or 1,
+                "semanas": payload.get("semanas") or 4,
                 "categoria": payload.get("categoria") or "general",
                 "activa": True,
                 "sucursal_id": sucursal_for_new,
                 "creada_por_usuario_id": creada_por_usuario_id,
+                "plantilla_id": payload.get("plantilla_id"),
             }
         )
 
@@ -2367,7 +2377,19 @@ async def api_rutina_export_pdf(
         pdf_filename = _sanitize_download_filename(
             filename, f"rutina_{rutina_id}", ".pdf"
         )
-        data = _build_rutina_pdf_data(rutina_data, user_override=user_override)
+        try:
+            semanas_total = int(rutina_data.get("semanas") or 4)
+        except Exception:
+            semanas_total = 4
+        semanas_total = max(1, min(semanas_total, 12))
+        try:
+            current_week = int(weeks or 1)
+        except Exception:
+            current_week = 1
+        current_week = max(1, min(current_week, semanas_total))
+        data = _build_rutina_pdf_data(
+            rutina_data, user_override=user_override, current_week=current_week
+        )
         effective_template_id = template_id
         if effective_template_id is None:
             try:
@@ -2649,6 +2671,12 @@ async def api_rutina_assign(
             sucursal_id = None
         payload = await request.json()
         usuario_id = payload.get("usuario_id")
+        try:
+            usuario_id = int(usuario_id)
+        except Exception:
+            usuario_id = None
+        if not usuario_id:
+            raise HTTPException(status_code=400, detail="usuario_id requerido")
 
         rutina_origen = svc.obtener_rutina_detalle(rutina_id, sucursal_id=sucursal_id)
         if not rutina_origen:
@@ -2660,9 +2688,11 @@ async def api_rutina_assign(
             "descripcion": rutina_origen["descripcion"],
             "usuario_id": usuario_id,
             "dias_semana": rutina_origen["dias_semana"],
+            "semanas": rutina_origen.get("semanas") or 4,
             "categoria": rutina_origen["categoria"],
             "activa": True,
             "sucursal_id": sucursal_id,
+            "plantilla_id": rutina_origen.get("plantilla_id"),
         }
         new_id = svc.crear_rutina(new_data)
         if new_id:
@@ -2733,13 +2763,66 @@ async def api_rutina_assign(
 
 
 @router.get("/api/maintenance_status")
-async def api_maintenance_status():
-    return {"maintenance": False}
+async def api_maintenance_status(request: Request, db: Session = Depends(get_admin_db)):
+    claims = get_claims(request)
+    tenant = str(claims.get("tenant") or "").strip().lower()
+    if not tenant:
+        raise HTTPException(status_code=400, detail="Tenant inválido")
+    row = db.execute(
+        text(
+            "SELECT status, suspended_reason, suspended_until FROM gyms WHERE LOWER(subdominio) = :t LIMIT 1"
+        ),
+        {"t": tenant},
+    ).mappings().first()
+    if not row:
+        return {"maintenance": False}
+    is_maintenance = str(row.get("status") or "").strip().lower() == "maintenance"
+    until = row.get("suspended_until")
+    if is_maintenance and until is not None:
+        try:
+            if hasattr(until, "timestamp") and until <= datetime.utcnow():
+                is_maintenance = False
+        except Exception:
+            pass
+    msg = str(row.get("suspended_reason") or "").strip() if is_maintenance else ""
+    return {
+        "maintenance": bool(is_maintenance),
+        "message": msg or None,
+        "until": until.isoformat() if hasattr(until, "isoformat") else None,
+    }
 
 
 @router.get("/api/suspension_status")
-async def api_suspension_status():
-    return {"suspended": False}
+async def api_suspension_status(request: Request, db: Session = Depends(get_admin_db)):
+    claims = get_claims(request)
+    tenant = str(claims.get("tenant") or "").strip().lower()
+    if not tenant:
+        raise HTTPException(status_code=400, detail="Tenant inválido")
+    row = db.execute(
+        text(
+            "SELECT status, suspended_reason, suspended_until, hard_suspend FROM gyms WHERE LOWER(subdominio) = :t LIMIT 1"
+        ),
+        {"t": tenant},
+    ).mappings().first()
+    if not row:
+        return {"suspended": False}
+    status = str(row.get("status") or "").strip().lower()
+    is_suspended = status == "suspended"
+    until = row.get("suspended_until")
+    if is_suspended and until is not None:
+        try:
+            if hasattr(until, "timestamp") and until <= datetime.utcnow():
+                is_suspended = False
+        except Exception:
+            pass
+    msg = str(row.get("suspended_reason") or "").strip() if is_suspended else ""
+    hard = bool(row.get("hard_suspend")) if is_suspended else False
+    return {
+        "suspended": bool(is_suspended),
+        "reason": msg or None,
+        "until": until.isoformat() if hasattr(until, "isoformat") else None,
+        "hard": bool(hard),
+    }
 
 
 # --- QR Access Endpoints ---

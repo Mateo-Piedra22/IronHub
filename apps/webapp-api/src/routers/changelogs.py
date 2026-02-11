@@ -151,6 +151,8 @@ async def api_changelog_status(
         if not _modules_enabled(modules, r.get("audience_modules")):
             continue
         min_v = str(r.get("min_app_version") or "").strip()
+        if min_v and not app_ver:
+            continue
         if min_v and app_ver and not _version_gte(app_ver, min_v):
             continue
         latest = r
@@ -233,6 +235,8 @@ async def api_changelog_list(
         if not _modules_enabled(modules, r.get("audience_modules")):
             continue
         min_v = str(r.get("min_app_version") or "").strip()
+        if min_v and not app_ver:
+            continue
         if min_v and app_ver and not _version_gte(app_ver, min_v):
             continue
         filtered.append(_row_to_dict(dict(r)))

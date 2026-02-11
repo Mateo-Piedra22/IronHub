@@ -833,6 +833,7 @@ class Rutina(Base):
     nombre_rutina: Mapped[str] = mapped_column(String(255), nullable=False)
     descripcion: Mapped[Optional[str]] = mapped_column(Text)
     dias_semana: Mapped[Optional[int]] = mapped_column(Integer)
+    semanas: Mapped[Optional[int]] = mapped_column(Integer, server_default="4")
     categoria: Mapped[Optional[str]] = mapped_column(
         String(100), server_default="general"
     )
@@ -867,6 +868,7 @@ class Rutina(Base):
         Index("idx_rutinas_creada_por_usuario_id", "creada_por_usuario_id"),
         Index("idx_rutinas_sucursal_id", "sucursal_id"),
         Index("idx_rutinas_plantilla_id", "plantilla_id"),
+        Index("idx_rutinas_semanas", "semanas"),
     )
 
 

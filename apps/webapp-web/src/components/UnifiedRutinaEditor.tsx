@@ -37,8 +37,9 @@ import {
     ArrowDown,
 } from 'lucide-react';
 import { Button, Modal, Select, Input, Textarea, useToast } from '@/components/ui';
-import { api, type Ejercicio, type EjercicioRutina, type Rutina } from '@/lib/api';
+import { api, type Ejercicio, type EjercicioRutina, type Rutina, type Template } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import TemplateSelectionModal from '@/components/TemplateSelectionModal';
 
 // ============================
 // Types
@@ -64,6 +65,7 @@ interface UnifiedRutinaEditorProps {
     rutina?: Rutina | null;
     isPlantilla: boolean;
     onSuccess: () => void;
+    gymId?: number;
 }
 
 // ============================
@@ -227,9 +229,10 @@ function ExerciseEditorPanel({
     onMoveDown,
     onDuplicate,
 }: ExerciseEditorPanelProps) {
+    const MAX_WEEKS = 12;
     const [formData, setFormData] = useState({
-        series: ['', '', '', ''],
-        repeticiones: ['', '', '', ''],
+        series: Array.from({ length: MAX_WEEKS }, () => ''),
+        repeticiones: Array.from({ length: MAX_WEEKS }, () => ''),
         orden: 1,
         dia: 1,
     });
@@ -238,17 +241,16 @@ function ExerciseEditorPanel({
         if (exercise) {
             const seriesArr = (exercise.series?.toString() || '3').split(',').map(s => s.trim());
             const repsArr = (exercise.repeticiones?.toString() || '10').split(',').map(s => s.trim());
-            // Pad arrays to 4 elements
-            while (seriesArr.length < 4) seriesArr.push(seriesArr[seriesArr.length - 1] || '');
-            while (repsArr.length < 4) repsArr.push(repsArr[repsArr.length - 1] || '');
+            while (seriesArr.length < MAX_WEEKS) seriesArr.push(seriesArr[seriesArr.length - 1] || '');
+            while (repsArr.length < MAX_WEEKS) repsArr.push(repsArr[repsArr.length - 1] || '');
             setFormData({
-                series: seriesArr.slice(0, 4),
-                repeticiones: repsArr.slice(0, 4),
+                series: seriesArr.slice(0, MAX_WEEKS),
+                repeticiones: repsArr.slice(0, MAX_WEEKS),
                 orden: exercise.orden || 1,
                 dia: exercise.dia || 1,
             });
         }
-    }, [exercise]);
+    }, [exercise, MAX_WEEKS]);
 
     const handleSave = () => {
         // Only include weeks that are needed
@@ -393,6 +395,7 @@ export function UnifiedRutinaEditor({
     rutina,
     isPlantilla,
     onSuccess,
+    gymId,
 }: UnifiedRutinaEditorProps) {
     const { success, error } = useToast();
 
@@ -402,6 +405,9 @@ export function UnifiedRutinaEditor({
     const [categoria, setCategoria] = useState('general');
     const [diasSemana, setDiasSemana] = useState(3);
     const [semanas, setSemanas] = useState(4);
+    const [plantillaId, setPlantillaId] = useState<number | null>(null);
+    const [plantillaTemplate, setPlantillaTemplate] = useState<Template | null>(null);
+    const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
 
     // Days and exercises
     const [days, setDays] = useState<DayExercises[]>([]);
@@ -446,7 +452,8 @@ export function UnifiedRutinaEditor({
                 setDescripcion(rutina.descripcion || '');
                 setCategoria(rutina.categoria || 'general');
                 setDiasSemana(rutina.dias?.length || 3);
-                setSemanas(4); // Default
+                setSemanas(Number(rutina.semanas || 4) || 4);
+                setPlantillaId(rutina.plantilla_id ?? null);
 
                 // Convert rutina.dias to DayExercises[]
                 const daysData: DayExercises[] = (rutina.dias || []).map((d) => {
@@ -480,6 +487,8 @@ export function UnifiedRutinaEditor({
                 setCategoria('general');
                 setDiasSemana(3);
                 setSemanas(4);
+                setPlantillaId(null);
+                setPlantillaTemplate(null);
                 setDays([
                     { dayNumber: 1, dayName: '', exercises: [] },
                     { dayNumber: 2, dayName: '', exercises: [] },
@@ -488,6 +497,20 @@ export function UnifiedRutinaEditor({
             }
         }
     }, [isOpen, rutina, diasSemana, loadEjercicios]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        if (!plantillaId) {
+            setPlantillaTemplate(null);
+            return;
+        }
+        (async () => {
+            const res = await api.getTemplate(plantillaId);
+            if (res.ok && res.data?.success && res.data.template) {
+                setPlantillaTemplate(res.data.template);
+            }
+        })();
+    }, [isOpen, plantillaId]);
 
     // Update days when diasSemana changes
     useEffect(() => {
@@ -729,6 +752,8 @@ export function UnifiedRutinaEditor({
                 descripcion,
                 categoria,
                 dias_semana: diasSemana,
+                semanas,
+                plantilla_id: plantillaId,
                 es_plantilla: isPlantilla,
                 activa: true,
                 dias: days.map(d => ({
@@ -753,7 +778,7 @@ export function UnifiedRutinaEditor({
             }
 
             if (res.ok) {
-                success(rutina ? 'Rutina actualizada' : 'Rutina creada');
+                success(rutina?.id ? 'Rutina actualizada' : 'Rutina creada');
                 onSuccess();
                 onClose();
             } else {
@@ -775,7 +800,7 @@ export function UnifiedRutinaEditor({
             <Modal
                 isOpen={isOpen}
                 onClose={onClose}
-                title={rutina ? 'Editar Rutina' : (isPlantilla ? 'Nueva Plantilla' : 'Nueva Rutina')}
+                title={rutina?.id ? 'Editar Rutina' : (isPlantilla ? 'Nueva Plantilla' : 'Nueva Rutina')}
                 size="xl"
                 className="!max-w-[95vw] !max-h-[95vh]"
                 footer={
@@ -808,10 +833,13 @@ export function UnifiedRutinaEditor({
                                         value={diasSemana.toString()}
                                         onChange={(e) => setDiasSemana(Number(e.target.value))}
                                         options={[
+                                            { value: '1', label: '1 día' },
                                             { value: '2', label: '2 días' },
                                             { value: '3', label: '3 días' },
                                             { value: '4', label: '4 días' },
                                             { value: '5', label: '5 días' },
+                                            { value: '6', label: '6 días' },
+                                            { value: '7', label: '7 días' },
                                         ]}
                                     />
                                     <Select
@@ -823,6 +851,14 @@ export function UnifiedRutinaEditor({
                                             { value: '2', label: '2 semanas' },
                                             { value: '3', label: '3 semanas' },
                                             { value: '4', label: '4 semanas' },
+                                            { value: '5', label: '5 semanas' },
+                                            { value: '6', label: '6 semanas' },
+                                            { value: '7', label: '7 semanas' },
+                                            { value: '8', label: '8 semanas' },
+                                            { value: '9', label: '9 semanas' },
+                                            { value: '10', label: '10 semanas' },
+                                            { value: '11', label: '11 semanas' },
+                                            { value: '12', label: '12 semanas' },
                                         ]}
                                     />
                                 </div>
@@ -849,6 +885,40 @@ export function UnifiedRutinaEditor({
                                         { value: 'fullbody', label: 'Full Body' },
                                     ]}
                                 />
+                            </div>
+                            <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-3 flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                    <div className="text-xs text-slate-400">Template de exportación</div>
+                                    <div className="text-sm text-white truncate">
+                                        {plantillaTemplate?.nombre || (plantillaId ? `Template #${plantillaId}` : "Sin template")}
+                                    </div>
+                                    <div className="text-xs text-slate-500">
+                                        {plantillaTemplate?.categoria
+                                            ? `${plantillaTemplate.categoria}${plantillaTemplate.dias_semana ? ` • ${plantillaTemplate.dias_semana} días` : ""}`
+                                            : "Se usa el default del gimnasio o del sistema al exportar"}
+                                    </div>
+                                </div>
+                                <div className="flex gap-2">
+                                    {plantillaId && (
+                                        <Button
+                                            variant="secondary"
+                                            size="sm"
+                                            onClick={() => {
+                                                setPlantillaId(null);
+                                                setPlantillaTemplate(null);
+                                            }}
+                                        >
+                                            Quitar
+                                        </Button>
+                                    )}
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={() => setTemplatePickerOpen(true)}
+                                    >
+                                        {plantillaId ? "Cambiar" : "Elegir"}
+                                    </Button>
+                                </div>
                             </div>
                         </div>
 
@@ -982,6 +1052,21 @@ export function UnifiedRutinaEditor({
                     </div>
                 </div>
             </Modal>
+
+            <TemplateSelectionModal
+                isOpen={templatePickerOpen}
+                onClose={() => setTemplatePickerOpen(false)}
+                onTemplateSelect={(t) => {
+                    setPlantillaId(t.id);
+                    setPlantillaTemplate(t);
+                    const hasExercises = days.some((d) => (d.exercises || []).length > 0);
+                    if (!hasExercises && t.dias_semana && Number.isFinite(t.dias_semana)) {
+                        setDiasSemana(Number(t.dias_semana));
+                    }
+                }}
+                rutina={rutina}
+                gymId={gymId}
+            />
 
             {/* Floating Exercise Editor */}
             <AnimatePresence>

@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 from src.database.raw_manager import RawPostgresManager
 from src.services.admin_service import AdminService
 from src.routers.payments import router as payments_router
+from src.routers.routine_templates import router as routine_templates_router
 from src.secure_config import SecureConfig
 from src.security_utils import SecurityUtils
 
@@ -73,6 +74,7 @@ app = FastAPI(
 
 # Include routers
 app.include_router(payments_router)
+app.include_router(routine_templates_router)
 
 # CORS
 origins_str = os.getenv("ALLOWED_ORIGINS", "")

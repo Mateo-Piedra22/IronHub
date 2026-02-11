@@ -8,9 +8,9 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { api, type Gym, type WhatsAppConfig, type Payment, type WhatsAppTemplateCatalogItem, type FeatureFlags, type GymBranch, type GymTipoClaseItem, type GymTipoCuotaItem, type TipoCuotaEntitlementsUpdate, type GymBranchCreateInput, type GymBranchUpdateInput, type GymOnboardingStatus, type TenantMigrationStatus } from '@/lib/api';
+import { api, type Gym, type WhatsAppConfig, type Payment, type WhatsAppTemplateCatalogItem, type FeatureFlags, type GymBranch, type GymTipoClaseItem, type GymTipoCuotaItem, type TipoCuotaEntitlementsUpdate, type GymBranchCreateInput, type GymBranchUpdateInput, type GymOnboardingStatus, type TenantMigrationStatus, type TenantRoutineTemplate, type TenantRoutineTemplateAssignment } from '@/lib/api';
 
-type Section = 'onboarding' | 'subscription' | 'branches' | 'payments' | 'whatsapp' | 'maintenance' | 'attendance' | 'modules' | 'entitlements' | 'branding' | 'health' | 'password';
+type Section = 'onboarding' | 'subscription' | 'branches' | 'payments' | 'whatsapp' | 'maintenance' | 'attendance' | 'modules' | 'routine_templates' | 'entitlements' | 'branding' | 'health' | 'password';
 
 const BRANCH_CODE_RE = /^[a-z0-9][a-z0-9_-]{1,39}$/;
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
@@ -63,6 +63,13 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
     const [tenantMigration, setTenantMigration] = useState<TenantMigrationStatus | null>(null);
     const [tenantMigrationLoading, setTenantMigrationLoading] = useState(false);
     const [tenantProvisioning, setTenantProvisioning] = useState(false);
+    const [routineTemplatesLoading, setRoutineTemplatesLoading] = useState(false);
+    const [routineTemplatesCatalog, setRoutineTemplatesCatalog] = useState<TenantRoutineTemplate[]>([]);
+    const [routineTemplateAssignments, setRoutineTemplateAssignments] = useState<TenantRoutineTemplateAssignment[]>([]);
+    const [assignTemplateId, setAssignTemplateId] = useState<number>(0);
+    const [assignTemplatePriority, setAssignTemplatePriority] = useState<number>(0);
+    const [assignTemplateNotes, setAssignTemplateNotes] = useState<string>('');
+    const [assignTemplateActive, setAssignTemplateActive] = useState<boolean>(true);
     const normalizeBranchCode = (v: string) =>
         String(v || '')
             .trim()
@@ -437,6 +444,24 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         }
     };
 
+    const reloadRoutineTemplates = useCallback(async () => {
+        setRoutineTemplatesLoading(true);
+        try {
+            const [catRes, asgRes] = await Promise.all([
+                api.getGymRoutineTemplateCatalog(gymId),
+                api.getGymRoutineTemplateAssignments(gymId),
+            ]);
+            if (catRes.ok && catRes.data?.ok) {
+                setRoutineTemplatesCatalog(catRes.data.templates || []);
+            }
+            if (asgRes.ok && asgRes.data?.ok) {
+                setRoutineTemplateAssignments(asgRes.data.assignments || []);
+            }
+        } finally {
+            setRoutineTemplatesLoading(false);
+        }
+    }, [gymId]);
+
     const setProductionReady = async (ready: boolean) => {
         setProdReadySaving(true);
         try {
@@ -734,6 +759,11 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         if (!entTipoCuotaId) return;
         void loadTipoCuotaEntitlements(entTipoCuotaId);
     }, [activeSection, entTipoCuotaId, loadTipoCuotaEntitlements]);
+
+    useEffect(() => {
+        if (activeSection !== 'routine_templates') return;
+        void reloadRoutineTemplates();
+    }, [activeSection, reloadRoutineTemplates]);
 
     const saveTipoCuotaEntitlements = async () => {
         if (!entTipoCuotaId) return;
@@ -1345,6 +1375,7 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
         { id: 'maintenance', name: 'Mantenimiento', icon: Wrench },
         { id: 'attendance', name: 'Asistencias', icon: Activity },
         { id: 'modules', name: 'Módulos', icon: Activity },
+        { id: 'routine_templates', name: 'Rutinas / Templates', icon: FileText },
         { id: 'entitlements', name: 'Accesos', icon: Key },
         { id: 'branding', name: 'Branding', icon: Palette },
         { id: 'health', name: 'Salud', icon: FileText },
@@ -2886,6 +2917,230 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                                 })}
                             </div>
                         )}
+                    </div>
+                )}
+
+                {activeSection === 'routine_templates' && (
+                    <div className="space-y-6">
+                        <div className="flex items-center justify-between gap-3">
+                            <h2 className="text-lg font-semibold text-white">Rutinas / Templates</h2>
+                            <button
+                                onClick={() => void reloadRoutineTemplates()}
+                                disabled={routineTemplatesLoading}
+                                className="btn-secondary flex items-center gap-2"
+                            >
+                                {routineTemplatesLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Actualizar'}
+                            </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                            <div className="p-4 bg-slate-800/50 rounded-lg border border-slate-700 space-y-3">
+                                <div className="text-white font-medium">Asignar template al gimnasio</div>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                    <div className="md:col-span-2">
+                                        <label className="label">Template</label>
+                                        <select
+                                            className="input"
+                                            value={assignTemplateId ? String(assignTemplateId) : ''}
+                                            onChange={(e) => setAssignTemplateId(Number(e.target.value) || 0)}
+                                        >
+                                            <option value="">Seleccionar…</option>
+                                            {routineTemplatesCatalog.map((t) => (
+                                                <option key={t.id} value={String(t.id)}>
+                                                    {t.nombre} {t.dias_semana ? `(${t.dias_semana} días)` : ''}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="label">Prioridad</label>
+                                        <input
+                                            className="input"
+                                            type="number"
+                                            value={String(assignTemplatePriority)}
+                                            onChange={(e) => setAssignTemplatePriority(Number(e.target.value) || 0)}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="label">Notas</label>
+                                    <input
+                                        className="input"
+                                        value={assignTemplateNotes}
+                                        onChange={(e) => setAssignTemplateNotes(e.target.value)}
+                                        placeholder="Opcional"
+                                    />
+                                </div>
+                                <div className="flex items-center justify-between gap-3">
+                                    <label className="flex items-center gap-2 text-slate-300 text-sm">
+                                        <input
+                                            type="checkbox"
+                                            checked={assignTemplateActive}
+                                            onChange={(e) => setAssignTemplateActive(Boolean(e.target.checked))}
+                                        />
+                                        Activo
+                                    </label>
+                                    <button
+                                        className="btn-primary flex items-center gap-2"
+                                        disabled={routineTemplatesLoading || !assignTemplateId}
+                                        onClick={async () => {
+                                            if (!assignTemplateId) return;
+                                            setRoutineTemplatesLoading(true);
+                                            try {
+                                                const res = await api.assignGymRoutineTemplate(gymId, {
+                                                    template_id: assignTemplateId,
+                                                    activa: assignTemplateActive,
+                                                    prioridad: assignTemplatePriority,
+                                                    notas: assignTemplateNotes ? assignTemplateNotes : null,
+                                                });
+                                                if (res.ok && res.data?.ok) {
+                                                    showMessage('Template asignado');
+                                                    setAssignTemplateId(0);
+                                                    setAssignTemplatePriority(0);
+                                                    setAssignTemplateNotes('');
+                                                    setAssignTemplateActive(true);
+                                                    await reloadRoutineTemplates();
+                                                } else {
+                                                    showMessage(res.data?.error || res.error || 'Error');
+                                                }
+                                            } catch {
+                                                showMessage('Error');
+                                            } finally {
+                                                setRoutineTemplatesLoading(false);
+                                            }
+                                        }}
+                                    >
+                                        <Plus className="w-4 h-4" />
+                                        Asignar
+                                    </button>
+                                </div>
+                                <div className="text-xs text-slate-500">
+                                    Estos templates son la estructura del PDF/export y se eligen desde Gestión al crear rutinas o plantillas.
+                                </div>
+                            </div>
+
+                            <div className="p-4 bg-slate-800/50 rounded-lg border border-slate-700 space-y-3">
+                                <div className="text-white font-medium">Asignaciones actuales</div>
+                                {routineTemplatesLoading ? (
+                                    <div className="flex items-center gap-2 text-slate-400">
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        Cargando…
+                                    </div>
+                                ) : routineTemplateAssignments.length ? (
+                                    <div className="space-y-2">
+                                        {routineTemplateAssignments.map((a) => (
+                                            <div key={a.assignment_id} className="p-3 rounded-lg bg-slate-900/40 border border-slate-800">
+                                                <div className="flex items-center justify-between gap-3">
+                                                    <div className="min-w-0">
+                                                        <div className="text-white font-medium truncate">{a.nombre}</div>
+                                                        <div className="text-xs text-slate-500">
+                                                            {a.categoria || 'general'}
+                                                            {a.dias_semana ? ` • ${a.dias_semana} días` : ''}
+                                                            {a.publica ? ' • pública' : ''}
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        className="btn-secondary flex items-center gap-2"
+                                                        onClick={async () => {
+                                                            if (!confirm('Quitar asignación?')) return;
+                                                            setRoutineTemplatesLoading(true);
+                                                            try {
+                                                                const res = await api.deleteGymRoutineTemplateAssignment(gymId, a.assignment_id);
+                                                                if (res.ok && res.data?.ok) {
+                                                                    showMessage('Asignación eliminada');
+                                                                    await reloadRoutineTemplates();
+                                                                } else {
+                                                                    showMessage(res.data?.error || res.error || 'Error');
+                                                                }
+                                                            } finally {
+                                                                setRoutineTemplatesLoading(false);
+                                                            }
+                                                        }}
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+
+                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+                                                    <label className="flex items-center gap-2 text-slate-300 text-sm">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={Boolean(a.activa)}
+                                                            onChange={(e) => {
+                                                                const v = Boolean(e.target.checked);
+                                                                setRoutineTemplateAssignments((prev) =>
+                                                                    prev.map((x) => (x.assignment_id === a.assignment_id ? { ...x, activa: v } : x))
+                                                                );
+                                                            }}
+                                                        />
+                                                        Activo
+                                                    </label>
+                                                    <div>
+                                                        <label className="label">Prioridad</label>
+                                                        <input
+                                                            className="input"
+                                                            type="number"
+                                                            value={String(a.prioridad || 0)}
+                                                            onChange={(e) => {
+                                                                const v = Number(e.target.value) || 0;
+                                                                setRoutineTemplateAssignments((prev) =>
+                                                                    prev.map((x) => (x.assignment_id === a.assignment_id ? { ...x, prioridad: v } : x))
+                                                                );
+                                                            }}
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="label">Notas</label>
+                                                        <input
+                                                            className="input"
+                                                            value={String(a.notas || '')}
+                                                            onChange={(e) => {
+                                                                const v = e.target.value;
+                                                                setRoutineTemplateAssignments((prev) =>
+                                                                    prev.map((x) => (x.assignment_id === a.assignment_id ? { ...x, notas: v } : x))
+                                                                );
+                                                            }}
+                                                        />
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex justify-end mt-3">
+                                                    <button
+                                                        className="btn-primary flex items-center gap-2"
+                                                        disabled={routineTemplatesLoading}
+                                                        onClick={async () => {
+                                                            setRoutineTemplatesLoading(true);
+                                                            try {
+                                                                const cur = routineTemplateAssignments.find((x) => x.assignment_id === a.assignment_id);
+                                                                if (!cur) return;
+                                                                const res = await api.updateGymRoutineTemplateAssignment(gymId, cur.assignment_id, {
+                                                                    activa: Boolean(cur.activa),
+                                                                    prioridad: Number(cur.prioridad || 0),
+                                                                    notas: cur.notas ?? null,
+                                                                });
+                                                                if (res.ok && res.data?.ok) {
+                                                                    showMessage('Asignación actualizada');
+                                                                    await reloadRoutineTemplates();
+                                                                } else {
+                                                                    showMessage(res.data?.error || res.error || 'Error');
+                                                                }
+                                                            } finally {
+                                                                setRoutineTemplatesLoading(false);
+                                                            }
+                                                        }}
+                                                    >
+                                                        <Save className="w-4 h-4" />
+                                                        Guardar
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="text-slate-500 text-sm">Sin asignaciones.</div>
+                                )}
+                            </div>
+                        </div>
                     </div>
                 )}
 

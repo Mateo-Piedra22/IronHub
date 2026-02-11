@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, type ChangeEvent } from "react";
+import dynamic from "next/dynamic";
 import Image from "next/image";
 import { 
   Save, Eye, Download, Upload, RefreshCw, 
@@ -8,7 +9,9 @@ import {
   RotateCcw, ZoomIn, ZoomOut, Maximize2
 } from "lucide-react";
 import { Badge, Button, Input, Modal, Select, Toggle, useToast } from "@/components/ui";
-import { api, type Template, type TemplateConfig, type TemplateValidation } from "@/lib/api";
+import { api, type Template, type TemplateConfig, type TemplateValidation, type TemplateVersion } from "@/lib/api";
+
+const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
 interface TemplateEditorProps {
   template?: Template;
@@ -19,12 +22,18 @@ interface TemplateEditorProps {
 }
 
 export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = false }: TemplateEditorProps) {
-  const [activeTab, setActiveTab] = useState<"config" | "preview" | "validation">("config");
+  const [activeTab, setActiveTab] = useState<"config" | "preview" | "validation" | "versions">("config");
   const [saving, setSaving] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [validation, setValidation] = useState<TemplateValidation | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string>("");
   const [previewScale, setPreviewScale] = useState(1);
+  const monacoRef = useRef<any>(null);
+  const editorRef = useRef<any>(null);
+  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [versions, setVersions] = useState<TemplateVersion[]>([]);
+  const [newVersionLabel, setNewVersionLabel] = useState("");
+  const [newVersionDesc, setNewVersionDesc] = useState("");
   
   // Template data
   const [templateData, setTemplateData] = useState<Partial<Template>>({
@@ -116,16 +125,59 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
     } catch {}
   }, [templateData.configuracion]);
 
+  const setEditorMarkers = useCallback((markers: any[]) => {
+    const monaco = monacoRef.current;
+    const editor = editorRef.current;
+    if (!monaco || !editor) return;
+    const model = editor.getModel?.();
+    if (!model) return;
+    monaco.editor.setModelMarkers(model, "template-config", markers);
+  }, []);
+
+  const showJsonParseError = useCallback((err: unknown) => {
+    const message = err instanceof Error ? err.message : "JSON inválido";
+    setValidation({ is_valid: false, errors: [{ message }], warnings: [] });
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
+    }
+    const model = editor.getModel?.();
+    if (!model) {
+      return;
+    }
+    let start = { lineNumber: 1, column: 1 };
+    const m = message.match(/position\s+(\d+)/i);
+    if (m?.[1]) {
+      const pos = Number(m[1]);
+      if (Number.isFinite(pos) && pos >= 0) {
+        start = model.getPositionAt(pos);
+      }
+    }
+    setEditorMarkers([
+      {
+        severity: monacoRef.current?.MarkerSeverity?.Error ?? 8,
+        message,
+        startLineNumber: start.lineNumber,
+        startColumn: start.column,
+        endLineNumber: start.lineNumber,
+        endColumn: Math.max(start.column + 1, start.column),
+      },
+    ]);
+  }, [setEditorMarkers]);
+
   const handleConfigChange = useCallback((value: string | undefined) => {
     if (value !== undefined) {
       setConfigJson(value);
       try {
         const parsed = JSON.parse(value);
+        setEditorMarkers([]);
         setTemplateData(prev => ({ ...prev, configuracion: parsed }));
         validateTemplate(parsed);
-      } catch {}
+      } catch (e) {
+        showJsonParseError(e);
+      }
     }
-  }, [validateTemplate]);
+  }, [setEditorMarkers, showJsonParseError, validateTemplate]);
 
   const handleSave = async () => {
     if (!templateData.nombre?.trim()) {
@@ -246,6 +298,78 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
     setTemplateData(prev => ({ ...prev, configuracion: defaultConfig }));
   };
 
+  const loadVersions = useCallback(async () => {
+    if (!template || isNew) return;
+    setVersionsLoading(true);
+    try {
+      const res = await api.getTemplateVersions(template.id);
+      if (res.ok && res.data?.success) {
+        setVersions(res.data.versions || []);
+      }
+    } catch {
+    } finally {
+      setVersionsLoading(false);
+    }
+  }, [isNew, template]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (activeTab !== "versions") return;
+    loadVersions();
+  }, [activeTab, isOpen, loadVersions]);
+
+  const handleCreateVersion = async () => {
+    if (!template || isNew) return;
+    try {
+      const cfg = JSON.parse(configJson) as TemplateConfig;
+      const res = await api.createTemplateVersion(template.id, {
+        version: newVersionLabel || undefined,
+        descripcion: newVersionDesc || undefined,
+        configuracion: cfg,
+      });
+      if (res.ok && res.data?.success) {
+        success("Versión creada");
+        setNewVersionLabel("");
+        setNewVersionDesc("");
+        await loadVersions();
+      } else {
+        error("Error creando versión");
+      }
+    } catch (e) {
+      showJsonParseError(e);
+    }
+  };
+
+  const handleRestoreVersion = async (version: string) => {
+    if (!template || isNew) return;
+    if (!confirm(`¿Restaurar a la versión ${version}?`)) return;
+    try {
+      const res = await api.restoreTemplateVersion(template.id, version);
+      if (res.ok && res.data?.success) {
+        success(`Restaurada a ${version}`);
+        const refreshed = await api.getTemplate(template.id);
+        if (refreshed.ok && refreshed.data?.success) {
+          setTemplateData({
+            nombre: refreshed.data.template.nombre,
+            descripcion: refreshed.data.template.descripcion || "",
+            categoria: refreshed.data.template.categoria || "general",
+            dias_semana: refreshed.data.template.dias_semana,
+            configuracion: refreshed.data.template.configuracion,
+            activa: refreshed.data.template.activa,
+            publica: refreshed.data.template.publica,
+            tags: refreshed.data.template.tags || [],
+          });
+          setConfigJson(JSON.stringify(refreshed.data.template.configuracion, null, 2));
+        }
+        await loadVersions();
+      } else {
+        error("Error restaurando versión");
+      }
+    } catch {
+      error("Error restaurando versión");
+    }
+  };
+
   const getCategoryOptions = () => [
     { value: "general", label: "General" },
     { value: "fuerza", label: "Fuerza" },
@@ -342,6 +466,15 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
               <Check className="w-4 h-4 mr-2" />
               Validación
             </Button>
+            <Button
+              variant={activeTab === "versions" ? "primary" : "secondary"}
+              size="sm"
+              onClick={() => setActiveTab("versions")}
+              disabled={!template || isNew}
+            >
+              <FileText className="w-4 h-4 mr-2" />
+              Versiones
+            </Button>
           </div>
 
           <div className="flex gap-2">
@@ -388,6 +521,16 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
                   className="hidden"
                 />
               </label>
+
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  editorRef.current?.getAction?.("editor.action.formatDocument")?.run?.();
+                }}
+              >
+                <Code className="w-4 h-4" />
+              </Button>
 
               <Button
                 variant="secondary"
@@ -498,13 +641,26 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
               {/* JSON Editor */}
               <div className="lg:col-span-3 flex flex-col">
                 <div className="flex-1 relative">
-                  <textarea
-                    value={configJson}
-                    onChange={(e: ChangeEvent<HTMLTextAreaElement>) => handleConfigChange(e.target.value)}
-                    className="absolute inset-0 w-full h-full p-4 font-mono text-sm bg-slate-900 border border-slate-800 rounded-xl text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 resize-none"
-                    style={{ whiteSpace: wordWrap ? "pre-wrap" : "pre" }}
-                    spellCheck={false}
-                  />
+                  <div className="absolute inset-0 border border-slate-800 rounded-xl overflow-hidden">
+                    <MonacoEditor
+                      value={configJson}
+                      onChange={handleConfigChange}
+                      language="json"
+                      theme="vs-dark"
+                      height="100%"
+                      options={{
+                        minimap: { enabled: false },
+                        fontSize: 13,
+                        wordWrap: "on",
+                        scrollBeyondLastLine: false,
+                        automaticLayout: true,
+                      }}
+                      onMount={(editor, monaco) => {
+                        editorRef.current = editor;
+                        monacoRef.current = monaco;
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
             </div>
@@ -690,6 +846,87 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
                   </Button>
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === "versions" && (
+            <div className="h-full overflow-y-auto p-6">
+              <div className="max-w-4xl mx-auto space-y-6">
+                <div className="bg-slate-800 rounded-xl p-6 border border-slate-700">
+                  <div className="flex items-center justify-between gap-3 mb-4">
+                    <h3 className="text-lg font-semibold text-white">Historial de Versiones</h3>
+                    <Button variant="secondary" size="sm" onClick={loadVersions} disabled={versionsLoading}>
+                      <RefreshCw className={versionsLoading ? "w-4 h-4 animate-spin" : "w-4 h-4"} />
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <Input
+                      label="Versión"
+                      value={newVersionLabel}
+                      onChange={(e) => setNewVersionLabel(e.target.value)}
+                      placeholder="1.0.1"
+                    />
+                    <div className="md:col-span-2">
+                      <Input
+                        label="Descripción"
+                        value={newVersionDesc}
+                        onChange={(e) => setNewVersionDesc(e.target.value)}
+                        placeholder="Cambios realizados..."
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-4 flex justify-end">
+                    <Button onClick={handleCreateVersion} disabled={versionsLoading}>
+                      Crear versión
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+                  {versionsLoading ? (
+                    <div className="p-8 text-center text-slate-400">
+                      <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-3" />
+                      Cargando versiones...
+                    </div>
+                  ) : versions.length > 0 ? (
+                    <div className="divide-y divide-slate-700">
+                      {versions.map((v) => (
+                        <div key={`${v.id}-${v.version}`} className="p-4 flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <div className="font-semibold text-white truncate">{v.version}</div>
+                              {v.es_actual && <Badge variant="success">Actual</Badge>}
+                            </div>
+                            <div className="text-xs text-slate-400 mt-1">
+                              {String(v.fecha_creacion || "").slice(0, 19).replace("T", " ")}
+                            </div>
+                            {v.descripcion && (
+                              <div className="text-sm text-slate-300 mt-2">
+                                {v.descripcion}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => handleRestoreVersion(v.version)}
+                              disabled={Boolean(v.es_actual)}
+                            >
+                              Restaurar
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-8 text-center text-slate-400">
+                      No hay versiones registradas.
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </div>

@@ -9,7 +9,7 @@ interface TemplateSelectionModalProps {
     isOpen: boolean;
     onClose: () => void;
     onTemplateSelect: (template: Template) => void;
-    rutina: Rutina | null;
+    rutina?: Rutina | null;
     gymId?: number;
 }
 
@@ -74,23 +74,95 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
     };
 
     const loadTemplates = useCallback(async (resetPage = false) => {
-        if (!rutina) return;
-
         setLoading(true);
         try {
             const currentPage = resetPage ? 0 : page;
-            const params = {
+            const limit = 12;
+            const offset = currentPage * limit;
+
+            if (_gymId) {
+                const gymRes = await api.getGymTemplates(_gymId);
+                let source: Template[] = [];
+                if (gymRes.ok && gymRes.data?.success && Array.isArray(gymRes.data.templates)) {
+                    source = gymRes.data.templates;
+                }
+
+                if (!source.length) {
+                    const publicRes = await api.getTemplates({
+                        query: searchQuery || undefined,
+                        categoria: selectedCategory || undefined,
+                        dias_semana: selectedDays ? parseInt(selectedDays) : undefined,
+                        sort_by: sortBy,
+                        sort_order: sortOrder,
+                        limit,
+                        offset,
+                    });
+                    if (publicRes.ok && publicRes.data?.success && publicRes.data.templates) {
+                        if (resetPage) {
+                            setTemplates(publicRes.data.templates);
+                            setPage(0);
+                        } else {
+                            setTemplates(prev => [...prev, ...(publicRes.data?.templates || [])]);
+                        }
+                        setTotal(publicRes.data.total || 0);
+                        setHasMore(publicRes.data.has_more || false);
+                    }
+                    return;
+                }
+
+                const q = searchQuery.trim().toLowerCase();
+                let filtered = source;
+                if (q) {
+                    filtered = filtered.filter((t) => {
+                        const n = String(t.nombre || "").toLowerCase();
+                        const d = String(t.descripcion || "").toLowerCase();
+                        const c = String(t.categoria || "").toLowerCase();
+                        return n.includes(q) || d.includes(q) || c.includes(q);
+                    });
+                }
+                if (selectedCategory) {
+                    filtered = filtered.filter((t) => String(t.categoria || "") === String(selectedCategory));
+                }
+                if (selectedDays) {
+                    const ds = Number.parseInt(selectedDays, 10);
+                    filtered = filtered.filter((t) => !t.dias_semana || t.dias_semana === ds);
+                }
+
+                const sortDir = sortOrder === "asc" ? 1 : -1;
+                filtered = [...filtered].sort((a, b) => {
+                    if (sortBy === "nombre") {
+                        return String(a.nombre || "").localeCompare(String(b.nombre || "")) * sortDir;
+                    }
+                    if (sortBy === "categoria") {
+                        return String(a.categoria || "").localeCompare(String(b.categoria || "")) * sortDir;
+                    }
+                    if (sortBy === "uso_count") {
+                        return (Number(a.uso_count || 0) - Number(b.uso_count || 0)) * sortDir;
+                    }
+                    return 0;
+                });
+
+                const pageItems = filtered.slice(offset, offset + limit);
+                if (resetPage) {
+                    setTemplates(pageItems);
+                    setPage(0);
+                } else {
+                    setTemplates(prev => [...prev, ...pageItems]);
+                }
+                setTotal(filtered.length);
+                setHasMore(offset + limit < filtered.length);
+                return;
+            }
+
+            const response = await api.getTemplates({
                 query: searchQuery || undefined,
                 categoria: selectedCategory || undefined,
                 dias_semana: selectedDays ? parseInt(selectedDays) : undefined,
                 sort_by: sortBy,
                 sort_order: sortOrder,
-                limit: 12,
-                offset: currentPage * 12
-            };
-
-            const response = await api.getTemplates(params);
-            
+                limit,
+                offset,
+            });
             if (response.ok && response.data?.success && response.data.templates) {
                 if (resetPage) {
                     setTemplates(response.data.templates);
@@ -107,7 +179,7 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
         } finally {
             setLoading(false);
         }
-    }, [rutina, searchQuery, selectedCategory, selectedDays, sortBy, sortOrder, page]);
+    }, [_gymId, error, page, searchQuery, selectedCategory, selectedDays, sortBy, sortOrder]);
 
     // Load more templates
     const loadMore = () => {
@@ -128,8 +200,6 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
 
     // Generate preview for template
     const generatePreview = async (template: Template) => {
-        if (!rutina) return;
-
         setPreviewTemplate(template);
         setPreviewLoading(true);
         try {

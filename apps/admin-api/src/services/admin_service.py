@@ -1027,6 +1027,178 @@ class AdminService:
             url += f"?sslmode={params.get('sslmode')}"
         return create_engine(url, pool_pre_ping=True)
 
+    def tenant_routine_templates_catalog(self, gym_id: int) -> Dict[str, Any]:
+        eng = self._get_tenant_engine_for_gym(int(gym_id))
+        if not eng:
+            return {"ok": False, "error": "tenant_db_unavailable"}
+        try:
+            with eng.connect() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT
+                          id, nombre, descripcion, categoria, dias_semana, activa, publica,
+                          version_actual, tags, uso_count, rating_promedio, rating_count,
+                          preview_url, fecha_creacion, fecha_actualizacion
+                        FROM plantillas_rutina
+                        ORDER BY fecha_actualizacion DESC NULLS LAST, fecha_creacion DESC NULLS LAST, id DESC
+                        LIMIT 500
+                        """
+                    )
+                ).mappings().all()
+            return {"ok": True, "gym_id": int(gym_id), "templates": [dict(r) for r in rows]}
+        except Exception as e:
+            logger.exception("Error listing tenant routine templates (gym_id=%s)", int(gym_id))
+            return {"ok": False, "error": "list_failed", "detail": str(e)}
+
+    def tenant_routine_template_assignments(self, gym_id: int) -> Dict[str, Any]:
+        eng = self._get_tenant_engine_for_gym(int(gym_id))
+        if not eng:
+            return {"ok": False, "error": "tenant_db_unavailable"}
+        try:
+            with eng.connect() as conn:
+                gym_cfg_id = conn.execute(text("SELECT id FROM gym_config ORDER BY id ASC LIMIT 1")).scalar()
+                if not gym_cfg_id:
+                    return {"ok": True, "gym_id": int(gym_id), "assignments": []}
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT
+                          gp.id as assignment_id,
+                          gp.gimnasio_id,
+                          gp.plantilla_id,
+                          gp.activa,
+                          gp.prioridad,
+                          gp.notas,
+                          gp.fecha_asignacion,
+                          pr.nombre,
+                          pr.descripcion,
+                          pr.categoria,
+                          pr.dias_semana,
+                          pr.publica,
+                          pr.version_actual,
+                          pr.tags
+                        FROM gimnasio_plantillas gp
+                        JOIN plantillas_rutina pr ON pr.id = gp.plantilla_id
+                        WHERE gp.gimnasio_id = :gid
+                        ORDER BY gp.activa DESC, gp.prioridad DESC, gp.fecha_asignacion DESC NULLS LAST, gp.id DESC
+                        """
+                    ),
+                    {"gid": int(gym_cfg_id)},
+                ).mappings().all()
+            return {"ok": True, "gym_id": int(gym_id), "assignments": [dict(r) for r in rows]}
+        except Exception as e:
+            logger.exception("Error listing tenant routine template assignments (gym_id=%s)", int(gym_id))
+            return {"ok": False, "error": "list_failed", "detail": str(e)}
+
+    def tenant_assign_routine_template(
+        self,
+        gym_id: int,
+        template_id: int,
+        activa: bool = True,
+        prioridad: int = 0,
+        notas: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        eng = self._get_tenant_engine_for_gym(int(gym_id))
+        if not eng:
+            return {"ok": False, "error": "tenant_db_unavailable"}
+        try:
+            with eng.begin() as conn:
+                gym_cfg_id = conn.execute(text("SELECT id FROM gym_config ORDER BY id ASC LIMIT 1")).scalar()
+                if not gym_cfg_id:
+                    return {"ok": False, "error": "gym_config_missing"}
+                assignment_id = conn.execute(
+                    text(
+                        """
+                        INSERT INTO gimnasio_plantillas (gimnasio_id, plantilla_id, activa, prioridad, notas)
+                        VALUES (:gid, :tid, :activa, :prioridad, :notas)
+                        ON CONFLICT (gimnasio_id, plantilla_id)
+                        DO UPDATE SET activa = EXCLUDED.activa, prioridad = EXCLUDED.prioridad, notas = EXCLUDED.notas
+                        RETURNING id
+                        """
+                    ),
+                    {
+                        "gid": int(gym_cfg_id),
+                        "tid": int(template_id),
+                        "activa": bool(activa),
+                        "prioridad": int(prioridad or 0),
+                        "notas": notas,
+                    },
+                ).scalar()
+            return {"ok": True, "gym_id": int(gym_id), "assignment_id": int(assignment_id)}
+        except Exception as e:
+            logger.exception("Error assigning tenant routine template (gym_id=%s)", int(gym_id))
+            return {"ok": False, "error": "assign_failed", "detail": str(e)}
+
+    def tenant_update_routine_template_assignment(
+        self,
+        gym_id: int,
+        assignment_id: int,
+        activa: Optional[bool] = None,
+        prioridad: Optional[int] = None,
+        notas: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        eng = self._get_tenant_engine_for_gym(int(gym_id))
+        if not eng:
+            return {"ok": False, "error": "tenant_db_unavailable"}
+        try:
+            sets = []
+            params: Dict[str, Any] = {"id": int(assignment_id)}
+            if activa is not None:
+                sets.append("activa = :activa")
+                params["activa"] = bool(activa)
+            if prioridad is not None:
+                sets.append("prioridad = :prioridad")
+                params["prioridad"] = int(prioridad)
+            if notas is not None:
+                sets.append("notas = :notas")
+                params["notas"] = notas
+            if not sets:
+                return {"ok": True, "gym_id": int(gym_id), "assignment_id": int(assignment_id), "updated": False}
+
+            with eng.begin() as conn:
+                gym_cfg_id = conn.execute(text("SELECT id FROM gym_config ORDER BY id ASC LIMIT 1")).scalar()
+                if not gym_cfg_id:
+                    return {"ok": False, "error": "gym_config_missing"}
+                params["gid"] = int(gym_cfg_id)
+                res = conn.execute(
+                    text(
+                        f"""
+                        UPDATE gimnasio_plantillas
+                        SET {", ".join(sets)}
+                        WHERE id = :id AND gimnasio_id = :gid
+                        """
+                    ),
+                    params,
+                )
+            return {"ok": True, "gym_id": int(gym_id), "assignment_id": int(assignment_id), "updated": bool(res.rowcount)}
+        except Exception as e:
+            logger.exception("Error updating tenant routine template assignment (gym_id=%s)", int(gym_id))
+            return {"ok": False, "error": "update_failed", "detail": str(e)}
+
+    def tenant_delete_routine_template_assignment(self, gym_id: int, assignment_id: int) -> Dict[str, Any]:
+        eng = self._get_tenant_engine_for_gym(int(gym_id))
+        if not eng:
+            return {"ok": False, "error": "tenant_db_unavailable"}
+        try:
+            with eng.begin() as conn:
+                gym_cfg_id = conn.execute(text("SELECT id FROM gym_config ORDER BY id ASC LIMIT 1")).scalar()
+                if not gym_cfg_id:
+                    return {"ok": False, "error": "gym_config_missing"}
+                res = conn.execute(
+                    text(
+                        """
+                        DELETE FROM gimnasio_plantillas
+                        WHERE id = :id AND gimnasio_id = :gid
+                        """
+                    ),
+                    {"id": int(assignment_id), "gid": int(gym_cfg_id)},
+                )
+            return {"ok": True, "gym_id": int(gym_id), "assignment_id": int(assignment_id), "deleted": bool(res.rowcount)}
+        except Exception as e:
+            logger.exception("Error deleting tenant routine template assignment (gym_id=%s)", int(gym_id))
+            return {"ok": False, "error": "delete_failed", "detail": str(e)}
+
     def tenant_migration_status(self, gym_id: int) -> Dict[str, Any]:
         gym = self.obtener_gimnasio(int(gym_id))
         if not gym:
@@ -4055,9 +4227,24 @@ class AdminService:
     def _get_tenant_engine(self, db_name: str):
         """Get SQLAlchemy engine for a tenant database."""
         try:
+            from urllib.parse import quote_plus
+
             params = self.resolve_tenant_db_params()
-            conn_str = f"postgresql://{params.get('user')}:{params.get('password')}@{params.get('host')}:{params.get('port')}/{db_name}?sslmode={params.get('sslmode', 'require')}"
-            return create_engine(conn_str, pool_pre_ping=True)
+            user = str(params.get("user") or "")
+            password = quote_plus(str(params.get("password") or ""))
+            host = str(params.get("host") or "")
+            port = str(params.get("port") or "5432")
+            sslmode = str(params.get("sslmode") or "require")
+            connect_timeout = int(params.get("connect_timeout") or 5)
+            statement_timeout_ms = int(params.get("statement_timeout_ms") or 10_000)
+
+            conn_str = (
+                f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db_name}"
+                f"?sslmode={quote_plus(sslmode)}"
+                f"&connect_timeout={connect_timeout}"
+                f"&options={quote_plus(f'-c statement_timeout={statement_timeout_ms}')}"
+            )
+            return create_engine(conn_str, pool_pre_ping=True, pool_size=1, max_overflow=0)
         except Exception as e:
             logger.error(f"Error creating tenant engine for {db_name}: {e}")
             return None

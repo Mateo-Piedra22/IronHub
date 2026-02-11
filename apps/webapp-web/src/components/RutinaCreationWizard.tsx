@@ -9,12 +9,13 @@ import { cn } from '@/lib/utils';
 interface RutinaCreationWizardProps {
     isOpen: boolean;
     onClose: () => void;
-    onProceed: (rutinaData: Partial<Rutina>) => void;
+    onProceed: (data: { usuario_id: number; usuario_nombre?: string | null; template_id?: number | null }) => void;
 }
 
 export function RutinaCreationWizard({ isOpen, onClose, onProceed }: RutinaCreationWizardProps) {
-    const [step, setStep] = useState<'choice' | 'user_search' | 'template_search'>('choice');
+    const [step, setStep] = useState<'user_search' | 'source_choice' | 'template_search'>('user_search');
     const [loading, setLoading] = useState(false);
+    const [selectedUser, setSelectedUser] = useState<Usuario | null>(null);
 
     // Search states
     const [searchQuery, setSearchQuery] = useState('');
@@ -24,10 +25,11 @@ export function RutinaCreationWizard({ isOpen, onClose, onProceed }: RutinaCreat
     // Reset on open
     useEffect(() => {
         if (isOpen) {
-            setStep('choice');
+            setStep('user_search');
             setSearchQuery('');
             setUserResults([]);
             setTemplateResults([]);
+            setSelectedUser(null);
         }
     }, [isOpen]);
 
@@ -64,61 +66,17 @@ export function RutinaCreationWizard({ isOpen, onClose, onProceed }: RutinaCreat
         return () => clearTimeout(timeout);
     }, [searchQuery, step]);
 
-    const handleOptionUser = () => {
-        setStep('user_search');
-        setSearchQuery('');
-        setUserResults([]);
-        setTemplateResults([]);
-    };
-
-    const handleOptionTemplate = () => {
-        setStep('template_search');
-        setSearchQuery('');
-        setUserResults([]);
-        setTemplateResults([]);
-    };
-
-    const handleOptionScratch = () => {
-        onProceed({});
-        onClose();
-    };
-
     const handleSelectUser = (user: Usuario) => {
-        onProceed({
-            usuario_id: user.id,
-            usuario_nombre: user.nombre
-        });
-        onClose();
+        setSelectedUser(user);
+        setStep('source_choice');
+        setSearchQuery('');
+        setUserResults([]);
     };
 
-    const handleSelectTemplate = async (template: Rutina) => {
-        setLoading(true);
-        try {
-            // Fetch full details of the template (including exercises)
-            // Assuming getRutina returns full details or we pass what we have
-            const res = await api.getRutina(template.id);
-            // If getRutina gives full exercise details, use that. 
-            // If not, we rely on what we have or need to fetch details.
-            // Given previous tasks, getRutina SHOULD return full details including exercises.
-
-            if (res.ok && res.data) {
-                const fullTemplate = res.data;
-                onProceed({
-                    ...fullTemplate,
-                    id: undefined, // Clear ID to create new
-                    es_plantilla: false, // It's a routine now
-                    nombre: `${fullTemplate.nombre} (Copia)`,
-                    activa: true,
-                    fecha_creacion: undefined,
-                    usuario_id: undefined // Unless we want to combine user selection? Legacy didn't combine I think.
-                });
-                onClose();
-            }
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setLoading(false);
-        }
+    const handleSelectTemplate = (template: Rutina) => {
+        if (!selectedUser) return;
+        onProceed({ usuario_id: selectedUser.id, usuario_nombre: selectedUser.nombre, template_id: template.id });
+        onClose();
     };
 
     return (
@@ -129,38 +87,9 @@ export function RutinaCreationWizard({ isOpen, onClose, onProceed }: RutinaCreat
             size="lg"
         >
             <div className="min-h-[400px]">
-                {step === 'choice' && (
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4">
-                        <ChoiceCard
-                            icon={Users}
-                            title="Asignar a Usuario"
-                            description="Crear una rutina vacía vinculada a un alumno específico."
-                            onClick={handleOptionUser}
-                            color="bg-blue-500/10 text-blue-500 border-blue-500/20 hover:border-blue-500"
-                        />
-                        <ChoiceCard
-                            icon={FileText}
-                            title="Desde Plantilla"
-                            description="Copiar una plantilla existente y modificarla."
-                            onClick={handleOptionTemplate}
-                            color="bg-purple-500/10 text-purple-500 border-purple-500/20 hover:border-purple-500"
-                        />
-                        <ChoiceCard
-                            icon={Plus}
-                            title="Desde Cero"
-                            description="Crear una rutina completamente vacía sin asignar."
-                            onClick={handleOptionScratch}
-                            color="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 hover:border-emerald-500"
-                        />
-                    </div>
-                )}
-
                 {step === 'user_search' && (
                     <div className="space-y-4">
                         <div className="flex items-center gap-2 mb-4">
-                            <Button variant="ghost" size="sm" onClick={() => setStep('choice')}>
-                                ← Volver
-                            </Button>
                             <h3 className="font-semibold text-lg">Seleccionar Usuario</h3>
                         </div>
 
@@ -209,10 +138,65 @@ export function RutinaCreationWizard({ isOpen, onClose, onProceed }: RutinaCreat
                     </div>
                 )}
 
+                {step === 'source_choice' && selectedUser && (
+                    <div className="space-y-4">
+                        <div className="flex items-center gap-2 mb-4">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                    setSelectedUser(null);
+                                    setStep('user_search');
+                                    setSearchQuery('');
+                                    setTemplateResults([]);
+                                }}
+                            >
+                                ← Cambiar usuario
+                            </Button>
+                            <div className="min-w-0">
+                                <h3 className="font-semibold text-lg">Nueva rutina para</h3>
+                                <div className="text-sm text-slate-400 truncate">{selectedUser.nombre}</div>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                            <ChoiceCard
+                                icon={Plus}
+                                title="Rutina vacía"
+                                description="Crear una rutina nueva y configurarla."
+                                onClick={() => {
+                                    onProceed({ usuario_id: selectedUser.id, usuario_nombre: selectedUser.nombre });
+                                    onClose();
+                                }}
+                                color="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 hover:border-emerald-500"
+                            />
+                            <ChoiceCard
+                                icon={FileText}
+                                title="Desde plantilla"
+                                description="Asignar una plantilla existente y ajustarla."
+                                onClick={() => {
+                                    setStep('template_search');
+                                    setSearchQuery('');
+                                    setTemplateResults([]);
+                                }}
+                                color="bg-purple-500/10 text-purple-500 border-purple-500/20 hover:border-purple-500"
+                            />
+                        </div>
+                    </div>
+                )}
+
                 {step === 'template_search' && (
                     <div className="space-y-4">
                         <div className="flex items-center gap-2 mb-4">
-                            <Button variant="ghost" size="sm" onClick={() => setStep('choice')}>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                    setStep('source_choice');
+                                    setSearchQuery('');
+                                    setTemplateResults([]);
+                                }}
+                            >
                                 ← Volver
                             </Button>
                             <h3 className="font-semibold text-lg">Seleccionar Plantilla</h3>

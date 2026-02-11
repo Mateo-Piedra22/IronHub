@@ -712,6 +712,12 @@ class TrainingService(BaseService):
                 dias_semana = 1
             dias_semana = max(1, dias_semana)
 
+            try:
+                semanas = int(data.get("semanas") or 4)
+            except Exception:
+                semanas = 4
+            semanas = max(1, min(semanas, 12))
+
             nombre = str(data.get("nombre_rutina") or "").strip()
             if not nombre:
                 return None
@@ -724,6 +730,11 @@ class TrainingService(BaseService):
                 categoria=data.get("categoria", "general"),
                 activa=data.get("activa", True),
             )
+            if hasattr(Rutina, "semanas"):
+                try:
+                    rutina.semanas = semanas
+                except Exception:
+                    pass
             if hasattr(Rutina, "creada_por_usuario_id") and "creada_por_usuario_id" in data:
                 rutina.creada_por_usuario_id = data.get("creada_por_usuario_id")
             if hasattr(Rutina, "sucursal_id") and "sucursal_id" in data:
@@ -834,7 +845,7 @@ class TrainingService(BaseService):
                 dcount = int(dias_semana_val or 1)
             except Exception:
                 dcount = 1
-            dcount = max(1, min(dcount, 5))
+            dcount = max(1, min(dcount, 7))
             dias_list: List[Dict[str, Any]] = [
                 {"numero": d, "nombre": f"Día {d}", "ejercicios": []}
                 for d in range(1, dcount + 1)
@@ -910,6 +921,7 @@ class TrainingService(BaseService):
             "usuario_nombre": usuario_nombre,
             "categoria": rutina.categoria,
             "dias_semana": rutina.dias_semana,
+            "semanas": getattr(rutina, "semanas", None) if hasattr(rutina, "semanas") else None,
             "activa": rutina.activa,
             "uuid_rutina": getattr(rutina, "uuid_rutina", None),
             "plantilla_id": getattr(rutina, "plantilla_id", None)
@@ -959,6 +971,11 @@ class TrainingService(BaseService):
                 rutina.categoria = data["categoria"]
             if "dias_semana" in data:
                 rutina.dias_semana = data["dias_semana"]
+            if hasattr(rutina, "semanas") and "semanas" in data:
+                try:
+                    rutina.semanas = max(1, min(int(data.get("semanas") or 4), 12))
+                except Exception:
+                    pass
             if "activa" in data:
                 rutina.activa = data["activa"]
             if hasattr(rutina, "plantilla_id") and "plantilla_id" in data:

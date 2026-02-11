@@ -273,6 +273,7 @@ export interface Rutina {
     descripcion?: string;
     categoria?: string;
     dias_semana?: number;
+    semanas?: number;
     activa: boolean;
     es_plantilla: boolean;
     usuario_id?: number;
@@ -1050,6 +1051,11 @@ class ApiClient {
                     'X-Tenant': typeof window !== 'undefined' ? getCurrentTenant() : '',
                 };
                 try {
+                    const v = (process.env.NEXT_PUBLIC_APP_VERSION || '').trim();
+                    if (v) headers['X-App-Version'] = v;
+                } catch {
+                }
+                try {
                     const m = method.toUpperCase();
                     const isWrite = m !== 'GET';
                     const isAuthRoute = endpoint.startsWith('/api/auth/');
@@ -1077,12 +1083,23 @@ class ApiClient {
                     headers['If-None-Match'] = cached.etag;
                 }
 
-                const response = await fetch(url, {
-                    ...options,
-                    method,
-                    credentials: 'include',
-                    headers,
-                });
+                const timeoutMs = method === 'GET' ? 12_000 : 20_000;
+                const controller = options.signal ? null : new AbortController();
+                const signal = options.signal ?? controller?.signal;
+                const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+
+                let response: Response;
+                try {
+                    response = await fetch(url, {
+                        ...options,
+                        method,
+                        credentials: 'include',
+                        headers,
+                        signal,
+                    });
+                } finally {
+                    if (timer) clearTimeout(timer);
+                }
 
                 if (isGet && response.status === 304 && cached) {
                     const hit = cached.data as ApiResponse<T>;
@@ -1134,7 +1151,13 @@ class ApiClient {
                 if (isGet) delete _inFlight[cacheKey];
             }
         } catch (error) {
-            console.error('API Error:', error);
+            try {
+                const msg = String((error as any)?.name || '') + ' ' + String(error || '');
+                if (msg.toLowerCase().includes('abort')) {
+                    return { ok: false, error: 'Request timeout' };
+                }
+            } catch {
+            }
             return {
                 ok: false,
                 error: 'Error de conexión. Verifica tu conexión a internet.',
@@ -3150,6 +3173,14 @@ class ApiClient {
 
     async markChangelogsRead() {
         return this.request<{ ok: boolean }>(`/api/changelogs/read`, { method: 'POST', body: JSON.stringify({}) });
+    }
+
+    async getSystemReminder() {
+        return this.request<{ active: boolean; message?: string | null }>(`/api/admin/reminder`);
+    }
+
+    async setSystemReminder(payload: { active: boolean; message: string }) {
+        return this.request<{ ok: boolean }>(`/api/admin/reminder`, { method: 'POST', body: JSON.stringify(payload) });
     }
 
     // === Template API Methods ===

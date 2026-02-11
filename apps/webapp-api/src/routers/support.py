@@ -32,6 +32,44 @@ def _now() -> datetime:
     return datetime.utcnow().replace(microsecond=0)
 
 
+def _sanitize_attachments(x: Any) -> list[dict[str, Any]]:
+    if not isinstance(x, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for it in x:
+        if not isinstance(it, dict):
+            continue
+        url = it.get("url")
+        key = it.get("key")
+        filename = it.get("filename")
+        content_type = it.get("content_type")
+        size_bytes = it.get("size_bytes")
+        if not isinstance(url, str) or not url.strip():
+            continue
+        if key is not None and not isinstance(key, str):
+            key = None
+        if filename is not None and not isinstance(filename, str):
+            filename = None
+        if content_type is not None and not isinstance(content_type, str):
+            content_type = None
+        try:
+            size_bytes = int(size_bytes) if size_bytes is not None else None
+        except Exception:
+            size_bytes = None
+        out.append(
+            {
+                "url": url.strip(),
+                "key": key,
+                "filename": (filename or "").strip(),
+                "content_type": (content_type or "").strip(),
+                "size_bytes": size_bytes,
+            }
+        )
+        if len(out) >= 10:
+            break
+    return out
+
+
 def _sla_seconds_for_priority(priority: str) -> int:
     p = str(priority or "").strip().lower()
     if p == "critical":
@@ -98,12 +136,21 @@ async def api_support_upload_attachment(
     tenant = str(claims.get("tenant") or "").strip().lower()
     if not tenant:
         raise HTTPException(status_code=400, detail="Tenant inválido")
+    allowed_types = {
+        "application/pdf",
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "text/plain",
+    }
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="Archivo vacío")
     if len(content) > 5 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Archivo demasiado grande (max 5MB)")
     content_type = str(file.content_type or "application/octet-stream")
+    if content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="Tipo de archivo no permitido")
     ok, url_or_err, key = b2_storage.upload_file(
         content,
         str(file.filename or "file"),
@@ -165,6 +212,7 @@ async def api_support_create_ticket(request: Request, db: Session = Depends(get_
         attachments = []
     if len(attachments) > 10:
         raise HTTPException(status_code=400, detail="Demasiados adjuntos")
+    attachments = _sanitize_attachments(attachments)
 
     origin_url = _norm(payload.get("origin_url"))[:500] or None
     user_agent = _norm(payload.get("user_agent"))[:500] or _norm(request.headers.get("user-agent"))[:500] or None
@@ -385,16 +433,16 @@ async def api_support_get_ticket(
         text(
             """
             UPDATE support_tickets
-            SET unread_by_client = FALSE, updated_at = NOW()
+            SET unread_by_client = FALSE, updated_at = :ts
             WHERE id = :id
             """
         ),
-        {"id": int(ticket_id)},
+        {"id": int(ticket_id), "ts": _now()},
     )
     try:
         db.execute(
-            text("UPDATE support_tickets SET last_client_read_at = NOW() WHERE id = :id"),
-            {"id": int(ticket_id)},
+            text("UPDATE support_tickets SET last_client_read_at = :ts WHERE id = :id"),
+            {"id": int(ticket_id), "ts": _now()},
         )
     except Exception:
         pass
@@ -448,6 +496,7 @@ async def api_support_reply(
         attachments = []
     if len(attachments) > 10:
         raise HTTPException(status_code=400, detail="Demasiados adjuntos")
+    attachments = _sanitize_attachments(attachments)
 
     now = _now()
     db.execute(
