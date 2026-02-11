@@ -1120,6 +1120,9 @@ from src.routers import bulk_actions
 from src.routers import support
 from src.routers import changelogs
 from src.routers import access_control
+from src.routes import templates
+from src.routes import template_admin
+from src.routes import gym_templates
 
 # Include routers
 app.include_router(auth.router, tags=["Auth"])
@@ -1146,3 +1149,6 @@ app.include_router(meta_review.router, tags=["Meta Review"])
 app.include_router(staff.router, tags=["Staff"])
 app.include_router(work_sessions.router, tags=["Work Sessions"])
 app.include_router(team.router, tags=["Team"])
+app.include_router(templates.router, tags=["Templates"])
+app.include_router(template_admin.router, tags=["Template Admin"])
+app.include_router(gym_templates.router, tags=["Gym Templates"])

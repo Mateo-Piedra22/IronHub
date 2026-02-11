@@ -40,7 +40,6 @@ from src.dependencies import (
     get_gym_config_service,
     get_clase_service,
     get_training_service,
-    get_rm,
     require_feature,
     require_scope_gestion,
 )
@@ -50,6 +49,8 @@ from src.models.orm_models import (
     Usuario,
     RutinaEjercicio,
     Ejercicio,
+    PlantillaRutina,
+    GimnasioPlantilla,
 )
 from src.database.tenant_connection import (
     get_current_tenant,
@@ -73,6 +74,8 @@ from src.services.training_service import TrainingService
 from src.services.user_service import UserService
 from src.services.b2_storage import simple_upload as b2_upload
 from src.services.feature_flags_service import FeatureFlagsService
+from src.services.pdf_engine import PDFEngine
+from src.services.template_validator import TemplateValidator
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -119,6 +122,127 @@ def _cleanup_file(path: str) -> None:
             os.remove(path)
     except Exception:
         pass
+
+
+def _build_rutina_pdf_data(rutina_data: Dict[str, Any], user_override: Optional[str] = None) -> Dict[str, Any]:
+    try:
+        usuario_nombre = str(user_override or rutina_data.get("usuario_nombre") or "").strip() or "Usuario"
+    except Exception:
+        usuario_nombre = "Usuario"
+
+    dias_out: List[Dict[str, Any]] = []
+    dias = rutina_data.get("dias") or []
+    for d in dias:
+        if not isinstance(d, dict):
+            continue
+        try:
+            dnum = int(d.get("numero") or d.get("dayNumber") or d.get("dia") or 1)
+        except Exception:
+            dnum = 1
+        ejercicios_out: List[Dict[str, Any]] = []
+        for ex in (d.get("ejercicios") or []):
+            if not isinstance(ex, dict):
+                continue
+            nombre = ex.get("nombre") or ex.get("ejercicio_nombre") or ex.get("nombre_ejercicio")
+            if not nombre:
+                nombre = "Ejercicio"
+            ejercicios_out.append(
+                {
+                    "nombre": nombre,
+                    "series": ex.get("series"),
+                    "repeticiones": ex.get("repeticiones"),
+                    "descanso": ex.get("descanso"),
+                    "notas": ex.get("notas"),
+                    "orden": ex.get("orden"),
+                    "video_url": ex.get("video_url"),
+                }
+            )
+        dias_out.append({"numero": dnum, "nombre": d.get("nombre") or f"Día {dnum}", "ejercicios": ejercicios_out})
+
+    out: Dict[str, Any] = {
+        "rutina_id": rutina_data.get("id"),
+        "uuid_rutina": rutina_data.get("uuid_rutina"),
+        "nombre_rutina": rutina_data.get("nombre_rutina") or rutina_data.get("nombre") or f"Rutina {rutina_data.get('id')}",
+        "descripcion": rutina_data.get("descripcion") or "",
+        "categoria": rutina_data.get("categoria") or "",
+        "dias_semana": rutina_data.get("dias_semana") or (len(dias_out) if dias_out else 1),
+        "usuario": {
+            "id": rutina_data.get("usuario_id"),
+            "nombre": usuario_nombre,
+        },
+        "usuario_nombre": usuario_nombre,
+        "dias": dias_out,
+        "current_week": 1,
+    }
+    try:
+        out["gym_name"] = get_gym_name()
+    except Exception:
+        pass
+    return out
+
+
+def _select_template_config_for_rutina(
+    db: Session,
+    template_id: Optional[int],
+    qr_mode: str,
+) -> Dict[str, Any]:
+    template: Optional[PlantillaRutina] = None
+
+    if template_id is not None:
+        template = db.query(PlantillaRutina).filter(PlantillaRutina.id == int(template_id)).first()
+        if not template or not bool(getattr(template, "activa", True)):
+            raise HTTPException(status_code=404, detail="Plantilla no encontrada")
+        config = getattr(template, "configuracion", None) or {}
+    else:
+        gimnasio_id = get_current_tenant_gym_id()
+        if not gimnasio_id:
+            raise HTTPException(status_code=400, detail="No se pudo determinar el gimnasio del tenant")
+        assignment = (
+            db.query(GimnasioPlantilla)
+            .filter(GimnasioPlantilla.gimnasio_id == int(gimnasio_id), GimnasioPlantilla.activa == True)
+            .order_by(GimnasioPlantilla.prioridad.asc(), GimnasioPlantilla.fecha_asignacion.desc())
+            .first()
+        )
+        if assignment and assignment.configuracion_personalizada:
+            config = assignment.configuracion_personalizada
+        elif assignment and assignment.plantilla:
+            config = assignment.plantilla.configuracion
+        else:
+            template = (
+                db.query(PlantillaRutina)
+                .filter(PlantillaRutina.activa == True, PlantillaRutina.publica == True)
+                .order_by(PlantillaRutina.uso_count.desc(), PlantillaRutina.id.asc())
+                .first()
+            )
+            if not template:
+                raise HTTPException(status_code=404, detail="No hay plantillas disponibles")
+            config = getattr(template, "configuracion", None) or {}
+
+    try:
+        qr_norm = str(qr_mode or "auto").strip().lower()
+    except Exception:
+        qr_norm = "auto"
+    if qr_norm == "auto":
+        qr_norm = "inline"
+    if qr_norm not in ("inline", "sheet", "none"):
+        qr_norm = "inline"
+
+    cfg = dict(config or {})
+    qr_cfg = dict(cfg.get("qr_code") or {})
+    if qr_norm == "none":
+        qr_cfg["enabled"] = False
+    else:
+        qr_cfg.setdefault("enabled", True)
+        qr_cfg.setdefault("data_source", "routine_uuid")
+    cfg["qr_code"] = qr_cfg
+
+    validator = TemplateValidator()
+    validation = validator.validate_template(cfg)
+    if not validation.is_valid:
+        messages = [str(e.get("message") or "") for e in (validation.errors or []) if isinstance(e, dict)]
+        raise HTTPException(status_code=500, detail="Plantilla inválida: " + "; ".join([m for m in messages if m]))
+
+    return cfg
 
 
 def _cleanup_files(*paths: str) -> None:
@@ -2362,96 +2486,39 @@ async def api_rutina_export_pdf(
     rutina_id: int,
     weeks: int = 1,
     filename: Optional[str] = None,
+    template_id: Optional[int] = None,
     qr_mode: str = "auto",
     sheet: Optional[str] = None,
     tenant: Optional[str] = None,
+    user_override: Optional[str] = None,
     _=Depends(require_gestion_access),
     svc: TrainingService = Depends(get_training_service),
+    db: Session = Depends(get_db),
 ):
-    """Export routine as PDF using RoutineTemplateManager."""
-    rm = get_rm()
-    if rm is None:
-        raise HTTPException(
-            status_code=503, detail="RoutineTemplateManager no disponible"
-        )
+    """Export routine as PDF using the dynamic template system."""
     try:
-        try:
-            t = str(tenant or "").strip().lower()
-        except Exception:
-            t = ""
-        if t:
-            try:
-                ok_t, _err = validate_tenant_name(t)
-                if ok_t:
-                    set_current_tenant(t)
-            except Exception:
-                pass
-
-        weeks_n, qr_norm, sheet_norm = _normalize_rutina_export_params(
-            weeks, qr_mode, sheet
-        )
         rutina_data = svc.obtener_rutina_completa(rutina_id)
         if not rutina_data:
             raise HTTPException(status_code=404, detail="Rutina no encontrada")
 
-        # Build Rutina object for RoutineTemplateManager
-        rutina = Rutina(
-            id=rutina_data["id"],
-            nombre_rutina=rutina_data.get("nombre_rutina")
-            or rutina_data.get("nombre", ""),
-            descripcion=rutina_data.get("descripcion"),
-            dias_semana=rutina_data.get("dias_semana", 1),
-            categoria=rutina_data.get("categoria"),
-            uuid_rutina=rutina_data.get("uuid_rutina"),
-        )
-
-        # Build Usuario object
-        usuario = Usuario(nombre=rutina_data.get("usuario_nombre") or "Usuario")
-
-        ejercicios_por_dia = _build_exercises_by_day(rutina_data)
-        if not ejercicios_por_dia:
+        if not (rutina_data.get("ejercicios") or []) and not any((d.get("ejercicios") or []) for d in (rutina_data.get("dias") or []) if isinstance(d, dict)):
             raise HTTPException(
                 status_code=400, detail="La rutina no contiene ejercicios"
             )
 
-        tmp_xlsx_fd, tmp_xlsx = tempfile.mkstemp(
-            prefix=f"rutina_{rutina_id}_", suffix=".xlsx"
-        )
-        try:
-            os.close(tmp_xlsx_fd)
-        except Exception:
-            pass
-        tmp_pdf_fd, tmp_pdf = tempfile.mkstemp(
-            prefix=f"rutina_{rutina_id}_", suffix=".pdf"
-        )
-        try:
-            os.close(tmp_pdf_fd)
-        except Exception:
-            pass
-
-        try:
-            xlsx_path = rm.generate_routine_excel(
-                rutina,
-                usuario,
-                ejercicios_por_dia,
-                output_path=tmp_xlsx,
-                weeks=weeks_n,
-                qr_mode=qr_norm,
-                sheet=sheet_norm,
-            )
-        except ValueError as ve:
-            raise HTTPException(status_code=400, detail=str(ve))
-        pdf_path = rm.convert_excel_to_pdf(xlsx_path, pdf_path=tmp_pdf)
-
         pdf_filename = _sanitize_download_filename(
             filename, f"rutina_{rutina_id}", ".pdf"
         )
-        return FileResponse(
-            pdf_path,
-            media_type="application/pdf",
-            filename=pdf_filename,
-            background=BackgroundTask(_cleanup_files, str(pdf_path), str(xlsx_path)),
-        )
+        data = _build_rutina_pdf_data(rutina_data, user_override=user_override)
+        template_config = _select_template_config_for_rutina(db, template_id=template_id, qr_mode=qr_mode)
+
+        engine = PDFEngine()
+        pdf_bytes = engine.generate_pdf(template_config=template_config, data=data, output_path=None)
+        if not isinstance(pdf_bytes, (bytes, bytearray)):
+            raise HTTPException(status_code=500, detail="Error generando PDF")
+
+        headers = {"Content-Disposition": f'attachment; filename="{pdf_filename}"'}
+        return Response(content=bytes(pdf_bytes), media_type="application/pdf", headers=headers)
     except HTTPException:
         raise
     except Exception as e:

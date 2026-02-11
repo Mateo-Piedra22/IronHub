@@ -5,6 +5,149 @@
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
+// Template Types
+export interface Template {
+    id: number;
+    nombre: string;
+    descripcion?: string;
+    configuracion: TemplateConfig;
+    categoria: string;
+    dias_semana?: number;
+    activa: boolean;
+    publica: boolean;
+    creada_por?: number;
+    fecha_creacion: string;
+    fecha_actualizacion: string;
+    version_actual: string;
+    tags?: string[];
+    preview_url?: string;
+    uso_count: number;
+    rating_promedio?: number;
+    rating_count: number;
+}
+
+export interface TemplateConfig {
+    version: string;
+    metadata: {
+        name: string;
+        description?: string;
+        author?: string;
+        created_at?: string;
+        tags?: string[];
+    };
+    layout: {
+        page_size: 'A4' | 'A3' | 'Letter';
+        orientation: 'portrait' | 'landscape';
+        margins: {
+            top: number;
+            right: number;
+            bottom: number;
+            left: number;
+        };
+    };
+    sections: TemplateSection[];
+    variables: { [key: string]: TemplateVariable };
+    styling: {
+        primary_color: string;
+        secondary_color: string;
+        font_family: string;
+        font_size: number;
+    };
+}
+
+export interface TemplateSection {
+    id: string;
+    type: 'header' | 'footer' | 'exercise_table' | 'info_box' | 'image' | 'text';
+    content: any;
+    position?: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    };
+}
+
+export interface TemplateVariable {
+    type: 'string' | 'number' | 'boolean' | 'date' | 'image';
+    default?: any;
+    description?: string;
+    required?: boolean;
+}
+
+export interface TemplateAnalytics {
+    template_id: number;
+    usos_totales: number;
+    usuarios_unicos: number;
+    uso_ultimo_mes: number;
+    rating_promedio: number;
+    evaluaciones: number;
+    tendencias: {
+        periodo: string;
+        usos: number;
+    }[];
+    popularidad: {
+        posicion: number;
+        total_plantillas: number;
+    };
+}
+
+export interface TemplateStats {
+    total_templates: number;
+    active_templates: number;
+    total_usos: number;
+    usuarios_unicos: number;
+    rating_promedio: number;
+    total_ratings: number;
+    categorias_populares: { categoria: string; count: number }[];
+    plantillas_top: Template[];
+}
+
+export interface TemplatePreviewRequest {
+    format: 'pdf' | 'png' | 'jpg';
+    quality: 'low' | 'medium' | 'high';
+    qr_mode?: 'inline' | 'sheet' | 'none';
+    show_watermark?: boolean;
+    show_metadata?: boolean;
+    page_number?: number;
+    multi_page?: boolean;
+}
+
+export interface TemplateValidation {
+    valid: boolean;
+    errors: TemplateValidationError[];
+    warnings: TemplateValidationWarning[];
+    sections?: TemplateSection[];
+    variables?: TemplateVariable[];
+}
+
+export interface TemplateValidationError {
+    message: string;
+    path?: string;
+    suggestion?: string;
+}
+
+export interface TemplateValidationWarning {
+    message: string;
+    path?: string;
+    suggestion?: string;
+}
+
+export interface TemplateRating {
+    id: number;
+    template_id: number;
+    usuario_id: number;
+    rating: number;
+    comment?: string;
+    fecha: string;
+}
+
+export interface Rutina {
+    id: number;
+    nombre: string;
+    dias?: any[];
+    usuario_nombre?: string;
+}
+
 // Types
 export interface Gym {
     id: number;
@@ -1233,7 +1376,158 @@ export const api = {
     // Estadísticas
     getEstadisticasPagos: (año?: number) =>
         request<EstadisticasPagos>(`/api/pagos/estadisticas${año ? `?año=${año}` : ''}`),
+
+    // ========== TEMPLATE MANAGEMENT ==========
+
+    // Template CRUD
+    getTemplates: (params?: {
+        query?: string;
+        categoria?: string;
+        activa?: boolean;
+        sort_by?: string;
+        sort_order?: 'asc' | 'desc';
+        limit?: number;
+        offset?: number;
+    }) => {
+        const qp = new URLSearchParams();
+        if (params?.query) qp.set('query', params.query);
+        if (params?.categoria) qp.set('categoria', params.categoria);
+        if (params?.activa !== undefined) qp.set('activa', String(params.activa));
+        if (params?.sort_by) qp.set('sort_by', params.sort_by);
+        if (params?.sort_order) qp.set('sort_order', params.sort_order);
+        if (params?.limit) qp.set('limit', String(params.limit));
+        if (params?.offset) qp.set('offset', String(params.offset));
+        const q = qp.toString() ? `?${qp.toString()}` : '';
+        return request<{
+            ok: boolean;
+            templates: Template[];
+            total: number;
+            has_more: boolean;
+        }>(`/api/templates${q}`);
+    },
+
+    getTemplate: (id: number) =>
+        request<{ ok: boolean; template: Template }>(`/api/templates/${id}`),
+
+    createTemplate: (data: Partial<Template>) =>
+        request<{ ok: boolean; template: Template }>('/api/templates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        }),
+
+    updateTemplate: (id: number, data: Partial<Template>) =>
+        request<{ ok: boolean; template: Template }>(`/api/templates/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data),
+        }),
+
+    deleteTemplate: (id: number) =>
+        request<{ ok: boolean }>(`/api/templates/${id}`, { method: 'DELETE' }),
+
+    duplicateTemplate: (id: number) =>
+        request<{ ok: boolean; template: Template }>(`/api/templates/${id}/duplicate`, {
+            method: 'POST',
+        }),
+
+    // Template Categories
+    getTemplateCategories: () =>
+        request<{ ok: boolean; categories: string[] }>('/api/templates/categories'),
+
+    // Template Analytics
+    getTemplateAnalytics: (id: number) =>
+        request<{ ok: boolean; analytics: TemplateAnalytics }>(`/api/templates/${id}/analytics`),
+
+    getTemplateStats: (timeRange?: '7d' | '30d' | '90d' | '1y' | 'all') => {
+        const qp = new URLSearchParams();
+        if (timeRange) qp.set('time_range', timeRange);
+        const q = qp.toString() ? `?${qp.toString()}` : '';
+        return request<{ ok: boolean; stats: TemplateStats }>(`/api/templates/stats${q}`);
+    },
+
+    // Template Preview
+    getTemplatePreview: (id: number, request: TemplatePreviewRequest) =>
+        request<{ ok: boolean; preview_url: string; pages?: string[] }>(`/api/templates/${id}/preview`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(request),
+        }),
+
+    generateTemplatePreview: (config: TemplateConfig) =>
+        request<{ ok: boolean; preview_url: string }>('/api/templates/preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ configuracion: config }),
+        }),
+
+    // Template Validation
+    validateTemplate: (config: TemplateConfig) =>
+        request<{ ok: boolean; validation: TemplateValidation }>('/api/templates/validate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ configuracion: config }),
+        }),
+
+    // Template Bulk Operations
+    bulkUpdateTemplates: (templateIds: number[], data: Partial<Template>) =>
+        request<{ ok: boolean; updated: number }>('/api/templates/bulk', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ template_ids: templateIds, data }),
+        }),
+
+    bulkDeleteTemplates: (templateIds: number[]) =>
+        request<{ ok: boolean; deleted: number }>('/api/templates/bulk', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ template_ids: templateIds }),
+        }),
+
+    // Template Export/Import
+    exportTemplates: (templateIds?: number[]) => {
+        const qp = new URLSearchParams();
+        if (templateIds) qp.set('template_ids', templateIds.join(','));
+        const q = qp.toString() ? `?${qp.toString()}` : '';
+        return request<{ ok: boolean; download_url: string }>(`/api/templates/export${q}`);
+    },
+
+    importTemplates: (file: File) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        return request<{ ok: boolean; imported: number; errors: string[] }>('/api/templates/import', {
+            method: 'POST',
+            body: formData,
+        });
+    },
+
+    // Template Favorites
+    toggleTemplateFavorite: (id: number) =>
+        request<{ ok: boolean; favorite: boolean }>(`/api/templates/${id}/favorite`, {
+            method: 'POST',
+        }),
+
+    getTemplateFavorites: () =>
+        request<{ ok: boolean; templates: Template[] }>('/api/templates/favorites'),
+
+    // Template Rating
+    rateTemplate: (id: number, rating: number, comment?: string) =>
+        request<{ ok: boolean; rating: number }>(`/api/templates/${id}/rating`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rating, comment }),
+        }),
+
+    getTemplateRatings: (id: number) =>
+        request<{ ok: boolean; ratings: TemplateRating[] }>(`/api/templates/${id}/ratings`),
+
+    // Rutina Preview with Template
+    getRutinaPreviewWithTemplate: (rutinaId: number, templateId: number, request: TemplatePreviewRequest) =>
+        request<{ ok: boolean; preview_url: string; pages?: string[] }>(`/api/rutinas/${rutinaId}/preview/template/${templateId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(request),
+        }),
 };
 
 export default api;
-

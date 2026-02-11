@@ -35,6 +35,7 @@ import { UnifiedRutinaEditor } from '@/components/UnifiedRutinaEditor';
 import { RutinaCreationWizard } from '@/components/RutinaCreationWizard';
 import { AssignRutinaModal } from '@/components/AssignRutinaModal';
 import { ExcelPreviewViewer } from '@/components/ExcelPreviewViewer';
+import { GymTemplateManager } from '@/components/GymTemplateManager';
 
 // Sidebar navigation
 const subtabs = [
@@ -681,6 +682,20 @@ export default function RutinasPage() {
                     }
                 />
             </motion.div>
+
+            {/* Gym Template Manager - Solo para plantillas */}
+            {activeTab === 'plantillas' && (
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.3 }}
+                >
+                    <GymTemplateManager 
+                        gymId={1} // TODO: Obtener el ID del gimnasio actual
+                        gymName="Mi Gimnasio" // TODO: Obtener el nombre del gimnasio actual
+                    />
+                </motion.div>
+            )}
 
             {/* Unified Editor Modal */}
             <UnifiedRutinaEditor

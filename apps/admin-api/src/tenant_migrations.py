@@ -14,7 +14,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, text
 
-from src.tenant_migrations_bundle import EMBEDDED_FILES
+from tenant_migrations_bundle import EMBEDDED_FILES
 
 
 def _materialize_embedded_webapp_api_path() -> Path:

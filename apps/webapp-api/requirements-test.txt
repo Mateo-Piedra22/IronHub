@@ -1,0 +1,57 @@
+# Testing Dependencies
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-html>=3.1.0
+pytest-mock>=3.10.0
+pytest-asyncio>=0.21.0
+pytest-xdist>=3.0.0
+coverage>=7.0.0
+
+# Code Quality
+flake8>=6.0.0
+black>=23.0.0
+isort>=5.12.0
+mypy>=1.0.0
+
+# Template System Dependencies
+openpyxl>=3.1.0
+pandas>=2.0.0
+xlrd>=2.0.0
+
+# PDF Generation
+matplotlib>=3.6.0
+Pillow>=10.0.0
+
+# API Dependencies
+fastapi>=0.100.0
+uvicorn>=0.23.0
+python-multipart>=0.0.6
+
+# Database
+sqlalchemy>=2.0.0
+alembic>=1.11.0
+
+# Additional utilities
+python-dateutil>=2.8.0
+pydantic>=2.0.0
+httpx>=0.24.0
+
+# QR Code generation (optional)
+qrcode>=7.4.0
+pillow>=10.0.0
+
+# Excel processing
+openpyxl>=3.1.0
+xlrd>=2.0.0
+xlsxwriter>=3.1.0
+
+# Template validation
+jsonschema>=4.17.0
+
+# File processing
+pathlib2>=2.3.7
+
+# Development dependencies
+pre-commit>=3.3.0
+bandit>=1.7.0
+safety>=2.3.0

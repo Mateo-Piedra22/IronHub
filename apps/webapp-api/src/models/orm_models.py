@@ -78,6 +78,30 @@ class Usuario(Base):
         foreign_keys="[Rutina.usuario_id]",
         cascade="all, delete-orphan",
     )
+    plantillas_creadas: Mapped[List["PlantillaRutina"]] = relationship(
+        "PlantillaRutina",
+        back_populates="creador",
+        foreign_keys="[PlantillaRutina.creada_por]",
+        cascade="all, delete-orphan",
+    )
+    plantillas_versiones: Mapped[List["PlantillaRutinaVersion"]] = relationship(
+        "PlantillaRutinaVersion",
+        back_populates="creador",
+        foreign_keys="[PlantillaRutinaVersion.creada_por]",
+        cascade="all, delete-orphan",
+    )
+    gimnasio_plantillas_asignadas: Mapped[List["GimnasioPlantilla"]] = relationship(
+        "GimnasioPlantilla",
+        back_populates="asignador",
+        foreign_keys="[GimnasioPlantilla.asignada_por]",
+        cascade="all, delete-orphan",
+    )
+    plantilla_analitica: Mapped[List["PlantillaAnalitica"]] = relationship(
+        "PlantillaAnalitica",
+        back_populates="usuario",
+        foreign_keys="[PlantillaAnalitica.usuario_id]",
+        cascade="all, delete-orphan",
+    )
     usuario_notas: Mapped[List["UsuarioNota"]] = relationship(
         "UsuarioNota",
         back_populates="usuario",
@@ -820,12 +844,18 @@ class Rutina(Base):
     )
     activa: Mapped[bool] = mapped_column(Boolean, server_default="true")
     uuid_rutina: Mapped[Optional[str]] = mapped_column(String(36), unique=True)
+    plantilla_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("plantillas_rutina.id", ondelete="SET NULL")
+    )
 
     usuario: Mapped[Optional["Usuario"]] = relationship(
         "Usuario", back_populates="rutinas", foreign_keys=[usuario_id]
     )
     creada_por_usuario: Mapped[Optional["Usuario"]] = relationship(
         "Usuario", foreign_keys=[creada_por_usuario_id]
+    )
+    plantilla: Mapped[Optional["PlantillaRutina"]] = relationship(
+        "PlantillaRutina", back_populates="rutinas"
     )
     ejercicios: Mapped[List["RutinaEjercicio"]] = relationship(
         "RutinaEjercicio", back_populates="rutina", cascade="all, delete-orphan"
@@ -836,6 +866,7 @@ class Rutina(Base):
         Index("idx_rutinas_usuario_id", "usuario_id"),
         Index("idx_rutinas_creada_por_usuario_id", "creada_por_usuario_id"),
         Index("idx_rutinas_sucursal_id", "sucursal_id"),
+        Index("idx_rutinas_plantilla_id", "plantilla_id"),
     )
 
 
@@ -1917,4 +1948,219 @@ class WhatsappConfig(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.current_timestamp()
+    )
+
+
+# --- Dynamic Template System ---
+
+
+class PlantillaRutina(Base):
+    __tablename__ = "plantillas_rutina"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    nombre: Mapped[str] = mapped_column(String(255), nullable=False)
+    descripcion: Mapped[Optional[str]] = mapped_column(Text)
+    configuracion: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    categoria: Mapped[Optional[str]] = mapped_column(
+        String(100), server_default="general"
+    )
+    dias_semana: Mapped[Optional[int]] = mapped_column(Integer)
+    activa: Mapped[bool] = mapped_column(Boolean, server_default="true")
+    publica: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    creada_por: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="SET NULL")
+    )
+    fecha_creacion: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.current_timestamp()
+    )
+    fecha_actualizacion: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.current_timestamp()
+    )
+    version_actual: Mapped[Optional[str]] = mapped_column(
+        String(50), server_default="1.0.0"
+    )
+    tags: Mapped[Optional[list]] = mapped_column(JSONB)
+    preview_url: Mapped[Optional[str]] = mapped_column(String(500))
+    uso_count: Mapped[int] = mapped_column(Integer, server_default="0")
+    rating_promedio: Mapped[Optional[float]] = mapped_column(Numeric(3, 2))
+    rating_count: Mapped[int] = mapped_column(Integer, server_default="0")
+
+    # Relaciones
+    creador: Mapped[Optional["Usuario"]] = relationship(
+        "Usuario", back_populates="plantillas_creadas", foreign_keys=[creada_por]
+    )
+    versiones: Mapped[List["PlantillaRutinaVersion"]] = relationship(
+        "PlantillaRutinaVersion", back_populates="plantilla", cascade="all, delete-orphan"
+    )
+    gimnasio_asignaciones: Mapped[List["GimnasioPlantilla"]] = relationship(
+        "GimnasioPlantilla", back_populates="plantilla", cascade="all, delete-orphan"
+    )
+    analitica: Mapped[List["PlantillaAnalitica"]] = relationship(
+        "PlantillaAnalitica", back_populates="plantilla", cascade="all, delete-orphan"
+    )
+    mercado: Mapped[Optional["PlantillaMercado"]] = relationship(
+        "PlantillaMercado", back_populates="plantilla", uselist=False, cascade="all, delete-orphan"
+    )
+    rutinas: Mapped[List["Rutina"]] = relationship(
+        "Rutina", back_populates="plantilla", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index("idx_plantillas_rutina_activa", "activa"),
+        Index("idx_plantillas_rutina_categoria", "categoria"),
+        Index("idx_plantillas_rutina_publica", "publica"),
+        Index("idx_plantillas_rutina_creada_por", "creada_por"),
+        Index("idx_plantillas_rutina_fecha_creacion", "fecha_creacion"),
+    )
+
+
+class PlantillaRutinaVersion(Base):
+    __tablename__ = "plantillas_rutina_versiones"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    plantilla_id: Mapped[int] = mapped_column(
+        ForeignKey("plantillas_rutina.id", ondelete="CASCADE"), nullable=False
+    )
+    version: Mapped[str] = mapped_column(String(50), nullable=False)
+    configuracion: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    cambios_descripcion: Mapped[Optional[str]] = mapped_column(Text)
+    creada_por: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="SET NULL")
+    )
+    fecha_creacion: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.current_timestamp()
+    )
+    es_actual: Mapped[bool] = mapped_column(Boolean, server_default="false")
+
+    # Relaciones
+    plantilla: Mapped["PlantillaRutina"] = relationship(
+        "PlantillaRutina", back_populates="versiones"
+    )
+    creador: Mapped[Optional["Usuario"]] = relationship(
+        "Usuario", back_populates="plantillas_versiones", foreign_keys=[creada_por]
+    )
+
+    __table_args__ = (
+        UniqueConstraint("plantilla_id", "version", name="uq_plantilla_version"),
+        Index("idx_plantillas_versiones_plantilla_id", "plantilla_id"),
+        Index("idx_plantillas_versiones_es_actual", "es_actual"),
+        Index("idx_plantillas_versiones_fecha_creacion", "fecha_creacion"),
+    )
+
+
+class GimnasioPlantilla(Base):
+    __tablename__ = "gimnasio_plantillas"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    gimnasio_id: Mapped[int] = mapped_column(
+        ForeignKey("gimnasios.id", ondelete="CASCADE"), nullable=False
+    )
+    plantilla_id: Mapped[int] = mapped_column(
+        ForeignKey("plantillas_rutina.id", ondelete="CASCADE"), nullable=False
+    )
+    activa: Mapped[bool] = mapped_column(Boolean, server_default="true")
+    prioridad: Mapped[int] = mapped_column(Integer, server_default="0")
+    configuracion_personalizada: Mapped[Optional[dict]] = mapped_column(JSONB)
+    asignada_por: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="SET NULL")
+    )
+    fecha_asignacion: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.current_timestamp()
+    )
+    fecha_ultima_uso: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    uso_count: Mapped[int] = mapped_column(Integer, server_default="0")
+    notas: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Relaciones
+    # gimnasio: Mapped["Gimnasio"] = relationship("Gimnasio") # Comentado hasta que exista el modelo Gimnasio
+    plantilla: Mapped["PlantillaRutina"] = relationship(
+        "PlantillaRutina", back_populates="gimnasio_asignaciones"
+    )
+    asignador: Mapped[Optional["Usuario"]] = relationship(
+        "Usuario", back_populates="gimnasio_plantillas_asignadas", foreign_keys=[asignada_por]
+    )
+
+    __table_args__ = (
+        UniqueConstraint("gimnasio_id", "plantilla_id", name="uq_gimnasio_plantilla"),
+        Index("idx_gimnasio_plantillas_gimnasio_id", "gimnasio_id"),
+        Index("idx_gimnasio_plantillas_plantilla_id", "plantilla_id"),
+        Index("idx_gimnasio_plantillas_activa", "activa"),
+        Index("idx_gimnasio_plantillas_prioridad", "prioridad"),
+    )
+
+
+class PlantillaAnalitica(Base):
+    __tablename__ = "plantilla_analitica"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    plantilla_id: Mapped[int] = mapped_column(
+        ForeignKey("plantillas_rutina.id", ondelete="CASCADE"), nullable=False
+    )
+    gimnasio_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("gimnasios.id", ondelete="SET NULL")
+    )
+    usuario_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("usuarios.id", ondelete="SET NULL")
+    )
+    evento_tipo: Mapped[str] = mapped_column(String(50), nullable=False)  # 'view', 'export', 'create', 'edit'
+    fecha_evento: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.current_timestamp()
+    )
+    datos_evento: Mapped[Optional[dict]] = mapped_column(JSONB)
+    tiempo_render_ms: Mapped[Optional[int]] = mapped_column(Integer)
+    exitoso: Mapped[bool] = mapped_column(Boolean, server_default="true")
+    error_message: Mapped[Optional[str]] = mapped_column(Text)
+
+    # Relaciones
+    plantilla: Mapped["PlantillaRutina"] = relationship(
+        "PlantillaRutina", back_populates="analitica"
+    )
+    # gimnasio: Mapped[Optional["Gimnasio"]] = relationship("Gimnasio") # Comentado hasta que exista el modelo Gimnasio
+    usuario: Mapped[Optional["Usuario"]] = relationship(
+        "Usuario", back_populates="plantilla_analitica", foreign_keys=[usuario_id]
+    )
+
+    __table_args__ = (
+        Index("idx_plantilla_analitica_plantilla_id", "plantilla_id"),
+        Index("idx_plantilla_analitica_gimnasio_id", "gimnasio_id"),
+        Index("idx_plantilla_analitica_usuario_id", "usuario_id"),
+        Index("idx_plantilla_analitica_evento_tipo", "evento_tipo"),
+        Index("idx_plantilla_analitica_fecha_evento", "fecha_evento"),
+    )
+
+
+class PlantillaMercado(Base):
+    __tablename__ = "plantilla_mercado"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    plantilla_id: Mapped[int] = mapped_column(
+        ForeignKey("plantillas_rutina.id", ondelete="CASCADE"), nullable=False
+    )
+    precio: Mapped[float] = mapped_column(Numeric(10, 2), server_default="0.00")
+    moneda: Mapped[str] = mapped_column(String(3), server_default="USD")
+    descargas: Mapped[int] = mapped_column(Integer, server_default="0")
+    rating_promedio: Mapped[Optional[float]] = mapped_column(Numeric(3, 2))
+    rating_count: Mapped[int] = mapped_column(Integer, server_default="0")
+    resenas_count: Mapped[int] = mapped_column(Integer, server_default="0")
+    featured: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    trending: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    categoria_mercado: Mapped[Optional[str]] = mapped_column(String(100))
+    tags_mercado: Mapped[Optional[list]] = mapped_column(JSONB)
+    fecha_publicacion: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.current_timestamp()
+    )
+    fecha_ultima_descarga: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    ingresos_totales: Mapped[float] = mapped_column(Numeric(12, 2), server_default="0.00")
+
+    # Relaciones
+    plantilla: Mapped["PlantillaRutina"] = relationship(
+        "PlantillaRutina", back_populates="mercado"
+    )
+
+    __table_args__ = (
+        Index("idx_plantilla_mercado_plantilla_id", "plantilla_id"),
+        Index("idx_plantilla_mercado_featured", "featured"),
+        Index("idx_plantilla_mercado_trending", "trending"),
+        Index("idx_plantilla_mercado_categoria_mercado", "categoria_mercado"),
+        Index("idx_plantilla_mercado_fecha_publicacion", "fecha_publicacion"),
     )

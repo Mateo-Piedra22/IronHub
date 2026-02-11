@@ -6,4 +6,7 @@ export { Input, SearchInput, PasswordInput, Textarea, Select, Checkbox, type Inp
 export { DataTable, type Column, type DataTableProps } from './DataTable';
 export { SortableList, SortableItemWrapper, KanbanBoard, arrayMove, type SortableItem } from './DragDrop';
 export { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from './Card';
+export { Badge } from './Badge';
+export { Toggle } from './Toggle';
+export { Tabs, TabsList, TabsTrigger, TabsContent } from './Tabs';
 

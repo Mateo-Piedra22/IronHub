@@ -283,6 +283,7 @@ export interface Rutina {
     sucursal_nombre?: string | null;
     creada_por_usuario_id?: number | null;
     creada_por_nombre?: string | null;
+    uso_count?: number; // Added for template compatibility
 }
 
 export interface DiasRutina {
@@ -306,6 +307,132 @@ export interface EjercicioRutina {
     ejercicio_video_url?: string;
     descripcion?: string;
     equipamiento?: string;
+}
+
+// === Template Types ===
+export interface Template {
+    id: number;
+    nombre: string;
+    descripcion: string;
+    categoria: string;
+    dias_semana?: number;
+    tags?: string[];
+    preview_url?: string;
+    uso_count: number;
+    rating_promedio?: number;
+    rating_count?: number;
+    publica: boolean;
+    activa: boolean;
+    fecha_creacion?: string;
+    configuracion: any;
+    // For recommended templates
+    recommendation_reason?: string;
+    // Additional properties for compatibility
+    version_actual?: string;
+    usos_totales?: number;
+    usuarios_unicos?: number;
+}
+
+export interface GymTemplateAssignment {
+    assignment_id: number;
+    template_id: number;
+    template_name: string;
+    template_description: string;
+    template_category: string;
+    template_tags?: string[];
+    dias_semana?: number;
+    preview_url?: string;
+    uso_count: number;
+    rating_promedio?: number;
+    priority: number;
+    custom_config?: any;
+    notes?: string;
+    assigned_by?: number;
+    assigned_by_name?: string;
+    fecha_asignacion: string;
+    fecha_ultima_uso?: string;
+    gym_usage_count: number;
+}
+
+export interface TemplateVersion {
+    id: number;
+    plantilla_id: number;
+    version: string;
+    configuracion: Record<string, any>;
+    descripcion?: string;
+    creada_por?: number;
+    fecha_creacion: string;
+    es_actual: boolean;
+    creador?: {
+        id: number;
+        nombre: string;
+    };
+}
+
+export interface TemplateAnalytics {
+    template_id: number;
+    total_uses: number;
+    preview_generations: number;
+    downloads: number;
+    avg_generation_time: number;
+    success_rate: number;
+    last_used?: string;
+    usage_by_day: Record<string, number>;
+    popular_gyms: Array<{
+        id: number;
+        nombre: string;
+        usage_count: number;
+    }>;
+    error_rate: number;
+    // Additional properties for compatibility
+    usos_totales?: number;
+    usuarios_unicos?: number;
+}
+
+export interface GymAssignment {
+    id: number;
+    gimnasio_id: number;
+    plantilla_id: number;
+    activa: boolean;
+    prioridad: number;
+    asignada_por?: number;
+    fecha_asignacion: string;
+    uso_count: number;
+    gimnasio?: {
+        id: number;
+        nombre: string;
+    };
+    asignador?: {
+        id: number;
+        nombre: string;
+    };
+}
+
+export interface TemplatePreviewRequest {
+    format: 'pdf' | 'image' | 'thumbnail' | 'html' | 'json';
+    quality: 'low' | 'medium' | 'high' | 'ultra';
+    page_number?: number;
+    sample_data?: Record<string, any>;
+    background?: boolean;
+}
+
+export interface TemplateValidationResponse {
+    is_valid: boolean;
+    errors: Array<{
+        field: string;
+        message: string;
+        code: string;
+        severity: 'error' | 'warning';
+    }>;
+    warnings: Array<{
+        field: string;
+        message: string;
+        code: string;
+        severity: 'warning';
+    }>;
+    performance_score: number;
+    security_score: number;
+    best_practices_score: number;
 }
 
 // === Ejercicio Types ===
@@ -1011,6 +1138,56 @@ class ApiClient {
                 error: 'Error de conexión. Verifica tu conexión a internet.',
             };
         }
+    }
+
+    // === HTTP Methods ===
+    async get<T>(endpoint: string, params?: Record<string, any>): Promise<ApiResponse<T>> {
+        const url = new URL(endpoint, this.baseUrl);
+        if (params) {
+            Object.entries(params).forEach(([key, value]) => {
+                if (value !== undefined && value !== null) {
+                    url.searchParams.append(key, String(value));
+                }
+            });
+        }
+        return this.request<T>(url.pathname + url.search);
+    }
+
+    async post<T>(endpoint: string, data?: any): Promise<ApiResponse<T>> {
+        return this.request<T>(endpoint, {
+            method: 'POST',
+            body: data ? JSON.stringify(data) : undefined,
+        });
+    }
+
+    async put<T>(endpoint: string, data?: any): Promise<ApiResponse<T>> {
+        return this.request<T>(endpoint, {
+            method: 'PUT',
+            body: data ? JSON.stringify(data) : undefined,
+        });
+    }
+
+    async delete<T>(endpoint: string): Promise<ApiResponse<T>> {
+        return this.request<T>(endpoint, {
+            method: 'DELETE',
+        });
+    }
+
+    // === Template Methods ===
+    async getTemplateFavorites() {
+        return this.get<{ templates: Template[] }>('/api/v1/templates/favorites');
+    }
+
+    async toggleTemplateFavorite(templateId: number) {
+        return this.post(`/api/v1/templates/${templateId}/favorite`);
+    }
+
+    async rateTemplate(templateId: number, rating: number) {
+        return this.post(`/api/v1/templates/${templateId}/rate`, { rating });
+    }
+
+    async getTemplateCategories() {
+        return this.get<{ categories: string[] }>('/api/v1/templates/categories');
     }
 
     async uploadGymLogo(file: File): Promise<ApiResponse<{ ok: boolean; logo_url?: string; error?: string }>> {
@@ -1798,12 +1975,25 @@ class ApiClient {
         }
     }
 
-    getRutinaPdfUrl(id: number, weeks: number = 1): string {
+    getRutinaPdfUrl(id: number, params?: {
+        weeks?: number;
+        qr_mode?: 'inline' | 'sheet' | 'none';
+        sheet_name?: string;
+        user_override?: string;
+        filename?: string;
+    }): string {
         const p = new URLSearchParams();
-        p.set('weeks', String(weeks));
+        if (params?.weeks) p.set('weeks', String(params.weeks));
+        if (params?.qr_mode) p.set('qr_mode', params.qr_mode);
+        if (params?.sheet_name) p.set('sheet', params.sheet_name);
+        if (params?.user_override) p.set('user_override', params.user_override);
+        if (params?.filename) p.set('filename', params.filename);
+
         const t = typeof window !== 'undefined' ? getCurrentTenant() : '';
         if (t) p.set('tenant', t);
-        return `${this.baseUrl}/api/rutinas/${id}/export/pdf?${p.toString()}`;
+
+        const query = p.toString();
+        return `${this.baseUrl}/api/rutinas/${id}/export/pdf${query ? `?${query}` : ''}`;
     }
 
     getRutinaExcelUrl(id: number, params?: {
@@ -3048,6 +3238,145 @@ class ApiClient {
 
     async markChangelogsRead() {
         return this.request<{ ok: boolean }>(`/api/changelogs/read`, { method: 'POST', body: JSON.stringify({}) });
+    }
+
+    // === Template API Methods ===
+    
+    async getTemplates(params?: {
+        query?: string;
+        categoria?: string;
+        dias_semana?: number;
+        publica?: boolean;
+        creada_por?: number;
+        tags?: string[];
+        limit?: number;
+        offset?: number;
+        sort_by?: string;
+        sort_order?: string;
+    }) {
+        const q = new URLSearchParams();
+        if (params?.query) q.set('query', params.query);
+        if (params?.categoria) q.set('categoria', params.categoria);
+        if (params?.dias_semana) q.set('dias_semana', String(params.dias_semana));
+        if (params?.publica !== undefined) q.set('publica', String(params.publica));
+        if (params?.creada_por) q.set('creada_por', String(params.creada_por));
+        if (params?.tags) q.set('tags', params.tags.join(','));
+        if (params?.limit) q.set('limit', String(params.limit));
+        if (params?.offset) q.set('offset', String(params.offset));
+        if (params?.sort_by) q.set('sort_by', params.sort_by);
+        if (params?.sort_order) q.set('sort_order', params.sort_order);
+
+        return this.request<{ success: boolean; templates: Template[]; total: number; limit: number; offset: number; has_more: boolean }>(`/api/templates${q.toString() ? `?${q.toString()}` : ''}`);
+    }
+
+    async getTemplate(id: number) {
+        return this.request<{ success: boolean; template: Template }>(`/api/templates/${id}`);
+    }
+
+    async getTemplatePreview(id: number, request: TemplatePreviewRequest) {
+        return this.request<{ success: boolean; preview_url?: string; format: string; quality: string; page_number: number; generation_time?: number; cache_hit?: boolean }>(`/api/templates/${id}/preview`, {
+            method: 'POST',
+            body: JSON.stringify(request)
+        });
+    }
+
+    async getTemplatePreviewBytes(id: number, request: TemplatePreviewRequest): Promise<Blob> {
+        const response = await fetch(`${this.baseUrl}/api/templates/${id}/preview/bytes`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tenant': typeof window !== 'undefined' ? getCurrentTenant() : '',
+            },
+            body: JSON.stringify(request)
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to generate template preview: ${response.statusText}`);
+        }
+
+        return response.blob();
+    }
+
+    async getTemplateTags() {
+        return this.request<{ success: boolean; tags: string[] }>('/api/templates/tags');
+    }
+
+    async validateTemplate(configuracion: Record<string, any>) {
+        return this.request<{ success: boolean; validation: TemplateValidationResponse }>(`/api/templates/validate`, {
+            method: 'POST',
+            body: JSON.stringify({ configuracion })
+        });
+    }
+
+    async getTemplateAnalytics(id: number, days: number = 30) {
+        return this.request<{ success: boolean; analytics: TemplateAnalytics }>(`/api/templates/${id}/analytics?days=${days}`);
+    }
+
+    async getAnalyticsDashboard(gimnasio_id?: number, days: number = 30) {
+        const q = new URLSearchParams();
+        q.set('days', String(days));
+        if (gimnasio_id) q.set('gimnasio_id', String(gimnasio_id));
+
+        return this.request<{ success: boolean; dashboard: Record<string, any>; period_days: number; gimnasio_id?: number }>(`/api/templates/analytics/dashboard${q.toString() ? `?${q.toString()}` : ''}`);
+    }
+
+    async getGymTemplates(gimnasio_id: number) {
+        return this.request<{ success: boolean; templates: Template[]; gimnasio_id: number }>(`/api/gyms/${gimnasio_id}/templates`);
+    }
+
+    async getTemplateVersions(id: number) {
+        return this.request<{ success: boolean; versions: TemplateVersion[]; total: number }>(`/api/templates/${id}/versions`);
+    }
+
+    // Enhanced rutina export with template support
+    getRutinaPdfUrlWithTemplate(id: number, templateId: number, params?: {
+        weeks?: number;
+        qr_mode?: 'inline' | 'sheet' | 'none';
+        sheet_name?: string;
+        user_override?: string;
+        filename?: string;
+    }): string {
+        const p = new URLSearchParams();
+        p.set('template_id', String(templateId));
+        if (params?.weeks) p.set('weeks', String(params.weeks));
+        if (params?.qr_mode) p.set('qr_mode', params.qr_mode);
+        if (params?.sheet_name) p.set('sheet', params.sheet_name);
+        if (params?.user_override) p.set('user_override', params.user_override);
+        if (params?.filename) p.set('filename', params.filename);
+
+        const t = typeof window !== 'undefined' ? getCurrentTenant() : '';
+        if (t) p.set('tenant', t);
+
+        const query = p.toString();
+        return `${this.baseUrl}/api/rutinas/${id}/export/pdf${query ? `?${query}` : ''}`;
+    }
+
+    async getRutinaPreviewWithTemplate(id: number, templateId: number, request: TemplatePreviewRequest) {
+        return this.request<{ success: boolean; preview_url?: string; format: string; quality: string; page_number: number; generation_time?: number; cache_hit?: boolean }>(`/api/rutinas/${id}/preview`, {
+            method: 'POST',
+            body: JSON.stringify({ template_id: templateId, ...request })
+        });
+    }
+
+    async getRutinaPreviewBytesWithTemplate(id: number, templateId: number, request: TemplatePreviewRequest): Promise<Blob> {
+        const response = await fetch(`${this.baseUrl}/api/rutinas/${id}/preview/bytes`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Tenant': typeof window !== 'undefined' ? getCurrentTenant() : '',
+            },
+            body: JSON.stringify({ template_id: templateId, ...request })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Failed to generate routine preview: ${response.statusText}`);
+        }
+
+        return response.blob();
+    }
+
+    async getAvailableTemplatesForRutina(rutinaId: number) {
+        return this.request<{ success: boolean; templates: Template[]; rutina_id: number }>(`/api/rutinas/${rutinaId}/templates`);
     }
 
 }
