@@ -30,13 +30,12 @@ import { api, type Rutina, type Usuario } from '@/lib/api';
 import { formatDate, cn } from '@/lib/utils';
 import { UnifiedRutinaEditor } from '@/components/UnifiedRutinaEditor';
 import { RutinaCreationWizard } from '@/components/RutinaCreationWizard';
-import { AssignRutinaModal } from '@/components/AssignRutinaModal';
 import { RutinaExportModal } from '@/components/RutinaExportModal';
 
 // Sidebar navigation
 const subtabs = [
-    { id: 'plantillas', label: 'Plantillas', icon: FileText },
-    { id: 'asignadas', label: 'Asignadas', icon: Users },
+    { id: 'plantillas', label: 'Plantillas (rutina)', icon: FileText },
+    { id: 'asignadas', label: 'Rutinas asignadas', icon: Users },
 ];
 
 // Rutina preview modal
@@ -153,7 +152,7 @@ function RutinaPreviewModal({ isOpen, onClose, rutina }: RutinaPreviewModalProps
 
 export default function RutinasPage() {
     const { success, error } = useToast();
-    const gymId = 1;
+    const gymId = undefined;
 
     // State
     const [activeTab, setActiveTab] = useState<'plantillas' | 'asignadas'>('plantillas');
@@ -167,10 +166,7 @@ export default function RutinasPage() {
 
     // Wizard state
     const [wizardOpen, setWizardOpen] = useState(false);
-
-    // Assign modal state
-    const [assignModalOpen, setAssignModalOpen] = useState(false);
-    const [rutinaToAssign, setRutinaToAssign] = useState<Rutina | null>(null);
+    const [wizardPrefilledPlantillaId, setWizardPrefilledPlantillaId] = useState<number | null>(null);
 
     // Preview
     const [previewOpen, setPreviewOpen] = useState(false);
@@ -354,34 +350,8 @@ export default function RutinasPage() {
             setEditorOpen(true);
         } else {
             // If creating an assigned routine, use wizard
+            setWizardPrefilledPlantillaId(null);
             setWizardOpen(true);
-        }
-    };
-
-    const handleAssign = async (template: Rutina, user: Usuario) => {
-        setAssignModalOpen(false);
-        setLoading(true);
-        try {
-            const assigned = await api.assignRutina(template.id, user.id);
-            const newId = assigned.ok ? assigned.data?.id : null;
-            if (!newId) {
-                error(assigned.error || 'No se pudo asignar');
-                return;
-            }
-            const resDetails = await api.getRutina(newId);
-            if (resDetails.ok && resDetails.data) {
-                setRutinaToEdit(resDetails.data);
-            } else {
-                setRutinaToEdit({ id: newId } as Rutina);
-            }
-            setEditorOpen(true);
-            success(`Rutina asignada a ${user.nombre}`);
-
-        } catch (e) {
-            error('Error preparando asignación');
-            console.error(e);
-        } finally {
-            setLoading(false);
         }
     };
 
@@ -509,8 +479,8 @@ export default function RutinasPage() {
                             variant="ghost"
                             size="sm"
                             onClick={() => {
-                                setRutinaToAssign(row);
-                                setAssignModalOpen(true);
+                                setWizardPrefilledPlantillaId(row.id);
+                                setWizardOpen(true);
                             }}
                             title="Asignar a usuario"
                         >
@@ -640,12 +610,14 @@ export default function RutinasPage() {
             <RutinaCreationWizard
                 isOpen={wizardOpen}
                 onClose={() => setWizardOpen(false)}
+                prefilledPlantillaId={wizardPrefilledPlantillaId}
                 onProceed={async (data) => {
                     setWizardOpen(false);
+                    setWizardPrefilledPlantillaId(null);
                     setLoading(true);
                     try {
-                        if (data.template_id) {
-                            const assigned = await api.assignRutina(Number(data.template_id), Number(data.usuario_id));
+                        if (data.plantilla_id) {
+                            const assigned = await api.assignRutina(Number(data.plantilla_id), Number(data.usuario_id));
                             const newId = assigned.ok ? assigned.data?.id : null;
                             if (!newId) {
                                 error(assigned.error || 'No se pudo asignar');
@@ -672,17 +644,6 @@ export default function RutinasPage() {
                         setLoading(false);
                     }
                 }}
-            />
-
-            {/* Assign Modal */}
-            <AssignRutinaModal
-                isOpen={assignModalOpen}
-                onClose={() => {
-                    setAssignModalOpen(false);
-                    setRutinaToAssign(null);
-                }}
-                rutina={rutinaToAssign}
-                onAssign={handleAssign}
             />
 
             {/* Preview Modal */}

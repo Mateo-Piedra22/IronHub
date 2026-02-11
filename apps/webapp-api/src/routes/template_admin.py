@@ -23,6 +23,10 @@ from src.dependencies import (
     require_gym_access_gimnasio,
     require_owner,
 )
+from src.rate_limit import (
+    is_preview_rate_limited,
+    get_preview_rate_limit_status,
+)
 from src.services.template_service import TemplateService
 
 logger = logging.getLogger(__name__)
@@ -300,6 +304,7 @@ async def get_template_tags(
 
 @router.post("/{template_id}/preview", response_model=Dict[str, Any])
 async def generate_template_preview(
+    request: Request,
     template_id: int,
     format: str = Query("pdf", description="Preview format (pdf|image|thumbnail|html|json)"),
     quality: str = Query("medium", description="Preview quality (low|medium|high|ultra)"),
@@ -311,6 +316,18 @@ async def generate_template_preview(
 ):
     """Generate template preview in various formats."""
     try:
+        user_id = _get_session_user_id(request)
+        if is_preview_rate_limited(request, user_id=user_id):
+            status = get_preview_rate_limit_status(request, user_id=user_id)
+            raise HTTPException(
+                status_code=429,
+                detail="Demasiadas previsualizaciones",
+                headers={
+                    "Retry-After": str(status.get("preview_window", 60)),
+                    "X-RateLimit-Limit": str(status.get("preview_limit", 30)),
+                    "X-RateLimit-Remaining": "0",
+                },
+            )
         # Validate enums
         if format not in ("pdf", "image", "thumbnail", "html", "json"):
             raise HTTPException(status_code=400, detail="Invalid format")
@@ -363,6 +380,7 @@ async def generate_template_preview(
 
 @router.get("/{template_id}/preview/stream")
 async def stream_template_preview(
+    request: Request,
     template_id: int,
     format: str = Query("pdf", description="Stream format (pdf|image|thumbnail)"),
     quality: str = Query("medium", description="Stream quality"),
@@ -372,6 +390,18 @@ async def stream_template_preview(
 ):
     """Stream template preview directly."""
     try:
+        user_id = _get_session_user_id(request)
+        if is_preview_rate_limited(request, user_id=user_id):
+            status = get_preview_rate_limit_status(request, user_id=user_id)
+            raise HTTPException(
+                status_code=429,
+                detail="Demasiadas previsualizaciones",
+                headers={
+                    "Retry-After": str(status.get("preview_window", 60)),
+                    "X-RateLimit-Limit": str(status.get("preview_limit", 30)),
+                    "X-RateLimit-Remaining": "0",
+                },
+            )
         if format not in ("pdf", "image", "thumbnail"):
             raise HTTPException(status_code=400, detail="Invalid format")
 

@@ -31,6 +31,7 @@ from src.database.raw_manager import RawPostgresManager
 from src.services.admin_service import AdminService
 from src.routers.payments import router as payments_router
 from src.routers.routine_templates import router as routine_templates_router
+from src.routers.templates_v1 import router as templates_v1_router
 from src.secure_config import SecureConfig
 from src.security_utils import SecurityUtils
 
@@ -75,6 +76,7 @@ app = FastAPI(
 # Include routers
 app.include_router(payments_router)
 app.include_router(routine_templates_router)
+app.include_router(templates_v1_router)
 
 # CORS
 origins_str = os.getenv("ALLOWED_ORIGINS", "")

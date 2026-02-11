@@ -81,7 +81,7 @@ export function TemplateGallery({ onTemplateSelect, onTemplateEdit, onTemplateCr
       }
     } catch (err) {
       console.error("Error loading templates:", err);
-      error("Error al cargar plantillas");
+      error("Error al cargar templates");
     } finally {
       setLoading(false);
     }
@@ -149,33 +149,33 @@ export function TemplateGallery({ onTemplateSelect, onTemplateEdit, onTemplateCr
     try {
       const response = await api.duplicateTemplate(template.id);
       if (response.ok && response.data?.success) {
-        success("Plantilla duplicada exitosamente");
+        success("Template duplicado exitosamente");
         loadTemplates(true);
       } else {
-        error("Error al duplicar plantilla");
+        error("Error al duplicar template");
       }
     } catch (err) {
       console.error("Error duplicating template:", err);
-      error("Error al duplicar plantilla");
+      error("Error al duplicar template");
     }
   };
 
   const handleTemplateDelete = async (template: Template) => {
-    if (!confirm(`¿Estás seguro de eliminar la plantilla "${template.nombre}"?`)) {
+    if (!confirm(`¿Estás seguro de eliminar el template "${template.nombre}"?`)) {
       return;
     }
 
     try {
       const response = await api.deleteTemplate(template.id);
       if (response.ok && response.data?.success) {
-        success("Plantilla eliminada exitosamente");
+        success("Template eliminado exitosamente");
         loadTemplates(true);
       } else {
-        error("Error al eliminar plantilla");
+        error("Error al eliminar template");
       }
     } catch (err) {
       console.error("Error deleting template:", err);
-      error("Error al eliminar plantilla");
+      error("Error al eliminar template");
     }
   };
 
@@ -183,8 +183,8 @@ export function TemplateGallery({ onTemplateSelect, onTemplateEdit, onTemplateCr
     if (selectedTemplates.length === 0) return;
 
     const confirmMessage = action === "delete" 
-      ? `¿Estás seguro de eliminar ${selectedTemplates.length} plantillas?`
-      : `¿Estás seguro de ${action === "activate" ? "activar" : "desactivar"} ${selectedTemplates.length} plantillas?`;
+      ? `¿Estás seguro de eliminar ${selectedTemplates.length} templates?`
+      : `¿Estás seguro de ${action === "activate" ? "activar" : "desactivar"} ${selectedTemplates.length} templates?`;
 
     if (!confirm(confirmMessage)) return;
 
@@ -194,7 +194,7 @@ export function TemplateGallery({ onTemplateSelect, onTemplateEdit, onTemplateCr
       });
 
       if (response.ok && response.data?.success) {
-        success(`${action === "delete" ? "Eliminadas" : action === "activate" ? "Activadas" : "Desactivadas"} ${selectedTemplates.length} plantillas`);
+        success(`${action === "delete" ? "Eliminados" : action === "activate" ? "Activados" : "Desactivados"} ${selectedTemplates.length} templates`);
         setSelectedTemplates([]);
         setShowBulkActions(false);
         loadTemplates(true);
@@ -218,9 +218,9 @@ export function TemplateGallery({ onTemplateSelect, onTemplateEdit, onTemplateCr
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-white">Galería de Plantillas</h2>
+          <h2 className="text-2xl font-bold text-white">Galería de Templates</h2>
           <p className="text-slate-400 mt-1">
-            {total} plantilla{total !== 1 ? 's' : ''} encontrada{total !== 1 ? 's' : ''}
+            {total} template{total !== 1 ? 's' : ''} encontrado{total !== 1 ? 's' : ''}
           </p>
         </div>
         
@@ -237,7 +237,7 @@ export function TemplateGallery({ onTemplateSelect, onTemplateEdit, onTemplateCr
             onClick={onTemplateCreate}
             leftIcon={<Plus className="w-4 h-4" />}
           >
-            Nueva Plantilla
+            Nuevo Template
           </Button>
         </div>
       </div>
@@ -249,7 +249,7 @@ export function TemplateGallery({ onTemplateSelect, onTemplateEdit, onTemplateCr
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
             <Input
-              placeholder="Buscar plantillas..."
+              placeholder="Buscar templates..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-10"

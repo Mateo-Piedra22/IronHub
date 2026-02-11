@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type ChangeEvent } from "react";
 import { Grid, Plus, RefreshCw, Star, Users } from "lucide-react";
 import { Button, Select, useToast, Card } from "@/components/ui";
-import { api, type Template, type TemplateStats } from "@/lib/api";
+import { api, type Gym, type Template, type TemplateStats } from "@/lib/api";
 import { TemplateGallery } from "@/components/TemplateGallery";
 import { TemplateEditor } from "@/components/TemplateEditor";
 import { TemplatePreview } from "@/components/TemplatePreview";
@@ -11,6 +11,8 @@ import { TemplatePreview } from "@/components/TemplatePreview";
 type TimeRange = "7d" | "30d" | "90d" | "1y" | "all";
 
 export default function TemplatesPage() {
+  const [gyms, setGyms] = useState<Gym[]>([]);
+  const [selectedGymId, setSelectedGymId] = useState<number | null>(null);
   const [stats, setStats] = useState<TemplateStats | null>(null);
   const [timeRange, setTimeRange] = useState<TimeRange>("30d");
 
@@ -20,16 +22,46 @@ export default function TemplatesPage() {
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
   const [isCreatingNew, setIsCreatingNew] = useState(false);
 
-  const { success } = useToast();
+  const { success, error } = useToast();
+
+  const loadGyms = useCallback(async () => {
+    try {
+      const res = await api.getGyms({ page: 1, page_size: 500 });
+      if (!res.ok || !res.data?.gyms) {
+        error(res.error || "Error al cargar gimnasios");
+        return;
+      }
+      const list = Array.isArray(res.data.gyms) ? res.data.gyms : [];
+      setGyms(list);
+
+      const stored = typeof window !== "undefined" ? window.localStorage.getItem("ironhub_admin_selected_gym_id") : null;
+      const storedId = stored ? Number(stored) : 0;
+      const fallbackId = list[0]?.id ? Number(list[0].id) : 0;
+      const effectiveId = (storedId && list.some((g) => g.id === storedId)) ? storedId : fallbackId;
+      if (effectiveId) {
+        setSelectedGymId(effectiveId);
+        if (typeof window !== "undefined") window.localStorage.setItem("ironhub_admin_selected_gym_id", String(effectiveId));
+      } else {
+        setSelectedGymId(null);
+      }
+    } catch {
+      error("Error al cargar gimnasios");
+    }
+  }, [error]);
 
   const loadStats = useCallback(async () => {
     try {
+      if (!selectedGymId) return;
       const response = await api.getTemplateStats(timeRange);
       if (response.ok && response.data?.success) {
         setStats(response.data.stats);
       }
     } catch {}
-  }, [timeRange]);
+  }, [timeRange, selectedGymId]);
+
+  useEffect(() => {
+    loadGyms();
+  }, [loadGyms]);
 
   useEffect(() => {
     loadStats();
@@ -57,7 +89,7 @@ export default function TemplatesPage() {
   };
 
   const handleTemplateSave = (_template: Template) => {
-    success(`Plantilla ${isCreatingNew ? "creada" : "actualizada"} exitosamente`);
+    success(`Template ${isCreatingNew ? "creado" : "actualizado"} exitosamente`);
     setShowEditor(false);
     loadStats();
   };
@@ -79,11 +111,28 @@ export default function TemplatesPage() {
         <div>
           <h1 className="text-3xl font-bold text-white">Gestión de Plantillas</h1>
           <p className="text-slate-400 mt-1">
-            Administra y personaliza las plantillas de rutinas del sistema
+            Administra y personaliza templates de exportación de rutinas
           </p>
         </div>
 
         <div className="flex gap-3">
+          <Select
+            value={selectedGymId ? String(selectedGymId) : ""}
+            onChange={(e: ChangeEvent<HTMLSelectElement>) => {
+              const next = Number(e.target.value) || 0;
+              if (!next) return;
+              setSelectedGymId(next);
+              if (typeof window !== "undefined") window.localStorage.setItem("ironhub_admin_selected_gym_id", String(next));
+              setStats(null);
+              loadStats();
+            }}
+            placeholder="Gimnasio"
+            className="w-60"
+            options={[
+              { value: "", label: gyms.length ? "Seleccionar gimnasio…" : "Sin gimnasios" },
+              ...gyms.map((g) => ({ value: String(g.id), label: `${g.nombre} (ID: ${g.id})` })),
+            ]}
+          />
           <Select
             value={timeRange}
             onChange={(e: ChangeEvent<HTMLSelectElement>) => setTimeRange(e.target.value as TimeRange)}
@@ -102,14 +151,16 @@ export default function TemplatesPage() {
             variant="secondary"
             size="sm"
             leftIcon={<RefreshCw className="w-4 h-4" />}
+            disabled={!selectedGymId}
           >
             Actualizar
           </Button>
           <Button
             onClick={handleTemplateCreate}
             leftIcon={<Plus className="w-4 h-4" />}
+            disabled={!selectedGymId}
           >
-            Nueva Plantilla
+            Nuevo Template
           </Button>
         </div>
       </div>
@@ -179,12 +230,17 @@ export default function TemplatesPage() {
         </div>
       )}
 
-      {/* Templates Gallery — component manages its own data loading, filtering, pagination */}
-      <TemplateGallery
-        onTemplateSelect={handleTemplateSelect}
-        onTemplateEdit={handleTemplateEdit}
-        onTemplateCreate={handleTemplateCreate}
-      />
+      {selectedGymId ? (
+        <TemplateGallery
+          onTemplateSelect={handleTemplateSelect}
+          onTemplateEdit={handleTemplateEdit}
+          onTemplateCreate={handleTemplateCreate}
+        />
+      ) : (
+        <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-6 text-slate-300">
+          Seleccioná un gimnasio para administrar sus templates.
+        </div>
+      )}
 
       {/* Template Editor Modal */}
       {showEditor && (

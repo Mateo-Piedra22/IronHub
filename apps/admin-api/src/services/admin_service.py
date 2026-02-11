@@ -1041,6 +1041,11 @@ class AdminService:
                           version_actual, tags, uso_count, rating_promedio, rating_count,
                           preview_url, fecha_creacion, fecha_actualizacion
                         FROM plantillas_rutina
+                        WHERE
+                          configuracion ? 'pages'
+                          AND configuracion ? 'metadata'
+                          AND configuracion ? 'layout'
+                          AND configuracion ? 'variables'
                         ORDER BY fecha_actualizacion DESC NULLS LAST, fecha_creacion DESC NULLS LAST, id DESC
                         LIMIT 500
                         """

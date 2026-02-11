@@ -512,6 +512,13 @@ export function UnifiedRutinaEditor({
         })();
     }, [isOpen, plantillaId]);
 
+    useEffect(() => {
+        if (!isOpen) return;
+        if (!plantillaId) {
+            setTemplatePickerOpen(true);
+        }
+    }, [isOpen, plantillaId]);
+
     // Update days when diasSemana changes
     useEffect(() => {
         setDays(prevDays => {

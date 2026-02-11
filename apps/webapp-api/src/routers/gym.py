@@ -48,6 +48,7 @@ from src.models.orm_models import (
     Ejercicio,
     PlantillaRutina,
     GimnasioPlantilla,
+    PlantillaAnalitica,
 )
 from src.database.tenant_connection import (
     get_current_tenant,
@@ -66,6 +67,10 @@ from src.services.b2_storage import simple_upload as b2_upload
 from src.services.feature_flags_service import FeatureFlagsService
 from src.services.pdf_engine import PDFEngine
 from src.services.template_validator import TemplateValidator
+from src.rate_limit import (
+    is_export_rate_limited,
+    get_export_rate_limit_status,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -179,38 +184,66 @@ def _select_template_config_for_rutina(
     db: Session,
     template_id: Optional[int],
     qr_mode: str,
-) -> Dict[str, Any]:
+) -> tuple[Dict[str, Any], Optional[int]]:
     template: Optional[PlantillaRutina] = None
+    export_filter = [PlantillaRutina.tipo == "export_pdf"]
 
     if template_id is not None:
-        template = db.query(PlantillaRutina).filter(PlantillaRutina.id == int(template_id)).first()
+        template = (
+            db.query(PlantillaRutina)
+            .filter(PlantillaRutina.id == int(template_id), *export_filter)
+            .first()
+        )
         if not template or not bool(getattr(template, "activa", True)):
-            raise HTTPException(status_code=404, detail="Plantilla no encontrada")
+            raise HTTPException(status_code=404, detail="Template de exportación no encontrado")
         config = getattr(template, "configuracion", None) or {}
+        template_used_id: Optional[int] = int(template.id)
     else:
         gimnasio_id = get_current_tenant_gym_id()
         if not gimnasio_id:
             raise HTTPException(status_code=400, detail="No se pudo determinar el gimnasio del tenant")
-        assignment = (
+        config = {}
+        template_used_id = None
+
+        assignments = (
             db.query(GimnasioPlantilla)
             .filter(GimnasioPlantilla.gimnasio_id == int(gimnasio_id), GimnasioPlantilla.activa == True)
             .order_by(GimnasioPlantilla.prioridad.asc(), GimnasioPlantilla.fecha_asignacion.desc())
-            .first()
+            .all()
         )
-        if assignment and assignment.configuracion_personalizada:
-            config = assignment.configuracion_personalizada
-        elif assignment and assignment.plantilla:
-            config = assignment.plantilla.configuracion
-        else:
+
+        for assignment in assignments:
+            candidate = None
+            if assignment and assignment.configuracion_personalizada:
+                candidate = assignment.configuracion_personalizada
+            elif assignment and assignment.plantilla:
+                candidate = assignment.plantilla.configuracion
+            if not isinstance(candidate, dict):
+                continue
+            if assignment and assignment.plantilla and getattr(assignment.plantilla, "tipo", "") != "export_pdf":
+                continue
+            config = candidate
+            try:
+                if assignment and assignment.plantilla_id:
+                    template_used_id = int(assignment.plantilla_id)
+            except Exception:
+                template_used_id = None
+            break
+
+        if not config:
             template = (
                 db.query(PlantillaRutina)
-                .filter(PlantillaRutina.activa == True, PlantillaRutina.publica == True)
+                .filter(PlantillaRutina.activa == True, PlantillaRutina.publica == True, *export_filter)
                 .order_by(PlantillaRutina.uso_count.desc(), PlantillaRutina.id.asc())
                 .first()
             )
             if not template:
-                raise HTTPException(status_code=404, detail="No hay plantillas disponibles")
+                raise HTTPException(status_code=404, detail="No hay templates de exportación disponibles")
             config = getattr(template, "configuracion", None) or {}
+            try:
+                template_used_id = int(template.id)
+            except Exception:
+                template_used_id = None
 
     try:
         qr_norm = str(qr_mode or "auto").strip().lower()
@@ -239,7 +272,7 @@ def _select_template_config_for_rutina(
         messages = [str(e.get("message") or "") for e in (validation.errors or []) if isinstance(e, dict)]
         raise HTTPException(status_code=500, detail="Plantilla inválida: " + "; ".join([m for m in messages if m]))
 
-    return cfg
+    return cfg, template_used_id
 
 
 def _cleanup_files(*paths: str) -> None:
@@ -2351,6 +2384,7 @@ async def api_rutinas_create(
     ],
 )
 async def api_rutina_export_pdf(
+    request: Request,
     rutina_id: int,
     weeks: int = 1,
     filename: Optional[str] = None,
@@ -2364,7 +2398,25 @@ async def api_rutina_export_pdf(
     db: Session = Depends(get_db),
 ):
     """Export routine as PDF using the dynamic template system."""
+    t0 = time.time()
+    template_used_id: Optional[int] = None
     try:
+        try:
+            uid = request.session.get("user_id")
+            uid = int(uid) if uid is not None else None
+        except Exception:
+            uid = None
+        if is_export_rate_limited(request, user_id=uid):
+            status = get_export_rate_limit_status(request, user_id=uid)
+            raise HTTPException(
+                status_code=429,
+                detail="Demasiadas exportaciones",
+                headers={
+                    "Retry-After": str(status.get("export_window", 300)),
+                    "X-RateLimit-Limit": str(status.get("export_limit", 10)),
+                    "X-RateLimit-Remaining": "0",
+                },
+            )
         rutina_data = svc.obtener_rutina_completa(rutina_id)
         if not rutina_data:
             raise HTTPException(status_code=404, detail="Rutina no encontrada")
@@ -2397,12 +2449,24 @@ async def api_rutina_export_pdf(
                 effective_template_id = int(rid_tpl) if rid_tpl is not None else None
             except Exception:
                 effective_template_id = None
-        template_config = _select_template_config_for_rutina(db, template_id=effective_template_id, qr_mode=qr_mode)
+        template_config, template_used_id = _select_template_config_for_rutina(db, template_id=effective_template_id, qr_mode=qr_mode)
 
         engine = PDFEngine()
         pdf_bytes = engine.generate_pdf(template_config=template_config, data=data, output_path=None)
         if not isinstance(pdf_bytes, (bytes, bytearray)):
             raise HTTPException(status_code=500, detail="Error generando PDF")
+
+        try:
+            if template_used_id:
+                db.query(PlantillaRutina).filter(PlantillaRutina.id == int(template_used_id)).update(
+                    {PlantillaRutina.uso_count: PlantillaRutina.uso_count + 1}
+                )
+                db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
         headers = {"Content-Disposition": f'attachment; filename="{pdf_filename}"'}
         return Response(content=bytes(pdf_bytes), media_type="application/pdf", headers=headers)
@@ -2411,6 +2475,41 @@ async def api_rutina_export_pdf(
     except Exception as e:
         logging.exception("Error exporting PDF")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            render_ms = int((time.time() - t0) * 1000.0)
+        except Exception:
+            render_ms = None
+        try:
+            if template_used_id:
+                try:
+                    uid = request.session.get("user_id")
+                    uid = int(uid) if uid is not None else None
+                except Exception:
+                    uid = None
+                try:
+                    gid = get_current_tenant_gym_id()
+                    gid = int(gid) if gid is not None else None
+                except Exception:
+                    gid = None
+                db.add(
+                    PlantillaAnalitica(
+                        plantilla_id=int(template_used_id),
+                        gimnasio_id=gid,
+                        usuario_id=uid,
+                        evento_tipo="export_pdf",
+                        datos_evento={"rutina_id": int(rutina_id), "week": int(weeks or 1), "qr_mode": str(qr_mode or "")},
+                        tiempo_render_ms=render_ms,
+                        exitoso=True,
+                        error_message=None,
+                    )
+                )
+                db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
 
 @router.get(

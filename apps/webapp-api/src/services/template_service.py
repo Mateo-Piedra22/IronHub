@@ -318,7 +318,8 @@ class TemplateService:
                 limit=limit,
                 offset=offset,
                 sort_by=sort_by,
-                sort_order=sort_order
+                sort_order=sort_order,
+                export_only=True,
             )
             
             # Get total count for pagination
@@ -347,7 +348,8 @@ class TemplateService:
             templates = self.repository.get_templates_by_gym(
                 gimnasio_id=gimnasio_id,
                 activa=True,
-                include_public=include_public
+                include_public=include_public,
+                export_only=True,
             )
             
             result = []

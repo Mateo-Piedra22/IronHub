@@ -16,7 +16,8 @@ from src.dependencies import (
     require_gestion_access,
     require_gym_access,
 )
-from src.database.orm_models import PlantillaRutina, GimnasioPlantilla
+from src.database.tenant_connection import get_current_tenant_gym_id
+from src.models.orm_models import PlantillaRutina, GimnasioPlantilla
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +142,33 @@ async def get_gym_templates(
         raise
     except Exception as e:
         logger.error(f"Error getting templates for gym {gym_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/current/templates", response_model=Dict[str, Any])
+async def get_current_gym_templates(
+    active_only: bool = Query(True, description="Only active assignments"),
+    include_analytics: bool = Query(False, description="Include analytics data"),
+    db: Session = Depends(get_db),
+    _=Depends(require_gestion_access),
+):
+    gym_id = get_current_tenant_gym_id()
+    if not gym_id:
+        raise HTTPException(status_code=400, detail="No tenant gym_id")
+    try:
+        service = _safe_service(db)
+        if service is None:
+            raise HTTPException(status_code=501, detail="GymTemplateService not available")
+        templates = service.get_gym_templates(
+            gym_id=int(gym_id),
+            active_only=active_only,
+            include_analytics=include_analytics,
+        )
+        return {"success": True, "gym_id": int(gym_id), "templates": templates, "total": len(templates)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting templates for current gym: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

@@ -3282,6 +3282,10 @@ class ApiClient {
         return this.request<{ success: boolean; templates: Template[]; gym_id: number }>(`/api/v1/gyms/${gimnasio_id}/templates`);
     }
 
+    async getCurrentGymTemplates() {
+        return this.request<{ success: boolean; templates: Template[]; gym_id: number }>(`/api/v1/gyms/current/templates`);
+    }
+
     async getTemplateVersions(id: number) {
         return this.request<{ success: boolean; versions: TemplateVersion[]; total: number }>(`/api/v1/templates/${id}/versions`);
     }

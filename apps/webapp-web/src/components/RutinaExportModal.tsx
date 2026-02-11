@@ -134,7 +134,7 @@ export function RutinaExportModal({ isOpen, onClose, rutina, gymId }: RutinaExpo
                             <div className="flex items-center justify-between">
                                 <label className="text-sm font-medium text-slate-300">
                                     <Palette className="w-4 h-4 inline mr-2" />
-                                    Usar plantilla personalizada
+                                    Usar template personalizado
                                 </label>
                                 <Toggle
                                     checked={useTemplate}
@@ -186,7 +186,7 @@ export function RutinaExportModal({ isOpen, onClose, rutina, gymId }: RutinaExpo
                                         >
                                             <div className="flex items-center justify-center gap-2">
                                                 <Palette className="w-4 h-4" />
-                                                <span>Seleccionar plantilla</span>
+                                                <span>Seleccionar template</span>
                                             </div>
                                         </button>
                                     )}

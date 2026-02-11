@@ -600,11 +600,14 @@ async function request<T>(
     const signal = options.signal ?? controller?.signal;
     const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
     try {
+        const selectedGymId =
+            typeof window !== 'undefined' ? window.localStorage.getItem('ironhub_admin_selected_gym_id') : null;
         const res = await fetch(`${API_URL}${endpoint}`, {
             ...options,
             credentials: 'include',
             signal,
             headers: {
+                ...(selectedGymId ? { 'x-gym-id': selectedGymId } : {}),
                 ...options.headers,
             },
         });

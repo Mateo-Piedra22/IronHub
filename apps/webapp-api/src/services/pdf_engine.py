@@ -7,6 +7,8 @@ including variable resolution, exercise table building, QR code management, and 
 
 import io
 import os
+import base64
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 from datetime import datetime
 import logging
@@ -37,6 +39,9 @@ from jinja2.sandbox import SandboxedEnvironment
 
 logger = logging.getLogger(__name__)
 
+_ASSETS_ROOT = (Path(__file__).resolve().parents[2] / "assets").resolve()
+_MAX_IMAGE_BYTES = int(os.environ.get("PDF_MAX_IMAGE_BYTES", "600000"))
+
 
 class PDFEngine:
     """Core PDF generation engine for dynamic routine templates"""
@@ -50,6 +55,7 @@ class PDFEngine:
             autoescape=False,
         )
         self._compiled_templates: Dict[str, Any] = {}
+        self._max_compiled_templates = int(os.environ.get("PDF_MAX_COMPILED_TEMPLATES", "500"))
         
     def generate_pdf(
         self,
@@ -650,14 +656,41 @@ class PDFEngine:
         # Process template variables in path
         image_path = self._process_template_string(image_path, data)
         
-        # Add image if path exists
-        if image_path and os.path.exists(image_path):
+        if not image_path:
+            return elements
+
+        # data URI support (safer than filesystem access)
+        if image_path.startswith("data:image/"):
             try:
-                img = Image(image_path, width=width, height=height)
+                if "," not in image_path:
+                    return elements
+                header, b64 = image_path.split(",", 1)
+                raw = base64.b64decode(b64, validate=True)
+                if len(raw) > _MAX_IMAGE_BYTES:
+                    return elements
+                reader = ImageReader(io.BytesIO(raw))
+                img = Image(reader, width=width, height=height)
                 elements.append(img)
                 elements.append(Spacer(1, 12))
-            except Exception as e:
-                logger.warning(f"Could not load image {image_path}: {e}")
+                return elements
+            except Exception:
+                return elements
+
+        # Restrict filesystem reads to assets directory only
+        try:
+            p = Path(image_path)
+            if p.is_absolute():
+                return elements
+            candidate = (_ASSETS_ROOT / p).resolve()
+            if _ASSETS_ROOT not in candidate.parents and candidate != _ASSETS_ROOT:
+                return elements
+            if not candidate.exists() or not candidate.is_file():
+                return elements
+            img = Image(str(candidate), width=width, height=height)
+            elements.append(img)
+            elements.append(Spacer(1, 12))
+        except Exception as e:
+            logger.warning(f"Could not load image {image_path}: {e}")
         
         return elements
     
@@ -752,6 +785,11 @@ class PDFEngine:
                 raise TemplateError("Expresión no permitida")
             template = self._compiled_templates.get(s)
             if template is None:
+                if self._max_compiled_templates > 0 and len(self._compiled_templates) >= self._max_compiled_templates:
+                    try:
+                        self._compiled_templates.pop(next(iter(self._compiled_templates)))
+                    except Exception:
+                        self._compiled_templates = {}
                 template = self.jinja_env.from_string(s)
                 self._compiled_templates[s] = template
             return str(template.render(**data))

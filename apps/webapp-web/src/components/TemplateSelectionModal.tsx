@@ -73,102 +73,79 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
             const limit = 12;
             const offset = currentPage * limit;
 
-            if (_gymId) {
-                const gymRes = await api.getGymTemplates(_gymId);
-                let source: Template[] = [];
-                if (gymRes.ok && gymRes.data?.success && Array.isArray(gymRes.data.templates)) {
-                    source = gymRes.data.templates;
-                }
+            const gymRes = _gymId ? await api.getGymTemplates(_gymId) : await api.getCurrentGymTemplates();
+            let source: Template[] = [];
+            if (gymRes.ok && gymRes.data?.success && Array.isArray(gymRes.data.templates)) {
+                source = gymRes.data.templates;
+            }
 
-                if (!source.length) {
-                    const publicRes = await api.getTemplates({
-                        query: searchQuery || undefined,
-                        categoria: selectedCategory || undefined,
-                        dias_semana: selectedDays ? parseInt(selectedDays) : undefined,
-                        sort_by: sortBy,
-                        sort_order: sortOrder,
-                        limit,
-                        offset,
-                    });
-                    if (publicRes.ok && publicRes.data?.success && publicRes.data.templates) {
-                        if (resetPage) {
-                            setTemplates(publicRes.data.templates);
-                            setPage(0);
-                        } else {
-                            setTemplates(prev => [...prev, ...(publicRes.data?.templates || [])]);
-                        }
-                        setTotal(publicRes.data.total || 0);
-                        setHasMore(publicRes.data.has_more || false);
-                    }
-                    return;
-                }
-
-                const q = searchQuery.trim().toLowerCase();
-                let filtered = source;
-                if (q) {
-                    filtered = filtered.filter((t) => {
-                        const n = String(t.nombre || "").toLowerCase();
-                        const d = String(t.descripcion || "").toLowerCase();
-                        const c = String(t.categoria || "").toLowerCase();
-                        return n.includes(q) || d.includes(q) || c.includes(q);
-                    });
-                }
-                if (selectedCategory) {
-                    filtered = filtered.filter((t) => String(t.categoria || "") === String(selectedCategory));
-                }
-                if (selectedDays) {
-                    const ds = Number.parseInt(selectedDays, 10);
-                    filtered = filtered.filter((t) => !t.dias_semana || t.dias_semana === ds);
-                }
-
-                const sortDir = sortOrder === "asc" ? 1 : -1;
-                filtered = [...filtered].sort((a, b) => {
-                    if (sortBy === "nombre") {
-                        return String(a.nombre || "").localeCompare(String(b.nombre || "")) * sortDir;
-                    }
-                    if (sortBy === "categoria") {
-                        return String(a.categoria || "").localeCompare(String(b.categoria || "")) * sortDir;
-                    }
-                    if (sortBy === "uso_count") {
-                        return (Number(a.uso_count || 0) - Number(b.uso_count || 0)) * sortDir;
-                    }
-                    return 0;
+            if (!source.length) {
+                const publicRes = await api.getTemplates({
+                    query: searchQuery || undefined,
+                    categoria: selectedCategory || undefined,
+                    dias_semana: selectedDays ? parseInt(selectedDays) : undefined,
+                    sort_by: sortBy,
+                    sort_order: sortOrder,
+                    limit,
+                    offset,
                 });
-
-                const pageItems = filtered.slice(offset, offset + limit);
-                if (resetPage) {
-                    setTemplates(pageItems);
-                    setPage(0);
-                } else {
-                    setTemplates(prev => [...prev, ...pageItems]);
+                if (publicRes.ok && publicRes.data?.success && publicRes.data.templates) {
+                    if (resetPage) {
+                        setTemplates(publicRes.data.templates);
+                        setPage(0);
+                    } else {
+                        setTemplates(prev => [...prev, ...(publicRes.data?.templates || [])]);
+                    }
+                    setTotal(publicRes.data.total || 0);
+                    setHasMore(publicRes.data.has_more || false);
                 }
-                setTotal(filtered.length);
-                setHasMore(offset + limit < filtered.length);
                 return;
             }
 
-            const response = await api.getTemplates({
-                query: searchQuery || undefined,
-                categoria: selectedCategory || undefined,
-                dias_semana: selectedDays ? parseInt(selectedDays) : undefined,
-                sort_by: sortBy,
-                sort_order: sortOrder,
-                limit,
-                offset,
-            });
-            if (response.ok && response.data?.success && response.data.templates) {
-                if (resetPage) {
-                    setTemplates(response.data.templates);
-                    setPage(0);
-                } else {
-                    setTemplates(prev => [...prev, ...(response.data?.templates || [])]);
-                }
-                setTotal(response.data.total || 0);
-                setHasMore(response.data.has_more || false);
+            const q = searchQuery.trim().toLowerCase();
+            let filtered = source;
+            if (q) {
+                filtered = filtered.filter((t) => {
+                    const n = String(t.nombre || "").toLowerCase();
+                    const d = String(t.descripcion || "").toLowerCase();
+                    const c = String(t.categoria || "").toLowerCase();
+                    return n.includes(q) || d.includes(q) || c.includes(q);
+                });
             }
+            if (selectedCategory) {
+                filtered = filtered.filter((t) => String(t.categoria || "") === String(selectedCategory));
+            }
+            if (selectedDays) {
+                const ds = Number.parseInt(selectedDays, 10);
+                filtered = filtered.filter((t) => !t.dias_semana || t.dias_semana === ds);
+            }
+
+            const sortDir = sortOrder === "asc" ? 1 : -1;
+            filtered = [...filtered].sort((a, b) => {
+                if (sortBy === "nombre") {
+                    return String(a.nombre || "").localeCompare(String(b.nombre || "")) * sortDir;
+                }
+                if (sortBy === "categoria") {
+                    return String(a.categoria || "").localeCompare(String(b.categoria || "")) * sortDir;
+                }
+                if (sortBy === "uso_count") {
+                    return (Number(a.uso_count || 0) - Number(b.uso_count || 0)) * sortDir;
+                }
+                return 0;
+            });
+
+            const pageItems = filtered.slice(offset, offset + limit);
+            if (resetPage) {
+                setTemplates(pageItems);
+                setPage(0);
+            } else {
+                setTemplates(prev => [...prev, ...pageItems]);
+            }
+            setTotal(filtered.length);
+            setHasMore(offset + limit < filtered.length);
         } catch (err) {
             console.error("Error loading templates:", err);
-            error("Error al cargar plantillas");
+            error("Error al cargar templates");
         } finally {
             setLoading(false);
         }
@@ -237,7 +214,7 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
     const handleTemplateSelect = (template: Template) => {
         onTemplateSelect(template);
         onClose();
-        success(`Plantilla "${template.nombre}" seleccionada`);
+        success(`Template "${template.nombre}" seleccionado`);
     };
 
     // Filter templates based on routine days
@@ -256,12 +233,12 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
             <Modal
                 isOpen={isOpen && !previewTemplate}
                 onClose={onClose}
-                title="Seleccionar Plantilla"
+                title="Seleccionar Template"
                 size="xl"
                 footer={
                     <div className="flex justify-between items-center w-full">
                         <div className="text-sm text-slate-400">
-                            {total} plantilla{total !== 1 ? 's' : ''} encontrada{total !== 1 ? 's' : ''}
+                            {total} template{total !== 1 ? 's' : ''} encontrado{total !== 1 ? 's' : ''}
                         </div>
                         <div className="flex gap-2">
                             <Button variant="secondary" onClick={onClose}>
@@ -277,7 +254,7 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
                         <div className="flex-1 relative">
                             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
                             <Input
-                                placeholder="Buscar plantillas..."
+                                placeholder="Buscar templates..."
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 className="pl-10"
@@ -362,7 +339,7 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
                         ) : templates.length === 0 ? (
                             <div className="text-center py-8 text-slate-400">
                                 <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                                <p>No se encontraron plantillas</p>
+                                <p>No se encontraron templates</p>
                                 <p className="text-sm mt-1">Intenta ajustar los filtros de búsqueda</p>
                             </div>
                         ) : (
@@ -414,7 +391,7 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
                                 onClick={() => handleTemplateSelect(previewTemplate)}
                                 leftIcon={<Download className="w-4 h-4" />}
                             >
-                                Usar esta plantilla
+                                Usar este template
                             </Button>
                         )}
                     </div>

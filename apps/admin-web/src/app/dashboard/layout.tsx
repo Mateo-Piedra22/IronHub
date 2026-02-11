@@ -7,12 +7,13 @@ import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import {
     LayoutDashboard, Building2, CreditCard,
-    MessageSquare, Settings, LogOut, ChevronRight, LifeBuoy, Megaphone, ShieldAlert
+    MessageSquare, Settings, LogOut, ChevronRight, LifeBuoy, Megaphone, ShieldAlert, LayoutTemplate
 } from 'lucide-react';
 
 const navigation = [
     { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     { name: 'Gimnasios', href: '/dashboard/gyms', icon: Building2 },
+    { name: 'Templates', href: '/dashboard/templates', icon: LayoutTemplate },
     { name: 'Suscripciones', href: '/dashboard/subscriptions', icon: CreditCard },
     { name: 'Pagos', href: '/dashboard/payments', icon: CreditCard },
     { name: 'WhatsApp', href: '/dashboard/whatsapp', icon: MessageSquare },

@@ -2924,13 +2924,27 @@ export default function GymDetailPage({ params }: { params: Promise<{ id: string
                     <div className="space-y-6">
                         <div className="flex items-center justify-between gap-3">
                             <h2 className="text-lg font-semibold text-white">Rutinas / Templates</h2>
-                            <button
-                                onClick={() => void reloadRoutineTemplates()}
-                                disabled={routineTemplatesLoading}
-                                className="btn-secondary flex items-center gap-2"
-                            >
-                                {routineTemplatesLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Actualizar'}
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => {
+                                        try {
+                                            window.localStorage.setItem('ironhub_admin_selected_gym_id', String(gymId));
+                                        } catch {
+                                        }
+                                        window.location.href = '/dashboard/templates';
+                                    }}
+                                    className="btn-secondary"
+                                >
+                                    Administrar templates
+                                </button>
+                                <button
+                                    onClick={() => void reloadRoutineTemplates()}
+                                    disabled={routineTemplatesLoading}
+                                    className="btn-secondary flex items-center gap-2"
+                                >
+                                    {routineTemplatesLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Actualizar'}
+                                </button>
+                            </div>
                         </div>
 
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">

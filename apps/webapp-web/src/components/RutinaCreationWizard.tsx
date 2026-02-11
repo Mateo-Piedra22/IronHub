@@ -9,10 +9,11 @@ import { cn } from '@/lib/utils';
 interface RutinaCreationWizardProps {
     isOpen: boolean;
     onClose: () => void;
-    onProceed: (data: { usuario_id: number; usuario_nombre?: string | null; template_id?: number | null }) => void;
+    onProceed: (data: { usuario_id: number; usuario_nombre?: string | null; plantilla_id?: number | null }) => void;
+    prefilledPlantillaId?: number | null;
 }
 
-export function RutinaCreationWizard({ isOpen, onClose, onProceed }: RutinaCreationWizardProps) {
+export function RutinaCreationWizard({ isOpen, onClose, onProceed, prefilledPlantillaId }: RutinaCreationWizardProps) {
     const [step, setStep] = useState<'user_search' | 'source_choice' | 'template_search'>('user_search');
     const [loading, setLoading] = useState(false);
     const [selectedUser, setSelectedUser] = useState<Usuario | null>(null);
@@ -68,6 +69,11 @@ export function RutinaCreationWizard({ isOpen, onClose, onProceed }: RutinaCreat
 
     const handleSelectUser = (user: Usuario) => {
         setSelectedUser(user);
+        if (prefilledPlantillaId) {
+            onProceed({ usuario_id: user.id, usuario_nombre: user.nombre, plantilla_id: prefilledPlantillaId });
+            onClose();
+            return;
+        }
         setStep('source_choice');
         setSearchQuery('');
         setUserResults([]);
@@ -75,7 +81,7 @@ export function RutinaCreationWizard({ isOpen, onClose, onProceed }: RutinaCreat
 
     const handleSelectTemplate = (template: Rutina) => {
         if (!selectedUser) return;
-        onProceed({ usuario_id: selectedUser.id, usuario_nombre: selectedUser.nombre, template_id: template.id });
+        onProceed({ usuario_id: selectedUser.id, usuario_nombre: selectedUser.nombre, plantilla_id: template.id });
         onClose();
     };
 
@@ -90,7 +96,7 @@ export function RutinaCreationWizard({ isOpen, onClose, onProceed }: RutinaCreat
                 {step === 'user_search' && (
                     <div className="space-y-4">
                         <div className="flex items-center gap-2 mb-4">
-                            <h3 className="font-semibold text-lg">Seleccionar Usuario</h3>
+                            <h3 className="font-semibold text-lg">{prefilledPlantillaId ? 'Asignar a usuario' : 'Seleccionar Usuario'}</h3>
                         </div>
 
                         <div className="relative">

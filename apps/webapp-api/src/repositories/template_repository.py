@@ -24,6 +24,9 @@ class TemplateRepository:
     def __init__(self, db: Session):
         self.db = db
         self.validator = TemplateValidator()
+
+    def _export_only_filter(self):
+        return [PlantillaRutina.tipo == "export_pdf"]
     
     # === Template CRUD Operations ===
     
@@ -53,6 +56,7 @@ class TemplateRepository:
                 configuracion=configuracion,
                 categoria=categoria,
                 dias_semana=dias_semana,
+                tipo="export_pdf",
                 creada_por=creada_por,
                 publica=publica,
                 tags=tags or [],
@@ -193,13 +197,17 @@ class TemplateRepository:
         limit: int = 50,
         offset: int = 0,
         sort_by: str = "fecha_creacion",
-        sort_order: str = "desc"
+        sort_order: str = "desc",
+        export_only: bool = True,
     ) -> List[PlantillaRutina]:
         """Search templates with filters"""
         try:
             q = self.db.query(PlantillaRutina).options(
                 joinedload(PlantillaRutina.creador)
             )
+
+            if export_only:
+                q = q.filter(*self._export_only_filter())
             
             # Apply filters
             if query:
@@ -246,7 +254,8 @@ class TemplateRepository:
         self,
         gimnasio_id: int,
         activa: bool = True,
-        include_public: bool = True
+        include_public: bool = True,
+        export_only: bool = True,
     ) -> List[PlantillaRutina]:
         """Get templates available to a specific gym"""
         try:
@@ -259,6 +268,9 @@ class TemplateRepository:
                 GimnasioPlantilla.gimnasio_id == gimnasio_id,
                 GimnasioPlantilla.activa == activa
             )
+
+            if export_only:
+                q = q.filter(*self._export_only_filter())
             
             if include_public:
                 q = q.union(
@@ -533,7 +545,12 @@ class TemplateRepository:
     def get_template_categories(self) -> List[str]:
         """Get all available template categories"""
         try:
-            categories = self.db.query(PlantillaRutina.categoria).distinct().all()
+            categories = (
+                self.db.query(PlantillaRutina.categoria)
+                .filter(*self._export_only_filter())
+                .distinct()
+                .all()
+            )
             return [cat[0] for cat in categories if cat[0]]
         except SQLAlchemyError:
             return []
@@ -544,7 +561,8 @@ class TemplateRepository:
             # This is a simplified approach - in production you might want to use
             # PostgreSQL's unnest function for better performance
             templates = self.db.query(PlantillaRutina.tags).filter(
-                PlantillaRutina.tags.isnot(None)
+                PlantillaRutina.tags.isnot(None),
+                *self._export_only_filter(),
             ).all()
             
             all_tags = set()

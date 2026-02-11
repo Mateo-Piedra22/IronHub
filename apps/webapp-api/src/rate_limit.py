@@ -7,7 +7,7 @@ Provides thread-safe rate limiting by IP and DNI to prevent brute-force attacks.
 import os
 import time
 import threading
-from typing import Dict
+from typing import Dict, Optional
 from fastapi import Request
 from src.rate_limit_store import incr_and_check, get_rate_limit_store, InMemoryRateLimitStore
 
@@ -224,6 +224,99 @@ except Exception:
 
 
 _write_requests_by_ip: Dict[str, list] = {}
+
+
+try:
+    _PREVIEW_RATE_LIMIT_MAX = int(os.getenv("PREVIEW_RATE_LIMIT_MAX", "30"))
+except Exception:
+    _PREVIEW_RATE_LIMIT_MAX = 30
+
+try:
+    _PREVIEW_RATE_LIMIT_WINDOW = int(os.getenv("PREVIEW_RATE_LIMIT_WINDOW", "60"))
+except Exception:
+    _PREVIEW_RATE_LIMIT_WINDOW = 60
+
+try:
+    _EXPORT_RATE_LIMIT_MAX = int(os.getenv("EXPORT_RATE_LIMIT_MAX", "10"))
+except Exception:
+    _EXPORT_RATE_LIMIT_MAX = 10
+
+try:
+    _EXPORT_RATE_LIMIT_WINDOW = int(os.getenv("EXPORT_RATE_LIMIT_WINDOW", "300"))
+except Exception:
+    _EXPORT_RATE_LIMIT_WINDOW = 300
+
+
+def _rate_limit_key(prefix: str, request: Request, user_id: Optional[int]) -> str:
+    ip = _get_client_ip(request)
+    tenant = str(request.headers.get("x-tenant") or "").strip().lower()
+    uid = "anon"
+    if user_id is not None:
+        try:
+            uid = str(int(user_id))
+        except Exception:
+            uid = "anon"
+    return f"{prefix}:{tenant}:{ip}:{uid}"
+
+
+def is_preview_rate_limited(request: Request, user_id: Optional[int] = None) -> bool:
+    key = _rate_limit_key("preview", request, user_id)
+    limited, count = incr_and_check(key, _PREVIEW_RATE_LIMIT_WINDOW, _PREVIEW_RATE_LIMIT_MAX)
+    try:
+        store = get_rate_limit_store()
+        if isinstance(store, InMemoryRateLimitStore) and (count % 100 == 0):
+            store.cleanup(_PREVIEW_RATE_LIMIT_WINDOW)
+    except Exception:
+        pass
+    return bool(limited)
+
+
+def is_export_rate_limited(request: Request, user_id: Optional[int] = None) -> bool:
+    key = _rate_limit_key("export", request, user_id)
+    limited, count = incr_and_check(key, _EXPORT_RATE_LIMIT_WINDOW, _EXPORT_RATE_LIMIT_MAX)
+    try:
+        store = get_rate_limit_store()
+        if isinstance(store, InMemoryRateLimitStore) and (count % 50 == 0):
+            store.cleanup(_EXPORT_RATE_LIMIT_WINDOW)
+    except Exception:
+        pass
+    return bool(limited)
+
+
+def get_preview_rate_limit_status(request: Request, user_id: Optional[int] = None) -> dict:
+    ip = _get_client_ip(request)
+    tenant = str(request.headers.get("x-tenant") or "").strip().lower()
+    uid = None
+    if user_id is not None:
+        try:
+            uid = int(user_id)
+        except Exception:
+            uid = None
+    return {
+        "preview_limit": _PREVIEW_RATE_LIMIT_MAX,
+        "preview_window": _PREVIEW_RATE_LIMIT_WINDOW,
+        "ip": ip,
+        "tenant": tenant,
+        "user_id": uid,
+    }
+
+
+def get_export_rate_limit_status(request: Request, user_id: Optional[int] = None) -> dict:
+    ip = _get_client_ip(request)
+    tenant = str(request.headers.get("x-tenant") or "").strip().lower()
+    uid = None
+    if user_id is not None:
+        try:
+            uid = int(user_id)
+        except Exception:
+            uid = None
+    return {
+        "export_limit": _EXPORT_RATE_LIMIT_MAX,
+        "export_window": _EXPORT_RATE_LIMIT_WINDOW,
+        "ip": ip,
+        "tenant": tenant,
+        "user_id": uid,
+    }
 
 
 def is_global_rate_limited(request: Request) -> bool:

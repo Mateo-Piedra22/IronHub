@@ -1967,6 +1967,7 @@ class PlantillaRutina(Base):
         String(100), server_default="general"
     )
     dias_semana: Mapped[Optional[int]] = mapped_column(Integer)
+    tipo: Mapped[str] = mapped_column(String(50), nullable=False, server_default="export_pdf")
     activa: Mapped[bool] = mapped_column(Boolean, server_default="true")
     publica: Mapped[bool] = mapped_column(Boolean, server_default="false")
     creada_por: Mapped[Optional[int]] = mapped_column(
@@ -2013,6 +2014,7 @@ class PlantillaRutina(Base):
         Index("idx_plantillas_rutina_publica", "publica"),
         Index("idx_plantillas_rutina_creada_por", "creada_por"),
         Index("idx_plantillas_rutina_fecha_creacion", "fecha_creacion"),
+        Index("idx_plantillas_rutina_tipo", "tipo"),
     )
 
 

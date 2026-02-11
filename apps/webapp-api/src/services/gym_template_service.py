@@ -54,10 +54,11 @@ class GymTemplateService:
             
             template = self.db.query(PlantillaRutina).filter(
                 PlantillaRutina.id == template_id,
-                PlantillaRutina.activa == True
+                PlantillaRutina.activa == True,
+                PlantillaRutina.tipo == "export_pdf",
             ).first()
             if not template:
-                raise ValueError(f"Plantilla {template_id} no encontrada o inactiva")
+                raise ValueError(f"Template {template_id} no encontrado/inactivo o no es de exportación")
             
             # Verificar si ya está asignada
             existing = self.db.query(GimnasioPlantilla).filter(
@@ -145,6 +146,8 @@ class GymTemplateService:
             
             result = []
             for assignment in assignments:
+                if not assignment.plantilla or getattr(assignment.plantilla, "tipo", "") != "export_pdf":
+                    continue
                 template_data = {
                     "assignment_id": assignment.id,
                     "template_id": assignment.plantilla_id,

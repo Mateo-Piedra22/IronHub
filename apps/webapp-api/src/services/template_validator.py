@@ -7,6 +7,7 @@ impact assessment.
 """
 
 import json
+import re
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
@@ -45,6 +46,35 @@ class TemplateValidator:
             if jsonschema is not None
             else None
         )
+        self._allowed_builtin_vars = {
+            "rutina_id",
+            "uuid_rutina",
+            "nombre_rutina",
+            "descripcion",
+            "categoria",
+            "dias_semana",
+            "current_week",
+            "fecha_creacion",
+            "usuario",
+            "usuario_nombre",
+            "gimnasio",
+            "gym_name",
+            "dias",
+        }
+        self._allowed_filters = {
+            "lower",
+            "upper",
+            "title",
+            "capitalize",
+            "trim",
+            "length",
+            "default",
+            "replace",
+            "round",
+            "int",
+            "float",
+            "string",
+        }
     
     def _get_template_schema(self) -> Dict[str, Any]:
         """JSON Schema for template validation"""
@@ -408,6 +438,16 @@ class TemplateValidator:
         forbidden = self._find_forbidden_template_expressions(template_config)
         if forbidden:
             errors.extend(forbidden)
+
+        whitelist_warnings = self._validate_template_expression_whitelist(template_config)
+        if whitelist_warnings:
+            warnings.extend(whitelist_warnings)
+
+        section_errors, section_warnings = self._validate_section_semantics(template_config)
+        if section_errors:
+            errors.extend(section_errors)
+        if section_warnings:
+            warnings.extend(section_warnings)
         
         # Check page count limits
         page_count = len(template_config.get("pages", []))
@@ -477,6 +517,74 @@ class TemplateValidator:
         elif isinstance(obj, str):
             if "{{" in obj:
                 yield (obj, p)
+
+    def _extract_template_expressions(self, template_config: Dict[str, Any]) -> List[Tuple[str, List[Any]]]:
+        expressions: List[Tuple[str, List[Any]]] = []
+        for s, path in self._iter_template_strings(template_config):
+            try:
+                matches = re.findall(r"\{\{\s*(.+?)\s*\}\}", s)
+            except Exception:
+                matches = []
+            for expr in matches:
+                if expr:
+                    expressions.append((expr, path))
+        return expressions
+
+    def _parse_expression(self, expr: str) -> Tuple[Optional[str], List[str], bool]:
+        raw = str(expr or "").strip()
+        if not raw:
+            return None, [], False
+        parts = [p.strip() for p in raw.split("|")]
+        base = parts[0]
+        filters = []
+        for part in parts[1:]:
+            if not part:
+                continue
+            name = part.split("(", 1)[0].strip()
+            if name:
+                filters.append(name)
+        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$", base):
+            return base, filters, False
+        return base, filters, True
+
+    def _validate_template_expression_whitelist(self, template_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+        warnings: List[Dict[str, Any]] = []
+        defined_vars = set(template_config.get("variables", {}).keys())
+        allowed_vars = set(defined_vars) | set(self._allowed_builtin_vars)
+        for expr, path in self._extract_template_expressions(template_config):
+            base, filters, valid_base = self._parse_expression(expr)
+            if not base:
+                continue
+            if not valid_base:
+                warnings.append(
+                    {
+                        "severity": ValidationSeverity.WARNING.value,
+                        "type": "template_whitelist",
+                        "message": f"Expresión de template fuera de whitelist: {expr}",
+                        "path": path,
+                    }
+                )
+                continue
+            root = str(base).split(".", 1)[0]
+            if root not in allowed_vars:
+                warnings.append(
+                    {
+                        "severity": ValidationSeverity.WARNING.value,
+                        "type": "template_whitelist",
+                        "message": f"Variable fuera de whitelist: {root}",
+                        "path": path,
+                    }
+                )
+            for f in filters:
+                if f not in self._allowed_filters:
+                    warnings.append(
+                        {
+                            "severity": ValidationSeverity.WARNING.value,
+                            "type": "template_whitelist",
+                            "message": f"Filtro no permitido en whitelist: {f}",
+                            "path": path,
+                        }
+                    )
     
     def _assess_performance(self, template_config: Dict[str, Any]) -> Tuple[float, List[Dict[str, Any]]]:
         """Assess template performance impact"""
@@ -614,14 +722,239 @@ class TemplateValidator:
         """Find variables referenced but not defined"""
         defined_vars = set(template_config.get("variables", {}).keys())
         referenced_vars = set()
-        
-        # Simple variable reference detection (can be enhanced)
-        template_str = json.dumps(template_config)
-        import re
-        var_pattern = r'\{\{(\w+)\}\}'
-        referenced_vars.update(re.findall(var_pattern, template_str))
-        
-        return list(referenced_vars - defined_vars)
+        for expr, _path in self._extract_template_expressions(template_config):
+            base, _filters, valid_base = self._parse_expression(expr)
+            if not base or not valid_base:
+                continue
+            root = str(base).split(".", 1)[0]
+            referenced_vars.add(root)
+        return list(referenced_vars - defined_vars - set(self._allowed_builtin_vars))
+
+    def _validate_section_semantics(self, template_config: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        errors: List[Dict[str, Any]] = []
+        warnings: List[Dict[str, Any]] = []
+        pages = template_config.get("pages", [])
+        if not isinstance(pages, list):
+            return errors, warnings
+        for p_idx, page in enumerate(pages):
+            if not isinstance(page, dict):
+                errors.append(
+                    {
+                        "severity": ValidationSeverity.ERROR.value,
+                        "type": "section_semantics",
+                        "message": "Página inválida",
+                        "path": ["pages", p_idx],
+                    }
+                )
+                continue
+            sections = page.get("sections", [])
+            if not isinstance(sections, list):
+                errors.append(
+                    {
+                        "severity": ValidationSeverity.ERROR.value,
+                        "type": "section_semantics",
+                        "message": "Secciones inválidas",
+                        "path": ["pages", p_idx, "sections"],
+                    }
+                )
+                continue
+            for s_idx, section in enumerate(sections):
+                if not isinstance(section, dict):
+                    errors.append(
+                        {
+                            "severity": ValidationSeverity.ERROR.value,
+                            "type": "section_semantics",
+                            "message": "Sección inválida",
+                            "path": ["pages", p_idx, "sections", s_idx],
+                        }
+                    )
+                    continue
+                section_type = section.get("type")
+                content = section.get("content", {})
+                base_path = ["pages", p_idx, "sections", s_idx]
+                if section_type == "progress_chart":
+                    warnings.append(
+                        {
+                            "severity": ValidationSeverity.WARNING.value,
+                            "type": "section_semantics",
+                            "message": "Sección progress_chart no está soportada en exportación PDF",
+                            "path": base_path + ["type"],
+                        }
+                    )
+                conditional = section.get("conditional")
+                if conditional is not None:
+                    if not isinstance(conditional, dict):
+                        errors.append(
+                            {
+                                "severity": ValidationSeverity.ERROR.value,
+                                "type": "section_semantics",
+                                "message": "Condicional inválido",
+                                "path": base_path + ["conditional"],
+                            }
+                        )
+                    else:
+                        cond_if = conditional.get("if")
+                        if cond_if is not None and not isinstance(cond_if, str):
+                            errors.append(
+                                {
+                                    "severity": ValidationSeverity.ERROR.value,
+                                    "type": "section_semantics",
+                                    "message": "Condición inválida",
+                                    "path": base_path + ["conditional", "if"],
+                                }
+                            )
+                if not isinstance(content, dict):
+                    errors.append(
+                        {
+                            "severity": ValidationSeverity.ERROR.value,
+                            "type": "section_semantics",
+                            "message": "Contenido inválido",
+                            "path": base_path + ["content"],
+                        }
+                    )
+                    continue
+                if section_type == "header":
+                    if "title" in content and not isinstance(content.get("title"), str):
+                        errors.append(
+                            {
+                                "severity": ValidationSeverity.ERROR.value,
+                                "type": "section_semantics",
+                                "message": "Title inválido",
+                                "path": base_path + ["content", "title"],
+                            }
+                        )
+                    if "subtitle" in content and not isinstance(content.get("subtitle"), str):
+                        errors.append(
+                            {
+                                "severity": ValidationSeverity.ERROR.value,
+                                "type": "section_semantics",
+                                "message": "Subtitle inválido",
+                                "path": base_path + ["content", "subtitle"],
+                            }
+                        )
+                elif section_type == "text":
+                    text_val = content.get("text")
+                    if text_val is None or text_val == "":
+                        warnings.append(
+                            {
+                                "severity": ValidationSeverity.WARNING.value,
+                                "type": "section_semantics",
+                                "message": "Texto vacío en sección text",
+                                "path": base_path + ["content", "text"],
+                            }
+                        )
+                    elif not isinstance(text_val, str):
+                        errors.append(
+                            {
+                                "severity": ValidationSeverity.ERROR.value,
+                                "type": "section_semantics",
+                                "message": "Texto inválido en sección text",
+                                "path": base_path + ["content", "text"],
+                            }
+                        )
+                    if "style" in content and not isinstance(content.get("style"), str):
+                        errors.append(
+                            {
+                                "severity": ValidationSeverity.ERROR.value,
+                                "type": "section_semantics",
+                                "message": "Style inválido en sección text",
+                                "path": base_path + ["content", "style"],
+                            }
+                        )
+                elif section_type == "table":
+                    headers = content.get("headers")
+                    rows = content.get("rows")
+                    if headers is None or rows is None:
+                        warnings.append(
+                            {
+                                "severity": ValidationSeverity.WARNING.value,
+                                "type": "section_semantics",
+                                "message": "Tabla sin headers o rows",
+                                "path": base_path + ["content"],
+                            }
+                        )
+                    if headers is not None:
+                        if not isinstance(headers, list) or any(not isinstance(h, (str, int, float)) for h in headers):
+                            errors.append(
+                                {
+                                    "severity": ValidationSeverity.ERROR.value,
+                                    "type": "section_semantics",
+                                    "message": "Headers inválidos en tabla",
+                                    "path": base_path + ["content", "headers"],
+                                }
+                            )
+                    if rows is not None:
+                        if not isinstance(rows, list) or any(not isinstance(r, list) for r in rows):
+                            errors.append(
+                                {
+                                    "severity": ValidationSeverity.ERROR.value,
+                                    "type": "section_semantics",
+                                    "message": "Rows inválidos en tabla",
+                                    "path": base_path + ["content", "rows"],
+                                }
+                            )
+                elif section_type == "image":
+                    path_val = content.get("path")
+                    if not path_val:
+                        warnings.append(
+                            {
+                                "severity": ValidationSeverity.WARNING.value,
+                                "type": "section_semantics",
+                                "message": "Imagen sin path",
+                                "path": base_path + ["content", "path"],
+                            }
+                        )
+                    elif not isinstance(path_val, str):
+                        errors.append(
+                            {
+                                "severity": ValidationSeverity.ERROR.value,
+                                "type": "section_semantics",
+                                "message": "Path inválido en imagen",
+                                "path": base_path + ["content", "path"],
+                            }
+                        )
+                    for size_key in ("width", "height"):
+                        if size_key in content and not isinstance(content.get(size_key), (int, float)):
+                            errors.append(
+                                {
+                                    "severity": ValidationSeverity.ERROR.value,
+                                    "type": "section_semantics",
+                                    "message": f"{size_key} inválido en imagen",
+                                    "path": base_path + ["content", size_key],
+                                }
+                            )
+                elif section_type == "qr_code":
+                    size_val = content.get("size")
+                    if size_val is not None and not isinstance(size_val, (int, float)):
+                        errors.append(
+                            {
+                                "severity": ValidationSeverity.ERROR.value,
+                                "type": "section_semantics",
+                                "message": "Size inválido en QR",
+                                "path": base_path + ["content", "size"],
+                            }
+                        )
+                elif section_type == "spacing":
+                    height_val = content.get("height")
+                    if height_val is None:
+                        warnings.append(
+                            {
+                                "severity": ValidationSeverity.WARNING.value,
+                                "type": "section_semantics",
+                                "message": "Spacing sin height",
+                                "path": base_path + ["content", "height"],
+                            }
+                        )
+                    elif not isinstance(height_val, (int, float)):
+                        errors.append(
+                            {
+                                "severity": ValidationSeverity.ERROR.value,
+                                "type": "section_semantics",
+                                "message": "Height inválido en spacing",
+                                "path": base_path + ["content", "height"],
+                            }
+                        )
+        return errors, warnings
 
 
 # Template validation utilities
