@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 
 export default function SiteHeader() {
     const [scrolled, setScrolled] = useState(false);
@@ -21,9 +22,11 @@ export default function SiteHeader() {
             <div className="max-w-7xl mx-auto px-6 py-4">
                 <nav className="flex items-center justify-between">
                     <Link href="/" className="flex items-center gap-3 group">
-                        <img
+                        <Image
                             src="/images/logo-ironhub.png"
                             alt="IronHub"
+                            width={40}
+                            height={40}
                             className="w-10 h-10 rounded-xl shadow-sm group-hover:shadow-md transition-shadow"
                         />
                         <span className="text-xl font-display font-bold text-white">
@@ -60,4 +63,3 @@ export default function SiteHeader() {
         </header>
     );
 }
-

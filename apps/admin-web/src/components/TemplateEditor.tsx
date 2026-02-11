@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Badge, Button, Input, Modal, Select, Toggle, useToast } from "@/components/ui";
 import { api, type Template, type TemplateConfig, type TemplateValidation, type TemplateVersion } from "@/lib/api";
+import type * as Monaco from "monaco-editor";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
@@ -28,8 +29,8 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
   const [validation, setValidation] = useState<TemplateValidation | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string>("");
   const [previewScale, setPreviewScale] = useState(1);
-  const monacoRef = useRef<any>(null);
-  const editorRef = useRef<any>(null);
+  const monacoRef = useRef<typeof import("monaco-editor") | null>(null);
+  const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const [versionsLoading, setVersionsLoading] = useState(false);
   const [versions, setVersions] = useState<TemplateVersion[]>([]);
   const [newVersionLabel, setNewVersionLabel] = useState("");
@@ -50,7 +51,6 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
   // Editor states
   const [configJson, setConfigJson] = useState<string>("");
   const [autoSave, setAutoSave] = useState(false);
-  const wordWrap = true;
   
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const { success, error } = useToast();
@@ -125,7 +125,7 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
     } catch {}
   }, [templateData.configuracion]);
 
-  const setEditorMarkers = useCallback((markers: any[]) => {
+  const setEditorMarkers = useCallback((markers: Monaco.editor.IMarkerData[]) => {
     const monaco = monacoRef.current;
     const editor = editorRef.current;
     if (!monaco || !editor) return;

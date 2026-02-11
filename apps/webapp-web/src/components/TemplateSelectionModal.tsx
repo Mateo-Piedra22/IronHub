@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState, useEffect, useCallback } from "react";
 import { Star, Download, Search, ChevronRight, Loader2, FileText, Users, Eye, Palette } from "lucide-react";
 import { Modal, Button, Input, Select, useToast, Badge } from "@/components/ui";
@@ -34,13 +35,16 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
     
     const { success, error } = useToast();
 
-    // Load categories on mount
-    useEffect(() => {
-        if (isOpen) {
-            loadCategories();
-            loadTemplates();
+    const loadCategories = useCallback(async () => {
+        try {
+            const response = await api.getTemplateCategories();
+            if (response.ok && response.data?.success && response.data.categories) {
+                setCategories(response.data.categories);
+            }
+        } catch (err) {
+            console.error("Error loading categories:", err);
         }
-    }, [isOpen]);
+    }, []);
 
     // Reset state when modal closes
     useEffect(() => {
@@ -61,17 +65,6 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
             setPage(0);
         }
     }, [isOpen]);
-
-    const loadCategories = async () => {
-        try {
-            const response = await api.getTemplateCategories();
-            if (response.ok && response.data?.success && response.data.categories) {
-                setCategories(response.data.categories);
-            }
-        } catch (err) {
-            console.error("Error loading categories:", err);
-        }
-    };
 
     const loadTemplates = useCallback(async (resetPage = false) => {
         setLoading(true);
@@ -181,22 +174,35 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
         }
     }, [_gymId, error, page, searchQuery, selectedCategory, selectedDays, sortBy, sortOrder]);
 
+    useEffect(() => {
+        if (isOpen) {
+            void loadCategories();
+            void loadTemplates(true);
+        }
+    }, [isOpen, loadCategories, loadTemplates]);
+
     // Load more templates
     const loadMore = () => {
         if (!loading && hasMore) {
-            setPage(prev => prev + 1);
-            loadTemplates(false);
+            setPage((prev) => prev + 1);
         }
     };
+
+    useEffect(() => {
+        if (!isOpen) return;
+        if (page <= 0) return;
+        void loadTemplates(false);
+    }, [isOpen, page, loadTemplates]);
 
     // Handle search with debounce
     useEffect(() => {
         const timer = setTimeout(() => {
-            loadTemplates(true);
+            setPage(0);
+            void loadTemplates(true);
         }, 300);
 
         return () => clearTimeout(timer);
-    }, [searchQuery, selectedCategory, selectedDays, sortBy, sortOrder]);
+    }, [searchQuery, selectedCategory, selectedDays, sortBy, sortOrder, loadTemplates]);
 
     // Generate preview for template
     const generatePreview = async (template: Template) => {
@@ -480,10 +486,13 @@ function TemplateCard({ template, onSelect, onPreview, isRecommended }: Template
             {/* Preview Thumbnail */}
             <div className="relative h-32 bg-slate-900">
                 {template.preview_url ? (
-                    <img
+                    <Image
                         src={template.preview_url}
                         alt={template.nombre}
-                        className="w-full h-full object-cover"
+                        fill
+                        sizes="(max-width: 768px) 100vw, 33vw"
+                        className="object-cover"
+                        unoptimized
                     />
                 ) : (
                     <div className="flex items-center justify-center h-full">

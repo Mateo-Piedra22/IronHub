@@ -327,7 +327,7 @@ export interface Template {
     publica: boolean;
     activa: boolean;
     fecha_creacion?: string;
-    configuracion: any;
+    configuracion: unknown;
     // For recommended templates
     recommendation_reason?: string;
     // Additional properties for compatibility
@@ -348,7 +348,7 @@ export interface GymTemplateAssignment {
     uso_count: number;
     rating_promedio?: number;
     priority: number;
-    custom_config?: any;
+    custom_config?: unknown;
     notes?: string;
     assigned_by?: number;
     assigned_by_name?: string;
@@ -361,7 +361,7 @@ export interface TemplateVersion {
     id: number;
     plantilla_id: number;
     version: string;
-    configuracion: Record<string, any>;
+    configuracion: Record<string, unknown>;
     descripcion?: string;
     creada_por?: number;
     fecha_creacion: string;
@@ -415,7 +415,7 @@ export interface TemplatePreviewRequest {
     format: 'pdf' | 'image' | 'thumbnail' | 'html' | 'json';
     quality: 'low' | 'medium' | 'high' | 'ultra';
     page_number?: number;
-    sample_data?: Record<string, any>;
+    sample_data?: Record<string, unknown>;
     background?: boolean;
 }
 
@@ -1152,7 +1152,12 @@ class ApiClient {
             }
         } catch (error) {
             try {
-                const msg = String((error as any)?.name || '') + ' ' + String(error || '');
+                let name = '';
+                if (error && typeof error === 'object' && 'name' in error) {
+                    const n = (error as { name?: unknown }).name;
+                    name = typeof n === 'string' ? n : String(n ?? '');
+                }
+                const msg = `${name} ${String(error || '')}`;
                 if (msg.toLowerCase().includes('abort')) {
                     return { ok: false, error: 'Request timeout' };
                 }
@@ -1166,7 +1171,7 @@ class ApiClient {
     }
 
     // === HTTP Methods ===
-    async get<T>(endpoint: string, params?: Record<string, any>): Promise<ApiResponse<T>> {
+    async get<T>(endpoint: string, params?: Record<string, unknown>): Promise<ApiResponse<T>> {
         const url = new URL(endpoint, this.baseUrl);
         if (params) {
             Object.entries(params).forEach(([key, value]) => {
@@ -1178,14 +1183,14 @@ class ApiClient {
         return this.request<T>(url.pathname + url.search);
     }
 
-    async post<T>(endpoint: string, data?: any): Promise<ApiResponse<T>> {
+    async post<T>(endpoint: string, data?: unknown): Promise<ApiResponse<T>> {
         return this.request<T>(endpoint, {
             method: 'POST',
             body: data ? JSON.stringify(data) : undefined,
         });
     }
 
-    async put<T>(endpoint: string, data?: any): Promise<ApiResponse<T>> {
+    async put<T>(endpoint: string, data?: unknown): Promise<ApiResponse<T>> {
         return this.request<T>(endpoint, {
             method: 'PUT',
             body: data ? JSON.stringify(data) : undefined,
@@ -3254,7 +3259,7 @@ class ApiClient {
         return this.request<{ success: boolean; tags: string[] }>('/api/v1/templates/tags');
     }
 
-    async validateTemplate(configuracion: Record<string, any>) {
+    async validateTemplate(configuracion: Record<string, unknown>) {
         return this.request<{ success: boolean; validation: TemplateValidationResponse }>(`/api/v1/templates/validate`, {
             method: 'POST',
             body: JSON.stringify(configuracion)
@@ -3270,7 +3275,7 @@ class ApiClient {
         q.set('period_days', String(days));
         if (gimnasio_id) q.set('gimnasio_id', String(gimnasio_id));
 
-        return this.request<{ success: boolean; dashboard: Record<string, any>; period_days: number; gimnasio_id?: number }>(`/api/v1/templates/analytics/dashboard${q.toString() ? `?${q.toString()}` : ''}`);
+        return this.request<{ success: boolean; dashboard: Record<string, unknown>; period_days: number; gimnasio_id?: number }>(`/api/v1/templates/analytics/dashboard${q.toString() ? `?${q.toString()}` : ''}`);
     }
 
     async getGymTemplates(gimnasio_id: number) {

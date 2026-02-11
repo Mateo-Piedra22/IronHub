@@ -1,7 +1,10 @@
 /** @type {import('next').NextConfig} */
+const path = require('path');
+
 const nextConfig = {
     reactStrictMode: true,
     swcMinify: true,
+    outputFileTracingRoot: path.join(__dirname, '../../'),
     images: {
         domains: ['ironhub.motiona.xyz', 'api.ironhub.motiona.xyz'],
     },

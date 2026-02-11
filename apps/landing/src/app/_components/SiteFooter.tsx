@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Image from 'next/image';
 
 export default function SiteFooter() {
     return (
@@ -6,7 +7,7 @@ export default function SiteFooter() {
             <div className="max-w-7xl mx-auto px-6">
                 <div className="flex flex-col md:flex-row items-center justify-between gap-6">
                     <div className="flex items-center gap-3">
-                        <img src="/images/logo-ironhub.png" alt="IronHub" className="w-8 h-8 rounded-lg" />
+                        <Image src="/images/logo-ironhub.png" alt="IronHub" width={32} height={32} className="w-8 h-8 rounded-lg" />
                         <span className="font-display font-bold text-white">IronHub</span>
                     </div>
 
@@ -18,7 +19,7 @@ export default function SiteFooter() {
                             rel="noopener noreferrer"
                             className="flex items-center gap-2 group hover:opacity-80 transition-opacity"
                         >
-                            <img src="/images/logo-motiona.png" alt="MotionA" className="w-8 h-8 rounded-lg" />
+                            <Image src="/images/logo-motiona.png" alt="MotionA" width={32} height={32} className="w-8 h-8 rounded-lg" />
                             <span className="text-white font-semibold group-hover:text-primary-400 transition-colors">MotionA</span>
                         </a>
                     </div>
@@ -42,4 +43,3 @@ export default function SiteFooter() {
         </footer>
     );
 }
-

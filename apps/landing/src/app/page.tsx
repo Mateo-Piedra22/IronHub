@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { motion } from 'framer-motion';
 import {
     Dumbbell, Users, CreditCard, BarChart3, Shield, Zap,
@@ -273,11 +274,13 @@ function GymsSection({ gyms, loading, metrics }: { gyms: Gym[]; loading: boolean
                                             {/* Gym Avatar with gradient */}
                                             <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${gradients[index % gradients.length]} flex items-center justify-center mb-5 shadow-lg group-hover:shadow-xl transition-shadow`}>
                                                 {gym.logo_url ? (
-                                                    <img
+                                                    <Image
                                                         src={gym.logo_url}
                                                         alt={gym.nombre}
+                                                        width={48}
+                                                        height={48}
                                                         className="w-12 h-12 object-contain"
-                                                        loading="lazy"
+                                                        unoptimized
                                                     />
                                                 ) : (
                                                     <span className="text-2xl font-display font-bold text-white drop-shadow-sm">
@@ -591,11 +594,13 @@ function AboutSection() {
                     >
                         <div className="card p-8 relative overflow-hidden">
                             <div className="w-32 h-32 mx-auto rounded-3xl bg-gradient-to-br from-primary-600 via-primary-500 to-gold-500 flex items-center justify-center mb-6 shadow-lg animate-float">
-                                <img
+                                <Image
                                     src="/images/logo-motiona.png"
                                     alt="MotionA"
+                                    width={80}
+                                    height={80}
                                     className="w-20 h-20 object-contain"
-                                    loading="lazy"
+                                    priority={false}
                                 />
                             </div>
                             <div className="text-center">

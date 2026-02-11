@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState, useCallback, useEffect } from "react";
 import { Download, QrCode, Loader2, FileText, Palette } from "lucide-react";
 import { Modal, Button, Input, Select, useToast, Toggle } from "@/components/ui";
@@ -38,7 +39,7 @@ export function RutinaExportModal({ isOpen, onClose, rutina, gymId }: RutinaExpo
     useEffect(() => {
         if (!isOpen) return;
         if (!rutina) return;
-        const pid = Number((rutina as unknown as Record<string, unknown>).plantilla_id ?? (rutina as any).plantilla_id ?? 0);
+        const pid = Number((rutina as unknown as Record<string, unknown>)['plantilla_id'] ?? 0);
         if (!pid) {
             setSelectedTemplate(null);
             setUseTemplate(false);
@@ -147,10 +148,13 @@ export function RutinaExportModal({ isOpen, onClose, rutina, gymId }: RutinaExpo
                                         <div className="flex items-center justify-between">
                                             <div className="flex items-center gap-3">
                                                 {selectedTemplate.preview_url ? (
-                                                    <img
+                                                    <Image
                                                         src={selectedTemplate.preview_url}
                                                         alt={selectedTemplate.nombre}
+                                                        width={48}
+                                                        height={48}
                                                         className="w-12 h-12 rounded object-cover"
+                                                        unoptimized
                                                     />
                                                 ) : (
                                                     <div className="w-12 h-12 rounded bg-slate-700 flex items-center justify-center">

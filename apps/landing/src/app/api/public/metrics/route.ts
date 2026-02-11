@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 
 const ADMIN_API_URL = process.env.ADMIN_API_URL || process.env.NEXT_PUBLIC_ADMIN_API_URL || 'https://admin-api.ironhub.motiona.xyz';
-const WEBAPP_API_URL = process.env.WEBAPP_API_URL || process.env.NEXT_PUBLIC_WEBAPP_API_URL || 'https://api.ironhub.motiona.xyz';
 
 function isObject(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === 'object';
@@ -14,7 +13,6 @@ export async function GET(request: Request) {
 
     try {
         const base = ADMIN_API_URL.replace(/\/+$/, '');
-        const webappBase = WEBAPP_API_URL.replace(/\/+$/, '');
         const candidates = [
             `${base}/gyms/public/metrics${qs}`,
             `${base}/api/gyms/public/metrics${qs}`,

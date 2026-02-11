@@ -26,9 +26,8 @@ import {
     SearchInput,
     type Column,
 } from '@/components/ui';
-import { api, type Rutina, type Ejercicio, type Usuario } from '@/lib/api';
+import { api, type Rutina, type Usuario } from '@/lib/api';
 import { formatDate, cn } from '@/lib/utils';
-import { useAuth } from '@/lib/auth';
 import { UnifiedRutinaEditor } from '@/components/UnifiedRutinaEditor';
 import { RutinaCreationWizard } from '@/components/RutinaCreationWizard';
 import { AssignRutinaModal } from '@/components/AssignRutinaModal';
@@ -154,7 +153,6 @@ function RutinaPreviewModal({ isOpen, onClose, rutina }: RutinaPreviewModalProps
 
 export default function RutinasPage() {
     const { success, error } = useToast();
-    const { user } = useAuth();
     const gymId = 1;
 
     // State
@@ -162,7 +160,6 @@ export default function RutinasPage() {
     const [rutinas, setRutinas] = useState<Rutina[]>([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
-    const [ejercicios, setEjercicios] = useState<Ejercicio[]>([]);
 
     // Modals
     const [editorOpen, setEditorOpen] = useState(false);
@@ -255,16 +252,6 @@ export default function RutinasPage() {
             setLoading(false);
         }
     }, [activeTab, error]);
-
-    // Load ejercicios
-    useEffect(() => {
-        (async () => {
-            const res = await api.getEjercicios({});
-            if (res.ok && res.data) {
-                setEjercicios(res.data.ejercicios);
-            }
-        })();
-    }, []);
 
     useEffect(() => {
         const t = setTimeout(() => {

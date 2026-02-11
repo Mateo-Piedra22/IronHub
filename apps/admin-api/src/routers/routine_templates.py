@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from src.services.admin_service import AdminService
-from src.utils.raw_postgres import RawPostgresManager
+from src.database.raw_manager import RawPostgresManager
 
 router = APIRouter(prefix="/api", tags=["RoutineTemplates"])
 
@@ -105,4 +105,3 @@ async def delete_routine_template_assignment(gym_id: int, assignment_id: int, re
     out = adm.tenant_delete_routine_template_assignment(int(gym_id), int(assignment_id))
     code = 200 if out.get("ok") else 400
     return JSONResponse(out, status_code=code)
-

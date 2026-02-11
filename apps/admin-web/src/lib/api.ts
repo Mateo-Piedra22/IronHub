@@ -609,7 +609,7 @@ async function request<T>(
             },
         });
 
-        let data: any = null;
+        let data: unknown = null;
         try {
             data = await res.json();
         } catch {
@@ -617,13 +617,23 @@ async function request<T>(
         }
 
         if (!res.ok) {
-            const msg =
-                (data && (data.error || data.detail || data.message)) ||
-                `Request failed (${res.status})`;
+            const msg = (() => {
+                if (!data || typeof data !== 'object') return `Request failed (${res.status})`;
+                const o = data as Record<string, unknown>;
+                const err = o.error;
+                const detail = o.detail;
+                const message = o.message;
+                return (
+                    (typeof err === 'string' && err) ||
+                    (typeof detail === 'string' && detail) ||
+                    (typeof message === 'string' && message) ||
+                    `Request failed (${res.status})`
+                );
+            })();
             return { ok: false, error: String(msg) };
         }
 
-        return { ok: true, data };
+        return { ok: true, data: data as T };
     } catch (e) {
         const msg = String(e || '');
         if (msg.toLowerCase().includes('aborted')) {

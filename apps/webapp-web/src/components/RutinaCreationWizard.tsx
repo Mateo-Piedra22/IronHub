@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, type ComponentType } from 'react';
-import { FileText, Plus, Search, ChevronRight, Users, Loader2 } from 'lucide-react';
+import { FileText, Plus, Search, ChevronRight, Loader2 } from 'lucide-react';
 import { Modal, Button } from '@/components/ui';
 import { api, type Usuario, type Rutina } from '@/lib/api';
 import { cn } from '@/lib/utils';

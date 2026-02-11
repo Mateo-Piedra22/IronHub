@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 
 const ADMIN_API_URL = process.env.ADMIN_API_URL || process.env.NEXT_PUBLIC_ADMIN_API_URL || 'https://admin-api.ironhub.motiona.xyz';
-const WEBAPP_API_URL = process.env.WEBAPP_API_URL || process.env.NEXT_PUBLIC_WEBAPP_API_URL || 'https://api.ironhub.motiona.xyz';
 
 function isObject(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === 'object';
@@ -10,7 +9,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
 export async function GET() {
     try {
         const base = ADMIN_API_URL.replace(/\/+$/, '');
-        const webappBase = WEBAPP_API_URL.replace(/\/+$/, '');
         const candidates = [`${base}/gyms/public`, `${base}/api/gyms/public`];
         let res: Response | null = null;
         console.log(`[GymsProxy] Using Admin Base: ${base}`);
