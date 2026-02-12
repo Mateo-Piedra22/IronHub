@@ -18,6 +18,14 @@ export function Providers({ children }: { children: React.ReactNode }) {
         },
     }));
 
+    return (
+        <QueryClientProvider client={queryClient}>
+            <ProvidersContent>{children}</ProvidersContent>
+        </QueryClientProvider>
+    );
+}
+
+function ProvidersContent({ children }: { children: React.ReactNode }) {
     const bootstrapQuery = useQuery({
         queryKey: ['bootstrap', 'auto'],
         queryFn: async () => api.getBootstrap('auto'),
@@ -74,63 +82,60 @@ export function Providers({ children }: { children: React.ReactNode }) {
     }, [reminderActive, reminderMessage, reminderStorageKey]);
 
     return (
-        <QueryClientProvider client={queryClient}>
-            <AuthProvider>
-                {children}
-                {reminderVisible && !suspended && (
-                    <div className="fixed top-0 inset-x-0 z-[60] p-3">
-                        <div className="mx-auto max-w-4xl rounded-xl border border-amber-500/30 bg-black/70 backdrop-blur px-4 py-3 flex items-start gap-3">
-                            <div className="min-w-0 flex-1">
-                                <div className="text-sm font-semibold text-amber-300">Recordatorio</div>
-                                <div className="text-sm text-slate-200 whitespace-pre-wrap break-words">{reminderMessage}</div>
-                            </div>
-                            <button
-                                className="text-sm text-slate-300 hover:text-white"
-                                onClick={() => {
-                                    try {
-                                        if (reminderStorageKey) window.sessionStorage.setItem(reminderStorageKey, '1');
-                                    } catch {
-                                    }
-                                    setReminderVisible(false);
-                                }}
-                            >
-                                Cerrar
-                            </button>
+        <AuthProvider>
+            {children}
+            {reminderVisible && !suspended && (
+                <div className="fixed top-0 inset-x-0 z-[60] p-3">
+                    <div className="mx-auto max-w-4xl rounded-xl border border-amber-500/30 bg-black/70 backdrop-blur px-4 py-3 flex items-start gap-3">
+                        <div className="min-w-0 flex-1">
+                            <div className="text-sm font-semibold text-amber-300">Recordatorio</div>
+                            <div className="text-sm text-slate-200 whitespace-pre-wrap break-words">{reminderMessage}</div>
                         </div>
+                        <button
+                            className="text-sm text-slate-300 hover:text-white"
+                            onClick={() => {
+                                try {
+                                    if (reminderStorageKey) window.sessionStorage.setItem(reminderStorageKey, '1');
+                                } catch {
+                                }
+                                setReminderVisible(false);
+                            }}
+                        >
+                            Cerrar
+                        </button>
                     </div>
-                )}
-                {(suspended || maintenance) && (
-                    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4">
-                        <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-950/80 backdrop-blur p-6">
-                            {suspended ? (
-                                <>
-                                    <div className="text-lg font-bold text-danger-400">Servicio suspendido</div>
-                                    <div className="mt-2 text-slate-200">{suspensionReason}</div>
-                                    {suspensionUntil && (
-                                        <div className="mt-2 text-sm text-slate-400">Hasta: {suspensionUntil}</div>
-                                    )}
-                                </>
-                            ) : (
-                                <>
-                                    <div className="text-lg font-bold text-white">Mantenimiento</div>
-                                    <div className="mt-2 text-slate-200 whitespace-pre-wrap break-words">{maintenanceMessage}</div>
-                                    <button
-                                        className="mt-4 w-full btn-secondary"
-                                        onClick={() => {
-                                            void bootstrapQuery.refetch();
-                                            void reminderQuery.refetch();
-                                        }}
-                                    >
-                                        Reintentar
-                                    </button>
-                                </>
-                            )}
-                        </div>
+                </div>
+            )}
+            {(suspended || maintenance) && (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4">
+                    <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-950/80 backdrop-blur p-6">
+                        {suspended ? (
+                            <>
+                                <div className="text-lg font-bold text-danger-400">Servicio suspendido</div>
+                                <div className="mt-2 text-slate-200">{suspensionReason}</div>
+                                {suspensionUntil && (
+                                    <div className="mt-2 text-sm text-slate-400">Hasta: {suspensionUntil}</div>
+                                )}
+                            </>
+                        ) : (
+                            <>
+                                <div className="text-lg font-bold text-white">Mantenimiento</div>
+                                <div className="mt-2 text-slate-200 whitespace-pre-wrap break-words">{maintenanceMessage}</div>
+                                <button
+                                    className="mt-4 w-full btn-secondary"
+                                    onClick={() => {
+                                        void bootstrapQuery.refetch();
+                                        void reminderQuery.refetch();
+                                    }}
+                                >
+                                    Reintentar
+                                </button>
+                            </>
+                        )}
                     </div>
-                )}
-                <ToastContainer />
-            </AuthProvider>
-        </QueryClientProvider>
+                </div>
+            )}
+            <ToastContainer />
+        </AuthProvider>
     );
 }
-

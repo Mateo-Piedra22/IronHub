@@ -26,7 +26,7 @@ import {
     SearchInput,
     type Column,
 } from '@/components/ui';
-import { api, type Rutina, type Usuario } from '@/lib/api';
+import { api, type Rutina } from '@/lib/api';
 import { formatDate, cn } from '@/lib/utils';
 import { UnifiedRutinaEditor } from '@/components/UnifiedRutinaEditor';
 import { RutinaCreationWizard } from '@/components/RutinaCreationWizard';

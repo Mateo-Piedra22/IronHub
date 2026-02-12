@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Loader2, Plus, Trash2 } from "lucide-react";
 import { api, type Gym, type TenantRoutineTemplate, type TenantRoutineTemplateAssignment } from "@/lib/api";
 
-export default function GymRutinasPage({ params }: { params: { id: string } }) {
-  const gymId = useMemo(() => Number(params.id) || 0, [params.id]);
+export default function GymRutinasPage({ params }: { params: Promise<{ id: string }> }) {
+  const resolvedParams = use(params);
+  const gymId = useMemo(() => Number(resolvedParams.id) || 0, [resolvedParams.id]);
   const [gym, setGym] = useState<Gym | null>(null);
   const [loading, setLoading] = useState(true);
 
