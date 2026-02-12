@@ -123,6 +123,47 @@ async def get_tags(request: Request):
             pass
 
 
+@router.post("/preview")
+async def preview_template_config(
+    request: Request,
+    format: str = Query("pdf"),
+    quality: str = Query("medium"),
+    page_number: int = Query(1, ge=1),
+):
+    require_admin(request)
+    gym_id = require_gym_id(request)
+    service = with_tenant_service(gym_id)
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Invalid payload")
+        configuracion = payload.get("configuracion")
+        if configuracion is None and isinstance(payload.get("template_config"), dict):
+            configuracion = payload.get("template_config")
+        if configuracion is None and "metadata" in payload and "layout" in payload:
+            configuracion = payload
+        if not isinstance(configuracion, dict):
+            raise HTTPException(status_code=400, detail="configuracion requerida")
+        sample_data = payload.get("sample_data")
+        if not isinstance(sample_data, dict):
+            sample_data = None
+        url, err = service.generate_template_preview(
+            configuracion,
+            format=format,
+            quality=quality,
+            page_number=page_number,
+            sample_data=sample_data,
+        )
+        if not url:
+            raise HTTPException(status_code=400, detail=err or "preview_failed")
+        return JSONResponse({"success": True, "preview_url": url, "format": format, "quality": quality, "page_number": page_number})
+    finally:
+        try:
+            service.db.close()
+        except Exception:
+            pass
+
+
 @router.get("/{template_id}")
 async def get_template(template_id: int, request: Request):
     require_admin(request)
@@ -368,4 +409,3 @@ async def export_template(template_id: int, request: Request):
             service.db.close()
         except Exception:
             pass
-

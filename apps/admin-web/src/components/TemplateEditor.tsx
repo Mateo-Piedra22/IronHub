@@ -221,16 +221,12 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
 
     try {
       setPreviewLoading(true);
-      if (!template || isNew) {
-        error("Guardá la plantilla para generar vista previa");
-        return;
-      }
-
-      const response = await api.getTemplatePreview(template.id, {
+      const previewRequest = {
         format: "pdf",
         quality: "medium",
         page_number: 1,
-      });
+      } as const;
+      const response = await api.getTemplatePreviewFromConfig(templateData.configuracion, previewRequest);
       
       if (response.ok && response.data?.success) {
         setPreviewUrl(response.data.preview_url || "");

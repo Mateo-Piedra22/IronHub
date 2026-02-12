@@ -749,6 +749,11 @@ export function UnifiedRutinaEditor({
             error('El nombre es requerido');
             return;
         }
+        if (!plantillaId) {
+            setTemplatePickerOpen(true);
+            error('Seleccioná un template antes de guardar');
+            return;
+        }
 
         setSaving(true);
         try {
@@ -815,7 +820,7 @@ export function UnifiedRutinaEditor({
                         <Button variant="secondary" onClick={onClose} disabled={saving}>
                             Cancelar
                         </Button>
-                        <Button onClick={handleSave} isLoading={saving}>
+                        <Button onClick={handleSave} isLoading={saving} disabled={saving || !plantillaId}>
                             <Save className="w-4 h-4 mr-2" />
                             Guardar
                         </Button>

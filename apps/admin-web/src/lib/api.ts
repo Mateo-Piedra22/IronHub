@@ -1711,6 +1711,18 @@ export const api = {
                 body: JSON.stringify(previewRequest.sample_data ?? null),
             }
         ),
+    getTemplatePreviewFromConfig: (configuracion: TemplateConfig, previewRequest: TemplatePreviewRequest) =>
+        request<{ success: boolean; preview_url?: string; format: string; quality: string; page_number: number }>(
+            `/api/v1/templates/preview?format=${encodeURIComponent(previewRequest.format)}&quality=${encodeURIComponent(previewRequest.quality)}&page_number=${encodeURIComponent(String(previewRequest.page_number || 1))}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    configuracion,
+                    sample_data: previewRequest.sample_data ?? null,
+                }),
+            }
+        ),
 
     getRutinaPreviewWithTemplate: async (rutinaId: number, templateId: number, previewRequest: TemplatePreviewRequest) => {
         try {

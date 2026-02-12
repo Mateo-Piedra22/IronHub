@@ -336,6 +336,58 @@ export interface Template {
     usuarios_unicos?: number;
 }
 
+const normalizeGymTemplate = (item: unknown): Template | null => {
+    if (!item || typeof item !== 'object') return null;
+    const rec = item as Record<string, unknown>;
+    const isAssignment =
+        "template_id" in rec ||
+        "template_name" in rec ||
+        "template_description" in rec ||
+        "template_category" in rec;
+    const id = Number((isAssignment ? rec.template_id : rec.id) ?? 0) || 0;
+    const nombre = String((isAssignment ? rec.template_name : rec.nombre) ?? "").trim();
+    const descripcion = String((isAssignment ? rec.template_description : rec.descripcion) ?? "");
+    const categoria = String((isAssignment ? rec.template_category : rec.categoria) ?? "general");
+    const tags = Array.isArray(isAssignment ? rec.template_tags : rec.tags)
+        ? ((isAssignment ? rec.template_tags : rec.tags) as string[])
+        : undefined;
+    const dias_semana = rec.dias_semana !== undefined ? Number(rec.dias_semana) : undefined;
+    const preview_url = typeof rec.preview_url === "string" ? rec.preview_url : undefined;
+    const uso_count = Number(rec.uso_count ?? 0) || 0;
+    const rating_promedio = rec.rating_promedio !== undefined ? Number(rec.rating_promedio) : undefined;
+    const rating_count = rec.rating_count !== undefined ? Number(rec.rating_count) : undefined;
+    const publica = Boolean(rec.publica ?? true);
+    const activa = Boolean(rec.activa ?? true);
+    const fecha_creacion = typeof rec.fecha_creacion === "string" ? rec.fecha_creacion : undefined;
+    const configuracion = isAssignment ? {} : (rec.configuracion ?? {});
+    const recommendation_reason =
+        typeof rec.recommendation_reason === "string" ? rec.recommendation_reason : undefined;
+    const version_actual = typeof rec.version_actual === "string" ? rec.version_actual : undefined;
+    const usos_totales = rec.usos_totales !== undefined ? Number(rec.usos_totales) : undefined;
+    const usuarios_unicos = rec.usuarios_unicos !== undefined ? Number(rec.usuarios_unicos) : undefined;
+    if (!id && !nombre) return null;
+    return {
+        id,
+        nombre: nombre || `Template ${id || ""}`.trim() || "Template",
+        descripcion,
+        categoria,
+        dias_semana,
+        tags,
+        preview_url,
+        uso_count,
+        rating_promedio,
+        rating_count,
+        publica,
+        activa,
+        fecha_creacion,
+        configuracion,
+        recommendation_reason,
+        version_actual,
+        usos_totales,
+        usuarios_unicos,
+    };
+};
+
 export interface GymTemplateAssignment {
     assignment_id: number;
     template_id: number;
@@ -3279,11 +3331,35 @@ class ApiClient {
     }
 
     async getGymTemplates(gimnasio_id: number) {
-        return this.request<{ success: boolean; templates: Template[]; gym_id: number }>(`/api/v1/gyms/${gimnasio_id}/templates`);
+        const res = await this.request<{ success: boolean; templates: unknown[]; gym_id: number }>(`/api/v1/gyms/${gimnasio_id}/templates`);
+        if (!res.ok || !res.data?.success || !Array.isArray(res.data.templates)) return res as ApiResponse<{ success: boolean; templates: Template[]; gym_id: number }>;
+        const templates = res.data.templates
+            .map((item) => normalizeGymTemplate(item))
+            .filter((item): item is Template => Boolean(item));
+        return {
+            ...res,
+            data: {
+                success: true,
+                templates,
+                gym_id: res.data.gym_id,
+            },
+        };
     }
 
     async getCurrentGymTemplates() {
-        return this.request<{ success: boolean; templates: Template[]; gym_id: number }>(`/api/v1/gyms/current/templates`);
+        const res = await this.request<{ success: boolean; templates: unknown[]; gym_id: number }>(`/api/v1/gyms/current/templates`);
+        if (!res.ok || !res.data?.success || !Array.isArray(res.data.templates)) return res as ApiResponse<{ success: boolean; templates: Template[]; gym_id: number }>;
+        const templates = res.data.templates
+            .map((item) => normalizeGymTemplate(item))
+            .filter((item): item is Template => Boolean(item));
+        return {
+            ...res,
+            data: {
+                success: true,
+                templates,
+                gym_id: res.data.gym_id,
+            },
+        };
     }
 
     async getTemplateVersions(id: number) {
