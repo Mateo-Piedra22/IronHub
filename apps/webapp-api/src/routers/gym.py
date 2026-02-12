@@ -4,6 +4,8 @@ import json
 import time
 import secrets
 import base64
+import re
+import unicodedata
 import zlib
 import uuid
 import threading
@@ -265,6 +267,7 @@ def _select_template_config_for_rutina(
         qr_cfg.setdefault("data_source", "routine_uuid")
         qr_cfg["position"] = qr_norm
     cfg["qr_code"] = qr_cfg
+    cfg = _normalize_template_metadata_name(cfg)
 
     validator = TemplateValidator()
     validation = validator.validate_template(cfg)
@@ -302,6 +305,24 @@ def _sanitize_download_filename(
         .replace("|", "_")
     )
     return base
+
+
+def _normalize_template_metadata_name(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(cfg, dict):
+        return cfg
+    metadata = cfg.get("metadata")
+    if not isinstance(metadata, dict):
+        return cfg
+    name = str(metadata.get("name") or "").strip()
+    if not name:
+        return cfg
+    normalized = unicodedata.normalize("NFKD", name)
+    normalized = "".join(c for c in normalized if not unicodedata.combining(c))
+    normalized = re.sub(r"[^a-zA-Z0-9_\-\s]+", "", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if normalized:
+        metadata["name"] = normalized
+    return cfg
 
 
 def _get_public_base_url(request: Request) -> str:

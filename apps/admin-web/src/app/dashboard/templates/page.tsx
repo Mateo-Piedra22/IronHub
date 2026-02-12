@@ -26,18 +26,30 @@ export default function TemplatesPage() {
 
   const loadGyms = useCallback(async () => {
     try {
-      const res = await api.getGyms({ page: 1, page_size: 500 });
-      if (!res.ok || !res.data?.gyms) {
-        error(res.error || "Error al cargar gimnasios");
-        return;
+      const pageSize = 100;
+      let page = 1;
+      let all: Gym[] = [];
+      let total = 0;
+      while (true) {
+        const res = await api.getGyms({ page, page_size: pageSize });
+        if (!res.ok || !res.data?.gyms) {
+          error(res.error || "Error al cargar gimnasios");
+          return;
+        }
+        const items = Array.isArray(res.data.gyms) ? res.data.gyms : [];
+        total = Number(res.data.total || total);
+        all = [...all, ...items];
+        if (!items.length) break;
+        if (total && all.length >= total) break;
+        if (items.length < pageSize) break;
+        page += 1;
       }
-      const list = Array.isArray(res.data.gyms) ? res.data.gyms : [];
-      setGyms(list);
+      setGyms(all);
 
       const stored = typeof window !== "undefined" ? window.localStorage.getItem("ironhub_admin_selected_gym_id") : null;
       const storedId = stored ? Number(stored) : 0;
-      const fallbackId = list[0]?.id ? Number(list[0].id) : 0;
-      const effectiveId = (storedId && list.some((g) => g.id === storedId)) ? storedId : fallbackId;
+      const fallbackId = all[0]?.id ? Number(all[0].id) : 0;
+      const effectiveId = (storedId && all.some((g) => g.id === storedId)) ? storedId : fallbackId;
       if (effectiveId) {
         setSelectedGymId(effectiveId);
         if (typeof window !== "undefined") window.localStorage.setItem("ironhub_admin_selected_gym_id", String(effectiveId));

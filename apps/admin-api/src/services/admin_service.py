@@ -7,6 +7,7 @@ import secrets
 import hashlib
 import base64
 import json
+from decimal import Decimal
 from datetime import datetime, date, timedelta
 from typing import Any, Dict, List, Optional, Set
 import psycopg2
@@ -1027,6 +1028,20 @@ class AdminService:
             url += f"?sslmode={params.get('sslmode')}"
         return create_engine(url, pool_pre_ping=True)
 
+    def _serialize_value(self, value: Any) -> Any:
+        if isinstance(value, Decimal):
+            return float(value)
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+        if isinstance(value, list):
+            return [self._serialize_value(v) for v in value]
+        if isinstance(value, dict):
+            return {k: self._serialize_value(v) for k, v in value.items()}
+        return value
+
+    def _serialize_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        return {k: self._serialize_value(v) for k, v in row.items()}
+
     def tenant_routine_templates_catalog(self, gym_id: int) -> Dict[str, Any]:
         eng = self._get_tenant_engine_for_gym(int(gym_id))
         if not eng:
@@ -1051,7 +1066,7 @@ class AdminService:
                         """
                     )
                 ).mappings().all()
-            return {"ok": True, "gym_id": int(gym_id), "templates": [dict(r) for r in rows]}
+            return {"ok": True, "gym_id": int(gym_id), "templates": [self._serialize_row(dict(r)) for r in rows]}
         except Exception as e:
             logger.exception("Error listing tenant routine templates (gym_id=%s)", int(gym_id))
             return {"ok": False, "error": "list_failed", "detail": str(e)}
@@ -1091,7 +1106,7 @@ class AdminService:
                     ),
                     {"gid": int(gym_cfg_id)},
                 ).mappings().all()
-            return {"ok": True, "gym_id": int(gym_id), "assignments": [dict(r) for r in rows]}
+            return {"ok": True, "gym_id": int(gym_id), "assignments": [self._serialize_row(dict(r)) for r in rows]}
         except Exception as e:
             logger.exception("Error listing tenant routine template assignments (gym_id=%s)", int(gym_id))
             return {"ok": False, "error": "list_failed", "detail": str(e)}

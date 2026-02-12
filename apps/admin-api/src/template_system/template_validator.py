@@ -147,8 +147,8 @@ class TemplateValidator:
                     "type": "object",
                     "required": ["name", "version", "description"],
                     "properties": {
-                        "name": {"type": "string", "minLength": 1, "maxLength": 255},
-                        "version": {"type": "string"},
+                        "name": {"type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[a-zA-Z0-9_\\-\\s]+$"},
+                        "version": {"type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$"},
                         "description": {"type": "string", "minLength": 1, "maxLength": 1000},
                     },
                 },
@@ -176,4 +176,3 @@ class TemplateValidator:
                 "styling": {"type": "object"},
             },
         }
-

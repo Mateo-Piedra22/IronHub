@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import json
+import re
+import unicodedata
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -20,6 +22,23 @@ class TemplateService:
         self.repository = TemplateRepository(db_session)
         self.preview_engine = PreviewEngine()
 
+    def _normalize_metadata_name(self, configuracion: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(configuracion, dict):
+            return configuracion
+        metadata = configuracion.get("metadata")
+        if not isinstance(metadata, dict):
+            return configuracion
+        name = str(metadata.get("name") or "").strip()
+        if not name:
+            return configuracion
+        normalized = unicodedata.normalize("NFKD", name)
+        normalized = "".join(c for c in normalized if not unicodedata.combining(c))
+        normalized = re.sub(r"[^a-zA-Z0-9_\-\s]+", "", normalized)
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        if normalized:
+            metadata["name"] = normalized
+        return configuracion
+
     def create_template(self, payload: Dict[str, Any], creada_por: Optional[int] = None) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
         nombre = str(payload.get("nombre") or "").strip()
         if not nombre:
@@ -27,6 +46,7 @@ class TemplateService:
         configuracion = payload.get("configuracion")
         if not isinstance(configuracion, dict):
             return None, "configuracion requerida"
+        configuracion = self._normalize_metadata_name(configuracion)
         descripcion = payload.get("descripcion")
         categoria = str(payload.get("categoria") or "general")
         dias_semana = payload.get("dias_semana")
@@ -78,6 +98,8 @@ class TemplateService:
                 updates["dias_semana"] = None
         if "tags" in updates and updates["tags"] is not None and not isinstance(updates["tags"], list):
             updates["tags"] = None
+        if "configuracion" in updates and isinstance(updates["configuracion"], dict):
+            updates["configuracion"] = self._normalize_metadata_name(updates["configuracion"])
 
         tpl, err = self.repository.update_template(int(template_id), updates=updates, creada_por=creada_por, cambios_descripcion=cambios_descripcion)
         if not tpl:
@@ -154,6 +176,8 @@ class TemplateService:
         return [self._version_to_dict(v) for v in versions]
 
     def create_template_version(self, template_id: int, version: str, configuracion: Dict[str, Any], descripcion: Optional[str], creada_por: Optional[int]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        if isinstance(configuracion, dict):
+            configuracion = self._normalize_metadata_name(configuracion)
         v, err = self.repository.create_template_version(int(template_id), version=str(version), configuracion=configuracion, cambios_descripcion=descripcion, creada_por=creada_por)
         if not v:
             return None, err or "create_version_failed"
