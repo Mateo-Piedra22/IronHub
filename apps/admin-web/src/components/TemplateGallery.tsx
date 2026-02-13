@@ -25,7 +25,7 @@ export function TemplateGallery({ onTemplateSelect, onTemplateEdit, onTemplateCr
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("");
-  const [selectedStatus, setSelectedStatus] = useState<FilterStatus>("all");
+  const [selectedStatus, setSelectedStatus] = useState<FilterStatus>("active");
   const [sortBy, setSortBy] = useState<SortOption>("fecha_creacion");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
@@ -169,6 +169,10 @@ export function TemplateGallery({ onTemplateSelect, onTemplateEdit, onTemplateCr
       const response = await api.deleteTemplate(template.id);
       if (response.ok && response.data?.success) {
         success("Template eliminado exitosamente");
+        setTemplates(prev => prev.filter(t => t.id !== template.id));
+        setSelectedTemplates(prev => prev.filter(id => id !== template.id));
+        setShowBulkActions(false);
+        setTotal(prev => Math.max(0, prev - 1));
         loadTemplates(true);
       } else {
         error("Error al eliminar template");
@@ -189,12 +193,33 @@ export function TemplateGallery({ onTemplateSelect, onTemplateEdit, onTemplateCr
     if (!confirm(confirmMessage)) return;
 
     try {
+      if (action === "delete") {
+        const ids = [...selectedTemplates];
+        const results = await Promise.allSettled(ids.map(id => api.deleteTemplate(id)));
+        const deletedIds = ids.filter((_, index) => {
+          const res = results[index];
+          return res.status === "fulfilled" && res.value.ok && res.value.data?.success;
+        });
+        if (deletedIds.length) {
+          success(`Eliminados ${deletedIds.length} templates`);
+          setTemplates(prev => prev.filter(t => !deletedIds.includes(t.id)));
+          setTotal(prev => Math.max(0, prev - deletedIds.length));
+        }
+        if (deletedIds.length !== ids.length) {
+          error("No se pudieron eliminar algunos templates");
+        }
+        setSelectedTemplates([]);
+        setShowBulkActions(false);
+        loadTemplates(true);
+        return;
+      }
+
       const response = await api.bulkUpdateTemplates(selectedTemplates, {
         activa: action === "activate" ? true : action === "deactivate" ? false : undefined
       });
 
       if (response.ok && response.data?.success) {
-        success(`${action === "delete" ? "Eliminados" : action === "activate" ? "Activados" : "Desactivados"} ${selectedTemplates.length} templates`);
+        success(`${action === "activate" ? "Activados" : "Desactivados"} ${selectedTemplates.length} templates`);
         setSelectedTemplates([]);
         setShowBulkActions(false);
         loadTemplates(true);
