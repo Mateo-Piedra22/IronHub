@@ -189,8 +189,20 @@ class PreviewEngine:
         return None
 
     def _cache_key(self, template_config: Dict[str, Any], cfg: PreviewConfig, data: Optional[Dict[str, Any]]) -> str:
-        raw = json.dumps({"template": template_config, "cfg": cfg.__dict__, "data": data or {}}, sort_keys=True, ensure_ascii=False)
+        raw = json.dumps(
+            {"template": template_config, "cfg": cfg.__dict__, "data": data or {}},
+            sort_keys=True,
+            ensure_ascii=False,
+            default=self._json_default,
+        )
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def _json_default(self, obj: Any) -> Any:
+        if isinstance(obj, Enum):
+            return obj.value
+        if isinstance(obj, (bytes, bytearray)):
+            return base64.b64encode(bytes(obj)).decode("utf-8")
+        return str(obj)
 
     def _get_cached(self, key: str) -> Optional[Dict[str, Any]]:
         item = self._cache.get(key)
@@ -267,4 +279,3 @@ class PreviewEngine:
             "routine": {"uuid": "demo-uuid"},
             "dias": dias,
         }
-
