@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import time
+from datetime import datetime
 from collections import OrderedDict
 from dataclasses import dataclass
 from enum import Enum
@@ -257,6 +258,11 @@ class PreviewEngine:
             dias_semana = None
         if not dias_semana:
             dias_semana = 3
+        total_weeks = template_config.get("total_weeks") or template_config.get("metadata", {}).get("total_weeks") or 4
+        try:
+            total_weeks = int(total_weeks)
+        except Exception:
+            total_weeks = 4
 
         dias = []
         for i in range(1, dias_semana + 1):
@@ -278,4 +284,8 @@ class PreviewEngine:
             "usuario_nombre": "Juan Pérez",
             "routine": {"uuid": "demo-uuid"},
             "dias": dias,
+            "fecha": datetime.utcnow().strftime("%d/%m/%Y"),
+            "current_year": datetime.utcnow().strftime("%Y"),
+            "total_weeks": total_weeks,
+            "gym_logo_base64": "",
         }

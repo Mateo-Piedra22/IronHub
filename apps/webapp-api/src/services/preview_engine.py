@@ -494,6 +494,15 @@ class PreviewEngine:
             "fecha_creacion": datetime.now(),
             "categoria": template_config.get("metadata", {}).get("category", "general"),
         }
+        total_weeks = template_config.get("total_weeks") or template_config.get("metadata", {}).get("total_weeks") or 4
+        try:
+            total_weeks = int(total_weeks)
+        except Exception:
+            total_weeks = 4
+        sample_data["total_weeks"] = total_weeks
+        sample_data["fecha"] = datetime.now().strftime("%d/%m/%Y")
+        sample_data["current_year"] = datetime.now().strftime("%Y")
+        sample_data["gym_logo_base64"] = ""
         
         # Add user data if required
         if any(var.get("type") == "user_data" for var in variables.values()):

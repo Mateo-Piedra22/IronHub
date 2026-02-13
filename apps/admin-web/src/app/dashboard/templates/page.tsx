@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ChangeEvent } from "react";
-import { Grid, Plus, RefreshCw, Star, Users } from "lucide-react";
-import { Button, Select, useToast, Card } from "@/components/ui";
+import { Grid, Plus, RefreshCw, Star, Users, Upload } from "lucide-react";
+import { Button, Select, useToast, Card, Modal, Input, Toggle } from "@/components/ui";
 import { api, type Gym, type Template, type TemplateStats } from "@/lib/api";
 import { TemplateGallery } from "@/components/TemplateGallery";
 import { TemplateEditor } from "@/components/TemplateEditor";
@@ -15,12 +15,24 @@ export default function TemplatesPage() {
   const [selectedGymId, setSelectedGymId] = useState<number | null>(null);
   const [stats, setStats] = useState<TemplateStats | null>(null);
   const [timeRange, setTimeRange] = useState<TimeRange>("30d");
+  const [galleryKey, setGalleryKey] = useState(0);
 
   // Modal states
   const [showEditor, setShowEditor] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [showImportExcel, setShowImportExcel] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
   const [isCreatingNew, setIsCreatingNew] = useState(false);
+  const [excelFile, setExcelFile] = useState<File | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [importNombre, setImportNombre] = useState("");
+  const [importDescripcion, setImportDescripcion] = useState("");
+  const [importCategoria, setImportCategoria] = useState("");
+  const [importTags, setImportTags] = useState("");
+  const [importPublica, setImportPublica] = useState(false);
+  const [importActiva, setImportActiva] = useState(true);
+  const [replaceDefaults, setReplaceDefaults] = useState(true);
+  const [importLoading, setImportLoading] = useState(false);
 
   const { success, error } = useToast();
 
@@ -100,6 +112,58 @@ export default function TemplatesPage() {
     setShowEditor(true);
   };
 
+  const resetImportForm = () => {
+    setExcelFile(null);
+    setImageFile(null);
+    setImportNombre("");
+    setImportDescripcion("");
+    setImportCategoria("");
+    setImportTags("");
+    setImportPublica(false);
+    setImportActiva(true);
+    setReplaceDefaults(true);
+  };
+
+  const handleImportExcel = async () => {
+    if (!selectedGymId) return;
+    if (!excelFile) {
+      error("Seleccioná un archivo Excel");
+      return;
+    }
+    setImportLoading(true);
+    try {
+      const res = await api.importExcelTemplate({
+        excel_file: excelFile,
+        image_file: imageFile || undefined,
+        nombre: importNombre || undefined,
+        descripcion: importDescripcion || undefined,
+        categoria: importCategoria || undefined,
+        tags: importTags || undefined,
+        publica: importPublica,
+        activa: importActiva,
+        replace_defaults: replaceDefaults,
+      });
+      if (!res.ok || !res.data?.success) {
+        error(res.error || "No se pudo importar el Excel");
+        return;
+      }
+      success("Template importado correctamente");
+      setShowImportExcel(false);
+      resetImportForm();
+      setGalleryKey((prev) => prev + 1);
+      loadStats();
+    } catch {
+      error("No se pudo importar el Excel");
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
+  const handleOpenImport = () => {
+    resetImportForm();
+    setShowImportExcel(true);
+  };
+
   const handleTemplateSave = (_template: Template) => {
     success(`Template ${isCreatingNew ? "creado" : "actualizado"} exitosamente`);
     setShowEditor(false);
@@ -166,6 +230,14 @@ export default function TemplatesPage() {
             disabled={!selectedGymId}
           >
             Actualizar
+          </Button>
+          <Button
+            onClick={handleOpenImport}
+            variant="secondary"
+            leftIcon={<Upload className="w-4 h-4" />}
+            disabled={!selectedGymId}
+          >
+            Importar Excel
           </Button>
           <Button
             onClick={handleTemplateCreate}
@@ -244,6 +316,7 @@ export default function TemplatesPage() {
 
       {selectedGymId ? (
         <TemplateGallery
+          key={galleryKey}
           onTemplateSelect={handleTemplateSelect}
           onTemplateEdit={handleTemplateEdit}
           onTemplateCreate={handleTemplateCreate}
@@ -273,6 +346,78 @@ export default function TemplatesPage() {
           onClose={() => setShowPreview(false)}
         />
       )}
+
+      <Modal
+        isOpen={showImportExcel}
+        onClose={() => setShowImportExcel(false)}
+        title="Importar plantilla desde Excel"
+        description="Subí el archivo Excel y opcionalmente una imagen de logo."
+        size="lg"
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => setShowImportExcel(false)}
+              disabled={importLoading}
+            >
+              Cancelar
+            </Button>
+            <Button onClick={handleImportExcel} disabled={importLoading || !excelFile}>
+              {importLoading ? "Importando..." : "Importar"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <div className="text-sm text-slate-300">Archivo Excel</div>
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              className="block w-full text-sm text-slate-300 file:mr-4 file:rounded-lg file:border-0 file:bg-slate-800 file:px-4 file:py-2 file:text-sm file:text-white hover:file:bg-slate-700"
+              onChange={(e) => setExcelFile(e.target.files?.[0] || null)}
+            />
+          </div>
+          <div className="space-y-2">
+            <div className="text-sm text-slate-300">Logo (opcional)</div>
+            <input
+              type="file"
+              accept="image/*"
+              className="block w-full text-sm text-slate-300 file:mr-4 file:rounded-lg file:border-0 file:bg-slate-800 file:px-4 file:py-2 file:text-sm file:text-white hover:file:bg-slate-700"
+              onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+            />
+          </div>
+          <Input
+            label="Nombre"
+            value={importNombre}
+            onChange={(e) => setImportNombre(e.target.value)}
+            placeholder="Plantilla Excel Importada"
+          />
+          <Input
+            label="Descripción"
+            value={importDescripcion}
+            onChange={(e) => setImportDescripcion(e.target.value)}
+            placeholder="Descripción opcional"
+          />
+          <Input
+            label="Categoría"
+            value={importCategoria}
+            onChange={(e) => setImportCategoria(e.target.value)}
+            placeholder="general"
+          />
+          <Input
+            label="Tags"
+            value={importTags}
+            onChange={(e) => setImportTags(e.target.value)}
+            placeholder="fuerza, hipertrofia"
+          />
+          <div className="flex flex-wrap gap-6">
+            <Toggle checked={importPublica} onChange={setImportPublica} label="Pública" />
+            <Toggle checked={importActiva} onChange={setImportActiva} label="Activa" />
+            <Toggle checked={replaceDefaults} onChange={setReplaceDefaults} label="Reemplazar plantillas por defecto" />
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

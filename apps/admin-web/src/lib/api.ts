@@ -1578,6 +1578,67 @@ export const api = {
             body: JSON.stringify(data),
         }),
 
+    importExcelTemplate: async (payload: {
+        excel_file: File;
+        image_file?: File | null;
+        nombre?: string;
+        descripcion?: string;
+        categoria?: string;
+        tags?: string;
+        publica?: boolean;
+        activa?: boolean;
+        replace_defaults?: boolean;
+    }) => {
+        const form = new FormData();
+        form.append('excel_file', payload.excel_file);
+        if (payload.image_file) form.append('image_file', payload.image_file);
+        if (payload.nombre) form.append('nombre', payload.nombre);
+        if (payload.descripcion) form.append('descripcion', payload.descripcion);
+        if (payload.categoria) form.append('categoria', payload.categoria);
+        if (payload.tags) form.append('tags', payload.tags);
+        if (payload.publica !== undefined) form.append('publica', String(payload.publica));
+        if (payload.activa !== undefined) form.append('activa', String(payload.activa));
+        if (payload.replace_defaults !== undefined) form.append('replace_defaults', String(payload.replace_defaults));
+
+        const selectedGymId =
+            typeof window !== 'undefined' ? window.localStorage.getItem('ironhub_admin_selected_gym_id') : null;
+        try {
+            const res = await fetch(`${API_URL}/api/v1/templates/import-excel`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    ...(selectedGymId ? { 'x-gym-id': selectedGymId } : {}),
+                },
+                body: form,
+            });
+            let data: unknown = null;
+            try {
+                data = await res.json();
+            } catch {
+                data = null;
+            }
+            if (!res.ok) {
+                const msg = (() => {
+                    if (!data || typeof data !== 'object') return `Request failed (${res.status})`;
+                    const o = data as Record<string, unknown>;
+                    const err = o.error;
+                    const detail = o.detail;
+                    const message = o.message;
+                    return (
+                        (typeof err === 'string' && err) ||
+                        (typeof detail === 'string' && detail) ||
+                        (typeof message === 'string' && message) ||
+                        `Request failed (${res.status})`
+                    );
+                })();
+                return { ok: false, error: String(msg) };
+            }
+            return { ok: true, data: data as { success: boolean; template?: Template } };
+        } catch {
+            return { ok: false, error: 'Network error' };
+        }
+    },
+
     updateTemplate: (id: number, data: Partial<Template>) =>
         request<{ success: boolean; template: Template }>(`/api/v1/templates/${id}`, {
             method: 'PUT',

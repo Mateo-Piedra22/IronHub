@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import base64
-import json
 import re
 import unicodedata
 from datetime import datetime, timedelta
+from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import distinct, func
 from sqlalchemy.orm import Session
+from PIL import Image
 
 from .preview_engine import PreviewConfig, PreviewEngine, PreviewFormat, PreviewQuality
 from .models import PlantillaAnalitica, PlantillaRutina
@@ -258,6 +258,340 @@ class TemplateService:
         if not tpl:
             return None, "Template not found"
         return {"template": self._template_to_dict(tpl)}, None
+
+    def create_template_from_excel(
+        self,
+        excel_bytes: bytes,
+        image_bytes: Optional[bytes],
+        payload: Dict[str, Any],
+        creada_por: Optional[int] = None,
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        nombre = str(payload.get("nombre") or "Plantilla Excel Importada").strip()
+        if not nombre:
+            nombre = "Plantilla Excel Importada"
+        descripcion = str(payload.get("descripcion") or "").strip()
+        if not descripcion:
+            descripcion = f"Plantilla importada desde Excel ({nombre})"
+        categoria = str(payload.get("categoria") or "general")
+        tags = payload.get("tags")
+        if tags is not None and not isinstance(tags, list):
+            tags = None
+        publica = bool(payload.get("publica") or False)
+        activa = bool(payload.get("activa") if payload.get("activa") is not None else True)
+        replace_defaults = bool(payload.get("replace_defaults") if payload.get("replace_defaults") is not None else True)
+        dias_semana = self._detect_days_from_excel(excel_bytes)
+        try:
+            override_dias = payload.get("dias_semana")
+            if override_dias is not None:
+                dias_semana = int(override_dias)
+        except Exception:
+            pass
+        if dias_semana is None or dias_semana <= 0:
+            dias_semana = 3
+        dias_semana = max(2, min(5, int(dias_semana)))
+        orientation = self._infer_orientation_from_image(image_bytes)
+        headers = self._extract_excel_headers(excel_bytes)
+        weeks, week_columns = self._extract_weeks_and_columns(excel_bytes)
+        configuracion = self._build_excel_equivalent_config(
+            nombre=nombre,
+            descripcion=descripcion,
+            categoria=categoria,
+            dias_semana=dias_semana,
+            orientation=orientation,
+            headers=headers,
+            weeks=weeks,
+            week_columns=week_columns,
+        )
+        configuracion = self._normalize_metadata_name(configuracion)
+        tpl, err = self.repository.create_template(
+            nombre=nombre,
+            configuracion=configuracion,
+            descripcion=descripcion,
+            categoria=categoria,
+            dias_semana=dias_semana,
+            creada_por=creada_por,
+            tags=[str(t) for t in tags] if isinstance(tags, list) else None,
+            publica=publica,
+            activa=activa,
+        )
+        if not tpl:
+            return None, err or "create_failed"
+        if replace_defaults:
+            try:
+                self._replace_default_excel_templates(configuracion, creada_por=creada_por)
+            except Exception:
+                pass
+        return self._template_to_dict(tpl), None
+
+    def _build_excel_equivalent_config(
+        self,
+        nombre: str,
+        descripcion: str,
+        categoria: str,
+        dias_semana: int,
+        orientation: Optional[str],
+        headers: List[str],
+        weeks: Optional[int],
+        week_columns: Optional[List[str]],
+    ) -> Dict[str, Any]:
+        base_tags = ["excel", "imported", f"{dias_semana}_dias"]
+        metadata_tags = list(dict.fromkeys(base_tags))
+        layout_orientation = orientation if orientation in ("portrait", "landscape") else "portrait"
+        total_weeks = int(weeks or 4)
+        week_headers = week_columns if week_columns else ["Ser", "Rep", "Kg", "RIR"]
+        config = {
+            "metadata": {
+                "name": nombre,
+                "version": "1.0.0",
+                "description": descripcion,
+                "author": "import",
+                "category": categoria,
+                "difficulty": "beginner",
+                "tags": metadata_tags,
+                "estimated_duration": 45,
+            },
+            "layout": {
+                "page_size": "A4",
+                "orientation": layout_orientation,
+                "margins": {"top": 20, "bottom": 20, "left": 20, "right": 20},
+            },
+            "pages": [
+                {
+                    "name": "Rutina",
+                    "sections": [
+                        {"type": "excel_header", "content": {"weeks": total_weeks}},
+                        {"type": "spacing", "content": {"height": 8}},
+                        {
+                            "type": "exercise_table",
+                            "content": {
+                                "format": "excel_weekly",
+                                "weeks": total_weeks,
+                                "week_columns": week_headers,
+                                "label": "EJERCICIOS",
+                            },
+                        },
+                        {"type": "spacing", "content": {"height": 12}},
+                        {"type": "qr_code", "content": {"size": 90}},
+                    ],
+                }
+            ],
+            "variables": {
+                "gym_name": {"type": "string", "default": "Gimnasio", "required": False},
+                "nombre_rutina": {"type": "string", "default": "Rutina", "required": False},
+                "usuario_nombre": {"type": "string", "default": "Usuario", "required": False},
+                "fecha": {"type": "string", "default": "", "required": False},
+                "current_year": {"type": "string", "default": "", "required": False},
+                "gym_logo_base64": {"type": "string", "default": "", "required": False},
+                "total_weeks": {"type": "number", "default": total_weeks, "required": False},
+            },
+            "qr_code": {"enabled": True, "position": "inline", "data_source": "routine_uuid"},
+            "styling": {
+                "fonts": {
+                    "title": {"family": "Helvetica-Bold", "size": 18, "color": "#000000"},
+                    "body": {"family": "Helvetica", "size": 10, "color": "#111827"},
+                },
+                "colors": {"primary": "#111827", "accent": "#3B82F6"},
+            },
+            "excel_equivalent": f"Import_{dias_semana}_dias",
+            "dias_semana": dias_semana,
+        }
+        if headers:
+            config["excel_headers"] = headers
+        return config
+
+    def _infer_orientation_from_image(self, image_bytes: Optional[bytes]) -> Optional[str]:
+        if not image_bytes:
+            return None
+        try:
+            with Image.open(BytesIO(image_bytes)) as img:
+                width, height = img.size
+            if width > height:
+                return "landscape"
+            return "portrait"
+        except Exception:
+            return None
+
+    def _extract_excel_headers(self, excel_bytes: bytes) -> List[str]:
+        try:
+            from openpyxl import load_workbook
+        except Exception:
+            return []
+        try:
+            wb = load_workbook(BytesIO(excel_bytes), data_only=True)
+            ws = wb.active
+            for row in ws.iter_rows(min_row=1, max_row=25, values_only=True):
+                if not row:
+                    continue
+                values = [str(v).strip() for v in row if v is not None and str(v).strip()]
+                if len(values) >= 2:
+                    headers = []
+                    for v in row:
+                        if v is None:
+                            headers.append("")
+                        else:
+                            headers.append(str(v).strip())
+                    cleaned = [h for h in headers if h]
+                    return cleaned
+            return []
+        except Exception:
+            return []
+
+    def _extract_weeks_and_columns(self, excel_bytes: bytes) -> Tuple[Optional[int], Optional[List[str]]]:
+        try:
+            from openpyxl import load_workbook
+        except Exception:
+            return None, None
+        try:
+            wb = load_workbook(BytesIO(excel_bytes), data_only=True)
+            ws = wb.active
+            week_row_idx = None
+            week_cols: List[int] = []
+            for idx, row in enumerate(ws.iter_rows(min_row=1, max_row=30, values_only=True), start=1):
+                if not row:
+                    continue
+                found = False
+                for col_idx, cell in enumerate(row, start=1):
+                    if cell is None:
+                        continue
+                    raw = str(cell).strip().lower()
+                    if raw.startswith("semana"):
+                        found = True
+                        week_cols.append(col_idx)
+                if found:
+                    week_row_idx = idx
+                    break
+            if not week_cols:
+                return None, None
+            week_cols = sorted(set(week_cols))
+            weeks_count = len(week_cols)
+            subheaders: List[str] = []
+            if week_row_idx and week_row_idx + 1 <= ws.max_row:
+                row = [ws.cell(week_row_idx + 1, c).value for c in range(1, ws.max_column + 1)]
+                start = week_cols[0]
+                if len(week_cols) > 1:
+                    end = week_cols[1] - 1
+                else:
+                    end = min(ws.max_column, start + 10)
+                for c in range(start, end + 1):
+                    val = row[c - 1] if c - 1 < len(row) else None
+                    if val is None:
+                        continue
+                    raw = str(val).strip()
+                    if raw:
+                        subheaders.append(raw)
+            if not subheaders:
+                subheaders = ["Ser", "Rep", "Kg", "RIR"]
+            return weeks_count, subheaders
+        except Exception:
+            return None, None
+
+    def _replace_default_excel_templates(self, configuracion: Dict[str, Any], creada_por: Optional[int]) -> None:
+        names = [
+            "Plantilla Excel 2 días",
+            "Plantilla Excel 3 días",
+            "Plantilla Excel 4 días",
+            "Plantilla Excel 5 días",
+        ]
+        for name in names:
+            try:
+                tpl = self.db.query(PlantillaRutina).filter(PlantillaRutina.nombre == name).first()
+                if not tpl:
+                    continue
+                descripcion = str(tpl.descripcion or "").strip()
+                if "dinámica" not in descripcion.lower():
+                    descripcion = (descripcion + " " if descripcion else "") + "Reemplazada por plantilla dinámica"
+                updates = {
+                    "configuracion": configuracion,
+                    "descripcion": descripcion,
+                    "publica": False,
+                    "activa": True,
+                }
+                self.repository.update_template(
+                    int(tpl.id),
+                    updates=updates,
+                    creada_por=creada_por,
+                    cambios_descripcion="Reemplazo por plantilla dinámica",
+                )
+            except Exception:
+                continue
+
+    def _detect_days_from_excel(self, excel_bytes: bytes) -> Optional[int]:
+        try:
+            from openpyxl import load_workbook
+        except Exception:
+            return None
+        try:
+            wb = load_workbook(BytesIO(excel_bytes), data_only=True)
+            ws = wb.active
+            header_row_idx = None
+            header_values: List[str] = []
+            for idx, row in enumerate(ws.iter_rows(min_row=1, max_row=25, values_only=True), start=1):
+                if not row:
+                    continue
+                values = [str(v).strip() for v in row if v is not None and str(v).strip()]
+                if len(values) >= 2:
+                    header_row_idx = idx
+                    header_values = [str(v).strip() if v is not None else "" for v in row]
+                    break
+            day_col = None
+            if header_values:
+                for i, h in enumerate(header_values):
+                    if not h:
+                        continue
+                    hl = h.strip().lower()
+                    if "dia" in hl or "día" in hl or "day" in hl:
+                        day_col = i
+                        break
+            days_found: List[int] = []
+            if day_col is not None and header_row_idx is not None:
+                for row in ws.iter_rows(min_row=header_row_idx + 1, max_row=header_row_idx + 300, values_only=True):
+                    if not row:
+                        continue
+                    raw = row[day_col] if day_col < len(row) else None
+                    if raw is None:
+                        continue
+                    try:
+                        day_val = int(str(raw).strip())
+                    except Exception:
+                        continue
+                    if day_val > 0:
+                        days_found.append(day_val)
+            if days_found:
+                return len(sorted(set(days_found)))
+            day_names = {
+                "lunes": 1,
+                "martes": 2,
+                "miercoles": 3,
+                "miércoles": 3,
+                "jueves": 4,
+                "viernes": 5,
+                "sabado": 6,
+                "sábado": 6,
+                "domingo": 7,
+            }
+            day_matches: List[int] = []
+            for row in ws.iter_rows(min_row=1, max_row=200, values_only=True):
+                for cell in row:
+                    if cell is None:
+                        continue
+                    raw = str(cell).strip().lower()
+                    if not raw:
+                        continue
+                    for name, num in day_names.items():
+                        if raw.startswith(name):
+                            day_matches.append(num)
+                    if raw.startswith("dia ") or raw.startswith("día "):
+                        parts = raw.replace("día", "dia").split()
+                        if len(parts) >= 2:
+                            try:
+                                day_matches.append(int(parts[1]))
+                            except Exception:
+                                pass
+            if day_matches:
+                return len(sorted(set(day_matches)))
+            return None
+        except Exception:
+            return None
 
     def _template_to_dict(self, tpl) -> Dict[str, Any]:
         return {

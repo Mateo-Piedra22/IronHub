@@ -9,6 +9,7 @@ import unicodedata
 import zlib
 import uuid
 import threading
+import urllib.request
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -113,6 +114,52 @@ _MAX_PREVIEW_DECOMPRESSED_BYTES = int(
 _PREVIEW_SECRET_CACHE: Optional[str] = None
 
 
+def _logo_to_data_uri(logo_url: str) -> str:
+    if not logo_url:
+        return ""
+    if logo_url.startswith("data:image/"):
+        return logo_url
+    max_bytes = int(os.environ.get("PDF_MAX_IMAGE_BYTES", "600000"))
+    if logo_url.startswith("/assets/") or not logo_url.startswith("http"):
+        rel = logo_url[len("/assets/") :] if logo_url.startswith("/assets/") else logo_url
+        rel = rel.lstrip("/")
+        assets_root = (Path(__file__).resolve().parents[1] / "assets").resolve()
+        candidate = (assets_root / rel).resolve()
+        if assets_root not in candidate.parents and candidate != assets_root:
+            return ""
+        if not candidate.exists() or not candidate.is_file():
+            return ""
+        if candidate.suffix.lower() == ".svg":
+            return ""
+        raw = candidate.read_bytes()
+        if len(raw) > max_bytes:
+            return ""
+        ext = candidate.suffix.lower()
+        if ext == ".png":
+            ctype = "image/png"
+        elif ext in (".jpg", ".jpeg"):
+            ctype = "image/jpeg"
+        elif ext == ".gif":
+            ctype = "image/gif"
+        else:
+            return ""
+        return f"data:{ctype};base64,{base64.b64encode(raw).decode()}"
+    try:
+        req = urllib.request.Request(logo_url, headers={"User-Agent": "IronHub"})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            ctype = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
+            if ctype not in ("image/png", "image/jpeg", "image/jpg", "image/gif"):
+                return ""
+            raw = resp.read(max_bytes + 1)
+            if len(raw) > max_bytes:
+                return ""
+            if ctype == "image/jpg":
+                ctype = "image/jpeg"
+            return f"data:{ctype};base64,{base64.b64encode(raw).decode()}"
+    except Exception:
+        return ""
+
+
 def _cleanup_file(path: str) -> None:
     try:
         if path and os.path.exists(path):
@@ -179,6 +226,18 @@ def _build_rutina_pdf_data(
         out["gym_name"] = get_gym_name()
     except Exception:
         pass
+    try:
+        total_weeks = int(rutina_data.get("semanas") or 4)
+    except Exception:
+        total_weeks = 4
+    total_weeks = max(1, min(total_weeks, 12))
+    out["total_weeks"] = total_weeks
+    out["fecha"] = datetime.now().strftime("%d/%m/%Y")
+    out["current_year"] = datetime.now().strftime("%Y")
+    try:
+        out["gym_logo_base64"] = _logo_to_data_uri(_resolve_logo_url())
+    except Exception:
+        out["gym_logo_base64"] = ""
     return out
 
 

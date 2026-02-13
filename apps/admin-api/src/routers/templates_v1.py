@@ -1,7 +1,7 @@
 import os
-from typing import Any, Dict, Optional
+from typing import Optional
 
-from fastapi import APIRouter, Request, HTTPException, Query
+from fastapi import APIRouter, Request, HTTPException, Query, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import sessionmaker
 
@@ -157,6 +157,54 @@ async def preview_template_config(
         if not url:
             raise HTTPException(status_code=400, detail=err or "preview_failed")
         return JSONResponse({"success": True, "preview_url": url, "format": format, "quality": quality, "page_number": page_number})
+    finally:
+        try:
+            service.db.close()
+        except Exception:
+            pass
+
+
+@router.post("/import-excel")
+async def import_excel_template(
+    request: Request,
+    excel_file: UploadFile = File(...),
+    image_file: Optional[UploadFile] = File(None),
+    nombre: Optional[str] = Form(None),
+    descripcion: Optional[str] = Form(None),
+    categoria: Optional[str] = Form(None),
+    tags: Optional[str] = Form(None),
+    publica: Optional[bool] = Form(False),
+    activa: Optional[bool] = Form(True),
+    replace_defaults: Optional[bool] = Form(True),
+):
+    require_admin(request)
+    gym_id = require_gym_id(request)
+    service = with_tenant_service(gym_id)
+    try:
+        excel_bytes = await excel_file.read()
+        if not excel_bytes:
+            raise HTTPException(status_code=400, detail="excel requerido")
+        image_bytes = None
+        if image_file is not None:
+            image_bytes = await image_file.read()
+            if not image_bytes:
+                image_bytes = None
+        tag_list = None
+        if tags:
+            tag_list = [t.strip() for t in str(tags).split(",") if t.strip()]
+        payload = {
+            "nombre": nombre,
+            "descripcion": descripcion,
+            "categoria": categoria,
+            "tags": tag_list,
+            "publica": bool(publica),
+            "activa": bool(activa),
+            "replace_defaults": bool(replace_defaults),
+        }
+        tpl, err = service.create_template_from_excel(excel_bytes, image_bytes, payload)
+        if not tpl:
+            raise HTTPException(status_code=400, detail=err or "import_failed")
+        return JSONResponse({"success": True, "template": tpl})
     finally:
         try:
             service.db.close()

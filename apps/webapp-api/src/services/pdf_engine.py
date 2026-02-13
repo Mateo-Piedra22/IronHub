@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 from datetime import datetime
 import logging
+import unicodedata
 
 # PDF generation libraries
 from reportlab.lib.pagesizes import letter, A4, legal, landscape
@@ -449,6 +450,8 @@ class PDFEngine:
         
         if section_type == "header":
             return self._build_header_section(content, data, styling)
+        elif section_type == "excel_header":
+            return self._build_excel_header_section(content, data, styling)
         elif section_type == "text":
             return self._build_text_section(content, data, styling)
         elif section_type == "table":
@@ -506,6 +509,72 @@ class PDFEngine:
         # Add spacing
         elements.append(Spacer(1, 20))
         
+        return elements
+
+    def _build_excel_header_section(
+        self,
+        content: Dict[str, Any],
+        data: Dict[str, Any],
+        styling: Dict[str, Any]
+    ) -> List[Any]:
+        elements = []
+        gym_name = self._process_template_string(str(data.get("gym_name") or "Gimnasio"), data)
+        rutina = self._process_template_string(str(data.get("nombre_rutina") or "Rutina"), data)
+        usuario = self._process_template_string(str(data.get("usuario_nombre") or "Usuario"), data)
+        fecha = self._process_template_string(str(data.get("fecha") or ""), data).strip()
+        if not fecha:
+            fecha = datetime.now().strftime("%d/%m/%Y")
+        year = self._process_template_string(str(data.get("current_year") or ""), data).strip()
+        if not year:
+            year = datetime.now().strftime("%Y")
+        total_weeks = data.get("total_weeks") or content.get("weeks") or 4
+        try:
+            total_weeks = int(total_weeks)
+        except Exception:
+            total_weeks = 4
+
+        logo_uri = self._process_template_string(str(data.get("gym_logo_base64") or ""), data).strip()
+        logo_cell: Any = Paragraph(gym_name, self.custom_styles["header"])
+        if logo_uri.startswith("data:image/"):
+            try:
+                header, b64 = logo_uri.split(",", 1)
+                raw = base64.b64decode(b64, validate=True)
+                if len(raw) <= _MAX_IMAGE_BYTES:
+                    reader = ImageReader(io.BytesIO(raw))
+                    logo_cell = Image(reader, width=1.2 * inch, height=1.2 * inch)
+            except Exception:
+                logo_cell = Paragraph(gym_name, self.custom_styles["header"])
+
+        info_lines = [
+            Paragraph("RUTINA DE ENTRENAMIENTO", self.custom_styles["header"]),
+            Paragraph(f"{rutina}", self.custom_styles["subtitle"]),
+            Paragraph(f"PARA: {usuario}", self.custom_styles["body"]),
+            Paragraph(f"FECHA: {fecha}", self.custom_styles["body"]),
+            Paragraph(f"AÑO: {year}", self.custom_styles["body"]),
+            Paragraph(f"PLAN {total_weeks} SEMANAS", self.custom_styles["body"]),
+        ]
+        info_table = Table([[line] for line in info_lines], colWidths=[5.4 * inch])
+        info_table.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                ]
+            )
+        )
+        table = Table([[logo_cell, info_table]], colWidths=[1.6 * inch, 5.4 * inch])
+        table.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                    ("BOX", (0, 0), (-1, -1), 1, black),
+                    ("INNERGRID", (0, 0), (-1, -1), 0.5, black),
+                ]
+            )
+        )
+        elements.append(table)
+        elements.append(Spacer(1, 10))
         return elements
     
     def _build_text_section(
@@ -590,7 +659,9 @@ class PDFEngine:
         if not dias:
             return elements
         
-        # Build exercise table
+        if str(content.get("format") or "").strip().lower() == "excel_weekly":
+            return self._build_excel_weekly_table(content, data, styling, dias)
+
         for dia in dias:
             dia_num = dia.get("numero", 1)
             ejercicios = dia.get("ejercicios", [])
@@ -639,6 +710,134 @@ class PDFEngine:
             elements.append(Spacer(1, 20))
         
         return elements
+
+    def _build_excel_weekly_table(
+        self,
+        content: Dict[str, Any],
+        data: Dict[str, Any],
+        styling: Dict[str, Any],
+        dias: List[Dict[str, Any]],
+    ) -> List[Any]:
+        elements: List[Any] = []
+        try:
+            weeks = int(content.get("weeks") or data.get("total_weeks") or 4)
+        except Exception:
+            weeks = 4
+        weeks = max(1, min(weeks, 12))
+        week_columns = content.get("week_columns")
+        if not isinstance(week_columns, list) or not week_columns:
+            week_columns = ["Ser", "Rep", "Kg", "RIR"]
+        label = str(content.get("label") or "EJERCICIOS").strip() or "EJERCICIOS"
+
+        header_row = [label]
+        subheader_row = [""]
+        for w in range(1, weeks + 1):
+            header_row.append(f"SEMANA {w}")
+            for i in range(len(week_columns) - 1):
+                header_row.append("")
+            for col in week_columns:
+                subheader_row.append(str(col))
+
+        rows: List[List[Any]] = [header_row, subheader_row]
+        for dia in dias:
+            dia_num = dia.get("numero", 1)
+            ejercicios = dia.get("ejercicios", []) or []
+            day_row = [f"DÍA {dia_num}"] + [""] * (weeks * len(week_columns))
+            rows.append(day_row)
+            for ejercicio in ejercicios:
+                row = [str(ejercicio.get("nombre") or "")]
+                for w in range(1, weeks + 1):
+                    for idx, col in enumerate(week_columns):
+                        row.append(self._get_excel_week_value(ejercicio, w, col, idx))
+                rows.append(row)
+
+        col_widths = [2.4 * inch] + [0.6 * inch] * (weeks * len(week_columns))
+        table = Table(rows, colWidths=col_widths, repeatRows=2)
+        table.setStyle(
+            TableStyle(
+                [
+                    ("GRID", (0, 0), (-1, -1), 0.5, black),
+                    ("BACKGROUND", (0, 0), (-1, 0), lightgrey),
+                    ("BACKGROUND", (0, 1), (-1, 1), white),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, 0), 9),
+                    ("FONTSIZE", (0, 1), (-1, 1), 8),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ]
+            )
+        )
+        span_start = 1
+        for _ in range(1, weeks + 1):
+            span_end = span_start + len(week_columns) - 1
+            table.setStyle([("SPAN", (span_start, 0), (span_end, 0))])
+            span_start = span_end + 1
+
+        row_index = 2
+        for dia in dias:
+            table.setStyle(
+                [
+                    ("BACKGROUND", (0, row_index), (-1, row_index), lightgrey),
+                    ("FONTNAME", (0, row_index), (-1, row_index), "Helvetica-Bold"),
+                ]
+            )
+            row_index += 1 + len(dia.get("ejercicios", []) or [])
+
+        elements.append(table)
+        elements.append(Spacer(1, 12))
+        return elements
+
+    def _get_excel_week_value(self, ejercicio: Dict[str, Any], week: int, label: str, col_index: int) -> str:
+        week_data = None
+        for key in ("semanas", "weeks", "week_data", "semanas_data"):
+            raw = ejercicio.get(key)
+            if isinstance(raw, dict):
+                week_data = raw.get(str(week))
+                if week_data is None:
+                    week_data = raw.get(week)
+                if week_data is not None:
+                    break
+            if isinstance(raw, list):
+                if 0 <= week - 1 < len(raw):
+                    week_data = raw[week - 1]
+                    break
+
+        if isinstance(week_data, dict):
+            key = self._map_week_label(label)
+            if key and key in week_data:
+                return str(week_data.get(key) or "")
+        if isinstance(week_data, list):
+            if 0 <= col_index < len(week_data):
+                return str(week_data[col_index] or "")
+
+        key = self._map_week_label(label)
+        if key:
+            if key in ("repeticiones", "series", "peso_kg", "rir", "descanso", "notas"):
+                val = ejercicio.get(key)
+                if key in ("repeticiones", "series", "peso_kg"):
+                    v = self._get_weekly_value(val, week)
+                    return str(v or "")
+                return str(val or "")
+        return ""
+
+    def _map_week_label(self, label: str) -> Optional[str]:
+        raw = str(label or "").strip().lower()
+        raw = unicodedata.normalize("NFKD", raw)
+        raw = "".join([c for c in raw if not unicodedata.combining(c)])
+        raw = raw.replace(".", "").replace(":", "").strip()
+        if raw in ("ser", "series", "sets", "set"):
+            return "series"
+        if raw in ("rep", "reps", "repeticiones", "repeticion"):
+            return "repeticiones"
+        if raw in ("kg", "peso", "carga", "peso_kg"):
+            return "peso_kg"
+        if raw in ("rir", "rpe"):
+            return "rir"
+        if raw in ("descanso", "rest"):
+            return "descanso"
+        if raw in ("notas", "nota", "notes"):
+            return "notas"
+        return None
     
     def _build_image_section(
         self,
