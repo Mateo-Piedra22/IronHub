@@ -271,21 +271,50 @@ class PreviewEngine:
                     "numero": i,
                     "nombre": "",
                     "ejercicios": [
-                        {"nombre": "Sentadilla", "series": 3, "repeticiones": "8-10", "descanso": "90s"},
-                        {"nombre": "Press banca", "series": 3, "repeticiones": "8-10", "descanso": "90s"},
-                        {"nombre": "Remo", "series": 3, "repeticiones": "10-12", "descanso": "60s"},
+                        {
+                            "nombre": "Sentadilla",
+                            "series": 3,
+                            "repeticiones": "8-10",
+                            "descanso": "90s",
+                            "peso_kg": 80,
+                            "rir": 2,
+                            "semanas": {1: {"series": 3, "repeticiones": "8", "peso_kg": 80, "rir": 2}},
+                        },
+                        {
+                            "nombre": "Press banca",
+                            "series": 3,
+                            "repeticiones": "8-10",
+                            "descanso": "90s",
+                            "peso_kg": 60,
+                            "rir": 2,
+                            "semanas": {1: {"series": 3, "repeticiones": "8", "peso_kg": 60, "rir": 2}},
+                        },
+                        {
+                            "nombre": "Remo",
+                            "series": 3,
+                            "repeticiones": "10-12",
+                            "descanso": "60s",
+                            "peso_kg": 50,
+                            "rir": 3,
+                            "semanas": {1: {"series": 3, "repeticiones": "10", "peso_kg": 50, "rir": 3}},
+                        },
                     ],
                 }
             )
+
+        rutina = {"uuid": "demo-uuid", "dias": dias, "total_weeks": total_weeks}
 
         return {
             "gym_name": "Gimnasio",
             "nombre_rutina": "Rutina de Ejemplo",
             "usuario_nombre": "Juan Pérez",
-            "routine": {"uuid": "demo-uuid"},
+            "routine": rutina,
+            "rutina": rutina,
             "dias": dias,
             "fecha": datetime.utcnow().strftime("%d/%m/%Y"),
             "current_year": datetime.utcnow().strftime("%Y"),
             "total_weeks": total_weeks,
             "gym_logo_base64": "",
+            "plan_objetivo": "Hipertrofia",
+            "profesor_nombre": "Entrenador Demo",
         }

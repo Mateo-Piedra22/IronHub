@@ -196,6 +196,13 @@ class PDFEngine:
             return self._render_image(section, data)
         if t == "page_break":
             return [PageBreak()]
+        if t == "progress_chart":
+            title = self._render_template_string(str(section.get("title") or "Progreso"), data).strip()
+            style = self.custom_styles.get("small", self.styles["Normal"])
+            out: List[Any] = [Paragraph(title, self.custom_styles["header"] if title else style)]
+            out.append(Paragraph("Gráfico de progreso no disponible en PDF", style))
+            out.append(Spacer(1, self._to_points(section.get("spacing_after", 6))))
+            return out
         return []
 
     def _render_table(self, section: Dict[str, Any], data: Dict[str, Any]) -> List[Any]:

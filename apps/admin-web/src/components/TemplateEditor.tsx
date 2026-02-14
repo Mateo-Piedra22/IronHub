@@ -187,6 +187,18 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
 
     try {
       const finalConfig = JSON.parse(configJson);
+      const validationRes = await api.validateTemplate(finalConfig);
+      if (validationRes.ok && validationRes.data?.success) {
+        setValidation(validationRes.data.validation);
+        if (!validationRes.data.validation.is_valid) {
+          error("La configuración tiene errores de validación");
+          setActiveTab("validation");
+          return;
+        }
+      } else {
+        error("Error al validar la configuración");
+        return;
+      }
       setSaving(true);
 
       const payload = {
@@ -425,7 +437,7 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
             </Button>
             <Button
               onClick={handleSave}
-              disabled={saving || !templateData.nombre?.trim()}
+              disabled={saving || !templateData.nombre?.trim() || (validation?.errors?.length ?? 0) > 0}
               leftIcon={saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             >
               {saving ? "Guardando..." : (isNew ? "Crear" : "Guardar")}
@@ -753,7 +765,7 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
                   <div className="bg-slate-800 rounded-xl p-6 border border-slate-700">
                     <h3 className="text-lg font-semibold text-white mb-4">Resumen de Validación</h3>
                     
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                       <div className="text-center">
                         <div className={`text-2xl font-bold ${
                           validation.errors.length > 0 ? 'text-red-400' :
@@ -783,6 +795,30 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
                           {Object.keys(templateData.configuracion?.variables || {}).length}
                         </div>
                         <div className="text-sm text-slate-400">Variables</div>
+                      </div>
+
+                      <div className="text-center">
+                        <div className={`text-2xl font-bold ${
+                          validation.performance_score == null ? 'text-slate-400' :
+                          validation.performance_score >= 80 ? 'text-green-400' :
+                          validation.performance_score >= 60 ? 'text-yellow-400' :
+                          'text-red-400'
+                        }`}>
+                          {validation.performance_score == null ? '—' : Math.round(validation.performance_score)}
+                        </div>
+                        <div className="text-sm text-slate-400">Performance</div>
+                      </div>
+
+                      <div className="text-center">
+                        <div className={`text-2xl font-bold ${
+                          validation.security_score == null ? 'text-slate-400' :
+                          validation.security_score >= 80 ? 'text-green-400' :
+                          validation.security_score >= 60 ? 'text-yellow-400' :
+                          'text-red-400'
+                        }`}>
+                          {validation.security_score == null ? '—' : Math.round(validation.security_score)}
+                        </div>
+                        <div className="text-sm text-slate-400">Seguridad</div>
                       </div>
                     </div>
                   </div>

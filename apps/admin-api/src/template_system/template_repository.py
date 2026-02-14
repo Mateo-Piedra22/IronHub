@@ -249,6 +249,12 @@ class TemplateRepository:
             )
             if not v:
                 return False, "Version not found"
+            if bool(v.es_actual) and str(tpl.version_actual or "") == str(v.version):
+                return True, None
+            validation = self.validator.validate_template(v.configuracion)
+            if not validation.is_valid:
+                msg = "; ".join([str(e.get("message") or "") for e in validation.errors if isinstance(e, dict)])
+                return False, f"Template validation failed: {msg}"
             self.db.query(PlantillaRutinaVersion).filter(
                 PlantillaRutinaVersion.plantilla_id == int(template_id),
                 PlantillaRutinaVersion.es_actual == True,
