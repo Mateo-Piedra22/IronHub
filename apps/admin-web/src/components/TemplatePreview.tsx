@@ -18,8 +18,9 @@ import {
   RefreshCw,
   Minimize2,
   Camera,
+  RotateCcw,
 } from "lucide-react";
-import { Button, Modal, useToast, Badge, Toggle, Select } from "@/components/ui";
+import { Button, Modal, useToast, Badge, Toggle, Select, Input } from "@/components/ui";
 import { api, type Template, type TemplatePreviewRequest, type Rutina } from "@/lib/api";
 
 interface TemplatePreviewProps {
@@ -51,6 +52,14 @@ export function TemplatePreview({ template, rutina, isOpen, onClose }: TemplateP
   const previewRef = useRef<HTMLDivElement>(null);
   const autoRefreshTimerRef = useRef<NodeJS.Timeout | null>(null);
   const { success, error } = useToast();
+  const [pageInput, setPageInput] = useState(1);
+
+  const handleFitWidth = useCallback(() => {
+    const width = previewRef.current?.clientWidth;
+    if (!width) return;
+    const next = Math.max(0.3, Math.min(2, (width - 64) / 900));
+    setScale(next);
+  }, []);
 
   const loadPreview = useCallback(async () => {
     if (!template) return;
@@ -91,6 +100,10 @@ export function TemplatePreview({ template, rutina, isOpen, onClose }: TemplateP
   useEffect(() => {
     if (isOpen) loadPreview();
   }, [isOpen, loadPreview]);
+
+  useEffect(() => {
+    setPageInput(currentPage + 1);
+  }, [currentPage]);
 
   // Auto-refresh functionality
   useEffect(() => {
@@ -375,29 +388,37 @@ export function TemplatePreview({ template, rutina, isOpen, onClose }: TemplateP
         <div className="flex items-center justify-between p-4 border-b border-slate-700">
           <div className="flex items-center gap-4">
             {/* Page Navigation */}
-            {previewPages.length > 1 && (
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => handlePageChange(Math.max(0, currentPage - 1))}
-                  disabled={currentPage === 0}
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </Button>
-                <span className="text-sm text-white">
-                  Página {currentPage + 1} / {previewPages.length}
-                </span>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => handlePageChange(Math.min(previewPages.length - 1, currentPage + 1))}
-                  disabled={currentPage === previewPages.length - 1}
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </Button>
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => handlePageChange(Math.max(0, currentPage - 1))}
+                disabled={currentPage === 0}
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
+              <Input
+                type="number"
+                min={1}
+                value={pageInput}
+                onChange={(e) => setPageInput(Math.max(1, Number(e.target.value) || 1))}
+                onBlur={() => {
+                  const maxPage = Math.max(1, previewPages.length);
+                  const next = Math.min(maxPage, Math.max(1, Number(pageInput) || 1));
+                  handlePageChange(next - 1);
+                }}
+                className="w-20"
+              />
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => handlePageChange(Math.min(previewPages.length - 1, currentPage + 1))}
+                disabled={currentPage >= previewPages.length - 1}
+              >
+                <ChevronRight className="w-4 h-4" />
+              </Button>
+              <span className="text-sm text-slate-400">Página</span>
+            </div>
 
             {/* Zoom Controls */}
             <div className="flex items-center gap-2">
@@ -423,6 +444,13 @@ export function TemplatePreview({ template, rutina, isOpen, onClose }: TemplateP
                 size="sm"
                 onClick={() => handleScaleChange(1)}
               >
+                <RotateCcw className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleFitWidth}
+              >
                 <Maximize2 className="w-4 h-4" />
               </Button>
             </div>
@@ -444,6 +472,15 @@ export function TemplatePreview({ template, rutina, isOpen, onClose }: TemplateP
             >
               <Settings className="w-4 h-4" />
             </Button>
+            {previewPages[currentPage] && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => window.open(previewPages[currentPage], "_blank", "noopener,noreferrer")}
+              >
+                <Share2 className="w-4 h-4" />
+              </Button>
+            )}
           </div>
         </div>
 

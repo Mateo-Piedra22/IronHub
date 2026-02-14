@@ -1,8 +1,8 @@
 "use client";
 
 import Image from "next/image";
-import { useState, useEffect, useCallback } from "react";
-import { Star, Download, Search, ChevronRight, Loader2, FileText, Users, Eye, Palette } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Star, Download, Search, ChevronRight, ChevronLeft, Loader2, FileText, Users, Eye, Palette, ZoomIn, ZoomOut, Maximize2, RefreshCw, RotateCcw } from "lucide-react";
 import { Modal, Button, Input, Select, useToast, Badge } from "@/components/ui";
 import { api, type Template, type Rutina, type TemplatePreviewRequest } from "@/lib/api";
 
@@ -29,6 +29,9 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
     const [previewTemplate, setPreviewTemplate] = useState<Template | null>(null);
     const [previewLoading, setPreviewLoading] = useState(false);
     const [previewUrl, setPreviewUrl] = useState<string>("");
+    const [previewScale, setPreviewScale] = useState(1);
+    const [previewPage, setPreviewPage] = useState(1);
+    const previewContainerRef = useRef<HTMLDivElement | null>(null);
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(0);
     const [hasMore, setHasMore] = useState(false);
@@ -62,6 +65,8 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
                 }
                 return "";
             });
+            setPreviewScale(1);
+            setPreviewPage(1);
             setPage(0);
         }
     }, [isOpen]);
@@ -182,14 +187,15 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
     }, [searchQuery, selectedCategory, selectedDays, sortBy, sortOrder, loadTemplates]);
 
     // Generate preview for template
-    const generatePreview = async (template: Template) => {
+    const generatePreview = async (template: Template, pageNumber: number = 1) => {
         setPreviewTemplate(template);
         setPreviewLoading(true);
         try {
+            const safePage = Math.max(1, pageNumber || 1);
             const request: TemplatePreviewRequest = {
                 format: 'pdf',
                 quality: 'medium',
-                page_number: 1
+                page_number: safePage
             };
 
             const blob = await api.getTemplatePreviewBytes(template.id, request);
@@ -202,6 +208,7 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
                 }
                 return nextUrl;
             });
+            setPreviewPage(safePage);
         } catch (err) {
             console.error("Error generating preview:", err);
             error("Error al generar vista previa");
@@ -210,11 +217,38 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
         }
     };
 
+    const handleFitWidth = useCallback(() => {
+        const width = previewContainerRef.current?.clientWidth;
+        if (!width) return;
+        const next = Math.max(0.3, Math.min(2, (width - 32) / 900));
+        setPreviewScale(next);
+    }, []);
+
     // Handle template selection
     const handleTemplateSelect = (template: Template) => {
         onTemplateSelect(template);
         onClose();
         success(`Template "${template.nombre}" seleccionado`);
+    };
+
+    const openPreview = (template: Template) => {
+        setPreviewScale(1);
+        setPreviewPage(1);
+        void generatePreview(template, 1);
+    };
+
+    const closePreview = () => {
+        setPreviewTemplate(null);
+        setPreviewScale(1);
+        setPreviewPage(1);
+        setPreviewUrl((prev) => {
+            if (prev?.startsWith("blob:")) {
+                try {
+                    URL.revokeObjectURL(prev);
+                } catch { }
+            }
+            return "";
+        });
     };
 
     // Filter templates based on routine days
@@ -322,7 +356,7 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
                                         key={template.id}
                                         template={template}
                                         onSelect={() => handleTemplateSelect(template)}
-                                        onPreview={() => generatePreview(template)}
+                                        onPreview={() => openPreview(template)}
                                         isRecommended={true}
                                     />
                                 ))}
@@ -350,7 +384,7 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
                                             key={template.id}
                                             template={template}
                                             onSelect={() => handleTemplateSelect(template)}
-                                            onPreview={() => generatePreview(template)}
+                                            onPreview={() => openPreview(template)}
                                             isRecommended={recommendedTemplates.includes(template)}
                                         />
                                     ))}
@@ -378,12 +412,12 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
             {/* Preview Modal */}
             <Modal
                 isOpen={!!previewTemplate}
-                onClose={() => setPreviewTemplate(null)}
+                onClose={closePreview}
                 title={`Vista previa: ${previewTemplate?.nombre}`}
                 size="lg"
                 footer={
                     <div className="flex justify-between items-center w-full">
-                        <Button variant="secondary" onClick={() => setPreviewTemplate(null)}>
+                        <Button variant="secondary" onClick={closePreview}>
                             Cerrar vista previa
                         </Button>
                         {previewTemplate && (
@@ -421,28 +455,119 @@ export function TemplateSelectionModal({ isOpen, onClose, onTemplateSelect, ruti
                     )}
 
                     {/* Preview */}
-                    <div className="bg-white rounded-lg overflow-hidden" style={{ minHeight: '400px' }}>
-                        {previewLoading ? (
-                            <div className="flex items-center justify-center h-96">
-                                <div className="text-center">
-                                    <Loader2 className="w-8 h-8 animate-spin text-slate-600 mx-auto mb-2" />
-                                    <p className="text-slate-600">Generando vista previa...</p>
-                                </div>
+                    <div className="bg-slate-900 rounded-lg overflow-hidden border border-slate-800">
+                        <div className="flex flex-wrap items-center justify-between gap-3 p-3 border-b border-slate-800">
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => previewTemplate && generatePreview(previewTemplate, previewPage - 1)}
+                                    disabled={previewLoading || previewPage <= 1}
+                                >
+                                    <ChevronLeft className="w-4 h-4" />
+                                </Button>
+                                <Input
+                                    type="number"
+                                    min={1}
+                                    value={previewPage}
+                                    onChange={(e) => setPreviewPage(Math.max(1, Number(e.target.value) || 1))}
+                                    onBlur={() => previewTemplate && generatePreview(previewTemplate, previewPage)}
+                                    className="w-20"
+                                />
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => previewTemplate && generatePreview(previewTemplate, previewPage + 1)}
+                                    disabled={previewLoading}
+                                >
+                                    <ChevronRight className="w-4 h-4" />
+                                </Button>
+                                <span className="text-xs text-slate-400">Página</span>
                             </div>
-                        ) : previewUrl ? (
-                            <iframe
-                                src={previewUrl}
-                                className="w-full h-96 border-0"
-                                title="Template Preview"
-                            />
-                        ) : (
-                            <div className="flex items-center justify-center h-96">
-                                <div className="text-center text-slate-500">
-                                    <Eye className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                                    <p>No se pudo generar la vista previa</p>
-                                </div>
+
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => setPreviewScale(Math.max(0.25, previewScale - 0.25))}
+                                >
+                                    <ZoomOut className="w-4 h-4" />
+                                </Button>
+                                <span className="text-xs text-slate-200 min-w-[44px] text-center">
+                                    {Math.round(previewScale * 100)}%
+                                </span>
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => setPreviewScale(Math.min(2, previewScale + 0.25))}
+                                >
+                                    <ZoomIn className="w-4 h-4" />
+                                </Button>
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => setPreviewScale(1)}
+                                >
+                                    <RotateCcw className="w-4 h-4" />
+                                </Button>
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={handleFitWidth}
+                                >
+                                    <Maximize2 className="w-4 h-4" />
+                                </Button>
                             </div>
-                        )}
+
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => previewTemplate && generatePreview(previewTemplate, previewPage)}
+                                    disabled={previewLoading}
+                                >
+                                    <RefreshCw className={previewLoading ? "w-4 h-4 animate-spin" : "w-4 h-4"} />
+                                </Button>
+                                {previewUrl && (
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")}
+                                    >
+                                        <Eye className="w-4 h-4" />
+                                    </Button>
+                                )}
+                            </div>
+                        </div>
+
+                        <div ref={previewContainerRef} className="min-h-[420px] bg-slate-900 overflow-auto p-6 flex items-center justify-center">
+                            {previewLoading ? (
+                                <div className="flex items-center justify-center h-96">
+                                    <div className="text-center">
+                                        <Loader2 className="w-8 h-8 animate-spin text-slate-300 mx-auto mb-2" />
+                                        <p className="text-slate-400">Generando vista previa...</p>
+                                    </div>
+                                </div>
+                            ) : previewUrl ? (
+                                <div
+                                    className="bg-white shadow-2xl transition-transform duration-200"
+                                    style={{ transform: `scale(${previewScale})` }}
+                                >
+                                    <iframe
+                                        src={previewUrl}
+                                        className="w-[900px] h-[1100px] border-0"
+                                        title="Template Preview"
+                                    />
+                                </div>
+                            ) : (
+                                <div className="flex items-center justify-center h-96">
+                                    <div className="text-center text-slate-500">
+                                        <Eye className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                                        <p>No se pudo generar la vista previa</p>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             </Modal>

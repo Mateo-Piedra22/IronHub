@@ -6,7 +6,7 @@ import Image from "next/image";
 import { 
   Save, Eye, Download, Upload, RefreshCw, 
   FileText, Code, Check, AlertTriangle,
-  RotateCcw, ZoomIn, ZoomOut, Maximize2
+  RotateCcw, ZoomIn, ZoomOut, Maximize2, ChevronLeft, ChevronRight
 } from "lucide-react";
 import { Badge, Button, Input, Modal, Select, Toggle, useToast } from "@/components/ui";
 import { api, type Template, type TemplateConfig, type TemplateValidation, type TemplateVersion } from "@/lib/api";
@@ -29,6 +29,8 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
   const [validation, setValidation] = useState<TemplateValidation | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string>("");
   const [previewScale, setPreviewScale] = useState(1);
+  const [previewPage, setPreviewPage] = useState(1);
+  const previewContainerRef = useRef<HTMLDivElement | null>(null);
   const monacoRef = useRef<typeof import("monaco-editor") | null>(null);
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const [versionsLoading, setVersionsLoading] = useState(false);
@@ -228,15 +230,17 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
     }
   };
 
-  const handlePreview = async () => {
+  const handlePreview = async (page?: number) => {
     if (!templateData.configuracion) return;
 
     try {
       setPreviewLoading(true);
+      const nextPage = Math.max(1, Number(page ?? previewPage) || 1);
+      setPreviewPage(nextPage);
       const previewRequest = {
         format: "pdf",
         quality: "medium",
-        page_number: 1,
+        page_number: nextPage,
       } as const;
       const response = await api.getTemplatePreviewFromConfig(templateData.configuracion, previewRequest);
       
@@ -253,6 +257,13 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
       setPreviewLoading(false);
     }
   };
+
+  const handleFitWidth = useCallback(() => {
+    const width = previewContainerRef.current?.clientWidth;
+    if (!width) return;
+    const next = Math.max(0.3, Math.min(2, (width - 32) / 900));
+    setPreviewScale(next);
+  }, []);
 
   const handleExportTemplate = () => {
     const dataStr = JSON.stringify(templateData, null, 2);
@@ -501,7 +512,7 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={handlePreview}
+                onClick={() => handlePreview()}
                 disabled={previewLoading}
                 leftIcon={previewLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
               >
@@ -677,9 +688,35 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
           {activeTab === "preview" && (
             <div className="h-full flex flex-col">
               <div className="flex items-center justify-between p-4 border-b border-slate-700">
-                <div className="flex items-center gap-3">
-                  <span className="text-sm text-slate-400">Zoom:</span>
-                  <div className="flex gap-2">
+                <div className="flex flex-wrap items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => handlePreview(previewPage - 1)}
+                      disabled={previewPage <= 1 || previewLoading}
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </Button>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={previewPage}
+                      onChange={(e) => setPreviewPage(Math.max(1, Number(e.target.value) || 1))}
+                      onBlur={() => handlePreview(previewPage)}
+                      className="w-20"
+                    />
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => handlePreview(previewPage + 1)}
+                      disabled={previewLoading}
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </Button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
                     <Button
                       variant="secondary"
                       size="sm"
@@ -700,23 +737,41 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
                       size="sm"
                       onClick={() => setPreviewScale(1)}
                     >
+                      <RotateCcw className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={handleFitWidth}
+                    >
                       <Maximize2 className="w-4 h-4" />
                     </Button>
                   </div>
                 </div>
 
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handlePreview}
-                  disabled={previewLoading}
-                  leftIcon={previewLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                >
-                  Actualizar Vista Previa
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                  onClick={() => handlePreview()}
+                    disabled={previewLoading}
+                    leftIcon={previewLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  >
+                    Actualizar
+                  </Button>
+                  {previewUrl && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => window.open(previewUrl, "_blank", "noopener,noreferrer")}
+                    >
+                      <Eye className="w-4 h-4" />
+                    </Button>
+                  )}
+                </div>
               </div>
 
-              <div className="flex-1 overflow-auto p-8 flex items-center justify-center bg-slate-900">
+              <div ref={previewContainerRef} className="flex-1 overflow-auto p-8 flex items-center justify-center bg-slate-900">
                 {previewLoading ? (
                   <div className="flex flex-col items-center gap-4">
                     <RefreshCw className="w-8 h-8 animate-spin text-primary-500" />
@@ -748,7 +803,7 @@ export function TemplateEditor({ template, isOpen, onClose, onSave, isNew = fals
                   <div className="text-center">
                     <FileText className="w-16 h-16 text-slate-600 mx-auto mb-4" />
                     <p className="text-slate-400 mb-4">No hay vista previa disponible</p>
-                    <Button onClick={handlePreview} leftIcon={<Eye className="w-4 h-4" />}>
+                    <Button onClick={() => handlePreview()} leftIcon={<Eye className="w-4 h-4" />}>
                       Generar Vista Previa
                     </Button>
                   </div>

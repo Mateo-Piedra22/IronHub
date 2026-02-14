@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     Plus,
@@ -16,6 +16,7 @@ import {
     QrCode,
     FileDown,
     Power,
+    ChevronLeft,
 } from 'lucide-react';
 import {
     Button,
@@ -47,6 +48,8 @@ interface RutinaPreviewModalProps {
 
 function RutinaPreviewModal({ isOpen, onClose, rutina }: RutinaPreviewModalProps) {
     const [expandedDays, setExpandedDays] = useState<number[]>([]);
+    const [currentDayIndex, setCurrentDayIndex] = useState(0);
+    const dayRefs = useRef<Record<number, HTMLDivElement | null>>({});
 
     const toggleDay = (dayNum: number) => {
         setExpandedDays((prev) =>
@@ -54,7 +57,30 @@ function RutinaPreviewModal({ isOpen, onClose, rutina }: RutinaPreviewModalProps
         );
     };
 
+    useEffect(() => {
+        if (!isOpen) return;
+        setCurrentDayIndex(0);
+        setExpandedDays([]);
+    }, [isOpen, rutina?.id]);
+
     if (!rutina) return null;
+
+    const orderedDays = [...(rutina.dias || [])].sort((a, b) => a.numero - b.numero);
+
+    const focusDay = (nextIndex: number) => {
+        const safeIndex = Math.max(0, Math.min(orderedDays.length - 1, nextIndex));
+        const day = orderedDays[safeIndex];
+        if (!day) return;
+        setCurrentDayIndex(safeIndex);
+        setExpandedDays((prev) => (prev.includes(day.numero) ? prev : [...prev, day.numero]));
+        const target = dayRefs.current[day.numero];
+        if (target) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    };
+
+    const expandAll = () => setExpandedDays(orderedDays.map((d) => d.numero));
+    const collapseAll = () => setExpandedDays([]);
 
     return (
         <Modal
@@ -85,6 +111,46 @@ function RutinaPreviewModal({ isOpen, onClose, rutina }: RutinaPreviewModalProps
                     )}
                 </div>
 
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => focusDay(currentDayIndex - 1)}
+                            disabled={currentDayIndex <= 0}
+                        >
+                            <ChevronLeft className="w-4 h-4" />
+                        </Button>
+                        <span className="text-sm text-slate-300">
+                            Día {orderedDays.length ? currentDayIndex + 1 : 0} / {orderedDays.length}
+                        </span>
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => focusDay(currentDayIndex + 1)}
+                            disabled={currentDayIndex >= orderedDays.length - 1}
+                        >
+                            <ChevronRight className="w-4 h-4" />
+                        </Button>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <Button variant="secondary" size="sm" onClick={expandAll} disabled={!orderedDays.length}>
+                            <ChevronDown className="w-4 h-4" />
+                        </Button>
+                        <Button variant="secondary" size="sm" onClick={collapseAll} disabled={!orderedDays.length}>
+                            <ChevronRight className="w-4 h-4" />
+                        </Button>
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => window.open(api.getRutinaPdfUrl(rutina.id), "_blank", "noopener,noreferrer")}
+                        >
+                            <FileDown className="w-4 h-4" />
+                        </Button>
+                    </div>
+                </div>
+
                 {/* Days */}
                 <div className="space-y-3">
                     {(!rutina.dias || rutina.dias.length === 0) ? (
@@ -92,8 +158,14 @@ function RutinaPreviewModal({ isOpen, onClose, rutina }: RutinaPreviewModalProps
                             Esta rutina no tiene días configurados
                         </div>
                     ) : (
-                        rutina.dias.map((dia) => (
-                            <div key={dia.numero} className="border border-slate-800 rounded-xl overflow-hidden">
+                        orderedDays.map((dia) => (
+                            <div
+                                key={dia.numero}
+                                ref={(el) => {
+                                    dayRefs.current[dia.numero] = el;
+                                }}
+                                className="border border-slate-800 rounded-xl overflow-hidden"
+                            >
                                 <button
                                     onClick={() => toggleDay(dia.numero)}
                                     className="w-full flex items-center justify-between p-4 bg-slate-900/50 hover:bg-slate-800/50 transition-colors"
