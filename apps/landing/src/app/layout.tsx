@@ -39,24 +39,20 @@ export default function RootLayout({
     children: React.ReactNode;
 }) {
     return (
-        <html lang="es" className="dark">
+        <html lang="es">
             <head>
                 <link rel="preconnect" href="https://fonts.googleapis.com" />
                 <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
             </head>
             <body className="min-h-screen antialiased">
-                <div className="relative">
-                    {/* Gradient orbs for premium effect */}
-                    <div className="pointer-events-none fixed inset-0 overflow-hidden">
-                        <div className="absolute -top-40 -right-40 h-[500px] w-[500px] rounded-full bg-primary-600/20 blur-[100px]" />
-                        <div className="absolute top-1/2 -left-40 h-[400px] w-[400px] rounded-full bg-gold-600/10 blur-[100px]" />
-                        <div className="absolute bottom-0 right-1/3 h-[300px] w-[300px] rounded-full bg-primary-500/10 blur-[80px]" />
-                    </div>
-
-                    {/* Main content */}
-                    <div className="relative z-10">
+                <div className="master-grid">
+                    <div className="grid-col grid-left">
                         <SiteHeader />
+                    </div>
+                    <div className="grid-col grid-main">
                         {children}
+                    </div>
+                    <div className="grid-col grid-rail">
                         <SiteFooter />
                     </div>
                 </div>

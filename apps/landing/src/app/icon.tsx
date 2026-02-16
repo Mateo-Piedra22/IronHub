@@ -19,12 +19,12 @@ export default function Icon() {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    background: 'linear-gradient(135deg, #7c3aed 0%, #2563eb 100%)',
-                    borderRadius: 8,
-                    color: '#fff',
+                    background: '#f4f4f0',
+                    border: '2px solid #000',
+                    color: '#000',
                     fontSize: 18,
                     fontWeight: 800,
-                    fontFamily: 'Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial',
+                    fontFamily: 'Helvetica Neue, Arial, system-ui',
                     letterSpacing: -1,
                 }}
             >
@@ -34,4 +34,3 @@ export default function Icon() {
         size
     );
 }
-

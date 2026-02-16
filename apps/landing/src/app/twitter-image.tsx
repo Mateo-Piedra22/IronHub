@@ -15,9 +15,10 @@ export default function TwitterImage() {
                     flexDirection: 'column',
                     justifyContent: 'center',
                     padding: 80,
-                    background: 'linear-gradient(135deg, #0b1220 0%, #111827 50%, #0b1220 100%)',
-                    color: '#fff',
-                    fontFamily: 'Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial',
+                    background: '#f4f4f0',
+                    color: '#000',
+                    fontFamily: 'Helvetica Neue, Arial, system-ui',
+                    border: '2px solid #000',
                 }}
             >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -25,8 +26,8 @@ export default function TwitterImage() {
                         style={{
                             width: 72,
                             height: 72,
-                            borderRadius: 20,
-                            background: 'linear-gradient(135deg, #7c3aed 0%, #2563eb 100%)',
+                            background: '#ff4d00',
+                            border: '2px solid #000',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
@@ -44,7 +45,7 @@ export default function TwitterImage() {
                     <br />
                     para gimnasios
                 </div>
-                <div style={{ marginTop: 18, fontSize: 26, color: 'rgba(226,232,240,0.85)', maxWidth: 900, lineHeight: 1.35 }}>
+                <div style={{ marginTop: 18, fontSize: 26, color: '#333', maxWidth: 900, lineHeight: 1.35 }}>
                     Operación diaria + reportes + WhatsApp.
                 </div>
             </div>
@@ -52,4 +53,3 @@ export default function TwitterImage() {
         size
     );
 }
-

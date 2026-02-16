@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        :root {
+            --line-color: #000;
+            --bg-color: #f4f4f0; /* Un blanco roto, tipo papel técnico */
+            --accent: #ff4d00; /* Naranja industrial internacional */
+        }
+        body {
+            background-color: var(--bg-color);
+            color: #000;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+        }
+        
+        /* La Grilla Maestra - Visible y Rígida */
+        .master-grid {
+            display: grid;
+            grid-template-columns: 250px 1fr 300px;
+            min-height: 100vh;
+            border-top: 1px solid var(--line-color);
+        }
+
+        .col {
+            border-right: 1px solid var(--line-color);
+            padding: 2rem;
+            position: relative;
+        }
+
+        /* Tipografía Jerárquica */
+        .label {
+            font-family: 'Courier New', monospace;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            display: block;
+            margin-bottom: 1rem;
+            opacity: 0.7;
+        }
+        .label::before { content: '[ '; }
+        .label::after { content: ' ]'; }
+
+        h1 {
+            font-size: 5rem;
+            line-height: 0.9;
+            margin: 0 0 2rem 0;
+            font-weight: 500;
+            letter-spacing: -2px;
+        }
+
+        .product-tag {
+            background: var(--line-color);
+            color: var(--bg-color);
+            padding: 0.2rem 0.5rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            display: inline-block;
+            margin-bottom: 2rem;
+        }
+
+        /* Elementos de Interfaz "Crudos" */
+        .feature-list {
+            list-style: none;
+            padding: 0;
+        }
+        .feature-item {
+            border-top: 1px solid var(--line-color);
+            padding: 1.5rem 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .feature-item:hover {
+            background: #e0e0e0;
+            padding-left: 10px; /* Pequeño desplazamiento mecánico */
+        }
+        
+        .cta-box {
+            background: var(--accent);
+            color: white;
+            padding: 2rem;
+            margin-top: 4rem;
+            text-decoration: none;
+            display: block;
+            font-weight: bold;
+            font-size: 1.5rem;
+            border: 1px solid black;
+            transition: transform 0.2s;
+        }
+        .cta-box:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 0 black;
+        }
+
+        /* Decoración Técnica */
+        .tech-stat {
+            position: absolute;
+            bottom: 2rem;
+            right: 2rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8rem;
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+    <div class="master-grid">
+        <div class="col" style="background: #e8e8e8;">
+            <span class="label">Sistema</span>
+            <div style="font-weight: bold; font-size: 1.2rem; margin-bottom: 20px;">Motiona.xyz</div>
+            <br>
+            <nav>
+                <div style="margin-bottom: 10px;">01. IronHub</div>
+                <div style="margin-bottom: 10px; opacity: 0.5;">02. ArgenPOS</div>
+                <div style="margin-bottom: 10px; opacity: 0.5;">03. TurnoPRO</div>
+            </nav>
+        </div>
+
+        <div class="col">
+            <div class="product-tag">V. 2.4.0 STABLE</div>
+            <span class="label">Main Module</span>
+            <h1>Control Total.<br>Sin Fricción.</h1>
+            
+            <p style="font-size: 1.5rem; max-width: 600px; line-height: 1.4;">
+                La gestión de gimnasios reinventada. Eliminamos el ruido visual para que te enfoques en métricas, socios y crecimiento.
+            </p>
+
+            <a href="#" class="cta-box">INICIAR SISTEMA -></a>
+        </div>
+
+        <div class="col">
+            <span class="label">Capacidades</span>
+            <ul class="feature-list">
+                <li class="feature-item">
+                    <span>Multi-Tenant</span>
+                    <span>+</span>
+                </li>
+                <li class="feature-item">
+                    <span>Pagos QR</span>
+                    <span>+</span>
+                </li>
+                <li class="feature-item">
+                    <span>Acceso Bio</span>
+                    <span>+</span>
+                </li>
+            </ul>
+
+            <div class="tech-stat">
+                UPTIME: 99.9%<br>
+                LATENCY: 12ms<br>
+                REGION: LATAM-SOUTH
+            </div>
+        </div>
+    </div>
+</body>
+</html>

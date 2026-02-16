@@ -19,12 +19,12 @@ export default function AppleIcon() {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    background: 'linear-gradient(135deg, #7c3aed 0%, #2563eb 100%)',
-                    borderRadius: 36,
-                    color: '#fff',
+                    background: '#f4f4f0',
+                    border: '3px solid #000',
+                    color: '#000',
                     fontSize: 86,
                     fontWeight: 900,
-                    fontFamily: 'Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial',
+                    fontFamily: 'Helvetica Neue, Arial, system-ui',
                     letterSpacing: -4,
                 }}
             >
@@ -34,4 +34,3 @@ export default function AppleIcon() {
         size
     );
 }
-

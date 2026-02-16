@@ -6,7 +6,7 @@ import Image from 'next/image';
 import { motion } from 'framer-motion';
 import {
     Dumbbell, Users, CreditCard, BarChart3, Shield, Zap,
-    ChevronRight, ExternalLink, Mail, MapPin, Phone
+    ChevronRight, ExternalLink, Mail, MapPin, Phone, Merge
 } from 'lucide-react';
 import type { Gym, PublicMetrics } from '@/lib/api';
 import { fetchPublicGyms, fetchPublicMetrics } from '@/lib/api';
@@ -29,11 +29,8 @@ const staggerContainer = {
 // Hero Section
 function HeroSection() {
     return (
-        <section className="relative min-h-screen flex items-center justify-center pt-20 overflow-hidden">
-            {/* Animated grid background */}
-            <div className="absolute inset-0 bg-mesh opacity-30" />
-
-            <div className="max-w-7xl mx-auto px-6 py-20 text-center relative z-10">
+        <section className="relative min-h-screen flex items-center pt-16">
+            <div className="max-w-4xl py-16 relative z-10">
                 <motion.div
                     initial="initial"
                     animate="animate"
@@ -51,17 +48,17 @@ function HeroSection() {
                     {/* Main Heading */}
                     <motion.h1
                         variants={fadeInUp}
-                        className="text-display-xl md:text-display-2xl font-display font-black tracking-tight"
+                        className="hero-title"
                     >
-                        <span className="text-white">Gestión de Gimnasios</span>
+                        <span>Gestión de Gimnasios</span>
                         <br />
-                        <span className="gradient-text">del Próximo Nivel</span>
+                        <span className="brand-accent">del Próximo Nivel</span>
                     </motion.h1>
 
                     {/* Subheading */}
                     <motion.p
                         variants={fadeInUp}
-                        className="max-w-2xl mx-auto text-lg md:text-xl text-slate-400 leading-relaxed"
+                        className="hero-subtitle max-w-2xl"
                     >
                         IronHub es la plataforma integral que transforma la manera en que
                         administras tu gimnasio. Control total de socios, pagos, asistencias
@@ -71,7 +68,7 @@ function HeroSection() {
                     {/* CTA Buttons */}
                     <motion.div
                         variants={fadeInUp}
-                        className="flex flex-wrap items-center justify-center gap-4 pt-4"
+                        className="flex flex-wrap items-center gap-4 pt-4"
                     >
                         <a href="#gyms" className="btn-primary flex items-center gap-2">
                             Explorar Gimnasios
@@ -86,23 +83,23 @@ function HeroSection() {
                     {/* Platform Features */}
                     <motion.div
                         variants={fadeInUp}
-                        className="flex items-center justify-center gap-6 pt-12 flex-wrap"
+                        className="pt-10"
                     >
-                        {[
-                            'Multi-Tenant',
-                            'API WhatsApp',
-                            'Check-in QR',
-                        ].map((feature) => (
-                            <span key={feature} className="px-4 py-2 rounded-full bg-slate-800/50 border border-slate-700/50 text-sm text-slate-400">
-                                {feature}
-                            </span>
-                        ))}
+                        <ul className="feature-list">
+                            {[
+                                'Multi-Sucursal',
+                                'API WhatsApp',
+                                'Check-in QR',
+                            ].map((feature) => (
+                                <li key={feature} className="feature-item">
+                                    <span>{feature}</span>
+                                    <span className="meta-text">+</span>
+                                </li>
+                            ))}
+                        </ul>
                     </motion.div>
                 </motion.div>
             </div>
-
-            {/* Bottom gradient fade */}
-            <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-neutral-950 to-transparent" />
         </section>
     );
 }
@@ -127,8 +124,8 @@ function FeaturesSection() {
         },
         {
             icon: Shield,
-            title: 'Multi-Tenant Seguro',
-            description: 'Cada gimnasio tiene su base de datos aislada con seguridad enterprise.'
+            title: 'Multi-Sucursal Seguro',
+            description: 'Cada gimnasio y sus sucursales tienen su base de datos aislada con seguridad enterprise.'
         },
         {
             icon: Dumbbell,
@@ -139,22 +136,27 @@ function FeaturesSection() {
             icon: Zap,
             title: 'WhatsApp Integrado',
             description: 'Notificaciones automáticas y comunicación directa con tus socios.'
+        },
+        {
+            icon: Merge,
+            title: 'Múltiples sistemas de acceso',
+            description: 'Sistema de verificación y acceso rápido y seguro para los socios.'
         }
     ];
 
     return (
         <section id="features" className="py-24 relative">
-            <div className="max-w-7xl mx-auto px-6">
+            <div className="max-w-6xl">
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
-                    className="text-center mb-16"
+                    className="mb-12"
                 >
                     <h2 className="section-heading mb-4">
                         Todo lo que necesitas
                     </h2>
-                    <p className="text-slate-400 text-lg max-w-2xl mx-auto">
+                    <p className="hero-subtitle max-w-2xl">
                         Una suite completa de herramientas diseñadas para optimizar cada aspecto de tu gimnasio.
                     </p>
                 </motion.div>
@@ -167,13 +169,13 @@ function FeaturesSection() {
                             whileInView={{ opacity: 1, y: 0 }}
                             viewport={{ once: true }}
                             transition={{ delay: index * 0.1 }}
-                            className="card gradient-border p-6 group"
+                            className="card p-6"
                         >
-                            <div className="w-12 h-12 rounded-xl bg-primary-500/20 flex items-center justify-center mb-4 group-hover:bg-primary-500/30 transition-colors">
-                                <feature.icon className="w-6 h-6 text-primary-400" />
+                            <div className="icon-box mb-4">
+                                <feature.icon className="w-6 h-6" />
                             </div>
-                            <h3 className="text-lg font-semibold text-white mb-2">{feature.title}</h3>
-                            <p className="text-slate-400 text-sm leading-relaxed">{feature.description}</p>
+                            <h3 className="text-lg font-semibold mb-2">{feature.title}</h3>
+                            <p className="text-sm leading-relaxed">{feature.description}</p>
                         </motion.div>
                     ))}
                 </div>
@@ -193,36 +195,26 @@ function GymsSection({ gyms, loading, metrics }: { gyms: Gym[]; loading: boolean
         return out;
     }, [metrics]);
 
-    // Premium gradient colors for gym cards
-    const gradients = [
-        'from-blue-600 to-cyan-500',
-        'from-purple-600 to-pink-500',
-        'from-emerald-600 to-teal-500',
-        'from-orange-600 to-amber-500',
-        'from-rose-600 to-red-500',
-        'from-indigo-600 to-violet-500',
-    ];
-
     return (
         <section id="gyms" className="py-24 relative overflow-hidden">
-            <div className="max-w-7xl mx-auto px-6">
+            <div className="max-w-6xl">
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
-                    className="text-center mb-12"
+                    className="mb-12"
                 >
                     <h2 className="section-heading mb-4">
                         Gimnasios <span className="gradient-text">Conectados</span>
                     </h2>
-                    <p className="text-slate-400 text-lg max-w-2xl mx-auto">
+                    <p className="hero-subtitle max-w-2xl">
                         Descubre los gimnasios que confían en IronHub para su gestión diaria.
                     </p>
                 </motion.div>
 
                 {loading ? (
                     <div className="flex justify-center items-center py-12">
-                        <div className="w-8 h-8 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+                        <div className="w-8 h-8 border-2 border-[var(--line-color)] border-t-transparent animate-spin" />
                     </div>
                 ) : gyms.length === 0 ? (
                     <motion.div
@@ -230,13 +222,13 @@ function GymsSection({ gyms, loading, metrics }: { gyms: Gym[]; loading: boolean
                         animate={{ opacity: 1 }}
                         className="text-center py-16"
                     >
-                        <div className="w-20 h-20 mx-auto rounded-2xl bg-slate-800/50 flex items-center justify-center mb-6">
-                            <Users className="w-10 h-10 text-slate-500" />
+                        <div className="avatar-box w-20 h-20 mx-auto mb-6">
+                            <Users className="w-10 h-10" />
                         </div>
-                        <h3 className="text-xl font-semibold text-slate-300 mb-2">
+                        <h3 className="text-xl font-semibold mb-2">
                             Próximamente más gimnasios
                         </h3>
-                        <p className="text-slate-500 max-w-md mx-auto">
+                        <p className="meta-text max-w-md mx-auto">
                             Estamos trabajando para incorporar más gimnasios a nuestra plataforma.
                         </p>
                     </motion.div>
@@ -244,9 +236,6 @@ function GymsSection({ gyms, loading, metrics }: { gyms: Gym[]; loading: boolean
                     <>
                         {/* Horizontal Scroll Carousel */}
                         <div className="relative">
-                            {/* Gradient fade left */}
-                            <div className="absolute left-0 top-0 bottom-0 w-12 bg-gradient-to-r from-slate-950 to-transparent z-10 pointer-events-none" />
-
                             {/* Scrollable container */}
                             <div
                                 className="flex gap-6 overflow-x-auto pb-4 snap-x snap-mandatory scrollbar-hide"
@@ -270,9 +259,9 @@ function GymsSection({ gyms, loading, metrics }: { gyms: Gym[]; loading: boolean
                                         whileHover={{ y: -8, transition: { duration: 0.2 } }}
                                         className="flex-shrink-0 w-72 snap-start"
                                     >
-                                        <div className="card h-full p-6 group cursor-pointer hover:border-primary-500/50 transition-all duration-300">
+                                        <div className="card h-full p-6 group cursor-pointer hover:border-[var(--accent)] transition-all duration-300">
                                             {/* Gym Avatar with gradient */}
-                                            <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${gradients[index % gradients.length]} flex items-center justify-center mb-5 shadow-lg group-hover:shadow-xl transition-shadow`}>
+                                            <div className="avatar-box w-16 h-16 mb-5">
                                                 {gym.logo_url ? (
                                                     <Image
                                                         src={gym.logo_url}
@@ -283,29 +272,29 @@ function GymsSection({ gyms, loading, metrics }: { gyms: Gym[]; loading: boolean
                                                         unoptimized
                                                     />
                                                 ) : (
-                                                    <span className="text-2xl font-display font-bold text-white drop-shadow-sm">
+                                                    <span className="text-2xl font-bold">
                                                         {gym.nombre.charAt(0).toUpperCase()}
                                                     </span>
                                                 )}
                                             </div>
 
                                             {/* Gym Name */}
-                                            <h3 className="text-xl font-semibold text-white mb-1 group-hover:text-primary-300 transition-colors truncate">
+                                            <h3 className="text-xl font-semibold mb-1 group-hover:text-[var(--accent)] transition-colors truncate">
                                                 {gym.nombre}
                                             </h3>
 
                                             {/* Subdomain */}
-                                            <p className="text-slate-500 text-sm mb-5 truncate">
+                                            <p className="meta-text text-sm mb-5 truncate">
                                                 {gym.subdominio}.ironhub.motiona.xyz
                                             </p>
 
                                             {/* Status */}
                                             <div className="flex items-center justify-between">
                                                 <div className="flex items-center gap-2">
-                                                    <div className="w-2 h-2 rounded-full bg-success-500 animate-pulse" />
-                                                    <span className="text-xs text-success-400 font-medium">Online</span>
+                                                    <div className="w-2 h-2 bg-success-500 animate-pulse" />
+                                                    <span className="text-xs font-medium">Online</span>
                                                 </div>
-                                                <div className="text-xs text-slate-500">
+                                                <div className="text-xs">
                                                     {usersTotal === null ? (
                                                         <span>Usuarios: —</span>
                                                     ) : (
@@ -324,14 +313,11 @@ function GymsSection({ gyms, loading, metrics }: { gyms: Gym[]; loading: boolean
                                 {/* Spacer for right padding */}
                                 <div className="flex-shrink-0 w-4" />
                             </div>
-
-                            {/* Gradient fade right */}
-                            <div className="absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-slate-950 to-transparent z-10 pointer-events-none" />
                         </div>
 
                         {/* Scroll hint */}
                         <div className="flex justify-center mt-6">
-                            <div className="flex items-center gap-2 text-slate-500 text-sm">
+                            <div className="flex items-center gap-2 meta-text">
                                 <span>Desliza para ver más</span>
                                 <ChevronRight className="w-4 h-4 animate-pulse" />
                             </div>
@@ -342,22 +328,19 @@ function GymsSection({ gyms, loading, metrics }: { gyms: Gym[]; loading: boolean
                             initial={{ opacity: 0, y: 20 }}
                             whileInView={{ opacity: 1, y: 0 }}
                             viewport={{ once: true }}
-                            className="mt-12 text-center"
+                            className="mt-12"
                         >
-                            <div className="inline-flex items-center gap-3 px-6 py-3 rounded-full bg-slate-800/50 border border-slate-700/50">
+                            <div className="inline-flex items-center gap-3 px-6 py-3 panel-note">
                                 <div className="flex -space-x-2">
-                                    {gyms.slice(0, 4).map((gym, i) => (
-                                        <div
-                                            key={gym.id}
-                                            className={`w-8 h-8 rounded-full bg-gradient-to-br ${gradients[i % gradients.length]} border-2 border-slate-900 flex items-center justify-center`}
-                                        >
-                                            <span className="text-xs font-bold text-white">
+                                    {gyms.slice(0, 4).map((gym) => (
+                                        <div key={gym.id} className="avatar-box w-8 h-8 flex items-center justify-center">
+                                            <span className="text-xs font-bold">
                                                 {gym.nombre.charAt(0)}
                                             </span>
                                         </div>
                                     ))}
                                 </div>
-                                <span className="text-slate-300 text-sm font-medium">
+                                <span className="text-sm font-medium">
                                     {metrics?.totals?.active_gyms ?? gyms.length} gimnasios activos · {metrics?.totals?.paying_gyms ?? '—'} pagando
                                 </span>
                             </div>
@@ -408,12 +391,12 @@ function LeadSection({ metrics }: { metrics: PublicMetrics | null }) {
 
     return (
         <section id="lead" className="py-24 relative">
-            <div className="max-w-7xl mx-auto px-6">
-                <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="text-center mb-12">
+            <div className="max-w-6xl">
+                <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="mb-12">
                     <h2 className="section-heading mb-4">
                         Métricas <span className="gradient-text">y Acceso</span>
                     </h2>
-                    <p className="text-slate-400 text-lg max-w-2xl mx-auto">
+                    <p className="hero-subtitle max-w-2xl">
                         Si querés sumarte, completá el formulario y enviá la solicitud lista para WhatsApp o email.
                     </p>
                 </motion.div>
@@ -421,52 +404,52 @@ function LeadSection({ metrics }: { metrics: PublicMetrics | null }) {
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
                     <div className="space-y-4">
                         <div className="card p-6">
-                            <h3 className="text-white font-semibold mb-4">Impacto en números</h3>
+                            <h3 className="font-semibold mb-4">Impacto en números</h3>
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
-                                    <div className="text-xs text-slate-500">Gimnasios activos</div>
-                                    <div className="text-2xl font-bold text-white mt-1">{metrics?.totals?.active_gyms ?? '—'}</div>
+                                <div className="panel-note p-4">
+                                    <div className="text-xs">Gimnasios activos</div>
+                                    <div className="text-2xl font-bold mt-1">{metrics?.totals?.active_gyms ?? '—'}</div>
                                 </div>
-                                <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
-                                    <div className="text-xs text-slate-500">Gimnasios pagando</div>
-                                    <div className="text-2xl font-bold text-white mt-1">{metrics?.totals?.paying_gyms ?? '—'}</div>
+                                <div className="panel-note p-4">
+                                    <div className="text-xs">Gimnasios pagando</div>
+                                    <div className="text-2xl font-bold mt-1">{metrics?.totals?.paying_gyms ?? '—'}</div>
                                 </div>
-                                <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
-                                    <div className="text-xs text-slate-500">Usuarios totales</div>
-                                    <div className="text-2xl font-bold text-white mt-1">{metrics?.totals?.total_users ?? '—'}</div>
+                                <div className="panel-note p-4">
+                                    <div className="text-xs">Usuarios totales</div>
+                                    <div className="text-2xl font-bold mt-1">{metrics?.totals?.total_users ?? '—'}</div>
                                 </div>
-                                <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4">
-                                    <div className="text-xs text-slate-500">Usuarios activos</div>
-                                    <div className="text-2xl font-bold text-white mt-1">{metrics?.totals?.total_active_users ?? '—'}</div>
+                                <div className="panel-note p-4">
+                                    <div className="text-xs">Usuarios activos</div>
+                                    <div className="text-2xl font-bold mt-1">{metrics?.totals?.total_active_users ?? '—'}</div>
                                 </div>
                             </div>
-                            <div className="text-xs text-slate-500 mt-4">
+                            <div className="text-xs meta-text mt-4">
                                 Datos agregados a partir de gimnasios activos (caché pública).
                             </div>
                         </div>
 
                         <div className="card p-6">
-                            <h3 className="text-white font-semibold mb-2">Incluye</h3>
+                            <h3 className="font-semibold mb-2">Incluye</h3>
                             <div className="space-y-3 text-sm">
                                 <div className="flex items-start gap-3">
-                                    <BarChart3 className="w-5 h-5 text-primary-400 mt-0.5" />
+                                    <BarChart3 className="w-5 h-5 mt-0.5" />
                                     <div>
-                                        <div className="text-white font-medium">Dashboard ejecutivo</div>
-                                        <div className="text-slate-400">KPIs reales, reportes y exportaciones</div>
+                                        <div className="font-medium">Dashboard ejecutivo</div>
+                                        <div className="meta-text">KPIs reales, reportes y exportaciones</div>
                                     </div>
                                 </div>
                                 <div className="flex items-start gap-3">
-                                    <CreditCard className="w-5 h-5 text-primary-400 mt-0.5" />
+                                    <CreditCard className="w-5 h-5 mt-0.5" />
                                     <div>
-                                        <div className="text-white font-medium">Pagos y cobranzas</div>
-                                        <div className="text-slate-400">Vencimientos, mora y trazabilidad</div>
+                                        <div className="font-medium">Pagos y cobranzas</div>
+                                        <div className="meta-text">Vencimientos, mora y trazabilidad</div>
                                     </div>
                                 </div>
                                 <div className="flex items-start gap-3">
-                                    <Users className="w-5 h-5 text-primary-400 mt-0.5" />
+                                    <Users className="w-5 h-5 mt-0.5" />
                                     <div>
-                                        <div className="text-white font-medium">Usuarios y asistencia</div>
-                                        <div className="text-slate-400">Altas, control de acceso y reportes</div>
+                                        <div className="font-medium">Usuarios y asistencia</div>
+                                        <div className="meta-text">Altas, control de acceso y reportes</div>
                                     </div>
                                 </div>
                             </div>
@@ -474,7 +457,7 @@ function LeadSection({ metrics }: { metrics: PublicMetrics | null }) {
                     </div>
 
                     <div className="card p-6">
-                        <h3 className="text-white font-semibold mb-4">Solicitar acceso</h3>
+                        <h3 className="font-semibold mb-4">Solicitar acceso</h3>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
                                 <label className="label">Tu nombre</label>
@@ -507,7 +490,7 @@ function LeadSection({ metrics }: { metrics: PublicMetrics | null }) {
                         </div>
 
                         {!isComplete ? (
-                            <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/40 p-4 text-sm text-slate-300">
+                            <div className="mt-4 panel-note p-4 text-sm">
                                 Completá nombre, gimnasio, ciudad, teléfono y email para habilitar el envío.
                             </div>
                         ) : (
@@ -524,8 +507,8 @@ function LeadSection({ metrics }: { metrics: PublicMetrics | null }) {
                         )}
 
                         <div className="mt-4">
-                            <div className="text-xs text-slate-500">Vista previa del mensaje</div>
-                            <pre className="mt-2 text-xs text-slate-300 rounded-xl border border-slate-800 bg-slate-950/40 p-4 whitespace-pre-wrap">
+                            <div className="text-xs meta-text">Vista previa del mensaje</div>
+                            <pre className="mt-2 text-xs panel-note p-4 whitespace-pre-wrap">
                                 {leadText}
                             </pre>
                         </div>
@@ -540,7 +523,7 @@ function LeadSection({ metrics }: { metrics: PublicMetrics | null }) {
 function AboutSection() {
     return (
         <section id="about" className="py-24 relative">
-            <div className="max-w-7xl mx-auto px-6">
+            <div className="max-w-6xl">
                 <div className="grid lg:grid-cols-2 gap-16 items-center">
                     {/* Content */}
                     <motion.div
@@ -554,7 +537,7 @@ function AboutSection() {
                         </h2>
                         <div className="space-y-4 text-slate-400 leading-relaxed">
                             <p>
-                                IronHub es producto de <strong className="text-white">MotionA</strong>, una empresa
+                                IronHub es producto de <strong>MotionA</strong>, una empresa
                                 argentina dedicada al desarrollo de software empresarial de alta calidad.
                             </p>
                             <p>
@@ -564,23 +547,23 @@ function AboutSection() {
                             </p>
                             <p>
                                 Con IronHub, llevamos la gestión de gimnasios al siguiente nivel:
-                                arquitectura multi-tenant, seguridad enterprise, y una experiencia
+                                arquitectura multi-sucursal, seguridad enterprise, y una experiencia
                                 de usuario impecable.
                             </p>
                         </div>
 
                         <div className="flex flex-wrap gap-4 mt-8">
                             <div className="card px-4 py-3">
-                                <div className="text-2xl font-bold text-white">2025</div>
-                                <div className="text-xs text-slate-500">Año de Fundación</div>
+                                <div className="text-2xl font-bold">2025</div>
+                                <div className="text-xs meta-text">Año de Fundación</div>
                             </div>
                             <div className="card px-4 py-3">
-                                <div className="text-2xl font-bold text-white">Argentina</div>
-                                <div className="text-xs text-slate-500">Sede Central</div>
+                                <div className="text-2xl font-bold">Argentina</div>
+                                <div className="text-xs meta-text">Sede Central</div>
                             </div>
                             <div className="card px-4 py-3">
-                                <div className="text-2xl font-bold text-white">Enterprise</div>
-                                <div className="text-xs text-slate-500">Nivel de Soluciones</div>
+                                <div className="text-2xl font-bold">Enterprise</div>
+                                <div className="text-xs meta-text">Nivel de Soluciones</div>
                             </div>
                         </div>
                     </motion.div>
@@ -592,8 +575,8 @@ function AboutSection() {
                         viewport={{ once: true }}
                         className="relative"
                     >
-                        <div className="card p-8 relative overflow-hidden">
-                            <div className="w-32 h-32 mx-auto rounded-3xl bg-gradient-to-br from-primary-600 via-primary-500 to-gold-500 flex items-center justify-center mb-6 shadow-lg animate-float">
+                        <div className="card p-8 relative">
+                            <div className="avatar-box w-32 h-32 mx-auto mb-6">
                                 <Image
                                     src="/images/logo-motiona.png"
                                     alt="MotionA"
@@ -604,13 +587,9 @@ function AboutSection() {
                                 />
                             </div>
                             <div className="text-center">
-                                <h3 className="text-2xl font-display font-bold text-white mb-2">MotionA</h3>
-                                <p className="text-slate-400">Software Solutions</p>
+                                <h3 className="text-2xl font-bold mb-2">MotionA</h3>
+                                <p className="meta-text">Software Solutions</p>
                             </div>
-
-                            {/* Decorative elements */}
-                            <div className="absolute -top-20 -right-20 w-40 h-40 rounded-full bg-primary-500/20 blur-3xl" />
-                            <div className="absolute -bottom-20 -left-20 w-40 h-40 rounded-full bg-gold-500/10 blur-3xl" />
                         </div>
                     </motion.div>
                 </div>
@@ -623,52 +602,52 @@ function AboutSection() {
 function ContactSection() {
     return (
         <section id="contact" className="py-24 relative">
-            <div className="max-w-7xl mx-auto px-6">
+            <div className="max-w-6xl">
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
-                    className="card p-12 relative overflow-hidden"
+                    className="card p-10"
                 >
                     <div className="relative z-10 grid lg:grid-cols-2 gap-12">
                         <div>
                             <h2 className="section-heading mb-4">
                                 ¿Listo para empezar?
                             </h2>
-                            <p className="text-slate-400 mb-8">
+                            <p className="hero-subtitle mb-8">
                                 Contactanos para llevar tu gimnasio al siguiente nivel con IronHub.
                             </p>
 
                             <div className="space-y-4">
                                 <div className="flex items-center gap-4">
-                                    <div className="w-10 h-10 rounded-lg bg-primary-500/20 flex items-center justify-center">
-                                        <Mail className="w-5 h-5 text-primary-400" />
+                                    <div className="icon-box">
+                                        <Mail className="w-5 h-5" />
                                     </div>
                                     <div>
-                                        <div className="text-sm text-slate-500">Email</div>
-                                        <a href="mailto:soporte@motiona.xyz" className="text-white hover:text-primary-300 transition-colors">
+                                        <div className="text-sm meta-text">Email</div>
+                                        <a href="mailto:soporte@motiona.xyz" className="transition-colors">
                                             soporte@motiona.xyz
                                         </a>
                                     </div>
                                 </div>
 
                                 <div className="flex items-center gap-4">
-                                    <div className="w-10 h-10 rounded-lg bg-primary-500/20 flex items-center justify-center">
-                                        <MapPin className="w-5 h-5 text-primary-400" />
+                                    <div className="icon-box">
+                                        <MapPin className="w-5 h-5" />
                                     </div>
                                     <div>
-                                        <div className="text-sm text-slate-500">Ubicación</div>
-                                        <span className="text-white">Buenos Aires, Argentina</span>
+                                        <div className="text-sm meta-text">Ubicación</div>
+                                        <span>Buenos Aires, Argentina</span>
                                     </div>
                                 </div>
 
                                 <div className="flex items-center gap-4">
-                                    <div className="w-10 h-10 rounded-lg bg-primary-500/20 flex items-center justify-center">
-                                        <Phone className="w-5 h-5 text-primary-400" />
+                                    <div className="icon-box">
+                                        <Phone className="w-5 h-5" />
                                     </div>
                                     <div>
-                                        <div className="text-sm text-slate-500">WhatsApp</div>
-                                        <span className="text-white">+54 9 343 447-3599</span>
+                                        <div className="text-sm meta-text">WhatsApp</div>
+                                        <span>+54 9 343 447-3599</span>
                                     </div>
                                 </div>
                             </div>
@@ -684,9 +663,6 @@ function ContactSection() {
                             </Link>
                         </div>
                     </div>
-
-                    {/* Decorative */}
-                    <div className="absolute top-0 right-0 w-64 h-64 rounded-full bg-primary-500/10 blur-[100px]" />
                 </motion.div>
             </div>
         </section>
@@ -735,7 +711,7 @@ export default function LandingPage() {
     }, []);
 
     return (
-        <main className="pt-20">
+        <main className="main-shell">
             <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(schema) }} />
             <HeroSection />
             <FeaturesSection />
