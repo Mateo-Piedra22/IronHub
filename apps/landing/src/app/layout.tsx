@@ -1,4 +1,8 @@
 import type { Metadata } from 'next';
+import '@/motiona-design-system/styles/base.css';
+import '@/motiona-design-system/styles/components.css';
+import '@/motiona-design-system/styles/layouts.css';
+import '@/motiona-design-system/styles/utilities.css';
 import './globals.css';
 import SiteHeader from './_components/SiteHeader';
 import SiteFooter from './_components/SiteFooter';
@@ -44,7 +48,7 @@ export default function RootLayout({
                 <link rel="preconnect" href="https://fonts.googleapis.com" />
                 <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
             </head>
-            <body className="min-h-screen antialiased">
+            <body className="min-h-screen antialiased" data-brand="ironhub">
                 <div className="master-grid">
                     <div className="grid-col grid-left">
                         <SiteHeader />
