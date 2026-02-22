@@ -48,7 +48,7 @@ function HeroSection() {
                     {/* Main Heading */}
                     <motion.h1
                         variants={fadeInUp}
-                        className="hero-title"
+                        className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tighter uppercase leading-[0.9]"
                     >
                         <span>Gestión de Gimnasios</span>
                         <br />
@@ -58,7 +58,7 @@ function HeroSection() {
                     {/* Subheading */}
                     <motion.p
                         variants={fadeInUp}
-                        className="hero-subtitle max-w-2xl"
+                        className="text-lg font-mono opacity-70 mt-4 max-w-2xl leading-relaxed max-w-2xl"
                     >
                         IronHub es la plataforma integral que transforma la manera en que
                         administras tu gimnasio. Control total de socios, pagos, asistencias
@@ -70,11 +70,11 @@ function HeroSection() {
                         variants={fadeInUp}
                         className="flex flex-wrap items-center gap-4 pt-4"
                     >
-                        <a href="#gyms" className="btn-primary flex items-center gap-2">
+                        <a href="#gyms" className="bg-black text-white px-6 py-3 font-bold uppercase tracking-widest hover:bg-black/80 transition-colors text-xs inline-flex items-center justify-center flex items-center gap-2">
                             Explorar Gimnasios
                             <ChevronRight className="w-4 h-4" />
                         </a>
-                        <Link href="https://admin.ironhub.motiona.xyz" className="btn-secondary flex items-center gap-2">
+                        <Link href="https://admin.ironhub.motiona.xyz" className="border border-black px-6 py-3 font-bold uppercase tracking-widest hover:bg-black/5 transition-colors text-xs inline-flex items-center justify-center flex items-center gap-2">
                             Acceder al Admin
                             <ExternalLink className="w-4 h-4" />
                         </Link>
@@ -153,10 +153,10 @@ function FeaturesSection() {
                     viewport={{ once: true }}
                     className="mb-12"
                 >
-                    <h2 className="section-heading mb-4">
+                    <h2 className="text-2xl font-bold tracking-tight uppercase mb-4">
                         Todo lo que necesitas
                     </h2>
-                    <p className="hero-subtitle max-w-2xl">
+                    <p className="text-lg font-mono opacity-70 mt-4 max-w-2xl leading-relaxed max-w-2xl">
                         Una suite completa de herramientas diseñadas para optimizar cada aspecto de tu gimnasio.
                     </p>
                 </motion.div>
@@ -204,10 +204,10 @@ function GymsSection({ gyms, loading, metrics }: { gyms: Gym[]; loading: boolean
                     viewport={{ once: true }}
                     className="mb-12"
                 >
-                    <h2 className="section-heading mb-4">
+                    <h2 className="text-2xl font-bold tracking-tight uppercase mb-4">
                         Gimnasios <span className="gradient-text">Conectados</span>
                     </h2>
-                    <p className="hero-subtitle max-w-2xl">
+                    <p className="text-lg font-mono opacity-70 mt-4 max-w-2xl leading-relaxed max-w-2xl">
                         Descubre los gimnasios que confían en IronHub para su gestión diaria.
                     </p>
                 </motion.div>
@@ -330,7 +330,7 @@ function GymsSection({ gyms, loading, metrics }: { gyms: Gym[]; loading: boolean
                             viewport={{ once: true }}
                             className="mt-12"
                         >
-                            <div className="inline-flex items-center gap-3 px-6 py-3 panel-note">
+                            <div className="inline-flex items-center gap-3 px-6 py-3 border border-[var(--line-color,#000)] p-6 opacity-80">
                                 <div className="flex -space-x-2">
                                     {gyms.slice(0, 4).map((gym) => (
                                         <div key={gym.id} className="avatar-box w-8 h-8 flex items-center justify-center">
@@ -393,10 +393,10 @@ function LeadSection({ metrics }: { metrics: PublicMetrics | null }) {
         <section id="lead" className="py-24 relative">
             <div className="max-w-6xl">
                 <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="mb-12">
-                    <h2 className="section-heading mb-4">
+                    <h2 className="text-2xl font-bold tracking-tight uppercase mb-4">
                         Métricas <span className="gradient-text">y Acceso</span>
                     </h2>
-                    <p className="hero-subtitle max-w-2xl">
+                    <p className="text-lg font-mono opacity-70 mt-4 max-w-2xl leading-relaxed max-w-2xl">
                         Si querés sumarte, completá el formulario y enviá la solicitud lista para WhatsApp o email.
                     </p>
                 </motion.div>
@@ -406,19 +406,19 @@ function LeadSection({ metrics }: { metrics: PublicMetrics | null }) {
                         <div className="card p-6">
                             <h3 className="font-semibold mb-4">Impacto en números</h3>
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="panel-note p-4">
+                                <div className="border border-[var(--line-color,#000)] p-6 opacity-80 p-4">
                                     <div className="text-xs">Gimnasios activos</div>
                                     <div className="text-2xl font-bold mt-1">{metrics?.totals?.active_gyms ?? '—'}</div>
                                 </div>
-                                <div className="panel-note p-4">
+                                <div className="border border-[var(--line-color,#000)] p-6 opacity-80 p-4">
                                     <div className="text-xs">Gimnasios pagando</div>
                                     <div className="text-2xl font-bold mt-1">{metrics?.totals?.paying_gyms ?? '—'}</div>
                                 </div>
-                                <div className="panel-note p-4">
+                                <div className="border border-[var(--line-color,#000)] p-6 opacity-80 p-4">
                                     <div className="text-xs">Usuarios totales</div>
                                     <div className="text-2xl font-bold mt-1">{metrics?.totals?.total_users ?? '—'}</div>
                                 </div>
-                                <div className="panel-note p-4">
+                                <div className="border border-[var(--line-color,#000)] p-6 opacity-80 p-4">
                                     <div className="text-xs">Usuarios activos</div>
                                     <div className="text-2xl font-bold mt-1">{metrics?.totals?.total_active_users ?? '—'}</div>
                                 </div>
@@ -460,46 +460,46 @@ function LeadSection({ metrics }: { metrics: PublicMetrics | null }) {
                         <h3 className="font-semibold mb-4">Solicitar acceso</h3>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
-                                <label className="label">Tu nombre</label>
+                                <label className="font-mono text-xs uppercase opacity-70">Tu nombre</label>
                                 <input className="input w-full" value={ownerName} onChange={(e) => setOwnerName(e.target.value)} placeholder="Nombre y apellido" />
                             </div>
                             <div>
-                                <label className="label">Nombre del gimnasio</label>
+                                <label className="font-mono text-xs uppercase opacity-70">Nombre del gimnasio</label>
                                 <input className="input w-full" value={gymName} onChange={(e) => setGymName(e.target.value)} placeholder="Mi Gym" />
                             </div>
                             <div>
-                                <label className="label">Ciudad</label>
+                                <label className="font-mono text-xs uppercase opacity-70">Ciudad</label>
                                 <input className="input w-full" value={city} onChange={(e) => setCity(e.target.value)} placeholder="Santa Fe" />
                             </div>
                             <div>
-                                <label className="label">Cantidad de alumnos</label>
+                                <label className="font-mono text-xs uppercase opacity-70">Cantidad de alumnos</label>
                                 <input className="input w-full" value={usersCount} onChange={(e) => setUsersCount(e.target.value)} placeholder="Ej: 250" />
                             </div>
                             <div>
-                                <label className="label">Teléfono</label>
+                                <label className="font-mono text-xs uppercase opacity-70">Teléfono</label>
                                 <input className="input w-full" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+54 9 ..." />
                             </div>
                             <div>
-                                <label className="label">Email</label>
+                                <label className="font-mono text-xs uppercase opacity-70">Email</label>
                                 <input className="input w-full" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tu@email.com" />
                             </div>
                         </div>
                         <div className="mt-4">
-                            <label className="label">Notas</label>
+                            <label className="font-mono text-xs uppercase opacity-70">Notas</label>
                             <textarea className="input w-full min-h-[110px]" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Contanos qué necesitás..." />
                         </div>
 
                         {!isComplete ? (
-                            <div className="mt-4 panel-note p-4 text-sm">
+                            <div className="mt-4 border border-[var(--line-color,#000)] p-6 opacity-80 p-4 text-sm">
                                 Completá nombre, gimnasio, ciudad, teléfono y email para habilitar el envío.
                             </div>
                         ) : (
                             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <a className="btn-primary w-full flex items-center justify-center gap-2" href={waUrl} target="_blank" rel="noopener noreferrer">
+                                <a className="bg-black text-white px-6 py-3 font-bold uppercase tracking-widest hover:bg-black/80 transition-colors text-xs inline-flex items-center justify-center w-full flex items-center justify-center gap-2" href={waUrl} target="_blank" rel="noopener noreferrer">
                                     <Phone className="w-4 h-4" />
                                     Enviar a WhatsApp
                                 </a>
-                                <a className="btn-secondary w-full flex items-center justify-center gap-2" href={mailtoUrl}>
+                                <a className="border border-black px-6 py-3 font-bold uppercase tracking-widest hover:bg-black/5 transition-colors text-xs inline-flex items-center justify-center w-full flex items-center justify-center gap-2" href={mailtoUrl}>
                                     <Mail className="w-4 h-4" />
                                     Enviar por Email
                                 </a>
@@ -508,7 +508,7 @@ function LeadSection({ metrics }: { metrics: PublicMetrics | null }) {
 
                         <div className="mt-4">
                             <div className="text-xs meta-text">Vista previa del mensaje</div>
-                            <pre className="mt-2 text-xs panel-note p-4 whitespace-pre-wrap">
+                            <pre className="mt-2 text-xs border border-[var(--line-color,#000)] p-6 opacity-80 p-4 whitespace-pre-wrap">
                                 {leadText}
                             </pre>
                         </div>
@@ -532,7 +532,7 @@ function AboutSection() {
                         viewport={{ once: true }}
                     >
                         <span className="badge mb-4">Sobre Nosotros</span>
-                        <h2 className="section-heading mb-6">
+                        <h2 className="text-2xl font-bold tracking-tight uppercase mb-6">
                             Desarrollado por <span className="gradient-text">MotionA</span>
                         </h2>
                         <div className="space-y-4 text-slate-400 leading-relaxed">
@@ -611,10 +611,10 @@ function ContactSection() {
                 >
                     <div className="relative z-10 grid lg:grid-cols-2 gap-12">
                         <div>
-                            <h2 className="section-heading mb-4">
+                            <h2 className="text-2xl font-bold tracking-tight uppercase mb-4">
                                 ¿Listo para empezar?
                             </h2>
-                            <p className="hero-subtitle mb-8">
+                            <p className="text-lg font-mono opacity-70 mt-4 max-w-2xl leading-relaxed mb-8">
                                 Contactanos para llevar tu gimnasio al siguiente nivel con IronHub.
                             </p>
 
@@ -656,7 +656,7 @@ function ContactSection() {
                         <div className="flex items-center justify-center">
                             <Link
                                 href="https://admin.ironhub.motiona.xyz"
-                                className="btn-primary text-lg py-5 px-10 flex items-center gap-3"
+                                className="bg-black text-white px-6 py-3 font-bold uppercase tracking-widest hover:bg-black/80 transition-colors text-xs inline-flex items-center justify-center text-lg py-5 px-10 flex items-center gap-3"
                             >
                                 Ir al Panel de Admin
                                 <ExternalLink className="w-5 h-5" />
