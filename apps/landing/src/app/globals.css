@@ -462,3 +462,54 @@
     border-color: var(--line-color);
   }
 }
+
+/* ========================================
+   MOTIONA GRID SYSTEM (STANDARDIZED)
+   ======================================== */
+.motiona-theme {
+  --motiona-line: #000;
+  --motiona-bg: #f4f4f0;
+  --motiona-accent: #0055FF;
+  color: #000;
+  background: var(--motiona-bg);
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  min-height: 100vh;
+}
+body:has(.motiona-theme) { background: var(--motiona-bg) !important; color: #000 !important; }
+.motiona-theme * {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+.motiona-grid { display: grid; grid-template-columns: 1fr; min-height: 100vh; border-top: 1px solid var(--motiona-line); }
+@media (min-width: 768px) { .motiona-grid { grid-template-columns: 250px 1fr; } }
+@media (min-width: 1024px) { .motiona-grid { grid-template-columns: 250px minmax(0, 1fr) 300px; } }
+.motiona-col { border-bottom: 1px solid var(--motiona-line); padding: 2rem; position: relative; }
+@media (min-width: 768px) { .motiona-col { border-bottom: 0; border-right: 1px solid var(--motiona-line); } }
+.motiona-col:last-child { border-bottom: 0; }
+@media (min-width: 768px) { .motiona-col:last-child { border-right: 0; } }
+.motiona-label { font-family: "Courier New", Courier, monospace; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; display: block; margin-bottom: 1rem; opacity: 0.7; color: var(--motiona-line); }
+.motiona-label::before { content: '[ '; }
+.motiona-label::after { content: ' ]'; }
+.motiona-tag { display: inline-flex; align-items: center; gap: 8px; background: var(--motiona-line); color: var(--motiona-bg); padding: 0.2rem 0.6rem; font-family: "Courier New", Courier, monospace; font-size: 0.85rem; margin-bottom: 1.5rem; }
+.motiona-title, .motiona-hero-title { font-size: 4.8rem; line-height: 0.9; margin: 0 0 1.5rem 0; font-weight: 500; letter-spacing: -2px; }
+@media (max-width: 768px) { .motiona-title, .motiona-hero-title { font-size: 3.2rem; } }
+.motiona-heading, .motiona-section-heading { font-size: 2.4rem; line-height: 1.05; margin: 0; font-weight: 500; letter-spacing: -1px; }
+.motiona-lede, .motiona-subtitle { font-size: 1.3rem; line-height: 1.45; margin: 0 0 2rem 0; max-width: 680px; }
+.motiona-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.motiona-cta, .motiona-btn-primary { background: var(--motiona-accent); color: #fff; padding: 1rem 1.4rem; border: 1px solid var(--motiona-line); font-weight: 700; font-size: 1rem; text-transform: uppercase; letter-spacing: 0.5px; display: inline-flex; align-items: center; justify-content: center; transition: transform 0.2s; cursor: pointer; text-decoration: none; }
+.motiona-cta:hover, .motiona-btn-primary:hover { transform: translateY(-4px); box-shadow: 0 10px 0 var(--motiona-line); }
+.motiona-ghost, .motiona-btn-secondary { border: 1px solid var(--motiona-line); padding: 1rem 1.2rem; font-weight: 600; font-size: 0.95rem; text-transform: uppercase; color: #000; background: transparent; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; text-decoration: none; }
+.motiona-ghost:hover, .motiona-btn-secondary:hover { background: rgba(0, 0, 0, 0.05); }
+.motiona-divider { margin: 2.5rem 0; border-top: 1px solid var(--motiona-line); }
+.motiona-section { padding: 2.5rem 0; border-top: 1px solid var(--motiona-line); }
+.motiona-body { font-size: 1rem; line-height: 1.5; }
+.motiona-mono { font-family: "Courier New", Courier, monospace; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.8px; }
+.motiona-panel, .motiona-feature-card { border: 1px solid var(--motiona-line); padding: 1.5rem; background: transparent; }
+.motiona-panel+.motiona-panel { margin-top: 1rem; }
+.motiona-grid-2 { display: grid; gap: 1rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.motiona-grid-3 { display: grid; gap: 1rem; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.motiona-grid-4 { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.motiona-stat { display: grid; gap: 0.3rem; text-align: left; border: 1px solid var(--motiona-line); padding: 1rem; }
+.motiona-stat .value { font-size: 1.8rem; font-weight: 600; letter-spacing: -1px; }
+.motiona-stat .label { font-family: "Courier New", Courier, monospace; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; }
+.motiona-badge { display: inline-flex; align-items: center; gap: 8px; background: var(--motiona-line); color: var(--motiona-bg); padding: 0.2rem 0.6rem; font-family: "Courier New", Courier, monospace; font-size: 0.85rem; margin-bottom: 1.5rem; }
