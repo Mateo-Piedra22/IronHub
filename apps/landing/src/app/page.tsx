@@ -4,7 +4,7 @@
  */
 
 import Link from "next/link";
-import { ArrowRight, Check, Dumbbell, Users, CreditCard, BarChart3 } from "lucide-react";
+import { ArrowRight, Dumbbell, Users, CreditCard, BarChart3 } from "lucide-react";
 
 function HeroSection() {
     return (
