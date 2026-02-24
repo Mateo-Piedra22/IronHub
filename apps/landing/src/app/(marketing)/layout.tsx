@@ -15,9 +15,9 @@ interface MarketingLayoutProps {
 }
 
 const primaryLinks = [
-    { href: "/#features", label: "Características", code: "001" },
-    { href: "/#gyms", label: "Gimnasios", code: "002" },
-    { href: "/#about", label: "Sobre Nosotros", code: "003" },
+    { href: "/", label: "Inicio", code: "001" },
+    { href: "/terms", label: "Términos", code: "002" },
+    { href: "/privacy", label: "Privacidad", code: "003" },
 ];
 
 export default function MarketingLayout({ children }: MarketingLayoutProps) {

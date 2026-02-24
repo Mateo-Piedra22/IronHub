@@ -1,6 +1,5 @@
 import type { Metadata } from 'next';
 import './globals.css';
-import MarketingLayout from './(marketing)/layout';
 
 export const metadata: Metadata = {
     title: {
@@ -81,9 +80,7 @@ export default function RootLayout({
                 <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
             </head>
             <body className="min-h-screen antialiased" data-brand="ironhub">
-                <MarketingLayout>
-                    {children}
-                </MarketingLayout>
+                {children}
             </body>
         </html>
     );
